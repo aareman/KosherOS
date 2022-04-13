@@ -35,6 +35,7 @@
 
   - [ ] Ability to still install software via nix packages
   - [ ] Managed dotfiles
+  - [ ] Auto generate hosts list from domain list so that ips are up to date
 
 ** Nice to haves
   - [ ] custom search engine that only indexes legal pages
@@ -58,3 +59,5 @@
 
 ** TODO Update Script
 
+* Ideas
+** Custom app store wrapper around apt

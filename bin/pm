@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+# vim: ft=sh
+# A simple wrapper around apt with a whitelist of
+# what can be installed, removed, or updated
+
+# User must have sudoer access to apt under the hood (maybe snap)
+function help(){
+    echo "pm the help!"
+}
+
+function _package_valid(){}
+
+
+_command=$1
+shift 1
+case $_command in
+    add )
+        # install a package
+        ;;
+    *)
+        help
+        ;;
+esac

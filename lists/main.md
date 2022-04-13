@@ -51,6 +51,7 @@ askubuntu.com
 
 # BANKS AND FINANCIALS
 paypal
+wwws.betterment.com
 
 ## CHASE
 secure01b.chase.com

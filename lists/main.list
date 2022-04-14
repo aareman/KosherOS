@@ -76,6 +76,7 @@ paypal
 ## CHASE
 159.53.232.21 secure01b.chase.com
 159.53.42.11 www.chase.com
+159.53.85.137 chase.com
 
 ## MINT
 104.102.137.131 accounts.intuit.com
@@ -86,6 +87,11 @@ paypal
 142.251.40.238 maps.google.com
 142.250.81.238 docs.google.com
 142.251.40.206 sheets.google.com
+142.251.40.206 meet.google.com
+142.251.41.14 chat.google.com
+142.251.35.174 calendar.google.com
+142.251.40.206 duo.google.com
+142.250.80.14 translate.google.com
 142.250.64.110 photos.google.com
 142.251.32.110 tasks.google.com
 142.250.81.238 keep.google.com

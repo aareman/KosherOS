@@ -2,6 +2,8 @@
 
 # Very useful mapping
 # nnoremap <F2> 0y$:.!xargs -I'{}' ping -c 1 -q '{}' <bar> grep PING <bar> grep -oE '[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}'<cr>A<space><c-r>"<esc>
+0.0.0.0 localhost
+127.0.0.1 localhost
 
 # WORK
 13.33.46.107 admin.atlassian.com

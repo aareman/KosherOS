@@ -13,20 +13,21 @@
 34.226.54.62 app.fingercheck.com
 104.16.66.85 www.udemy.com
 # Office 365
-40.97.188.2 outlook.office.com
-152.195.19.97 res-2.cdn.office.net
-23.54.68.60 res.cdn.office.net
-20.189.173.9 browser.pipe.aria.microsoft.com
-52.113.194.132 teams.microsoft.com
-13.107.6.171 office.live.com
-20.190.154.137 login.microsoftonline.com
-13.107.6.156 office.com
-40.108.185.53 valmarsurgical-my.sharepoint.com
-52.96.44.162 to-do.office.com
 104.97.154.95 aka.ms
+13.107.6.156 office.com
+13.107.6.156 www.office.com
+13.107.6.171 office.live.com
+152.195.19.97 res-2.cdn.office.net
 152.199.4.44 aadcdn.msftauth.net
+20.189.173.9 browser.pipe.aria.microsoft.com
 20.190.154.137 login.live.com
+20.190.154.137 login.microsoftonline.com
 23.44.133.50 statics.teams.cdn.office.net
+23.54.68.60 res.cdn.office.net
+40.108.185.53 valmarsurgical-my.sharepoint.com
+40.97.188.2 outlook.office.com
+52.113.194.132 teams.microsoft.com
+52.96.44.162 to-do.office.com
 
 # DEVELOPMENT
 35.196.244.138 app.netdata.cloud

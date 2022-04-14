@@ -9,7 +9,6 @@
 13.33.46.107 admin.atlassian.com
 18.234.32.173 valmardynamics.atlassian.net
 13.225.71.10 aid-frontend.prod.atl-paas.net
-142.251.40.227 fonts.gstatic.com
 104.192.142.10 id.atlassian.com
 34.226.54.62 app.fingercheck.com
 104.16.66.85 www.udemy.com
@@ -78,6 +77,10 @@ paypal
 142.250.80.45 accounts.google.com
 142.251.40.142 play.google.com
 142.250.80.78 google.com
+142.250.80.67 ssl.gstatic.com
+142.251.40.227 fonts.gstatic.com
+142.250.72.99 www.gstatic.com
+142.250.80.74 fonts.googleapis.com
 # UTILITIES
 verizon
 158.57.194.119 www.oru.com

@@ -85,6 +85,10 @@ paypal
 184.29.167.108 mint.intuit.com
 52.72.53.214 mint.com
 23.222.135.149 intuit.com
+52.26.151.209 logging.api.intuit.com
+104.127.184.55 digitalasset.intuit.com
+184.29.167.243 lib.intuitcdn.net
+13.226.31.2 uxfabric.intuitcdn.net
 
 # GOOGLE SUITE
 142.251.35.165 mail.google.com

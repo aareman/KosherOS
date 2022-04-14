@@ -88,6 +88,10 @@ avraham ALL=NOPASSWD:/usr/bin/pm
    - [ ]
 
 ** TODO Update Script
+** WAITING hand keys to shoshana
+   - a search page
+   - core working functionality for work
+
 
 * Ideas
 ** Custom app store wrapper around apt

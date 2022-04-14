@@ -77,6 +77,8 @@ paypal
 159.53.232.21 secure01b.chase.com
 159.53.42.11 www.chase.com
 159.53.85.137 chase.com
+104.77.178.151 static.chasecdn.com
+159.53.117.80 securej.chase.com
 
 ## MINT
 104.102.137.131 accounts.intuit.com

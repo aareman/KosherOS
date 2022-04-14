@@ -12,6 +12,8 @@
 35.188.42.15 sentry.io
 18.234.32.177 api.atlassian.com
 104.192.142.10 id.atlassian.com
+18.234.32.173 atlassian.net
+104.192.142.12 atlassian.com
 104.192.142.16 auth.atlassian.com
 52.5.155.242 t.castle.io
 34.226.54.62 app.fingercheck.com
@@ -154,9 +156,11 @@ verizon
 # TORAH
 35.169.211.228 alldaf.org
 15.197.142.173 torahanytime.org
+104.26.3.9 torahanytime.com
 13.225.71.126 torahstream.org
 104.21.78.186 yutorah.org
 104.26.7.107 sefaria.org
+18.185.236.65 torahlive.com
 # SHOPPING
 151.101.130.7 thriftbooks.com
 

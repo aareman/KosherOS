@@ -6,10 +6,12 @@
 # WORK
 13.33.46.107 admin.atlassian.com
 18.234.32.173 valmardynamics.atlassian.net
+104.192.142.10 id.atlassian.com
 34.226.54.62 app.fingercheck.com
 104.16.66.85 www.udemy.com
 # Office 365
 40.97.188.2 outlook.office.com
+152.195.19.97 res-2.cdn.office.net
 52.113.194.132 teams.microsoft.com
 13.107.6.171 office.live.com
 20.190.154.137 login.microsoftonline.com
@@ -18,9 +20,9 @@
 52.96.44.162 to-do.office.com
 
 # DEVELOPMENT
-app.netdata.cloud
-chrome.google.com
-devdocs.io
+35.196.244.138 app.netdata.cloud
+142.250.72.110 chrome.google.com
+172.67.215.34 devdocs.io
 stack overflow / other exchanges
 vim awesome
 neovim awesome
@@ -40,47 +42,41 @@ udemy
 18.205.93.5 bitbucket.com
 
 # ENTERTAINMENT
-jewishradionetwork.com
+104.21.30.77 jewishradionetwork.com
 
 # REFERENCE
-ubuntu.com
-stackoverflow.com
-help.ubuntu.com
-wiki.archlinux.org
-askubuntu.com
+185.125.190.20 ubuntu.com
+151.101.1.69 stackoverflow.com
+91.189.91.48 help.ubuntu.com
+135.181.27.174 wiki.archlinux.org
+151.101.65.69 askubuntu.com
 
 # BANKS AND FINANCIALS
 paypal
-wwws.betterment.com
+104.20.13.36 wwws.betterment.com
 
 ## CHASE
-secure01b.chase.com
-www.chase.com
+159.53.232.21 secure01b.chase.com
+159.53.42.11 www.chase.com
 
 ## MINT
-accounts.intuit.com
-mint.intuit.com
+104.102.137.131 accounts.intuit.com
+184.29.167.108 mint.intuit.com
 
 # GOOGLE SUITE
-gmail
-maps
-docs
-sheets
-powerpoint
-photos
-tasks
-keep
+142.251.35.165 mail.google.com
+142.251.40.238 maps.google.com
+142.250.81.238 docs.google.com
+142.251.40.206 sheets.google.com
+142.250.64.110 photos.google.com
+142.251.32.110 tasks.google.com
+142.250.81.238 keep.google.com
 # UTILITIES
-banks
-gas
-electric
-water
-solar
 verizon
-www.oru.com
-www.mysuezwater.com
-www.vivintsolar.com
-auth.vivintsolar.com
+158.57.194.119 www.oru.com
+45.223.17.108 www.mysuezwater.com
+52.203.36.44 www.vivintsolar.com
+35.166.196.72 auth.vivintsolar.com
 # TORAH
 35.169.211.228 alldaf.org
 15.197.142.173 torahanytime.org

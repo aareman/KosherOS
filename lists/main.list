@@ -88,12 +88,15 @@ paypal
 52.26.151.209 logging.api.intuit.com
 104.127.184.55 digitalasset.intuit.com
 184.29.167.243 lib.intuitcdn.net
+23.4.226.184 static-fdpwidgets.intuitcdn.net
 13.226.31.2 uxfabric.intuitcdn.net
 103.224.182.242 tags.tigcdn.com
 52.24.120.90 rum.api.intuit.com
 13.226.31.60 apps.bazaarvoice.com
 23.1.192.15 plugin.intuitcdn.net
 13.225.209.21 images.mint.com
+13.226.31.65 cdn.appdynamics.com
+99.84.42.55 mint-cdn.intuit.com
 
 
 # GOOGLE SUITE

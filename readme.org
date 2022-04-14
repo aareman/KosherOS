@@ -1,30 +1,46 @@
 * Objective
-  To create a Kosher linux laptop that can be used by developers.
+  To create a Kosher linux
+  laptop that can be used by
+  developers.
 * Method of Implementation
 ** Root user has full access to anything
    Solution, non root user
 ** Need docker access
-   Solution, prevent docker from mounting files that belong to root
-    Change ~/etc/docker/daemon.json~ and restart the docker daemon
+   Solution, prevent docker from
+   mounting files that belong to
+   root
+    Change
+    ~/etc/docker/daemon.json~
+    and restart the docker
+    daemon
 
    #+BEGIN_SRC json
    {
-        "userns-remap": "container:container"
+        "userns-remap":
+        "default:default"
    }
    #+END_SRC
 
    #+BEGIN_SRC bash
    sudo service docker restart
+
+   # something
+   sudoedit /etc/sudoers
+avraham ALL=NOPASSWD:/usr/bin/pm
    #+END_SRC
 
 ** Can browse anything
-   Restrict dns to file lookup only instead of using a DNS service
+   Restrict dns to file lookup
+   only instead of using a DNS
+   service
 ** DNS does not protect against direct IP lookups
-   Block all external IP with iptables
+   Block all external IP with
+   iptables
 
 * Summary
 ** Must haves
-  - [ ] Non root user KD (kosher developer)
+  - [ ] Non root user KD (kosher
+    developer)
   - [ ] DNS whitelist
 
   #+BEGIN_SRC bash
@@ -33,28 +49,42 @@
   hosts: files
   #+END_SRC
 
-  - [ ] Ability to still install software via nix packages
+  - [ ] Ability to still install
+    software via nix packages
   - [ ] Managed dotfiles
-  - [ ] Auto generate hosts list from domain list so that ips are up to date
+  - [ ] Auto generate hosts list
+    from domain list so that ips
+    are up to date
 
 ** Nice to haves
-  - [ ] custom search engine that only indexes legal pages
-  - [ ] Custom home page for browsers
+  - [ ] custom search engine
+    that only indexes legal
+    pages
+  - [ ] Custom home page for
+    browsers
   - [ ] Custom Wallpapers
-  - [ ] Setup a custom linux distro with everything pre-configured
+  - [ ] Setup a custom linux
+    distro with everything
+    pre-configured
 
 * Tasks
 ** TODO Create a Dockerfile for testing
-   Must have sudo, so it emulates a real install
+   Must have sudo, so it
+   emulates a real install
 
 ** TODO Install Script
    Run on current user
    - [ ] Install dependencies
    - [ ] Generate Lists
-   - [ ] Configure system to auto update with no user prompting
-   - [ ] Configure root cron to update daily
-   - [ ] Configure /etc/nsswitch.conf
-   - [ ] Setup groups Docker etc... (remove sudo)
+   - [ ] Configure system to
+     auto update with no user
+     prompting
+   - [ ] Configure root cron to
+     update daily
+   - [ ] Configure
+     /etc/nsswitch.conf
+   - [ ] Setup groups Docker
+     etc... (remove sudo)
    - [ ]
 
 ** TODO Update Script

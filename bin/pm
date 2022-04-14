@@ -4,11 +4,21 @@
 # what can be installed, removed, or updated
 
 # User must have sudoer access to apt under the hood (maybe snap)
-function help(){
+function help() {
     echo "pm the help!"
 }
 
-function _package_valid(){}
+function _package_valid(){
+    echo "$1 is valid package!"
+}
+function update_packages() {
+    #function_body
+    fetch_packages && sudo apt dist-upgrade -y
+}
+function fetch_packages() {
+    #function_body
+    sudo apt update
+}
 
 
 _command=$1
@@ -16,6 +26,12 @@ shift 1
 case $_command in
     add )
         # install a package
+        ;;
+    update)
+        update_packages
+        ;;
+    fetch)
+        fetch_packages
         ;;
     *)
         help

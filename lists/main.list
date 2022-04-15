@@ -70,6 +70,11 @@ udemy
 ## VCS
 140.82.112.3 github.com
 185.199.110.154 github.githubassets.com
+140.82.112.22 collector.github.com
+140.82.114.6 api.github.com
+185.199.108.133 avatars.githubusercontent.com
+185.199.110.133 camo.githubusercontent.com
+185.199.109.133 user-images.githubusercontent.com
 172.65.251.78 gitlab.com
 18.205.93.5 bitbucket.com
 

@@ -159,6 +159,12 @@ paypal
 142.250.80.110 clients1.google.com
 142.251.35.164 www.google.com
 142.250.72.97 drive-thirdparty.googleusercontent.com
+142.250.80.97 doc-0s-6k-docs.googleusercontent.com
+142.251.41.1 doc-0s-5k-docs.googleusercontent.com
+142.251.32.97 doc-0s-4k-docs.googleusercontent.com
+142.251.32.97 doc-0s-3k-docs.googleusercontent.com
+142.251.41.1 doc-0s-2k-docs.googleusercontent.com
+142.250.65.225 doc-0s-1k-docs.googleusercontent.com
 # UTILITIES
 verizon
 158.57.194.119 www.oru.com

@@ -1,0 +1,89 @@
+<html>
+
+<head>
+<title>e2guardian - Accesso Negado</title>
+</head>
+
+<body bgcolor=#FFFFFF>
+
+<center>
+<table border=0 cellspacing=0 cellpadding=2 height=540 width=700>
+<tr>
+	<td colspan=2 bgcolor=#FEA700 height=100 align=center>
+	<font face=arial,helvetica size=6>
+	<b>Seu acesso foi negado!</b>
+	</td>
+</tr>
+<tr>
+	<td colspan=2 bgcolor=#FFFACD height=30 align=right>
+	<font face=arial,helvetica size=3 color=black>
+	<b>-USER-&nbsp;</b>
+	</td>
+</tr>
+<tr>
+	<td align=center valign=bottom width=150 bgcolor=#B0C4DE>
+	<font face=arial,helvetica size=1 color=black>
+	NOME ORGANIZACAO
+	</td>
+	<td width=550 bgcolor=#FFFFFF align=center valign=center>
+	<font face=arial,helvetica color=black>
+	<font size=4>
+	O seu acesso &agrave; p&aacute;gina:
+	<br><br>
+	<a href="-URL-" target="_blank">-URL-</a>
+	<br><br>
+	<font size=3>
+	foi negado pelo seguinte motivo:
+	<br><br>
+	<font color=red>
+	<b>-REASONGIVEN-</b>
+	<font color=black>
+	<br><br>
+	Categoria(s):
+	<br><br>
+	<font color=red>
+	<b>-CATEGORIES-</b>
+	<font color=black>
+	<br><br><br><br>
+	Voc&ecirc; est&aacute; vendo este erro porque o que voc&ecirc; tentou acessar parece conter
+	ou foi rotulado como material considerado inapropriado.
+	<br><br>
+	Se tiver algum questionamento, contacte seu Coordenador de &aacute;rea ou o Gerente de Redes.
+	<br><br><br><br>
+	<font size=1>
+	Produzido por <a href="http://www.e2guardian.org?block" target="_blank">e2guardian</a>
+	</td>
+</tr>
+</table>
+
+</body>
+
+</html>
+
+<!--
+As seguintes variáveis possíveis são:
+- URL- informa a URL ao usuário que estava tentando acessá-la
+- REASONGIVEN- informa o motivo pelo qual o acesso foi negado, de uma forma
+amigável (exemplo: não destacando a frase banida)
+- REASONLOGGED- informa o motivo que foi registrado, incluindo os detalhes.
+- USER- informa o usuário (se o sistema reconhecê-lo).
+- IP- informa o IP que originou o acesso.
+- HOST- informa o nome da máquina que originou o acesso, caso o sistema
+o reconheça.
+- FILTERGROUP- informa o número do grupo.
+- BYPASS- informa a URL que libera temporariamente a página negada.
+- CATEGORIES- informa a categoria em que o conteúdo foi classificado.
+
+É necessário remover o espaço entre o hífen e a variável para usá-las no seu
+código HTML. Eles já estão disponíveis, não há a necessidade de processamento
+extra.
+
+Mais exemplos de modelos podem ser encontrados no site do e2guardian na
+sessão Extra.
+
+Esta página foi elaborada por Paul Richards.	(http://www.ridney.com/)
+Modificada por Renato C. Pacheco em 2014-04-15
+
+Daniel Barron 2003-09-01
+-->
+

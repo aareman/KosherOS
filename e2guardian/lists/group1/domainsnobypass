@@ -1,0 +1,63 @@
+# User are not allowed to bypass domains in this list
+
+#Don't bother with the www. or the http://
+
+#NOTE: Sites using just IP should be put into bannedsiteiplistwithbypass
+
+#You can include
+#.tld so for example you can match .gov for example
+
+#.Include</etc/e2guardian/anotherbannedurllist>
+
+#You can have multiple .Includes.
+
+# WARNING: Old style Blanket blocks in this file will be silently ignored
+
+
+# .Include</etc/e2guardian/lists/blacklists/ads/domains>
+
+#Remove the # from the following and edit as needed to use a stock
+#squidGuard/urlblacklists collection.
+#.Include</etc/e2guardian/lists/blacklists/adult/domains>
+#.Include</etc/e2guardian/lists/blacklists/aggressive/domains>
+#.Include</etc/e2guardian/lists/blacklists/artnudes/domains>
+#.Include</etc/e2guardian/lists/blacklists/audio-video/domains>
+#.Include</etc/e2guardian/lists/blacklists/beerliquorinfo/domains>
+#.Include</etc/e2guardian/lists/blacklists/beerliquorsale/domains>
+#.Include</etc/e2guardian/lists/blacklists/chat/domains>
+#.Include</etc/e2guardian/lists/blacklists/childcare/domains>
+#.Include</etc/e2guardian/lists/blacklists/clothing/domains>
+#.Include</etc/e2guardian/lists/blacklists/culinary/domains>
+#.Include</etc/e2guardian/lists/blacklists/dialers/domains>
+#.Include</etc/e2guardian/lists/blacklists/drugs/domains>
+#.Include</etc/e2guardian/lists/blacklists/entertainment/domains>
+#.Include</etc/e2guardian/lists/blacklists/forums/domains>
+#.Include</etc/e2guardian/lists/blacklists/frencheducation/domains>
+#.Include</etc/e2guardian/lists/blacklists/gambling/domains>
+#.Include</etc/e2guardian/lists/blacklists/government/domains>
+#.Include</etc/e2guardian/lists/blacklists/hacking/domains>
+#.Include</etc/e2guardian/lists/blacklists/homerepair/domains>
+#.Include</etc/e2guardian/lists/blacklists/hygiene/domains>
+#.Include</etc/e2guardian/lists/blacklists/jewelry/domains>
+#.Include</etc/e2guardian/lists/blacklists/jobsearch/domains>
+#.Include</etc/e2guardian/lists/blacklists/kidstimewasting/domains>
+#.Include</etc/e2guardian/lists/blacklists/mail/domains>
+#.Include</etc/e2guardian/lists/blacklists/news/domains>
+#.Include</etc/e2guardian/lists/blacklists/onlineauctions/domains>
+#.Include</etc/e2guardian/lists/blacklists/onlinegames/domains>
+#.Include</etc/e2guardian/lists/blacklists/onlinepayment/domains>
+#.Include</etc/e2guardian/lists/blacklists/personalfinance/domains>
+#.Include</etc/e2guardian/lists/blacklists/pets/domains>
+#.Include</etc/e2guardian/lists/blacklists/porn/domains>
+#.Include</etc/e2guardian/lists/blacklists/proxy/domains>
+#.Include</etc/e2guardian/lists/blacklists/publicite/domains>
+#.Include</etc/e2guardian/lists/blacklists/redirector/domains>
+#.Include</etc/e2guardian/lists/blacklists/ringtones/domains>
+#.Include</etc/e2guardian/lists/blacklists/sportnews/domains>
+#.Include</etc/e2guardian/lists/blacklists/sports/domains>
+#.Include</etc/e2guardian/lists/blacklists/vacation/domains>
+#.Include</etc/e2guardian/lists/blacklists/violence/domains>
+#.Include</etc/e2guardian/lists/blacklists/virusinfected/domains>
+#.Include</etc/e2guardian/lists/blacklists/warez/domains>
+
+# You will need to edit to add and remove categories you want

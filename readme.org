@@ -5,9 +5,17 @@
 * Method of Implementation
 ** Root user has full access to anything
    Solution, non root user
+** e2guardian
+*** TODO Install
+*** TODO Added to install script
+*** TODO Configure
+*** TODO test
+*** TODO Design defaults
 ** Need docker access
-   Solution, prevent docker from
-   mounting files that belong to
+   Solution, prevent docker
+   from
+   mounting files that belong
+   to
    root
     Change
     ~/etc/docker/daemon.json~
@@ -22,7 +30,8 @@
    #+END_SRC
 
    #+BEGIN_SRC bash
-   sudo service docker restart
+   sudo service docker
+   restart
 
    # something
    sudoedit /etc/sudoers
@@ -30,8 +39,10 @@ avraham ALL=NOPASSWD:/usr/bin/pm
    #+END_SRC
 
 ** Can browse anything
-   Restrict dns to file lookup
-   only instead of using a DNS
+   Restrict dns to file
+   lookup
+   only instead of using a
+   DNS
    service
 ** DNS does not protect against direct IP lookups
    Block all external IP with
@@ -39,7 +50,8 @@ avraham ALL=NOPASSWD:/usr/bin/pm
 
 * Summary
 ** Must haves
-  - [ ] Non root user KD (kosher
+  - [ ] Non root user KD
+    (kosher
     developer)
   - [ ] DNS whitelist
 
@@ -49,11 +61,14 @@ avraham ALL=NOPASSWD:/usr/bin/pm
   hosts: files
   #+END_SRC
 
-  - [ ] Ability to still install
+  - [ ] Ability to still
+    install
     software via nix packages
   - [ ] Managed dotfiles
-  - [ ] Auto generate hosts list
-    from domain list so that ips
+  - [ ] Auto generate hosts
+    list
+    from domain list so that
+    ips
     are up to date
 
 ** Nice to haves
@@ -79,7 +94,8 @@ avraham ALL=NOPASSWD:/usr/bin/pm
    - [ ] Configure system to
      auto update with no user
      prompting
-   - [ ] Configure root cron to
+   - [ ] Configure root cron
+     to
      update daily
    - [ ] Configure
      /etc/nsswitch.conf
@@ -90,8 +106,12 @@ avraham ALL=NOPASSWD:/usr/bin/pm
 ** TODO Update Script
 ** WAITING hand keys to shoshana
    - a search page
-   - core working functionality for work
+   - core working
+     functionality for work
 
 
+* Notes
+** [[https://askubuntu.com/questions/855166/setting-up-opendns-with-content-blocking-on-a-laptop][setup a dns filter]]
+   [[https://blog.cloudflare.com/introducing-1-1-1-1-for-families/][Cloudflaredns]]
 * Ideas
 ** Custom app store wrapper around apt

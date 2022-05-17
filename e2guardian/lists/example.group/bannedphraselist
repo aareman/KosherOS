@@ -1,0 +1,47 @@
+# BANNEDPHRASELIST - INSTRUCTIONS FOR USE
+#
+# To block any page with the word "sex".
+# < sex >
+#
+# To block any page with words that contain the string "sex". (ie. sexual)
+# <sex>
+#
+# To block any page with the string "sex magazine".
+# <sex magazine>
+#
+# To block any page containing the words/strings "sex" and "fetish".
+# <sex>,<fetish>
+#
+# < test> will match any word with the string 'test' at the beginning
+# <test > will match any word with the string 'test' at the end
+# <test> will match any word with the string 'test' at any point in the word
+# < test > will match only the word 'test'
+# <this is a test phrase> will match that exact phrase
+# <test>,<secondtest> will match if both words are found in the page
+# A combination of the above can also be used eg < test>,<secondtest>
+#
+# All phrases need to be within < and > to work, othewise they will be
+# ignored.
+
+# Note: Use these sparingly - banned phrases tend to overblock
+
+
+#listcategory: "Banned Phrases"
+
+
+# The following banned phraselists are included in the default e2g distribution.
+
+.Include</etc/e2guardian/lists/phraselists/ukenglish/pornography/banned>
+
+#.Include</etc/e2guardian/lists/phraselists/ukenglish/gambling/banned>
+#.Include</etc/e2guardian/lists/phraselists/ukenglish/badwords/banned>
+
+#.Include</etc/e2guardian/lists/phraselists/portuguese/gambling/banned>
+#.Include</etc/e2guardian/lists/phraselists/portuguese/intolerance/banned>
+#.Include</etc/e2guardian/lists/phraselists/portuguese/personals/banned>
+
+#.Include</etc/e2guardian/lists/phraselists/ukenglish/gambling/banned>
+#.Include</etc/e2guardian/lists/phraselists/portuguese/gambling/banned>
+
+
+

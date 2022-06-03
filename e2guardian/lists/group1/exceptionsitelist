@@ -18,7 +18,10 @@
 # Remove the first # from the line above to enable this list only from
 # 9am to 5pm, Monday to Friday.
 
-# NOTE: From v5 Blanket exceptions are now implemented using Storyboarding 
+# NOTE: From v5 Blanket exceptions are now implemented using Storyboarding
 # WARNING: Old style Blanket blocks in this file will be silently ignored
 
 windowsupdate.microsoft.com
+github.com
+registry.npmjs.org
+e2guardian.org

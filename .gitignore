@@ -1,1 +1,4 @@
 generated.hosts
+*.swp
+*.swo
+e2guardian/ssl

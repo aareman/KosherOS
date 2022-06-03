@@ -1,86 +1,97 @@
 <html>
+    <head>
+        <title>Ruchniux - Access Denied</title>
+        <style>
+body {
+    background-image: linear-gradient(160deg, rgb(0, 147, 233) 0%, rgb(128, 208, 199) 100%);
+    min-height: 100%;
+    height:100%;
+    padding: 0 auto;
+    font-family: calibri;
+    color: #222;
+}
+            h1 {
+            }
+            .content {
+                width: 60%;
+                margin: 4rem auto;
+                background: #eee;
+                padding: 2rem;
+                border-radius: 1rem;
+                box-shadow: 1px 1px -5px #222;
+            }
+            .footer {
+                width: 100%;
+                margin: 1rem auto;
+                position: absolute;
+                bottom: 0;
+                text-align: center;
+            }
+            .header {
+                display: flex;
+            }
+            .h1 {
+                font-size: 4rem;
+                font-weight: 600;
+            }
+            .h2{
+                font-size: 1.5rem;
+            }
+            .protected-count {
+                font-size: 5rem;
+                color:
+  font-size: 72px;
+  background: linear-gradient(160deg, rgb(0, 147, 233) 0%, rgb(128, 208, 199) 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  vertical-align: middle;
+            }
+            .ml-auto {
+  margin-left: auto;
+            }
 
-<head>
-<title>E2Guardian - Access Denied</title>
-</head>
-
-<body bgcolor=#FFFFFF>
-
-<center>
-<table border=0 cellspacing=0 cellpadding=2 height=540 width=700>
-<tr>
-	<td colspan=2 bgcolor=#FEA700 height=100 align=center>
-	<font face=arial,helvetica size=6>
-	<b>Access has been Denied!</b>
-	</td>
-</tr>
-<tr>
-	<td colspan=2 bgcolor=#FFFACD height=30 align=right>
-	<font face=arial,helvetica size=3 color=black>
-	<b>-USER-&nbsp;</b>
-	</td>
-</tr>
-<tr>
-	<td align=center valign=bottom width=150 bgcolor=#B0C4DE>
-	<font face=arial,helvetica size=1 color=black>
-	YOUR ORG NAME
-	</td>
-	<td width=550 bgcolor=#FFFFFF align=center valign=center>
-	<font face=arial,helvetica color=black>
-	<font size=4>
-	Access to the page:
-	<br><br>
-	<a href="-URL-" target="_blank">-URL-</a>
-	<br><br>
-	<font size=3>
-	... has been denied for the following reason:
-	<br><br>
-	<font color=red>
-	<b>-REASONGIVEN-</b>
-	<font color=black>
-	<br><br>
-	Categories:
-	<br><br>
-	<font color=red>
-	<b>-CATEGORIES-</b>
-	<font color=black>
-	<br><br><br><br>
-	You are seeing this error because what you attempted to access appears to contain,
-	or is labeled as containing, material that has been deemed inappropriate.
-	<br><br>
-	If you have any queries contact your ICT Coordinator or Network Manager.
-	<br><br><br><br>
-	<font size=1>
-	Powered by <a href="http://www.e2guardian.org?block" target="_blank">E2Guardian</a>
-	</td>
-</tr>
-</table>
-
-</body>
-
+        </style>
+    </head>
+    <body>
+        <div class="content">
+            <div class="header">
+                <div class="col">
+            <div class="h1">Ruchniux</div>
+            <div class="h2">This site has been blocked</div>
+                </div>
+                <div class="col ml-auto">
+                    <div class="protected-count">313</div>
+                </div>
+            </div>
+            <div class="filter-group"></div>
+        </div>
+        <div class="footer">
+            Powered by <a href="http://e2guardian.org/cms/index.php">E2Guardian</a>
+        </div>
+    </body>
 </html>
 
 <!--
-The available variables are as follows:
-- URL- gives the URL the user was trying to get to.
-- REASONGIVEN- gives the nice reason (i.e. not quoting the banned phrase).
-- REASONLOGGED- gives the reason that gets logged including full details.
-- USER- gives the username if known.
-- IP- gives the originating IP.
-- HOST- gives the originating hostname if known.
-- RAWFILTERGROUP- gives the group number.
-- FILTERGROUP- gives the group name.
-- SERVERIP- gives the IP address on which the filter is running (correct for multiple filterip lines, but not if filterip option is blank).
-- BYPASS- gives URL which allows temporary bypass of denied page
-- CATEGORIES- gives the categories assigned to the banned content
+    The available variables are as follows:
+    - URL- gives the URL the user was trying to get to.
+    -REASONGIVEN- gives the nice reason (i.e. not quoting the banned phrase).
+    -REASONLOGGED- gives the reason that gets logged including full details.
+    - USER- gives the username if known.
+    - IP- gives the originating IP.
+    - HOST- gives the originating hostname if known.
+    - RAWFILTERGROUP- gives the group number.
+    - FILTERGROUP- gives the group name.
+    - SERVERIP- gives the IP address on which the filter is running (correct for multiple filterip lines, but not if filterip option is blank).
+    - BYPASS- gives URL which allows temporary bypass of denied page
+    -CATEGORIES- gives the categories assigned to the banned content
 
-You need to remove the space between the - and the variable to use them
-in your HTML.  They are there above so extra processing is not required.
+    You need to remove the space between the - and the variable to use them
+    in your HTML.  They are there above so extra processing is not required.
 
-More example templates are likely to be found on the E2Guardian web site
-on the Extras page.
+    More example templates are likely to be found on the E2Guardian web site
+    on the Extras page.
 
-Original page was designed by Paul Richards.  (http://www.ridney.com/)
+    Original page was designed by Paul Richards.  (http://www.ridney.com/)
 
 -->
 

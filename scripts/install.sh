@@ -63,7 +63,9 @@ function install_e2guardian() {
     openssl genrsa > private_cert.pem
     chown -R e2guardian. /etc/e2guardian/ssl
 
-    # TODO: backup /etc/e2guardian
+    # Linking
+    ln -s e2guardian /etc/
+    ln -s e2guardian/languages /usr/share/e2guardian
 
 }
 

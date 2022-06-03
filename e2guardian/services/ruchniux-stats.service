@@ -1,0 +1,18 @@
+# vim: ft=config
+[Unit]
+Description=Ruchniux Status Counter
+After=e2guardian.service
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+UMask=027
+Restart=always
+RestartSec=1
+# TODO: Fill in
+ExecStart=
+# TODO: Fill in
+User=
+
+[Install]
+WantedBy=multi-user.target

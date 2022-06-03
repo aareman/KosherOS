@@ -1,8 +1,9 @@
 * Objective
-  To create a Kosher linux
-  laptop that can be used by
-  developers.
+  To create a Kosher linux laptop that can be used by developers.
 * Method of Implementation
+  A Developer friendly kosher linux setup for the frum linux poweruser.
+  1. No sudo access
+
 ** Root user has full access to anything
    Solution, non root user
 ** e2guardian

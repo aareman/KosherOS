@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+# vim: ft=bash
+
+TEMPLATE_FILE=/home/avraham/dev/ruchniux/e2guardian/languages/ukenglish/template.html
+LOG_FILE=/var/log/e2guardian/access.log
+
+while true;
+do
+    blockedList="$(grep '*DENIED*' "$LOG_FILE" | wc -l)"
+    countOfBlockedSites="$(printf "%'.0f" "$blockedList" )"
+    sed -i -E 's/(^.*protected-count[^>]*>)[^<]*(<.*$)/\1'"$countOfBlockedSites"'\2/' "$TEMPLATE_FILE"
+    e2guardian -r
+    sleep 1
+done

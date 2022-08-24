@@ -2,6 +2,32 @@
 _user=ruchniux
 _currentUser="$USER"
 
+# TODO: add password type (wife/spouse, chetzy chetzy)
+# TODO: add validation for this
+read -p "Enter in Admin Password: " _ruchniuxPassword
+PS3="Select Filter Type: "
+# TODO: keep choosing if not valid choice
+select filterType in whitelist proxy; do
+_filterType=$filterType
+break
+done
+
+echo "USER: ${_currentUser}"
+echo "filter: ${_filterType}"
+
+echo "adminPAssword: ${_ruchniuxPassword}"
+exit
+
+
+# STEPS
+# - get user input
+# - create ruchniux user
+# - install application under that user
+# - setup crons for system updates (optionaly allow sudo just for this)
+# - install all system deps and config
+# - hand control over to that user
+# - bios boot cleanup (block boot from usb)
+
 
 # TODO: a module system to keep it clean and scalable
 # modules=(
@@ -16,20 +42,62 @@ _currentUser="$USER"
 #     ./$m
 # done
 
+function _install.docker(){
+    sudo apt install docker.io docker-compose -y
+    # setup docker permissions
 
-# Packages
-sudo apt update
-sudo apt upgrade -y
-sudo apt install docker.io docker-compose git -y
+}
 
-# install nix
+
+function _install.nix(){
 sudo mkdir /nix
 sudo chown "$_currentUser"
 sh <(curl -L https://nixos.org/nix/install) --no-daemon
+}
+function _install.whitelist(){
+    # TODO: implement
+}
+function _install.e2guardian() {
+    # TODO: refactor this into helper functions
+    # clone project
+    git clone https://github.com/e2guardian/e2guardian.git
+    cd e2guardian
+    # install dependencies
+    sudo apt update && sudo apt install libtommath1 libevent-pthreads-2.1-6
+    sudo service e2guardian status
+    # configuration
+    # As sudo
+    mkdir -p /etc/e2guardian/ssl/generatedcerts
+    chown -R e2guardian. /etc/e2guardian/ssl
+    cd /etc/e2guardian/ssl
+    openssl genrsa 4096 > private_root.pem
+    # TODO: generate this headless
+    openssl req -new -x509 -days 3650 -key private_root.pem -out my_rootCA.crt
+    # server needs to be the actual name of the server (here is 127.0.0.1)
+    openssl genrsa > private_cert.pem
+    chown -R e2guardian. /etc/e2guardian/ssl
+
+    # Linking
+    ln -s e2guardian /etc/
+    ln -s e2guardian/languages /usr/share/e2guardian
+
+}
+
+function install_and_update() {
+sudo apt update
+sudo apt upgrade -y
+sudo apt install git -y
+_install.docker
+_install.nix
+# TODO: make this conditional based on filter type
+_install.e2guardian
+}
+
+
+
 
 # Create a new sudo user to be able to revert this install
 
-# setup docker permissions
 
 # NOT DOING: just removing sudo and sticking with nix
 # update sudoers file so custom apt can be run
@@ -45,29 +113,8 @@ https://raw.githubusercontent.com/chadmayfield/my-pihole-blocklists/master/lists
 
 # TODO: Lock lists, waiting on working concept. This is the nsswitch thing
 
-function install_e2guardian() {
-    # clone project
-    git clone https://github.com/e2guardian/e2guardian.git
-    cd e2guardian
-    # install dependencies
-    sudo apt update && sudo apt install libtommath1 libevent-pthreads-2.1-6
-    sudo service e2guardian status
-    # configuration
-    # As sudo
-    mkdir -p /etc/e2guardian/ssl/generatedcerts
-    chown -R e2guardian. /etc/e2guardian/ssl
-    cd /etc/e2guardian/ssl
-    openssl genrsa 4096 > private_root.pem
-    openssl req -new -x509 -days 3650 -key private_root.pem -out my_rootCA.crt
-    # server needs to be the actual name of the server (here is 0.0.0.0)
-    openssl genrsa > private_cert.pem
-    chown -R e2guardian. /etc/e2guardian/ssl
 
-    # Linking
-    ln -s e2guardian /etc/
-    ln -s e2guardian/languages /usr/share/e2guardian
 
-}
-
-# Custom boot splash screen
+# TODO: Custom boot splash screen
 # https://askubuntu.com/a/2292
+# TODO: custom wallpaper

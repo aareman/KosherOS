@@ -1,0 +1,12 @@
+// Quietly deny (no auth prompt) stock update/package actions. These can
+// never succeed here anyway (no polkit admin identities exist) — returning
+// NO stops desktop components from popping unanswerable password dialogs.
+// OS updates happen via the bootc timer and kosherd's apply-updates action.
+polkit.addRule(function(action, subject) {
+    if (subject.user !== "root" &&
+        (action.id.indexOf("org.freedesktop.packagekit.") === 0 ||
+         action.id.indexOf("org.projectatomic.rpmostree1.") === 0 ||
+         action.id.indexOf("org.freedesktop.flatpak.") === 0)) {
+        return polkit.Result.NO;
+    }
+});

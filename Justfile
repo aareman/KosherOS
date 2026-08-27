@@ -57,12 +57,19 @@ build:
 # Create a bootable qcow2 from the locally built image (bootc-image-builder).
 # Needs sudo: bib must run as root, reading the image from your rootless storage.
 vm: build
-    mkdir -p build
-    sudo podman run --rm -it --privileged --security-opt label=type:unconfined_t \
+    mkdir -p build/podman-home/.config/containers
+    printf '{"default":[{"type":"insecureAcceptAnything"}]}' > build/podman-home/.config/containers/policy.json
+    # bib requires the image in ROOT podman storage; copy it over from the
+    # rootless build (layers are deduped, so re-copies after a rebuild are fast).
+    sudo env HOME="$PWD/build/podman-home" "$(command -v podman)" pull \
+        "containers-storage:[overlay@{{env_var("HOME")}}/.local/share/containers/storage]{{image}}"
+    sudo env HOME="$PWD/build/podman-home" "$(command -v podman)" run --rm -i --privileged --security-opt label=type:unconfined_t \
         -v ./build:/output \
-        -v {{env_var("HOME")}}/.local/share/containers/storage:/var/lib/containers/storage \
+        -v ./os-image/dev-config.toml:/config.toml:ro \
+        -v /var/lib/containers/storage:/var/lib/containers/storage \
         quay.io/centos-bootc/bootc-image-builder:latest \
-        --type qcow2 --local {{image}}
+        --type qcow2 --rootfs ext4 {{image}}
+    sudo chown -R "$USER:" build/qcow2
     @echo "qcow2 at build/qcow2/disk.qcow2 — boot with: just boot-image"
 
 # Boot the built qcow2 (headless, ssh on localhost:2223 if the image has sshd).

@@ -1,0 +1,7 @@
+# bootc-image-builder config for DEV disk images only (just vm).
+# Production installs create the admin in the first-boot wizard (stage 4)
+# and never ship a preset password.
+[[customizations.user]]
+name = "abba"
+password = "kosher"
+groups = ["kosher-admin"]

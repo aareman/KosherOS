@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from gi.repository import Gio, GLib
 
+ACTION_READ_CONFIG = "org.kosherlinux.read-config"
 ACTION_MANAGE_USERS = "org.kosherlinux.manage-users"
 ACTION_MANAGE_FILTER = "org.kosherlinux.manage-filter"
 ACTION_INSTALL_APPS = "org.kosherlinux.install-apps"

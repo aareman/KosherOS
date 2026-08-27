@@ -73,11 +73,25 @@ EOF
     printf 'instance-id: kosher-fedora\nlocal-hostname: kosher-fedora\n' > "$vm_dir/meta-data"
     cloud-localds "$seed" "$vm_dir/user-data" "$vm_dir/meta-data"
 
+    write_ssh_config
+}
+
+write_ssh_config() {
     cat > "$ssh_config" <<EOF
 Host kosher-fedora
     HostName 127.0.0.1
     Port $ssh_port
     User fedora
+    IdentityFile $(identity_file)
+    StrictHostKeyChecking no
+    UserKnownHostsFile /dev/null
+    LogLevel ERROR
+
+# The GUI qcow2 VM (just boot-image), when built from os-image/dev-config.toml
+Host kosher-gui
+    HostName 127.0.0.1
+    Port 2223
+    User root
     IdentityFile $(identity_file)
     StrictHostKeyChecking no
     UserKnownHostsFile /dev/null

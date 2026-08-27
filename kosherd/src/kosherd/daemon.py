@@ -110,20 +110,20 @@ INTROSPECTION_XML = """
 
 # method name -> polkit action id
 ACTIONS = {
-    "GetPolicy": auth.ACTION_MANAGE_USERS,
+    "GetPolicy": auth.ACTION_READ_CONFIG,
     "SetFilterMode": auth.ACTION_MANAGE_FILTER,
     "SetWhitelist": auth.ACTION_MANAGE_FILTER,
     "CreateUser": auth.ACTION_MANAGE_USERS,
     "AdoptUser": auth.ACTION_MANAGE_USERS,
     "SetGuestConfig": auth.ACTION_MANAGE_FILTER,
     "RemoveUser": auth.ACTION_MANAGE_USERS,
-    "ListCatalog": auth.ACTION_INSTALL_APPS,
+    "ListCatalog": auth.ACTION_READ_CONFIG,
     "InstallApp": auth.ACTION_INSTALL_APPS,
     "RemoveApp": auth.ACTION_INSTALL_APPS,
-    "CheckUpdate": auth.ACTION_APPLY_UPDATES,
+    "CheckUpdate": auth.ACTION_READ_CONFIG,
     "ApplyUpdate": auth.ACTION_APPLY_UPDATES,
     "SetCaptiveMode": auth.ACTION_MANAGE_NETWORK,
-    "IsEnabled": auth.ACTION_MANAGE_GUARDIAN,
+    "IsEnabled": auth.ACTION_READ_CONFIG,
     "SetGuardianPassword": auth.ACTION_MANAGE_GUARDIAN,
     "DisableGuardian": auth.ACTION_MANAGE_GUARDIAN,
 }
@@ -186,6 +186,11 @@ class Daemon:
         except (auth.NotAuthorized, GuardianError, PolicyError, KeyError, ValueError) as e:
             log.warning("%s by %s refused: %s", method, sender, e)
             invocation.return_dbus_error(ERROR_NAME, str(e))
+        except GLib.Error as e:
+            # A system service we called (accountsservice, polkit, ...) said no —
+            # pass its message through instead of masking it as 'internal error'.
+            log.warning("%s by %s failed downstream: %s", method, sender, e.message)
+            invocation.return_dbus_error(ERROR_NAME, e.message)
         except Exception as e:  # noqa: BLE001 - daemon must not crash on a bad call
             log.exception("%s failed", method)
             invocation.return_dbus_error(ERROR_NAME, f"internal error: {e}")
@@ -232,8 +237,20 @@ class Daemon:
         return None
 
     def impl_CreateUser(self, username: str, full_name: str, mode: str):
+        import pwd
+
         if mode not in MODES:
             raise PolicyError(f"unknown mode {mode!r}")
+        try:
+            existing_uid = pwd.getpwnam(username).pw_uid
+        except KeyError:
+            pass
+        else:
+            if self.policy.user(existing_uid) is not None:
+                raise PolicyError(f"'{username}' already exists and is already managed")
+            raise PolicyError(
+                f"'{username}' already exists — use Adopt Existing User to manage it"
+            )
         uid = self._accounts_create_user(username, full_name)
         self.policy.users.append(UserPolicy(uid=uid, username=username, mode=mode))
         self._save_and_apply()

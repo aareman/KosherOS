@@ -5,3 +5,15 @@
 name = "abba"
 password = "kosher"
 groups = ["kosher-admin"]
+
+# Dev disks only: sshd on + key-only root ssh, so `just deploy-kosherd
+# kosher-gui` can push code into the running GUI VM without a disk rebuild
+# (the image has no sudo, so root-by-key is the only dev channel; the root
+# password stays locked). @SSH_KEY@ is substituted by the `just vm` recipe.
+# Production images ship with sshd disabled and no preset users or keys.
+[[customizations.user]]
+name = "root"
+key = "@SSH_KEY@"
+
+[customizations.services]
+enabled = ["sshd"]

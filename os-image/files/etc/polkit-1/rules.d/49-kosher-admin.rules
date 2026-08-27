@@ -5,6 +5,10 @@ polkit.addRule(function(action, subject) {
     if (action.id.indexOf("org.kosherlinux.") === 0 &&
         subject.isInGroup("kosher-admin") &&
         subject.active && subject.local) {
+        // Reads are free for admins — no password just to LOOK at settings.
+        if (action.id === "org.kosherlinux.read-config") {
+            return polkit.Result.YES;
+        }
         return polkit.Result.AUTH_SELF_KEEP;
     }
 });

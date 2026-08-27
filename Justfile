@@ -42,12 +42,23 @@ dev-install VM="kosher-fedora":
         -e "{{vmssh}}" . {{VM}}:/tmp/kosher-linux/
     {{vmssh}} {{VM}} "sudo bash /tmp/kosher-linux/scripts/dev-install.sh"
 
-# Sub-second inner loop: push local kosherd code + schema into the VM and restart it.
+# Sub-second inner loop: push local kosherd code + schema into a VM and restart
+# it. Works on the stock VM (kosher-fedora, via sudo) and on the locked-down
+# GUI VM (kosher-gui, as root by key — the image has no sudo).
 deploy-kosherd VM="kosher-fedora":
     rsync -a -e "{{vmssh}}" kosherd/src/kosherd/ policy/schema/policy.schema.json \
         {{VM}}:/tmp/kosherd-src/
-    {{vmssh}} {{VM}} "sudo install -m644 /tmp/kosherd-src/policy.schema.json /usr/share/kosher/policy.schema.json && sudo rm /tmp/kosherd-src/policy.schema.json"
-    {{vmssh}} {{VM}} "sudo rsync -a /tmp/kosherd-src/ \$(sudo python3 -c 'import kosherd,os;print(os.path.dirname(kosherd.__file__))')/ && sudo systemctl restart kosherd && systemctl --no-pager status kosherd | head -5"
+    {{vmssh}} {{VM}} "S=\$([ \$(id -u) = 0 ] || echo sudo); \
+        \$S install -m644 /tmp/kosherd-src/policy.schema.json /usr/share/kosher/policy.schema.json \
+        && \$S rm /tmp/kosherd-src/policy.schema.json \
+        && \$S rsync -a /tmp/kosherd-src/ \$(\$S python3 -c 'import kosherd,os;print(os.path.dirname(kosherd.__file__))')/ \
+        && \$S systemctl restart kosherd && systemctl --no-pager status kosherd | head -3"
+
+# Same push for the admin app (GUI VM), then just relaunch the app in the VM.
+deploy-admin VM="kosher-gui":
+    rsync -a -e "{{vmssh}}" admin-app/src/kosheradmin/ {{VM}}:/tmp/kosheradmin-src/
+    {{vmssh}} {{VM}} "S=\$([ \$(id -u) = 0 ] || echo sudo); \
+        \$S rsync -a /tmp/kosheradmin-src/ \$(\$S python3 -c 'import kosheradmin,os;print(os.path.dirname(kosheradmin.__file__))')/"
 
 # --- OS image (stage 2) -------------------------------------------------------
 
@@ -60,13 +71,15 @@ build:
 vm: build
     mkdir -p build/podman-home/.config/containers
     printf '{"default":[{"type":"insecureAcceptAnything"}]}' > build/podman-home/.config/containers/policy.json
+    key="$(cat ~/.ssh/id_ed25519.pub 2>/dev/null || cat ~/.ssh/id_rsa.pub 2>/dev/null || cat build/vm/id_ed25519.pub)" \
+        && sed "s|@SSH_KEY@|$key|" os-image/dev-config.toml > build/dev-config.toml
     # bib requires the image in ROOT podman storage; copy it over from the
     # rootless build (layers are deduped, so re-copies after a rebuild are fast).
     sudo env HOME="$PWD/build/podman-home" "$(command -v podman)" pull \
         "containers-storage:[overlay@{{env_var("HOME")}}/.local/share/containers/storage]{{image}}"
     sudo env HOME="$PWD/build/podman-home" "$(command -v podman)" run --rm -i --privileged --security-opt label=type:unconfined_t \
         -v ./build:/output \
-        -v ./os-image/dev-config.toml:/config.toml:ro \
+        -v ./build/dev-config.toml:/config.toml:ro \
         -v /var/lib/containers/storage:/var/lib/containers/storage \
         quay.io/centos-bootc/bootc-image-builder:latest \
         --type qcow2 --rootfs ext4 {{image}}

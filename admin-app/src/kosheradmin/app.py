@@ -227,19 +227,42 @@ class ProfilesPage(Adw.PreferencesPage):
         row.add_row(wl)
         return row
 
+    def _unmanaged_users(self) -> list[str]:
+        import pwd
+
+        managed = {u["uid"] for u in self.win.policy["users"]}
+        guest_uid = self.win.policy.get("guest", {}).get("uid")
+        return sorted(
+            p.pw_name for p in pwd.getpwall()
+            if 1000 <= p.pw_uid < 65000
+            and p.pw_uid not in managed
+            and p.pw_uid != guest_uid
+        )
+
     def _user_dialog(self, adopt_mode: bool) -> None:
         title = "Adopt Existing User" if adopt_mode else "Create User Account"
         dialog = Adw.AlertDialog(heading=title)
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
-        name = Adw.EntryRow(title="Username")
-        full = Adw.EntryRow(title="Full name")
+        group = Adw.PreferencesGroup()
+
+        candidates: list[str] = []
+        if adopt_mode:
+            candidates = self._unmanaged_users()
+            if not candidates:
+                self.win.toast("Every existing account is already managed")
+                return
+            name_row = Adw.ComboRow(title="Account",
+                                    model=Gtk.StringList.new(candidates))
+            group.add(name_row)
+        else:
+            name = Adw.EntryRow(title="Username")
+            full = Adw.EntryRow(title="Full name")
+            group.add(name)
+            group.add(full)
+
         mode = Adw.ComboRow(title="Filter mode",
                             model=Gtk.StringList.new([MODE_LABELS[m] for m in MODES]))
         mode.set_selected(MODES.index("whitelist"))
-        group = Adw.PreferencesGroup()
-        group.add(name)
-        if not adopt_mode:
-            group.add(full)
         group.add(mode)
         box.append(group)
         dialog.set_extra_child(box)
@@ -250,12 +273,13 @@ class ProfilesPage(Adw.PreferencesPage):
         def on_response(_d, response):
             if response != "ok":
                 return
-            username = name.get_text().strip()
             m = MODES[mode.get_selected()]
             if adopt_mode:
+                username = candidates[name_row.get_selected()]
                 self.win.call(lambda: self.win.client.adopt_user(username, m),
                               done_msg=f"Adopted {username}")
             else:
+                username = name.get_text().strip()
                 self.win.call(
                     lambda: self.win.client.create_user(username, full.get_text().strip() or username, m),
                     done_msg=f"Created {username}")

@@ -52,6 +52,11 @@ INTROSPECTION_XML = """
       <arg direction="in" type="s" name="mode"/>
       <arg direction="out" type="i" name="uid"/>
     </method>
+    <method name="AdoptUser">
+      <arg direction="in" type="s" name="username"/>
+      <arg direction="in" type="s" name="mode"/>
+      <arg direction="out" type="i" name="uid"/>
+    </method>
     <method name="RemoveUser">
       <arg direction="in" type="i" name="uid"/>
     </method>
@@ -103,6 +108,7 @@ ACTIONS = {
     "SetFilterMode": auth.ACTION_MANAGE_FILTER,
     "SetWhitelist": auth.ACTION_MANAGE_FILTER,
     "CreateChild": auth.ACTION_MANAGE_USERS,
+    "AdoptUser": auth.ACTION_MANAGE_USERS,
     "RemoveUser": auth.ACTION_MANAGE_USERS,
     "ListCatalog": auth.ACTION_INSTALL_APPS,
     "InstallApp": auth.ACTION_INSTALL_APPS,
@@ -212,6 +218,24 @@ class Daemon:
         if mode not in MODES:
             raise PolicyError(f"unknown mode {mode!r}")
         uid = self._accounts_create_user(username, full_name)
+        self.policy.users.append(UserPolicy(uid=uid, username=username, mode=mode))
+        self._save_and_apply()
+        return GLib.Variant("(i)", (uid,))
+
+    def impl_AdoptUser(self, username: str, mode: str):
+        """Bring an EXISTING system user under filter management."""
+        import pwd
+
+        if mode not in MODES:
+            raise PolicyError(f"unknown mode {mode!r}")
+        try:
+            uid = pwd.getpwnam(username).pw_uid
+        except KeyError:
+            raise PolicyError(f"no such user {username!r}") from None
+        if uid < 1000:
+            raise PolicyError("cannot manage system accounts")
+        if self.policy.user(uid) is not None:
+            raise PolicyError(f"{username} is already managed")
         self.policy.users.append(UserPolicy(uid=uid, username=username, mode=mode))
         self._save_and_apply()
         return GLib.Variant("(i)", (uid,))

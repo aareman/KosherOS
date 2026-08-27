@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import getpass
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -60,6 +61,12 @@ def cmd_set_whitelist(args) -> int:
 def cmd_create_child(args) -> int:
     uid = _client().create_child(args.username, args.full_name or args.username, args.mode)
     print(f"created {args.username} (uid {uid}, mode {args.mode})")
+    return 0
+
+
+def cmd_adopt(args) -> int:
+    uid = _client().adopt_user(args.username, args.mode)
+    print(f"adopted {args.username} (uid {uid}, mode {args.mode})")
     return 0
 
 
@@ -140,6 +147,11 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("--full-name")
     s.set_defaults(func=cmd_create_child)
 
+    s = sub.add_parser("adopt", help="bring an existing user under filter management")
+    s.add_argument("username")
+    s.add_argument("mode", choices=policy_mod.MODES)
+    s.set_defaults(func=cmd_adopt)
+
     s = sub.add_parser("captive", help="open a temporary captive-portal window")
     s.add_argument("uid", type=int)
     s.add_argument("minutes", type=int, nargs="?", default=5)
@@ -172,6 +184,14 @@ def main(argv: list[str] | None = None) -> int:
     except policy_mod.PolicyError as e:
         print(f"error: {e}", file=sys.stderr)
         return 1
+    except Exception as e:  # noqa: BLE001
+        # Daemon-side refusals arrive as GLib.GError like
+        # "GDBus.Error:org.kosherlinux.Daemon1.Error: <message> (36)".
+        if e.__class__.__module__.startswith("gi."):
+            msg = re.sub(r"^.*?GDBus\.Error:[\w.]+: ", "", str(e))
+            print(f"error: {re.sub(r' \(\d+\)$', '', msg)}", file=sys.stderr)
+            return 1
+        raise
 
 
 if __name__ == "__main__":

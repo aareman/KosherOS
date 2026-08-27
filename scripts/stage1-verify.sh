@@ -44,21 +44,13 @@ else
 fi
 
 echo
-echo "== C. seed test users into policy (via policy file), then drive via D-Bus"
-python3 - <<'EOF'
-import json, pwd, subprocess
-doc = json.load(open("/var/lib/kosher/policy.json"))
-have = {u["uid"] for u in doc["users"]}
-for name, mode in [("wlkid", "whitelist"), ("nokid", "none"), ("dnskid", "dnsfilter")]:
-    uid = pwd.getpwnam(name).pw_uid
-    if uid not in have:
-        doc["users"].append({"uid": uid, "username": name, "mode": mode})
-doc["revision"] += 1
-json.dump(doc, open("/var/lib/kosher/policy.json", "w"), indent=2)
-subprocess.run(["systemctl", "restart", "kosherd"], check=True)
-EOF
-sleep 3
+echo "== C. adopt test users via the D-Bus API"
 check "kosherctl status over D-Bus (root, dev rule)" 0 kosherctl status
+kosherctl get-policy | grep -q '"wlkid"' || {
+    check "adopt wlkid (whitelist)" 0 kosherctl adopt wlkid whitelist
+    check "adopt nokid (none)" 0 kosherctl adopt nokid none
+    check "adopt dnskid (dnsfilter)" 0 kosherctl adopt dnskid dnsfilter
+}
 WLUID=$(id -u wlkid)
 check "SetWhitelist via D-Bus" 0 kosherctl set-whitelist "$WLUID" example.com --guardian-password ""
 check "polkit denies non-admin (nokid) D-Bus call" 1 as nokid kosherctl get-policy

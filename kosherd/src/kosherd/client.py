@@ -39,6 +39,9 @@ class DaemonClient:
     def create_child(self, username: str, full_name: str, mode: str) -> int:
         return self._call("Profiles", "CreateChild", "(sss)", username, full_name, mode)[0]
 
+    def adopt_user(self, username: str, mode: str) -> int:
+        return self._call("Profiles", "AdoptUser", "(ss)", username, mode)[0]
+
     def remove_user(self, uid: int) -> None:
         self._call("Profiles", "RemoveUser", "(i)", uid)
 

@@ -6,7 +6,7 @@ FROM quay.io/fedora/fedora-bootc:42
 # GNOME desktop + our runtime deps. Remove escape hatches (toolbox/container
 # tooling is attack-surface hygiene; the skuid firewall holds regardless).
 RUN dnf -y install @workstation-product-environment --exclude=toolbox --exclude=podman \
-        dnsmasq nftables python3-gobject python3-jsonschema malcontent malcontent-tools flatpak \
+        dnsmasq nftables python3-gobject python3-jsonschema python3-pip malcontent malcontent-tools flatpak \
     && dnf -y remove sudo toolbox podman gnome-boxes || true \
     && dnf clean all
 

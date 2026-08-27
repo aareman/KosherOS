@@ -46,11 +46,17 @@ INTROSPECTION_XML = """
       <arg direction="in" type="as" name="domains"/>
       <arg direction="in" type="s" name="guardian_password"/>
     </method>
-    <method name="CreateChild">
+    <method name="CreateUser">
       <arg direction="in" type="s" name="username"/>
       <arg direction="in" type="s" name="full_name"/>
       <arg direction="in" type="s" name="mode"/>
       <arg direction="out" type="i" name="uid"/>
+    </method>
+    <method name="SetGuestConfig">
+      <arg direction="in" type="b" name="enabled"/>
+      <arg direction="in" type="s" name="mode"/>
+      <arg direction="in" type="as" name="whitelist"/>
+      <arg direction="in" type="s" name="guardian_password"/>
     </method>
     <method name="AdoptUser">
       <arg direction="in" type="s" name="username"/>
@@ -107,8 +113,9 @@ ACTIONS = {
     "GetPolicy": auth.ACTION_MANAGE_USERS,
     "SetFilterMode": auth.ACTION_MANAGE_FILTER,
     "SetWhitelist": auth.ACTION_MANAGE_FILTER,
-    "CreateChild": auth.ACTION_MANAGE_USERS,
+    "CreateUser": auth.ACTION_MANAGE_USERS,
     "AdoptUser": auth.ACTION_MANAGE_USERS,
+    "SetGuestConfig": auth.ACTION_MANAGE_FILTER,
     "RemoveUser": auth.ACTION_MANAGE_USERS,
     "ListCatalog": auth.ACTION_INSTALL_APPS,
     "InstallApp": auth.ACTION_INSTALL_APPS,
@@ -122,7 +129,7 @@ ACTIONS = {
 }
 
 # Methods that can weaken the filter: guardian password required when enabled.
-GUARDIAN_GATED = {"SetFilterMode", "SetWhitelist", "DisableGuardian"}
+GUARDIAN_GATED = {"SetFilterMode", "SetWhitelist", "SetGuestConfig", "DisableGuardian"}
 
 ERROR_NAME = "org.kosherlinux.Daemon1.Error"
 
@@ -224,13 +231,48 @@ class Daemon:
         self._save_and_apply()
         return None
 
-    def impl_CreateChild(self, username: str, full_name: str, mode: str):
+    def impl_CreateUser(self, username: str, full_name: str, mode: str):
         if mode not in MODES:
             raise PolicyError(f"unknown mode {mode!r}")
         uid = self._accounts_create_user(username, full_name)
         self.policy.users.append(UserPolicy(uid=uid, username=username, mode=mode))
         self._save_and_apply()
         return GLib.Variant("(i)", (uid,))
+
+    def impl_SetGuestConfig(self, enabled: bool, mode: str, whitelist: list[str], _guardian_pw: str):
+        import pwd
+        import shutil
+
+        if mode not in MODES:
+            raise PolicyError(f"unknown mode {mode!r}")
+        g = self.policy.guest
+        if enabled:
+            try:
+                uid = pwd.getpwnam(policy_mod.GUEST_USERNAME).pw_uid
+            except KeyError:
+                res = subprocess.run(
+                    ["useradd", "-m", "-c", "Guest", policy_mod.GUEST_USERNAME],
+                    capture_output=True, text=True,
+                )
+                if res.returncode != 0:
+                    raise PolicyError(f"could not create guest account: {res.stderr.strip()}")
+                uid = pwd.getpwnam(policy_mod.GUEST_USERNAME).pw_uid
+            # Passwordless login; data is wiped after every sign-out by the
+            # GDM PostSession hook, and right now for a clean start.
+            subprocess.run(["passwd", "-d", policy_mod.GUEST_USERNAME], capture_output=True)
+            subprocess.run(["passwd", "-u", policy_mod.GUEST_USERNAME], capture_output=True)
+            home = Path(f"/home/{policy_mod.GUEST_USERNAME}")
+            if home.exists():
+                shutil.rmtree(home)
+            subprocess.run(["mkhomedir_helper", policy_mod.GUEST_USERNAME], capture_output=True)
+            g.uid = uid
+        else:
+            subprocess.run(["passwd", "-l", policy_mod.GUEST_USERNAME], capture_output=True)
+        g.enabled = enabled
+        g.mode = mode
+        g.whitelist = sorted(set(whitelist))
+        self._save_and_apply()
+        return None
 
     def impl_AdoptUser(self, username: str, mode: str):
         """Bring an EXISTING system user under filter management."""
@@ -272,7 +314,7 @@ class Daemon:
             "org.freedesktop.DBus.Properties", "Get",
             GLib.Variant("(ss)", ("org.freedesktop.Accounts.User", "Uid")),
             GLib.VariantType("(v)"), Gio.DBusCallFlags.NONE, -1, None,
-        )[0].get_uint64()
+        ).unpack()[0]  # (v) unpacks recursively -> plain int
         return int(uid)
 
     def _accounts_delete_user(self, uid: int) -> None:

@@ -40,7 +40,7 @@ def apply_malcontent(policy: Policy) -> None:
     manager = Malcontent.Manager.new(Gio.bus_get_sync(Gio.BusType.SYSTEM, None))
     installed = None
 
-    for user in policy.users:
+    for user in policy.effective_users():
         builder = Malcontent.AppFilterBuilder.new()
         if user.admin:
             builder.set_allow_user_installation(True)
@@ -62,4 +62,4 @@ def apply_malcontent(policy: Policy) -> None:
         except GLib.Error as e:
             log.error("malcontent filter for uid %d failed: %s", user.uid, e)
 
-    log.info("malcontent filters applied for %d users", len(policy.users))
+    log.info("malcontent filters applied for %d users", len(policy.effective_users()))

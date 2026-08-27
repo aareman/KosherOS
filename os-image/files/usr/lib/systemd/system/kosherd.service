@@ -15,7 +15,7 @@ RuntimeDirectoryMode=0700
 StateDirectory=kosher
 StateDirectoryMode=0700
 # Hardening — kosherd is root by necessity, so pin down everything else.
-ProtectHome=read-only
+# (No ProtectHome: kosherd creates and wipes the guest account's home.)
 PrivateTmp=yes
 NoNewPrivileges=no
 ProtectKernelModules=yes

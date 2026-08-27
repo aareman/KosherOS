@@ -36,6 +36,18 @@
       "items": { "$ref": "#/$defs/domain" },
       "description": "Domains reachable in whitelist mode for every user (OS update host, flatpak remote, connectivity check, portal). Merged with built-in defaults.",
       "default": []
+    },
+    "guest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["enabled"],
+      "description": "The guest session: a passwordless kosher-guest account whose home is wiped after every sign-out (GDM PostSession hook).",
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "uid": { "type": ["integer", "null"], "minimum": 1000, "description": "Set by kosherd when the guest account is created." },
+        "mode": { "enum": ["none", "whitelist", "dnsfilter"], "default": "whitelist" },
+        "whitelist": { "type": "array", "items": { "$ref": "#/$defs/domain" }, "default": [] }
+      }
     }
   },
   "$defs": {

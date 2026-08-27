@@ -30,7 +30,8 @@ def render(policy: Policy) -> str:
     # Dedupe on the stripped name: "example.org" and "*.example.org" render
     # to the same dnsmasq pattern.
     user_domains = sorted(
-        {d.removeprefix("*.") for u in policy.users if u.mode == "whitelist" for d in u.whitelist}
+        {d.removeprefix("*.")
+         for u in policy.effective_users() if u.mode == "whitelist" for d in u.whitelist}
     )
     system_domains = sorted({d.removeprefix("*.") for d in policy.effective_system_whitelist()})
 

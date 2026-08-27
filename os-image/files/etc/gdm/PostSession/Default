@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+# KosherOS: the guest session leaves no trace — wipe its home after every
+# sign-out. GDM runs this hook as root with $USER set to the session user.
+if [ "$USER" = "kosher-guest" ] && [ -d /home/kosher-guest ]; then
+    rm -rf /home/kosher-guest
+    mkhomedir_helper kosher-guest || {
+        mkdir -m 0700 /home/kosher-guest
+        cp -rT /etc/skel /home/kosher-guest
+        chown -R kosher-guest:kosher-guest /home/kosher-guest
+    }
+fi
+exit 0

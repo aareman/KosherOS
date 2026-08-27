@@ -42,10 +42,11 @@ dev-install VM="kosher-fedora":
         -e "{{vmssh}}" . {{VM}}:/tmp/kosher-linux/
     {{vmssh}} {{VM}} "sudo bash /tmp/kosher-linux/scripts/dev-install.sh"
 
-# Sub-second inner loop: push local kosherd code into the VM and restart it.
+# Sub-second inner loop: push local kosherd code + schema into the VM and restart it.
 deploy-kosherd VM="kosher-fedora":
-    rsync -a -e "{{vmssh}}" kosherd/src/kosherd/ \
+    rsync -a -e "{{vmssh}}" kosherd/src/kosherd/ policy/schema/policy.schema.json \
         {{VM}}:/tmp/kosherd-src/
+    {{vmssh}} {{VM}} "sudo install -m644 /tmp/kosherd-src/policy.schema.json /usr/share/kosher/policy.schema.json && sudo rm /tmp/kosherd-src/policy.schema.json"
     {{vmssh}} {{VM}} "sudo rsync -a /tmp/kosherd-src/ \$(sudo python3 -c 'import kosherd,os;print(os.path.dirname(kosherd.__file__))')/ && sudo systemctl restart kosherd && systemctl --no-pager status kosherd | head -5"
 
 # --- OS image (stage 2) -------------------------------------------------------

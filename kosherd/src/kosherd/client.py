@@ -36,8 +36,13 @@ class DaemonClient:
     def set_whitelist(self, uid: int, domains: list[str], guardian_password: str = "") -> None:
         self._call("Profiles", "SetWhitelist", "(iass)", uid, domains, guardian_password)
 
-    def create_child(self, username: str, full_name: str, mode: str) -> int:
-        return self._call("Profiles", "CreateChild", "(sss)", username, full_name, mode)[0]
+    def create_user(self, username: str, full_name: str, mode: str) -> int:
+        return self._call("Profiles", "CreateUser", "(sss)", username, full_name, mode)[0]
+
+    def set_guest_config(self, enabled: bool, mode: str, whitelist: list[str],
+                         guardian_password: str = "") -> None:
+        self._call("Profiles", "SetGuestConfig", "(bsass)",
+                   enabled, mode, whitelist, guardian_password)
 
     def adopt_user(self, username: str, mode: str) -> int:
         return self._call("Profiles", "AdoptUser", "(ss)", username, mode)[0]

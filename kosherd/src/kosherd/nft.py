@@ -74,7 +74,8 @@ def render(policy: Policy, *, dns_uid: int, doh_block4: tuple[str, ...] = DEFAUL
     upstream queries to the family resolver get out.
     """
     vmap_entries = ", ".join(
-        f"{u.uid} : jump {MODE_CHAINS[u.mode]}" for u in sorted(policy.users, key=lambda u: u.uid)
+        f"{u.uid} : jump {MODE_CHAINS[u.mode]}"
+        for u in sorted(policy.effective_users(), key=lambda u: u.uid)
     )
     vmap_rule = f"        meta skuid vmap {{ {vmap_entries} }}\n" if vmap_entries else ""
 

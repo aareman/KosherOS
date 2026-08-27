@@ -38,6 +38,11 @@ def cmd_status(args) -> int:
     for u in pol["users"]:
         extra = f" whitelist={len(u.get('whitelist', []))} domains" if u["mode"] == "whitelist" else ""
         print(f"  {u['username']} (uid {u['uid']}): {u['mode']}{extra}")
+    guest = pol.get("guest", {"enabled": False})
+    if guest["enabled"]:
+        print(f"  guest: enabled, mode {guest.get('mode', 'whitelist')}")
+    else:
+        print("  guest: disabled")
     return 0
 
 
@@ -58,9 +63,17 @@ def cmd_set_whitelist(args) -> int:
     return 0
 
 
-def cmd_create_child(args) -> int:
-    uid = _client().create_child(args.username, args.full_name or args.username, args.mode)
+def cmd_create_user(args) -> int:
+    uid = _client().create_user(args.username, args.full_name or args.username, args.mode)
     print(f"created {args.username} (uid {uid}, mode {args.mode})")
+    return 0
+
+
+def cmd_guest(args) -> int:
+    enabled = args.action == "enable"
+    _client().set_guest_config(enabled, args.mode, args.domains, _guardian_pw(args))
+    print(f"guest account {'enabled' if enabled else 'disabled'}"
+          + (f" (mode {args.mode})" if enabled else ""))
     return 0
 
 
@@ -141,11 +154,18 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("--guardian-password")
     s.set_defaults(func=cmd_set_whitelist)
 
-    s = sub.add_parser("create-child", help="create a managed child account")
+    s = sub.add_parser("create-user", help="create a managed user account")
     s.add_argument("username")
     s.add_argument("mode", choices=policy_mod.MODES)
     s.add_argument("--full-name")
-    s.set_defaults(func=cmd_create_child)
+    s.set_defaults(func=cmd_create_user)
+
+    s = sub.add_parser("guest", help="enable/disable and configure the guest account")
+    s.add_argument("action", choices=["enable", "disable"])
+    s.add_argument("--mode", choices=policy_mod.MODES, default="whitelist")
+    s.add_argument("domains", nargs="*", help="guest whitelist (whitelist mode)")
+    s.add_argument("--guardian-password")
+    s.set_defaults(func=cmd_guest)
 
     s = sub.add_parser("adopt", help="bring an existing user under filter management")
     s.add_argument("username")

@@ -125,11 +125,12 @@ class ProfilesPage(Adw.PreferencesPage):
         super().__init__()
         self.win = win
         self.users_group: Adw.PreferencesGroup | None = None
+        self.guest_group: Adw.PreferencesGroup | None = None
 
         actions = Adw.PreferencesGroup()
         adopt = Adw.ButtonRow(title="Adopt Existing User…")
         adopt.connect("activated", lambda *_: self._user_dialog(adopt_mode=True))
-        create = Adw.ButtonRow(title="Create Child Account…")
+        create = Adw.ButtonRow(title="Create User Account…")
         create.connect("activated", lambda *_: self._user_dialog(adopt_mode=False))
         guardian = Adw.ButtonRow(title="Guardian Password…")
         guardian.connect("activated", lambda *_: self._guardian_dialog())
@@ -140,6 +141,7 @@ class ProfilesPage(Adw.PreferencesPage):
     def refresh(self) -> None:
         if self.users_group is not None:
             self.remove(self.users_group)
+            self.remove(self.guest_group)
             self.remove(self.actions_group)
         group = Adw.PreferencesGroup(title="Profiles")
         g = self.win.policy["guardian"]["enabled"]
@@ -148,7 +150,46 @@ class ProfilesPage(Adw.PreferencesPage):
             group.add(self._user_row(user))
         self.users_group = group
         self.add(group)
+        self.guest_group = self._build_guest_group()
+        self.add(self.guest_group)
         self.add(self.actions_group)
+
+    def _build_guest_group(self) -> Adw.PreferencesGroup:
+        guest = self.win.policy.get("guest", {"enabled": False})
+        group = Adw.PreferencesGroup(
+            title="Guest Session",
+            description="Passwordless account; all guest data is erased at sign-out")
+
+        mode = guest.get("mode", "whitelist")
+        wl_domains = guest.get("whitelist", [])
+
+        def push(enabled, new_mode, domains):
+            self.win.with_guardian(lambda pw: self.win.call(
+                lambda: self.win.client.set_guest_config(enabled, new_mode, domains, pw),
+                done_msg="Guest settings saved"))
+
+        switch = Adw.SwitchRow(title="Enable guest account", active=guest["enabled"])
+        switch.connect("notify::active",
+                       lambda s, _p: s.get_active() != guest["enabled"] and
+                       push(s.get_active(), mode, wl_domains))
+        group.add(switch)
+
+        mode_row = Adw.ComboRow(title="Guest filter mode",
+                                model=Gtk.StringList.new([MODE_LABELS[m] for m in MODES]))
+        mode_row.set_selected(MODES.index(mode))
+        mode_row.connect("notify::selected",
+                         lambda c, _p: MODES[c.get_selected()] != mode and
+                         push(guest["enabled"], MODES[c.get_selected()], wl_domains))
+        group.add(mode_row)
+
+        wl = Adw.EntryRow(title="Guest whitelist (comma separated)")
+        wl.set_text(", ".join(wl_domains))
+        wl.set_show_apply_button(True)
+        wl.connect("apply", lambda _e: push(
+            guest["enabled"], mode,
+            [d.strip() for d in wl.get_text().split(",") if d.strip()]))
+        group.add(wl)
+        return group
 
     def _user_row(self, user: dict) -> Adw.ExpanderRow:
         row = Adw.ExpanderRow(title=user["username"])
@@ -187,7 +228,7 @@ class ProfilesPage(Adw.PreferencesPage):
         return row
 
     def _user_dialog(self, adopt_mode: bool) -> None:
-        title = "Adopt Existing User" if adopt_mode else "Create Child Account"
+        title = "Adopt Existing User" if adopt_mode else "Create User Account"
         dialog = Adw.AlertDialog(heading=title)
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
         name = Adw.EntryRow(title="Username")
@@ -216,7 +257,7 @@ class ProfilesPage(Adw.PreferencesPage):
                               done_msg=f"Adopted {username}")
             else:
                 self.win.call(
-                    lambda: self.win.client.create_child(username, full.get_text().strip() or username, m),
+                    lambda: self.win.client.create_user(username, full.get_text().strip() or username, m),
                     done_msg=f"Created {username}")
 
         dialog.connect("response", on_response)

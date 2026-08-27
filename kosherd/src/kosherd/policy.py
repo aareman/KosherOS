@@ -56,6 +56,27 @@ class UserPolicy:
         return d
 
 
+GUEST_USERNAME = "kosher-guest"
+
+
+@dataclass
+class GuestPolicy:
+    enabled: bool = False
+    uid: int | None = None
+    mode: str = "whitelist"
+    whitelist: list[str] = field(default_factory=list)
+
+    def to_dict(self) -> dict:
+        d: dict = {"enabled": self.enabled}
+        if self.uid is not None:
+            d["uid"] = self.uid
+        if self.mode != "whitelist":
+            d["mode"] = self.mode
+        if self.whitelist:
+            d["whitelist"] = self.whitelist
+        return d
+
+
 @dataclass
 class Policy:
     revision: int = 0
@@ -63,9 +84,21 @@ class Policy:
     users: list[UserPolicy] = field(default_factory=list)
     guardian_enabled: bool = False
     system_whitelist: list[str] = field(default_factory=list)
+    guest: GuestPolicy = field(default_factory=GuestPolicy)
 
     def user(self, uid: int) -> UserPolicy | None:
         return next((u for u in self.users if u.uid == uid), None)
+
+    def effective_users(self) -> list[UserPolicy]:
+        """Managed users plus the guest account (when enabled and created) —
+        what enforcement (nftables, dnsmasq, malcontent) actually applies to."""
+        users = list(self.users)
+        if self.guest.enabled and self.guest.uid is not None:
+            users.append(UserPolicy(
+                uid=self.guest.uid, username=GUEST_USERNAME,
+                mode=self.guest.mode, whitelist=list(self.guest.whitelist),
+            ))
+        return users
 
     def effective_system_whitelist(self) -> list[str]:
         return list(dict.fromkeys([*BUILTIN_SYSTEM_WHITELIST, *self.system_whitelist]))
@@ -78,11 +111,13 @@ class Policy:
             "users": [u.to_dict() for u in self.users],
             "guardian": {"enabled": self.guardian_enabled},
             "system_whitelist": self.system_whitelist,
+            "guest": self.guest.to_dict(),
         }
 
     @classmethod
     def from_dict(cls, doc: dict) -> "Policy":
         validate(doc)
+        guest_doc = doc.get("guest", {"enabled": False})
         return cls(
             revision=doc["revision"],
             source=doc["source"],
@@ -99,6 +134,12 @@ class Policy:
             ],
             guardian_enabled=doc["guardian"]["enabled"],
             system_whitelist=list(doc.get("system_whitelist", [])),
+            guest=GuestPolicy(
+                enabled=guest_doc["enabled"],
+                uid=guest_doc.get("uid"),
+                mode=guest_doc.get("mode", "whitelist"),
+                whitelist=list(guest_doc.get("whitelist", [])),
+            ),
         )
 
 

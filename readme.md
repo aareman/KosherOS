@@ -1,47 +1,52 @@
-# Objective
+# Kosher Linux
 
-**pre-alpha level software and configuration, use at your own risk**
+**Pre-alpha. Use at your own risk.**
 
-Ruchniux (Ruchnius + Linux) - a Linux filtering solution for the frum developer. That's the goal at least, I figure if a frum developer can get their work done even if a decent level of filtering, then this solution should work for other jobs / roles / needs.
+A family-friendly, filtered Linux distribution: a modern GNOME desktop on an
+immutable Fedora bootc base, with per-user filter modes — **no internet**,
+**whitelist-only**, or **DNS filter** (Cloudflare family) — and
+**administration without root**: a local admin (a parent) can install
+approved apps, manage children's profiles, and update the system, but nobody
+on the machine can weaken the filter or touch the OS underneath it. An
+optional second "guardian" password (e.g. the other spouse) is required on
+top for any filter change.
 
-This is a pretty ambitious project.
+See [docs/architecture.md](docs/architecture.md) for how it works.
 
-# Technology Stack
+## Layout
 
-- E2Guardian
-- Kosher MITM with SSL filtering
-- (original target is towards Ubunutu 20 ish, but should theoretically work on any platform)
+| path | what |
+|---|---|
+| `kosherd/` | privileged daemon, policy engine, `kosherctl` CLI (Python) |
+| `policy/` | policy JSON schema + examples — the contract for device, admin app, and portal |
+| `os-image/` | the distro: Containerfile + system config for the bootc image |
+| `scripts/dev-install.sh` | install the filter stack on a stock Fedora VM (stage-1 testing) |
+| `portal/` | remote-config portal (later stage; API contract draft) |
+| `docs/` | architecture |
+| `legacy/` | retired e2guardian/Ubuntu prototype, kept for reference |
 
-# Project Timeline
+## Development
 
-- A setup that works
-- A one step user script that installs this on existing ubuntu platforms
-- A Custom Linux distro with this setup out of the box
+All tooling comes from [devenv](https://devenv.sh) — nothing is installed on
+the host. `devenv shell` (or just `cd` in, with direnv) provides python +
+pytest, just, nft, qemu, cloud-localds, and podman.
 
-# How it works
+```sh
+just test          # unit tests for the policy engine (< 1 s)
+just render        # render + nft-syntax-check the example policy
+just fedora-vm     # fetch + boot a Fedora test VM (plain QEMU/KVM, no libvirt)
+just dev-install   # install the whole filter stack into that VM
+just deploy-kosherd# push local kosherd code into the VM and restart it (~1 s)
+just fedora-ssh    # shell into the VM
+just build         # build the OS image (layer-cached)
+just vm            # build a bootable qcow2 from it
+```
 
-- No Sudo
-    * Will need some kind of restricted sudo access, but not sure what that looks like yet
-- Use nix to install and manage most packages
-    * Potentially create a linux package manager that will install to a user directory (similar to nix, but manually package some things that may be difficult to do in nix)
-- E2Guardian preconfigured (I know that no single configuration works for everyone, but I'm going to try to get a config that works for the average software dev, and then provide ways to customize)
-- Create a secondary user "ruchniux" that can be used to customize the setup. (provide an ssh tunnel for remote config, in case you are getting it setup by TAG)
+## Roadmap
 
-# What is working so far
-
-- [X] DNS Whitelist
-- [X] E2Guardian
-- [X] SSL transparent proxy with E2Guardian
-- [ ] HTTP(S) Proxy configuration
-    - [X] browser
-    - [ ] system level
-    - [ ] package managers
-        - [ ] node
-        - [ ] rust
-        - [ ] python
-        - [ ] nix
-        - [ ] apt
-
-# Guides
-## Basic Whitelist
-## Setting up Ruchniux
+1. ✅ Filter core: kosherd, per-user nftables enforcement, dnsmasq whitelist sets, kosherctl
+2. Bootc OS image + signed CI builds + auto-updates
+3. Admin app (GTK4), guardian UX, curated flatpak remote
+4. Installable ISO + first-boot wizard
+5. Portal: remote filter config + remote support
+6. TLS-interception filter mode (mitmproxy)

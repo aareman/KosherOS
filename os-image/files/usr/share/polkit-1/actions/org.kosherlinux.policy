@@ -1,0 +1,71 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE policyconfig PUBLIC "-//freedesktop//DTD PolicyKit Policy Configuration 1.0//EN"
+ "http://www.freedesktop.org/standards/PolicyKit/1.0/policyconfig.dtd">
+<policyconfig>
+  <vendor>Kosher Linux</vendor>
+
+  <!-- All actions default to auth_admin. The image ships a rule making
+       auth_admin unsatisfiable (no admin identities), and a second rule
+       granting kosher-admin members AUTH_SELF_KEEP on org.kosherlinux.* —
+       so these actions are usable by admins and by nobody else. -->
+
+  <action id="org.kosherlinux.manage-users">
+    <description>Manage user accounts and profiles</description>
+    <message>Authentication is required to manage user profiles</message>
+    <defaults>
+      <allow_any>no</allow_any>
+      <allow_inactive>no</allow_inactive>
+      <allow_active>auth_admin</allow_active>
+    </defaults>
+  </action>
+
+  <action id="org.kosherlinux.manage-filter">
+    <description>Change filter modes and whitelists</description>
+    <message>Authentication is required to change filter settings</message>
+    <defaults>
+      <allow_any>no</allow_any>
+      <allow_inactive>no</allow_inactive>
+      <allow_active>auth_admin</allow_active>
+    </defaults>
+  </action>
+
+  <action id="org.kosherlinux.install-apps">
+    <description>Install or remove approved applications</description>
+    <message>Authentication is required to install applications</message>
+    <defaults>
+      <allow_any>no</allow_any>
+      <allow_inactive>no</allow_inactive>
+      <allow_active>auth_admin</allow_active>
+    </defaults>
+  </action>
+
+  <action id="org.kosherlinux.manage-network">
+    <description>Manage network settings and captive-portal access</description>
+    <message>Authentication is required to change network settings</message>
+    <defaults>
+      <allow_any>no</allow_any>
+      <allow_inactive>no</allow_inactive>
+      <allow_active>auth_admin</allow_active>
+    </defaults>
+  </action>
+
+  <action id="org.kosherlinux.apply-updates">
+    <description>Check for and apply system updates</description>
+    <message>Authentication is required to update the system</message>
+    <defaults>
+      <allow_any>no</allow_any>
+      <allow_inactive>no</allow_inactive>
+      <allow_active>auth_admin</allow_active>
+    </defaults>
+  </action>
+
+  <action id="org.kosherlinux.manage-guardian">
+    <description>Manage the filter guardian password</description>
+    <message>Authentication is required to manage the guardian password</message>
+    <defaults>
+      <allow_any>no</allow_any>
+      <allow_inactive>no</allow_inactive>
+      <allow_active>auth_admin</allow_active>
+    </defaults>
+  </action>
+</policyconfig>

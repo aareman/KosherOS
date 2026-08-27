@@ -1,0 +1,28 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "kosherd"
+version = "0.1.0"
+description = "Kosher Linux privileged management daemon, policy engine, and CLI"
+readme = "README.md"
+requires-python = ">=3.11"
+license = "GPL-3.0-or-later"
+dependencies = [
+    "jsonschema>=4",
+    # PyGObject is used at daemon runtime (D-Bus via Gio). It is installed as the
+    # distro package (python3-gobject) rather than from pip; the pure-policy
+    # modules (policy/nft/dns/guardian) import nothing from it so tests run anywhere.
+]
+
+[project.scripts]
+kosherd = "kosherd.daemon:main"
+kosherctl = "kosherd.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/kosherd"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]

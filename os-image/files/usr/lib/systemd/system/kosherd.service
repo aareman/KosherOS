@@ -1,0 +1,25 @@
+[Unit]
+Description=Kosher Linux privileged management daemon
+Documentation=https://github.com/aareman/kosher-linux
+After=dbus.service kosher-firewall.service polkit.service
+Wants=kosher-firewall.service
+
+[Service]
+Type=dbus
+BusName=org.kosherlinux.Daemon1
+ExecStart=/usr/bin/kosherd
+Restart=on-failure
+RestartSec=2
+RuntimeDirectory=kosherd
+RuntimeDirectoryMode=0700
+StateDirectory=kosher
+StateDirectoryMode=0700
+# Hardening — kosherd is root by necessity, so pin down everything else.
+ProtectHome=read-only
+PrivateTmp=yes
+NoNewPrivileges=no
+ProtectKernelModules=yes
+SystemCallArchitectures=native
+
+[Install]
+WantedBy=multi-user.target

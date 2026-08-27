@@ -1,0 +1,8 @@
+// Kosher Linux: there are NO polkit admin identities on this system.
+// Every stock action that defaults to auth_admin (adding flatpak remotes,
+// rpm-ostree rebase, NetworkManager system changes, ...) becomes
+// unsatisfiable. Admin capability exists ONLY through the org.kosherlinux.*
+// actions granted in 49-kosher-admin.rules, mediated by kosherd.
+polkit.addAdminRule(function(action, subject) {
+    return [];
+});

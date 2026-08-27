@@ -1,0 +1,17 @@
+[Unit]
+Description=Kosher Linux DNS (dnsmasq, Cloudflare family upstream, feeds nft whitelist sets)
+After=kosher-firewall.service network.target
+Before=nss-lookup.target
+Wants=nss-lookup.target
+# We replace systemd-resolved entirely (masked in the image).
+Conflicts=systemd-resolved.service
+
+[Service]
+Type=simple
+ExecStart=/usr/sbin/dnsmasq --keep-in-foreground --conf-file=/etc/kosher/dnsmasq.conf
+ExecReload=/bin/kill -HUP $MAINPID
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

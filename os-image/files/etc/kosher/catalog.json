@@ -1,0 +1,9 @@
+{
+  "comment": "Approved app catalog. kosherd only installs refs listed here, from the 'kosher' flatpak remote. Later portal-managed.",
+  "apps": [
+    { "ref": "org.mozilla.firefox", "name": "Firefox" },
+    { "ref": "org.libreoffice.LibreOffice", "name": "LibreOffice" },
+    { "ref": "org.gnome.gnome-2048", "name": "2048" },
+    { "ref": "org.gnome.Calculator", "name": "Calculator" }
+  ]
+}

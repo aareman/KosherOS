@@ -1,0 +1,33 @@
+{
+  "schema_version": 1,
+  "revision": 3,
+  "source": "local",
+  "users": [
+    {
+      "uid": 1000,
+      "username": "abba",
+      "mode": "dnsfilter",
+      "admin": true
+    },
+    {
+      "uid": 1001,
+      "username": "ima",
+      "mode": "dnsfilter"
+    },
+    {
+      "uid": 1002,
+      "username": "kid1",
+      "mode": "whitelist",
+      "whitelist": ["chinuch.org", "*.torahanytime.com", "artscroll.com"],
+      "apps": ["org.mozilla.firefox", "org.gnome.gnome-2048"]
+    },
+    {
+      "uid": 1003,
+      "username": "kid2",
+      "mode": "none",
+      "apps": ["org.gnome.gnome-2048"]
+    }
+  ],
+  "guardian": { "enabled": true },
+  "system_whitelist": ["portal.example.org"]
+}

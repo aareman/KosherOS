@@ -1,0 +1,78 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://kosherlinux.org/schema/policy.schema.json",
+  "title": "Kosher Linux device policy",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "revision", "source", "users", "guardian"],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "revision": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Monotonically increasing; bumped on every write. Lets the portal sync agent detect and merge concurrent local changes."
+    },
+    "source": {
+      "enum": ["local", "portal"],
+      "description": "Who last wrote this policy."
+    },
+    "users": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/user" }
+    },
+    "guardian": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["enabled"],
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "When true, filter-changing actions additionally require the guardian password (hash lives in /etc/kosher/guardian.shadow, never in this file)."
+        }
+      }
+    },
+    "system_whitelist": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/domain" },
+      "description": "Domains reachable in whitelist mode for every user (OS update host, flatpak remote, connectivity check, portal). Merged with built-in defaults.",
+      "default": []
+    }
+  },
+  "$defs": {
+    "domain": {
+      "type": "string",
+      "pattern": "^(\\*\\.)?([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\\.)+[a-z]{2,}$",
+      "description": "A DNS name, optionally with a leading *. wildcard (matches the domain and all subdomains)."
+    },
+    "user": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["uid", "username", "mode"],
+      "properties": {
+        "uid": { "type": "integer", "minimum": 1000 },
+        "username": { "type": "string", "pattern": "^[a-z_][a-z0-9_-]*$" },
+        "mode": {
+          "enum": ["none", "whitelist", "dnsfilter"],
+          "description": "none = no internet; whitelist = only whitelisted domains; dnsfilter = open web behind Cloudflare family DNS"
+        },
+        "admin": {
+          "type": "boolean",
+          "default": false,
+          "description": "Member of kosher-admin. Informational mirror of group membership for the portal; the group is authoritative."
+        },
+        "whitelist": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/domain" },
+          "default": [],
+          "description": "Only meaningful in whitelist mode."
+        },
+        "apps": {
+          "type": "array",
+          "items": { "type": "string" },
+          "default": [],
+          "description": "Flatpak refs this user may run (enforced via malcontent). Empty = all installed apps."
+        }
+      }
+    }
+  }
+}

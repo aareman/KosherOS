@@ -1,0 +1,50 @@
+name: Build OS image
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+env:
+  IMAGE: ghcr.io/${{ github.repository_owner }}/kosher-linux
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install pytest jsonschema
+      - run: sudo apt-get install -y nftables
+      - name: Unit tests
+        run: cd kosherd && python -m pytest tests/ -q
+
+  build:
+    needs: test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      id-token: write # cosign keyless signing
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build image
+        run: podman build -t "$IMAGE:${GITHUB_SHA::12}" -t "$IMAGE:latest" -f os-image/Containerfile .
+
+      - name: Push
+        if: github.event_name == 'push'
+        run: |
+          podman login ghcr.io -u "$GITHUB_ACTOR" -p "${{ secrets.GITHUB_TOKEN }}"
+          podman push "$IMAGE:${GITHUB_SHA::12}"
+          podman push "$IMAGE:latest"
+
+      - name: Sign (cosign keyless)
+        if: github.event_name == 'push'
+        uses: sigstore/cosign-installer@v3
+      - if: github.event_name == 'push'
+        run: |
+          cosign sign --yes "$IMAGE:${GITHUB_SHA::12}"
+          cosign sign --yes "$IMAGE:latest"

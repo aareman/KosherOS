@@ -1,0 +1,42 @@
+# Kosher Linux OS image — a thin, locked-down layer over Fedora bootc.
+# Build:  just build      Test in a VM:  just vm / just switch
+FROM quay.io/fedora/fedora-bootc:42
+
+# --- Packages ---------------------------------------------------------------
+# GNOME desktop + our runtime deps. Remove escape hatches (toolbox/container
+# tooling is attack-surface hygiene; the skuid firewall holds regardless).
+RUN dnf -y install @workstation-product-environment --exclude=toolbox --exclude=podman \
+        dnsmasq nftables python3-gobject python3-jsonschema malcontent malcontent-tools flatpak \
+    && dnf -y remove sudo toolbox podman gnome-boxes || true \
+    && dnf clean all
+
+# --- Static configuration (units, polkit, dbus, dnsmasq, baseline firewall) --
+COPY os-image/files/ /
+
+# SELinux: dnsmasq needs a netfilter netlink socket to feed the nft whitelist
+# sets (not covered by Fedora's stock dnsmasq policy).
+RUN dnf -y install checkpolicy policycoreutils && \
+    checkmodule -M -m -o /tmp/kosher-dnsmasq-nftset.mod /usr/share/kosher/selinux/kosher-dnsmasq-nftset.te && \
+    semodule_package -o /tmp/kosher-dnsmasq-nftset.pp -m /tmp/kosher-dnsmasq-nftset.mod && \
+    semodule -i /tmp/kosher-dnsmasq-nftset.pp && rm -f /tmp/kosher-dnsmasq-nftset.* && \
+    dnf clean all
+
+# --- Lockdown ----------------------------------------------------------------
+RUN passwd -l root \
+    && groupadd -r kosher-admin \
+    && systemctl mask systemd-resolved.service debug-shell.service \
+    && systemctl disable sshd.service 2>/dev/null || true \
+    && systemctl enable kosherd.service kosher-firewall.service kosher-dns.service \
+    && rm -f /etc/flatpak/remotes.d/flathub.flatpakrepo /etc/flatpak/remotes.d/fedora.flatpakrepo
+
+# Only images signed for our registry may be switched/updated to.
+# TODO(stage 2): replace with sigstoreSigned policy for the real registry:
+#   /etc/containers/policy.json + /etc/containers/registries.d/kosher.yaml
+
+# --- kosherd (last layer: changes most often, keeps rebuilds fast) -----------
+COPY kosherd/ /tmp/kosherd/
+COPY policy/schema/policy.schema.json /usr/share/kosher/policy.schema.json
+RUN python3 -m pip install --prefix=/usr --no-deps /tmp/kosherd/ && rm -rf /tmp/kosherd
+
+# bootc images must pass a container lint.
+RUN bootc container lint

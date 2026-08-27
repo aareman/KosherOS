@@ -1,0 +1,10 @@
+// Members of kosher-admin may perform kosher actions after re-entering
+// their OWN password (AUTH_SELF_KEEP), from an active local session only.
+// This is the entire admin privilege surface of the system.
+polkit.addRule(function(action, subject) {
+    if (action.id.indexOf("org.kosherlinux.") === 0 &&
+        subject.isInGroup("kosher-admin") &&
+        subject.active && subject.local) {
+        return polkit.Result.AUTH_SELF_KEEP;
+    }
+});

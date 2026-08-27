@@ -1,0 +1,17 @@
+[Unit]
+Description=Kosher Linux firewall (fail-closed, loads before network)
+DefaultDependencies=no
+Before=network-pre.target
+Wants=network-pre.target
+After=local-fs.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+# /etc/kosher/nft/kosher.nft is the last ruleset kosherd applied (the image
+# ships a fail-closed baseline). Rules exist before any link comes up.
+ExecStart=/usr/sbin/nft -f /etc/kosher/nft/kosher.nft
+ExecReload=/usr/sbin/nft -f /etc/kosher/nft/kosher.nft
+
+[Install]
+WantedBy=sysinit.target

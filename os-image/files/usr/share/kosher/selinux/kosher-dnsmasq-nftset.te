@@ -1,0 +1,13 @@
+module kosher-dnsmasq-nftset 1.0;
+
+# Fedora's dnsmasq policy predates nftset= support: populating nftables sets
+# requires a netfilter netlink socket, which dnsmasq_t may not create.
+# This grants exactly that — dnsmasq feeding the kosher whitelist sets is a
+# core mechanism of this OS (see docs/architecture.md).
+
+require {
+    type dnsmasq_t;
+    class netlink_netfilter_socket { create bind connect getattr setattr getopt setopt read write sendto recvfrom shutdown };
+}
+
+allow dnsmasq_t self:netlink_netfilter_socket { create bind connect getattr setattr getopt setopt read write sendto recvfrom shutdown };

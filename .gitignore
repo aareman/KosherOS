@@ -2,3 +2,16 @@ generated.hosts
 *.swp
 *.swo
 e2guardian/ssl
+
+__pycache__/
+*.pyc
+build/
+dist/
+*.egg-info/
+.pytest_cache/
+
+# devenv / direnv
+.devenv*
+devenv.local.nix
+devenv.local.yaml
+.direnv/

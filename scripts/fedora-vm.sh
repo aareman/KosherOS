@@ -9,7 +9,7 @@
 #   fedora-vm.sh destroy  delete the VM disk (base image is kept)
 set -euo pipefail
 
-FEDORA_RELEASE="${FEDORA_RELEASE:-42}"
+FEDORA_RELEASE="${FEDORA_RELEASE:-44}"
 IMAGE_NAME="Fedora-Cloud-Base-Generic-${FEDORA_RELEASE}-1.1.x86_64.qcow2"
 MIRRORS=(
     "https://download.fedoraproject.org/pub/fedora/linux/releases/${FEDORA_RELEASE}/Cloud/x86_64/images/${IMAGE_NAME}"
@@ -94,7 +94,8 @@ cmd_up() {
         echo "already running (pid $(cat "$pidfile"))"
         return
     fi
-    fetch_base
+    # An existing VM disk keeps whatever release it was created from.
+    [ -f "$disk" ] || fetch_base
     create_vm
     qemu-system-x86_64 \
         -enable-kvm -cpu host -m 4096 -smp 4 \

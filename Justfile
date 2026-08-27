@@ -55,13 +55,22 @@ build:
     podman build -t {{image}} -f os-image/Containerfile .
 
 # Create a bootable qcow2 from the locally built image (bootc-image-builder).
+# Needs sudo: bib must run as root, reading the image from your rootless storage.
 vm: build
     mkdir -p build
     sudo podman run --rm -it --privileged --security-opt label=type:unconfined_t \
-        -v ./build:/output -v /var/lib/containers/storage:/var/lib/containers/storage \
+        -v ./build:/output \
+        -v {{env_var("HOME")}}/.local/share/containers/storage:/var/lib/containers/storage \
         quay.io/centos-bootc/bootc-image-builder:latest \
         --type qcow2 --local {{image}}
-    @echo "qcow2 at build/qcow2/disk.qcow2"
+    @echo "qcow2 at build/qcow2/disk.qcow2 — boot with: just boot-image"
+
+# Boot the built qcow2 (headless, ssh on localhost:2223 if the image has sshd).
+boot-image:
+    qemu-system-x86_64 -enable-kvm -cpu host -m 4096 -smp 4 \
+        -drive file=build/qcow2/disk.qcow2,if=virtio \
+        -netdev user,id=n0,hostfwd=tcp:127.0.0.1:2223-:22 -device virtio-net-pci,netdev=n0 \
+        -display gtk -serial file:build/qcow2/console.log
 
 # Point a RUNNING bootc VM at the freshly built local image.
 switch VM: build

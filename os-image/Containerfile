@@ -1,14 +1,22 @@
 # Kosher Linux OS image — a thin, locked-down layer over Fedora bootc.
 # Build:  just build      Test in a VM:  just vm / just switch
-FROM quay.io/fedora/fedora-bootc:42
+FROM quay.io/fedora/fedora-bootc:44
 
 # --- Packages ---------------------------------------------------------------
 # GNOME desktop + our runtime deps. Remove escape hatches (toolbox/container
 # tooling is attack-surface hygiene; the skuid firewall holds regardless).
-RUN dnf -y install @workstation-product-environment --exclude=toolbox --exclude=podman \
-        dnsmasq nftables python3-gobject python3-jsonschema python3-pip malcontent malcontent-tools flatpak \
-    && dnf -y remove sudo toolbox podman gnome-boxes || true \
-    && dnf clean all
+# dnf5 can't mix a @group with plain packages in one install, hence two calls.
+RUN dnf -y install --exclude=toolbox --exclude=podman @workstation-product-environment && dnf clean all
+RUN dnf -y install dnsmasq nftables python3-gobject python3-jsonschema python3-pip \
+        malcontent malcontent-tools flatpak accountsservice && dnf clean all
+# sudo is on dnf's protected list; removing it here is the whole point.
+# podman must STAY: bootc (the update mechanism) depends on it in F44+. The
+# skuid firewall contains rootless containers, and SUB_UID_COUNT=0 below
+# denies new users subordinate IDs anyway.
+RUN for p in sudo toolbox gnome-boxes; do \
+        rpm -q "$p" >/dev/null 2>&1 && dnf -y --setopt=protected_packages= remove "$p"; \
+    done; \
+    ! rpm -q sudo && rpm -q bootc
 
 # --- Static configuration (units, polkit, dbus, dnsmasq, baseline firewall) --
 COPY os-image/files/ /
@@ -24,9 +32,11 @@ RUN dnf -y install checkpolicy policycoreutils && \
 # --- Lockdown ----------------------------------------------------------------
 RUN passwd -l root \
     && groupadd -r kosher-admin \
+    && sed -i -e 's/^SUB_UID_COUNT.*/SUB_UID_COUNT 0/' -e 's/^SUB_GID_COUNT.*/SUB_GID_COUNT 0/' /etc/login.defs \
     && systemctl mask systemd-resolved.service debug-shell.service \
     && systemctl disable sshd.service 2>/dev/null || true \
     && systemctl enable kosherd.service kosher-firewall.service kosher-dns.service \
+    && systemctl enable bootc-fetch-apply-updates.timer \
     && rm -f /etc/flatpak/remotes.d/flathub.flatpakrepo /etc/flatpak/remotes.d/fedora.flatpakrepo
 
 # Only images signed for our registry may be switched/updated to.

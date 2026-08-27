@@ -30,6 +30,16 @@ RUN dnf -y install checkpolicy policycoreutils && \
     dnf clean all
 
 # --- Lockdown ----------------------------------------------------------------
+# Identity: KosherOS, powered by Fedora (Fedora Remix terms). ID stays
+# "fedora" — tooling keys off it; only the human-facing names change.
+RUN . /usr/lib/os-release \
+    && sed -i \
+        -e 's/^NAME=.*/NAME="KosherOS"/' \
+        -e "s/^PRETTY_NAME=.*/PRETTY_NAME=\"KosherOS 0.1 (powered by Fedora ${VERSION_ID})\"/" \
+        -e '/^VARIANT=/d' -e '/^VARIANT_ID=/d' \
+        /usr/lib/os-release \
+    && printf 'VARIANT="KosherOS"\nVARIANT_ID=kosheros\n' >> /usr/lib/os-release
+
 RUN passwd -l root \
     && groupadd -r kosher-admin \
     && sed -i -e 's/^SUB_UID_COUNT.*/SUB_UID_COUNT 0/' -e 's/^SUB_GID_COUNT.*/SUB_GID_COUNT 0/' /etc/login.defs \
@@ -43,10 +53,12 @@ RUN passwd -l root \
 # TODO(stage 2): replace with sigstoreSigned policy for the real registry:
 #   /etc/containers/policy.json + /etc/containers/registries.d/kosher.yaml
 
-# --- kosherd (last layer: changes most often, keeps rebuilds fast) -----------
+# --- kosherd + admin app (last layers: change most often) ---------------------
 COPY kosherd/ /tmp/kosherd/
+COPY admin-app/ /tmp/admin-app/
 COPY policy/schema/policy.schema.json /usr/share/kosher/policy.schema.json
-RUN python3 -m pip install --prefix=/usr --no-deps /tmp/kosherd/ && rm -rf /tmp/kosherd
+RUN python3 -m pip install --prefix=/usr --no-deps /tmp/kosherd/ /tmp/admin-app/ \
+    && rm -rf /tmp/kosherd /tmp/admin-app
 
 # bootc images must pass a container lint.
 RUN bootc container lint

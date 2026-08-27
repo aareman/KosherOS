@@ -99,15 +99,14 @@ echo
 echo "== G. risk #3: malcontent / flatpak user-install probe"
 if command -v malcontent-client >/dev/null 2>&1; then
     ok "malcontent installed"
-    malcontent-client get-app-filter "$WLUID" 2>&1 | head -3 | sed 's/^/    /'
+    if malcontent-client get-app-filter "$WLUID" 2>&1 | grep -qi "installation is disallowed"; then
+        ok "flatpak installation disallowed for managed user (malcontent)"
+    else
+        bad "malcontent filter not applied for managed user"
+        malcontent-client get-app-filter "$WLUID" 2>&1 | head -3 | sed 's/^/    /'
+    fi
 else
     bad "malcontent-client missing"
-fi
-if as dnskid flatpak remote-add --user probe https://flathub.org/repo/flathub.flatpakrepo >/dev/null 2>&1; then
-    echo "  NOTE: flatpak user remote-add currently SUCCEEDS (malcontent not wired yet — stage 3)"
-    as dnskid flatpak remote-delete --user probe >/dev/null 2>&1
-else
-    ok "flatpak user remote-add blocked"
 fi
 
 echo

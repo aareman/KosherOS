@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=KosherOS Admin
+Comment=Manage profiles, filter modes, approved apps, and updates
+Exec=kosher-admin
+Icon=preferences-system
+Terminal=false
+Categories=System;Settings;
+Keywords=kosher;filter;admin;parental;

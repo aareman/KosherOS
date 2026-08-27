@@ -150,6 +150,7 @@ class Daemon:
             apply_policy(self.policy)
         except Exception:
             log.exception("failed to apply policy at startup; baseline rules remain")
+        self._apply_mct()
         try:
             loop.run()
         finally:
@@ -185,11 +186,20 @@ class Daemon:
     def _save_and_apply(self) -> None:
         policy_mod.save(self.policy)
         apply_policy(self.policy)
+        self._apply_mct()
         if self.connection:
             self.connection.emit_signal(
                 None, OBJECT_PATH, "org.kosherlinux.Daemon1.Profiles", "PolicyChanged",
                 GLib.Variant("(i)", (self.policy.revision,)),
             )
+
+    def _apply_mct(self) -> None:
+        try:
+            from .mct import apply_malcontent
+
+            apply_malcontent(self.policy)
+        except Exception:  # noqa: BLE001 - app filters must not block the firewall path
+            log.exception("malcontent application failed; network policy is still applied")
 
     # ---- Profiles --------------------------------------------------------
 
@@ -289,10 +299,12 @@ class Daemon:
         if ref not in allowed:
             raise PolicyError(f"{ref} is not in the approved catalog")
         self._flatpak("install", FLATPAK_REMOTE, ref)
+        self._apply_mct()  # refresh per-user blocklists for the new app
         return None
 
     def impl_RemoveApp(self, ref: str):
         self._flatpak("uninstall", ref)
+        self._apply_mct()
         return None
 
     @staticmethod

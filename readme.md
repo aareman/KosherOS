@@ -45,8 +45,9 @@ just vm            # build a bootable qcow2 from it
 ## Roadmap
 
 1. ✅ Filter core: kosherd, per-user nftables enforcement, dnsmasq whitelist sets, kosherctl
-2. Bootc OS image + signed CI builds + auto-updates
+2. ✅ Bootc OS image (builds, lint-clean, boots to GNOME) — CI publish + signing still pending
 3. Admin app (GTK4), guardian UX, curated flatpak remote
-4. Installable ISO + first-boot wizard
-5. Portal: remote filter config + remote support
-6. TLS-interception filter mode (mitmproxy)
+4. Branding: KosherOS boot-to-welcome (Plymouth, GDM, wallpaper, os-release ✅) — see [docs/branding.md](docs/branding.md)
+5. Installable ISO + first-boot wizard
+6. Portal: remote filter config + remote support
+7. TLS-interception filter mode (mitmproxy)

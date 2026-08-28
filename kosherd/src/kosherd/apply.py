@@ -80,6 +80,19 @@ def _write_atomic(path: Path, content: str, mode: int = 0o644) -> None:
         raise
 
 
+def _restart(service: str):
+    """Restart a service, clearing any previous failure first.
+
+    These services are restarted on every policy change. If one has already
+    tripped systemd's start rate limit, plain `restart` is refused and it
+    stays down — for the resolver that means no DNS at all.
+    """
+    subprocess.run(["systemctl", "reset-failed", service],
+                   capture_output=True, text=True)
+    return subprocess.run(["systemctl", "restart", service],
+                          capture_output=True, text=True)
+
+
 def apply_policy(policy: Policy) -> None:
     """Render and load enforcement for `policy`. Raises ApplyError on failure."""
     ruleset = nft.render(policy, dns_uid=dnsmasq_uid(), mitm_uid=mitm_uid())
@@ -106,19 +119,15 @@ def apply_policy(policy: Policy) -> None:
             mitmca.ensure_ca()
         except Exception:  # noqa: BLE001 - never leave the firewall unapplied
             log.exception("could not prepare the inspection CA")
-    subprocess.run(
-        ["systemctl", "restart" if inspected else "stop", MITM_SERVICE],
-        capture_output=True, text=True,
-    )
+    _restart(MITM_SERVICE) if inspected else subprocess.run(
+        ["systemctl", "stop", MITM_SERVICE], capture_output=True, text=True)
 
     _write_atomic(DNSMASQ_DROPIN_PATH, dns.render(policy))
     # Full restart, not reload: dnsmasq's SIGHUP re-reads /etc/hosts and clears
     # the cache but does NOT re-read config files, so new nftset= directives
     # would never take effect. Restart also flushes cached answers, which is
     # what we want after a whitelist change.
-    res = subprocess.run(
-        ["systemctl", "restart", DNS_SERVICE], capture_output=True, text=True
-    )
+    res = _restart(DNS_SERVICE)
     if res.returncode != 0:
         # DNS reload failure must not leave us silently unfiltered; the nft
         # rules are already live, so log loudly but do not roll back.

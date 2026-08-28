@@ -30,5 +30,17 @@ section "Sessions do not survive a restart"
 check_contains "the admin session is closed again" "False" \
     python3 -c "from kosherd.client import DaemonClient; print(DaemonClient().session_status()[0])"
 
+section "A burst of changes"
+# Found by running the suites back to back: every change restarts the
+# resolver, so six quick edits tripped systemd's start rate limit and left
+# the machine with NO DNS until someone reset the unit by hand.
+for _ in 1 2 3 4 5 6 7 8; do
+    kctl set-mode "$uid" dnsfilter >/dev/null
+    kctl set-mode "$uid" whitelist >/dev/null
+done
+check "the resolver survives rapid policy changes" 0 \
+    systemctl is-active --quiet kosher-dns
+assert_that "DNS still answers afterwards" wait_for_dns
+
 kctl set-mode "$uid" dnsfilter >/dev/null
 report

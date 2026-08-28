@@ -13,7 +13,8 @@ check "a block rule can be added" 0 \
     kosherctl rules "$uid" block "example.com/blocked*" --guardian-password ""
 check_contains "bad patterns are rejected before they reach the proxy" "action" \
     kosherctl rules "$uid" bogus "x.com" --guardian-password ""
-sleep 3
+wait_for_dns  # every policy change restarts the resolver
+sleep 2       # ...and the proxy needs a moment to bind
 
 section "Plumbing"
 check "the proxy is running" 0 systemctl is-active --quiet kosher-mitm
@@ -39,10 +40,13 @@ assert_that "an allowed URL loads with TLS trusted (got $code)" \
     test "$code" = "200"
 
 code=$(http_code_as dnskid https://example.com/blocked/page /tmp/other.html)
-if [ "$code" != "403" ] && ! grep -qi "KosherOS" /tmp/other.html 2>/dev/null; then
-    ok "users not in inspect mode are never intercepted (HTTP $code)"
+# "000" would mean the request never completed, which proves nothing — the
+# uninspected user must actually reach the real server.
+if [ "$code" != "000" ] && [ "$code" != "403" ] \
+   && ! grep -qi "KosherOS" /tmp/other.html 2>/dev/null; then
+    ok "users not in inspect mode reach the real server (HTTP $code)"
 else
-    bad "an uninspected user was intercepted (got '$code')"
+    bad "uninspected user got '$code' (expected a real response)"
 fi
 
 section "Turning it off"

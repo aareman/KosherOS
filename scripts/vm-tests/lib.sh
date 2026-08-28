@@ -35,6 +35,20 @@ check_contains() {
     fi
 }
 
+# Every policy change restarts the resolver, so traffic checks must wait
+# for it or they see a connection failure that has nothing to do with the
+# rule under test.
+wait_for_dns() {
+    local i
+    for i in $(seq 1 30); do
+        if dig +time=2 +tries=1 +short example.com >/dev/null 2>&1; then
+            return 0
+        fi
+        sleep 1
+    done
+    return 1
+}
+
 # assert_that <description> <command...> — passes when the command succeeds.
 assert_that() {
     local desc="$1"

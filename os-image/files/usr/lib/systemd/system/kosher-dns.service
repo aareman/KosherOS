@@ -5,6 +5,10 @@ Before=nss-lookup.target
 Wants=nss-lookup.target
 # We replace systemd-resolved entirely (masked in the image).
 Conflicts=systemd-resolved.service
+# kosherd restarts this on every policy change, so a burst of edits would
+# otherwise trip the default start rate limit and leave the machine with no
+# resolver at all until someone ran `systemctl reset-failed`.
+StartLimitIntervalSec=0
 
 [Service]
 Type=simple

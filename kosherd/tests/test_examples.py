@@ -56,3 +56,23 @@ def test_the_baseline_ruleset_is_fail_closed():
     assert "table inet kosher" in text
     assert "jump mode_none" in text, "the baseline must deny unknown users"
     assert "vmap" not in text, "the shipped baseline should manage nobody yet"
+
+
+UNITS = REPO / "os-image" / "files" / "usr" / "lib" / "systemd" / "system"
+
+
+@pytest.mark.parametrize("unit", ["kosher-dns.service", "kosher-mitm.service"])
+def test_restarted_services_are_not_rate_limited(unit):
+    # kosherd restarts these on every policy change. With systemd's default
+    # limit (5 starts in 10s) a burst of edits leaves them permanently dead
+    # — and for the resolver that means the machine loses DNS entirely.
+    assert "StartLimitIntervalSec=0" in (UNITS / unit).read_text(), (
+        f"{unit} must disable the start rate limit"
+    )
+
+
+def test_the_firewall_loads_before_the_network():
+    # Fail-closed depends on this ordering, not on kosherd running.
+    unit = (UNITS / "kosher-firewall.service").read_text()
+    assert "Before=network-pre.target" in unit
+    assert "DefaultDependencies=no" in unit

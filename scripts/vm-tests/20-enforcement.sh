@@ -8,7 +8,8 @@ kctl set-mode "$(id -u wlkid)" whitelist >/dev/null
 kctl set-whitelist "$(id -u wlkid)" example.com >/dev/null
 kctl set-mode "$(id -u nokid)" none >/dev/null
 kctl set-mode "$(id -u dnskid)" dnsfilter >/dev/null
-sleep 2  # dnsmasq restart repopulates the whitelist sets
+wait_for_dns  # the resolver restarts on every policy change
+sleep 1       # ...and then repopulates the whitelist sets
 
 section "Filter modes"
 check "root is unrestricted"                    0 fetch https://fedoraproject.org

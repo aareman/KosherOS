@@ -186,3 +186,28 @@ def test_rules_file_is_readable_by_the_unprivileged_proxy(tmp_path, monkeypatch)
     write_mitm_rules(Policy())
     mode = (tmp_path / "mitm" / "rules.json").stat().st_mode & 0o777
     assert mode == 0o644
+
+
+# -- surviving a burst of changes --------------------------------------------
+
+def test_restarts_clear_a_previous_failure_first(env):
+    # Regression: these services restart on EVERY policy change, so a burst
+    # of admin edits tripped systemd's start rate limit and left the
+    # resolver dead — the machine then had no DNS at all until someone ran
+    # `systemctl reset-failed` by hand.
+    apply_policy(policy_with("inspect"))
+    for service in ("kosher-dns.service", "kosher-mitm.service"):
+        assert env.index_of("reset-failed", service) < env.index_of("restart", service)
+
+
+def test_stopping_the_proxy_needs_no_reset(env):
+    apply_policy(policy_with("dnsfilter"))
+    assert env.matching("stop", "kosher-mitm.service")
+    assert not env.matching("reset-failed", "kosher-mitm.service")
+
+
+def test_repeated_applies_keep_restarting_the_resolver(env):
+    # Ten changes in a row is exactly the pattern that broke it.
+    for _ in range(10):
+        apply_policy(policy_with("whitelist"))
+    assert len(env.matching("restart", "kosher-dns.service")) == 10

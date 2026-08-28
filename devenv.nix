@@ -13,6 +13,10 @@
       ps.jsonschema
       ps.build
       ps.pygobject3 # gi.repository for kosherd client/daemon code
+      ps.cryptography # Ed25519 verification of signed portal policies
+      ps.fastapi
+      ps.uvicorn
+      ps.httpx # portal tests + the device-side sync client
     ]))
     pkgs.just
     pkgs.nftables # `nft --check` of rendered rulesets

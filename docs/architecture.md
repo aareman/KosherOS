@@ -19,11 +19,12 @@ existing privileged services (accountsservice, flatpak, bootc, NetworkManager)
 instead of reimplementing them.
 
 **Guardian dual-control**: optionally, filter-weakening calls
-(`SetFilterMode`, `SetWhitelist`, `DisableGuardian`) additionally require a
+(`SetFilterMode`, `SetWhitelist`, `SetUrlRules`, `SetGuestConfig`,
+`DisableGuardian`) additionally require a
 second password (e.g. the other spouse's), stored as a yescrypt hash in
 `/etc/kosher/guardian.shadow`, rate-limited (5 tries → 15 min lockout).
 
-## Filtering (v1 — no TLS interception)
+## Filtering: the DNS and packet planes
 
 Per-user modes, enforced in two planes:
 
@@ -42,6 +43,7 @@ fail-closed before the network by `kosher-firewall.service`):
 | `none` | loopback + LAN print/mDNS only; everything else rejected |
 | `whitelist` | only IPs in the `@wl4/@wl6` sets (populated by dnsmasq's `nftset=` as it resolves whitelisted domains — direct-IP browsing is blocked for free) plus `@sys4/@sys6` system domains |
 | `dnsfilter` | open, behind family DNS + evasion blocking |
+| `inspect` | as `dnsfilter`, plus URL rules applied by the local proxy (below) |
 
 Users are dispatched by `meta skuid`; unknown human UIDs fall through to
 `mode_none` (fail closed). A shared `evasion_block` chain rejects DoT (853),
@@ -54,6 +56,39 @@ so skuid rules still match.
 
 **Captive portals**: an admin can open a temporary per-UID window
 (`SetCaptiveMode`) implemented as an nft set element with a timeout.
+
+## Inspect mode: URL-level filtering
+
+At the DNS/IP layer a request is only ever "some host" — the path is
+encrypted, so `site.com/videos` cannot be told from `site.com/learn`.
+Inspect mode is the fourth filter mode, and the only one that can act on
+paths: it terminates TLS locally so the full URL is visible.
+
+- **Rules** (`kosherd/urlrules.py`) are an ordered allow/block list, first
+  match wins, matched case-insensitively and ignoring scheme and `www`
+  (a rule blocking `/videos` must not be dodged with `/Videos`). Bare hosts
+  cover the whole site, `*.host` includes subdomains, `host/dir/*` covers
+  the directory itself. Unmatched requests are allowed — inspect mode sits
+  on the family-DNS baseline — so a trailing `block *` makes it
+  deny-by-default.
+- **Plumbing**: nftables redirects *only inspected users'* tcp/80,443 into
+  a local mitmproxy (`kosher-mitm.service`), which runs as the unprivileged
+  `kosher-mitm` user. kosherd starts it when someone is in the mode and
+  stops it when nobody is.
+- **Whose request is it?** Packets carry no user identity, so the addon
+  resolves the client's source port through `/proc/net/tcp{,6}` to the
+  owning uid, then applies that user's rules and serves a branded block
+  page. The proxy never reads the policy: kosherd renders only
+  `uid -> rules` into `/var/lib/kosher-mitm/rules.json`.
+- **The certificate**: reading URLs requires the proxy to present its own
+  certificates, so kosherd generates a CA once, installs it in the system
+  trust store, and enables Firefox's enterprise-roots policy. The honest
+  cost — this user's HTTPS is decrypted on this machine — is stated in the
+  admin app next to the mode.
+
+Manage rules with `kosherctl rules <uid> list|allow|block|remove|clear`, or
+the Page rules editor in each profile. `scripts/inspect-verify.sh` drives
+the whole path in a VM (11 checks).
 
 ## Apps: an allowlist over upstream Flathub
 
@@ -82,9 +117,32 @@ become root here.
 ## Policy
 
 `/var/lib/kosher/policy.json` (schema in `policy/schema/`) is the single
-contract between kosherd, the admin app, and the future portal. `revision` +
-`source` fields make the portal just another writer, synced by a device-
-initiated agent (see `portal/README.md`).
+contract between kosherd, the admin app, and the portal. `revision` and
+`source` are what make a second writer safe.
+
+## Portal sync
+
+The portal (`portal/`, FastAPI + SQLite, self-hostable) is a **second
+writer** of that policy, so the device has to distinguish a genuine
+document from anything else. It does that with signatures, not trust in the
+connection:
+
+- the portal generates an Ed25519 key on first start and signs every policy
+  document; a device pins the public half when it enrols with a one-time
+  code;
+- the device (`kosherd/sync.py`) accepts a document only if the signature
+  matches that pinned key **and** the revision is higher than the one it
+  already applied — which is what stops an old, looser policy being
+  replayed at it;
+- verification only lives on the device: it never signs and never holds the
+  private key, so a stolen device cannot forge policy for another one;
+- sync is **outbound-only** — `kosher-sync.timer` polls every 15 minutes,
+  so no family machine opens an inbound port. `kosherctl sync` pulls now.
+
+Enrolling and unenrolling are guardian-gated, because they hand filter
+control to a portal and take it back. Losing the portal does not unlock a
+device: the last applied policy keeps being enforced, and unenrolling
+leaves it in place.
 
 ## Installation & first boot
 

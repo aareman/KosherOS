@@ -44,6 +44,14 @@ ACTIONS = {
     "GetPolicy": ACTION_READ_CONFIG,
     "SetFilterMode": ACTION_MANAGE_FILTER,
     "SetWhitelist": ACTION_MANAGE_FILTER,
+    # Enrolling hands filter control to a portal and unenrolling takes it
+    # back, so both are filter changes. Syncing only applies what the portal
+    # already signed — the Ed25519 signature and a strictly increasing
+    # revision authorise that content, not the caller.
+    "Enrol": ACTION_MANAGE_FILTER,
+    "Unenrol": ACTION_MANAGE_FILTER,
+    "SyncNow": ACTION_READ_CONFIG,
+    "PortalStatus": ACTION_READ_CONFIG,
     "SetUrlRules": ACTION_MANAGE_FILTER,
     "SetGuestConfig": ACTION_MANAGE_FILTER,
     "CreateUser": ACTION_MANAGE_USERS,
@@ -74,7 +82,7 @@ ACTIONS = {
 # Methods that can weaken the filter: guardian password required when enabled.
 GUARDIAN_GATED = frozenset({
     "SetFilterMode", "SetWhitelist", "SetUrlRules", "SetGuestConfig",
-    "DisableGuardian",
+    "DisableGuardian", "Enrol", "Unenrol",
 })
 
 # First-boot only; closed forever once setup is stamped complete.

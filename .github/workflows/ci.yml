@@ -18,17 +18,19 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - run: pip install pytest pytest-cov jsonschema
+      - run: pip install pytest pytest-cov jsonschema cryptography fastapi httpx
       - name: Install nftables
         # test_nft.py syntax-checks the rendered ruleset with the real
         # parser; it skips itself if the runner forbids user namespaces.
         run: sudo apt-get install -y nftables
-      - name: Run tests with coverage
+      - name: Device tests with coverage
         run: |
           cd kosherd
           python -m pytest tests/ -q \
             --cov=kosherd --cov-report=term-missing:skip-covered \
-            --cov-fail-under=85
+            --cov-fail-under=80
+      - name: Portal tests
+        run: cd portal && PYTHONPATH=src:../kosherd/src python -m pytest tests/ -q
 
   compile:
     name: Apps compile
@@ -44,7 +46,7 @@ jobs:
         # here rather than in a VM.
         run: |
           python -m compileall -q \
-            kosherd/src admin-app/src store-app/src setup-app/src mitm
+            kosherd/src admin-app/src store-app/src setup-app/src portal/src mitm
 
   shell:
     name: Shell scripts

@@ -1,0 +1,20 @@
+# KosherOS portal — self-hostable, single-tenant.
+#   podman build -t kosher-portal -f portal/Containerfile portal
+#   podman run -p 8000:8000 -v kosher-portal:/var/lib/kosher-portal \
+#       -e KOSHER_PORTAL_ADMIN_TOKEN=... kosher-portal
+FROM registry.fedoraproject.org/fedora-minimal:44
+
+RUN microdnf -y install python3 python3-pip && microdnf clean all
+WORKDIR /app
+COPY . /app
+RUN python3 -m pip install --no-cache-dir /app
+
+ENV KOSHER_PORTAL_DB=/var/lib/kosher-portal/portal.db \
+    KOSHER_PORTAL_HOST=0.0.0.0 \
+    KOSHER_PORTAL_PORT=8000
+VOLUME /var/lib/kosher-portal
+EXPOSE 8000
+
+# The admin token must be supplied at run time; without it the admin API
+# refuses every request rather than defaulting to something guessable.
+CMD ["kosher-portal"]

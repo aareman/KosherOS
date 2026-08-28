@@ -15,3 +15,6 @@ dist/
 devenv.local.nix
 devenv.local.yaml
 .direnv/
+
+# other sessions' worktrees live here
+.claude/worktrees/

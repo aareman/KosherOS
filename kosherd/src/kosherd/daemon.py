@@ -136,6 +136,23 @@ INTROSPECTION_XML = """
       <arg direction="in" type="i" name="minutes"/>
     </method>
   </interface>
+  <interface name="org.kosherlinux.Daemon1.Portal">
+    <method name="Enrol">
+      <arg direction="in" type="s" name="portal_url"/>
+      <arg direction="in" type="s" name="code"/>
+      <arg direction="in" type="s" name="guardian_password"/>
+      <arg direction="out" type="s" name="device_id"/>
+    </method>
+    <method name="Unenrol">
+      <arg direction="in" type="s" name="guardian_password"/>
+    </method>
+    <method name="SyncNow">
+      <arg direction="out" type="b" name="updated"/>
+    </method>
+    <method name="PortalStatus">
+      <arg direction="out" type="s" name="status_json"/>
+    </method>
+  </interface>
   <interface name="org.kosherlinux.Daemon1.Setup">
     <method name="IsComplete">
       <arg direction="out" type="b" name="complete"/>
@@ -622,6 +639,60 @@ class Daemon:
         GRUB_USER_CFG.write_text(
             f"GRUB2_PASSWORD={digest}\n")
         GRUB_USER_CFG.chmod(0o600)
+
+    # ---- Portal ----------------------------------------------------------
+
+    def impl_Enrol(self, portal_url: str, code: str, _guardian_pw: str):
+        from . import sync
+
+        enrolment = sync.enrol(portal_url, code)
+        enrolment.save()
+        log.info("enrolled with %s as device %s", portal_url, enrolment.device_id)
+        self.sync_now()
+        return GLib.Variant("(s)", (enrolment.device_id,))
+
+    def impl_Unenrol(self, _guardian_pw: str):
+        from . import sync
+
+        sync.ENROLMENT_PATH.unlink(missing_ok=True)
+        log.info("unenrolled from the portal; local policy stands")
+        return None
+
+    def impl_SyncNow(self):
+        return GLib.Variant("(b)", (self.sync_now(),))
+
+    def impl_PortalStatus(self):
+        from . import sync
+
+        enrolment = sync.Enrolment.load()
+        return GLib.Variant("(s)", (json.dumps({
+            "enrolled": enrolment is not None,
+            "portal_url": enrolment.portal_url if enrolment else "",
+            "device_id": enrolment.device_id if enrolment else "",
+            "revision": self.policy.revision,
+            "source": self.policy.source,
+        }),))
+
+    def sync_now(self) -> bool:
+        """Pull a signed policy from the portal. True if one was applied."""
+        from . import sync
+
+        enrolment = sync.Enrolment.load()
+        if enrolment is None:
+            raise PolicyError("this device is not enrolled with a portal")
+        doc = sync.PortalClient(enrolment).fetch_policy(self.policy.revision)
+        if doc is None:
+            return False
+        incoming = Policy.from_dict(doc)
+        incoming.source = "portal"
+        self.policy = incoming
+        # Keep the revision the portal issued: it is what replay protection
+        # compares against next time.
+        policy_mod.save(self.policy, bump_revision=False)
+        apply_policy(self.policy)
+        self._apply_mct()
+        log.info("applied portal policy revision %d", self.policy.revision)
+        return True
 
     # ---- Session ---------------------------------------------------------
 

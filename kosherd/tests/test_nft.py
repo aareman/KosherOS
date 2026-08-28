@@ -97,13 +97,20 @@ def test_inspect_mode_redirects_web_to_mitmproxy():
     pol = Policy.from_dict(json.loads(EXAMPLE.read_text()))
     pol.users[0].mode = "inspect"
     out = nft.render(pol, dns_uid=989, mitm_uid=988)
-    assert f"meta skuid {{ {pol.users[0].uid} }} tcp dport {{ 80, 443 }} redirect to :8080" in out
+    inspected = sorted(u.uid for u in pol.effective_users() if u.mode == "inspect")
+    uids = ", ".join(str(u) for u in inspected)
+    assert f"meta skuid {{ {uids} }} tcp dport {{ 80, 443 }} redirect to :8080" in out
     # inspected users still get the dnsfilter egress policy and evasion block
-    assert f"{pol.users[0].uid} : jump mode_dnsfilter" in out
+    for uid in inspected:
+        assert f"{uid} : jump mode_dnsfilter" in out
     # the proxy's own traffic must not be redirected back into itself
     assert "meta skuid { 0, 989, 988 } return" in out
 
 
 def test_no_mitm_redirect_without_inspected_users():
-    out = rendered()
+    pol = Policy.from_dict(json.loads(EXAMPLE.read_text()))
+    for user in pol.users:
+        if user.mode == "inspect":
+            user.mode = "dnsfilter"
+    out = nft.render(pol, dns_uid=989, mitm_uid=988)
     assert "redirect to :8080" not in out

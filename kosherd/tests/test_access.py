@@ -40,12 +40,12 @@ def test_every_method_has_an_action():
 
 READS = ["GetPolicy", "Status", "IsEnabled", "ListCatalog", "ListInstalled",
          "ListInstalledDetails", "SearchApps", "CheckUpdate", "Lock",
-         "VerifyGuardian"]
+         "VerifyGuardian", "PortalStatus", "SyncNow"]
 CHANGES = ["SetFilterMode", "SetWhitelist", "SetUrlRules", "CreateUser",
            "AdoptUser", "RemoveUser", "RemoveApp", "ApproveApp",
            "UnapproveApp", "SetUserApps", "SetUserCanInstall", "ApplyUpdate",
            "SetCaptiveMode", "SetGuardianPassword", "DisableGuardian",
-           "SetGuestConfig"]
+           "SetGuestConfig", "Enrol", "Unenrol"]
 
 
 @pytest.mark.parametrize("method", READS + CHANGES)
@@ -109,7 +109,7 @@ def test_the_guardian_gate_covers_every_filter_weakening_method():
     # Anything that can loosen filtering must be dual-controlled. If a new
     # filter method is added, it belongs in this list AND in GUARDIAN_GATED.
     expected = {"SetFilterMode", "SetWhitelist", "SetUrlRules",
-                "SetGuestConfig", "DisableGuardian"}
+                "SetGuestConfig", "DisableGuardian", "Enrol", "Unenrol"}
     assert GUARDIAN_GATED == expected
     filter_actions = {m for m, a in ACTIONS.items()
                       if a == access.ACTION_MANAGE_FILTER}
@@ -141,3 +141,25 @@ def test_an_interrupted_wizard_can_still_finish():
     # created the admin and then crashed must be able to set the guardian
     # and boot passwords on the next run.
     assert evaluate("FinishSetup", **FRESH).allowed
+
+
+# -- the portal --------------------------------------------------------------
+
+@pytest.mark.parametrize("method", ["Enrol", "Unenrol"])
+def test_portal_enrolment_is_dual_controlled(method):
+    # Enrolling hands filter control to a remote portal and unenrolling
+    # takes it back, so both are filter changes.
+    assert method in GUARDIAN_GATED
+    assert ACTIONS[method] == access.ACTION_MANAGE_FILTER
+    assert evaluate(method, **{**UNLOCKED, "guardian_enabled": True}).needs_guardian
+
+
+def test_syncing_is_not_an_admin_action():
+    # A sync only applies what the portal already signed; the Ed25519
+    # signature and a strictly increasing revision authorise the content,
+    # not the caller. Requiring the guardian here would break the timer.
+    for method in ("SyncNow", "PortalStatus"):
+        assert method not in GUARDIAN_GATED
+        assert ACTIONS[method] == access.ACTION_READ_CONFIG
+        assert not evaluate(method, **{**UNLOCKED,
+                                       "guardian_enabled": True}).needs_guardian

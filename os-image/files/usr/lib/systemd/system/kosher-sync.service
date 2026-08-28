@@ -1,0 +1,11 @@
+[Unit]
+Description=KosherOS portal sync (pull signed policy)
+After=kosherd.service network-online.target
+Wants=network-online.target
+Requires=kosherd.service
+# Nothing to do until the device is enrolled with a portal.
+ConditionPathExists=/var/lib/kosher/enrolment.json
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/kosherctl sync --quiet

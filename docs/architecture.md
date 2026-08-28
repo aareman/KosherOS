@@ -117,9 +117,32 @@ become root here.
 ## Policy
 
 `/var/lib/kosher/policy.json` (schema in `policy/schema/`) is the single
-contract between kosherd, the admin app, and the future portal. `revision` +
-`source` fields make the portal just another writer, synced by a device-
-initiated agent (see `portal/README.md`).
+contract between kosherd, the admin app, and the portal. `revision` and
+`source` are what make a second writer safe.
+
+## Portal sync
+
+The portal (`portal/`, FastAPI + SQLite, self-hostable) is a **second
+writer** of that policy, so the device has to distinguish a genuine
+document from anything else. It does that with signatures, not trust in the
+connection:
+
+- the portal generates an Ed25519 key on first start and signs every policy
+  document; a device pins the public half when it enrols with a one-time
+  code;
+- the device (`kosherd/sync.py`) accepts a document only if the signature
+  matches that pinned key **and** the revision is higher than the one it
+  already applied — which is what stops an old, looser policy being
+  replayed at it;
+- verification only lives on the device: it never signs and never holds the
+  private key, so a stolen device cannot forge policy for another one;
+- sync is **outbound-only** — `kosher-sync.timer` polls every 15 minutes,
+  so no family machine opens an inbound port. `kosherctl sync` pulls now.
+
+Enrolling and unenrolling are guardian-gated, because they hand filter
+control to a portal and take it back. Losing the portal does not unlock a
+device: the last applied policy keeps being enforced, and unenrolling
+leaves it in place.
 
 ## Installation & first boot
 

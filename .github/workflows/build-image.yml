@@ -16,10 +16,12 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - run: pip install pytest jsonschema
+      - run: pip install pytest jsonschema cryptography fastapi httpx
       - run: sudo apt-get install -y nftables
-      - name: Unit tests
-        run: cd kosherd && python -m pytest tests/ -q
+      - name: Unit tests (device)
+        run: cd kosherd && PYTHONPATH=src python -m pytest tests/ -q
+      - name: Unit tests (portal)
+        run: cd portal && PYTHONPATH=src:../kosherd/src python -m pytest tests/ -q
 
   build:
     needs: test

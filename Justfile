@@ -154,11 +154,15 @@ iso: build
     @echo "ISO at build/bootiso/install.iso — write it to a USB stick, or: just boot-iso"
 
 # Boot the installer ISO against a blank disk, to rehearse a real install.
+# `-boot once=d` matters: the kickstart is unattended and reboots when it
+# finishes, and with a permanent CD-first order (-boot d) the machine would
+# boot the installer again and reinstall in a loop. `once` applies to the
+# first boot only, so the reboot lands on the freshly installed disk.
 boot-iso:
     [ -f build/test-install.qcow2 ] || qemu-img create -f qcow2 build/test-install.qcow2 40G
     qemu-system-x86_64 -enable-kvm -cpu host -m 4096 -smp 4 \
         -drive file=build/test-install.qcow2,if=virtio \
-        -cdrom build/bootiso/install.iso -boot d \
+        -cdrom build/bootiso/install.iso -boot once=d \
         -netdev user,id=n0 -device virtio-net-pci,netdev=n0 \
         -display gtk
 

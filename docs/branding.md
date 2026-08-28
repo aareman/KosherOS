@@ -21,8 +21,26 @@ no other changes needed.
 | First-boot welcome wizard (stage 5) | our own GTK app — brand it from day one | logo + wordmark |
 | Desktop defaults | ✅ dconf: wallpaper (unlocked), dark scheme, favourites incl. the Store | real wallpaper |
 | Admin app / Store | GTK/libadwaita app icons (stock icons today) | app icons |
-| ISO installer (stage 4) | Anaconda product name via bootc-image-builder / kickstart | logo |
+| ISO installer | Anaconda branding: product name/version via `.buildstamp`, and a `product.img` overlaying the logo, sidebar and CSS in the installer's Anaconda theme | logo + wordmark |
 | Portal web UI (stage 5) | shared asset set | logo + wordmark |
+
+## Anaconda installer (do this once the brand is settled)
+
+The installer currently shows stock Fedora branding, which breaks the
+illusion at the very first thing a new owner sees. Anaconda takes branding
+from two places, both of which bootc-image-builder can carry:
+
+- **`/.buildstamp`** in the ISO root sets `Product`, `Version` and
+  `BugURL`, which is what Anaconda prints as "Install <Product>";
+- **`product.img`** — a small cpio/squashfs overlay mounted over the
+  installer runtime — replaces the Anaconda theme under
+  `/usr/share/anaconda/pixmaps/` (sidebar, logo, topbar background) and
+  `/usr/share/anaconda/anaconda-gtk.css` for colours.
+
+So the work is: generate those pixmaps from the final logo/wordmark at the
+sizes Anaconda expects, build `product.img`, and have `just iso` inject it.
+Deliberately deferred until the artwork is real — regenerating placeholder
+installer graphics twice is wasted effort.
 
 ## Asset checklist (create once, SVG-first)
 

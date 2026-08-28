@@ -25,6 +25,23 @@ if [ -e "$STAMP" ]; then
     exit 0
 fi
 
+# Text setup on request (kosher.setup=text) or when there is no display at
+# all: a serial console install has nothing for a compositor to draw on, and
+# it is what the automated boot test drives.
+want_text=no
+grep -qw "kosher.setup=text" /proc/cmdline 2>/dev/null && want_text=yes
+ls /dev/dri/card* >/dev/null 2>&1 || want_text=yes
+
+if [ "$want_text" = yes ]; then
+    echo "no display available (or kosher.setup=text): using text setup"
+    if kosherctl setup; then
+        echo "text setup completed"
+        exit 0
+    fi
+    echo "text setup did not complete"
+    exit 0
+fi
+
 if ! command -v cage >/dev/null 2>&1; then
     echo "FATAL: cage is not installed; cannot show the setup wizard"
     exit 0
@@ -32,11 +49,6 @@ fi
 if ! command -v kosher-setup >/dev/null 2>&1; then
     echo "FATAL: kosher-setup is not installed"
     exit 0
-fi
-# cage needs a DRM device. Say so plainly rather than failing three times.
-if ! ls /dev/dri/card* >/dev/null 2>&1; then
-    echo "WARNING: no /dev/dri device — cage has no display to draw on."
-    echo "  video drivers present: $(ls /sys/class/drm 2>/dev/null | tr '\n' ' ')"
 fi
 
 # Release the boot splash before taking the console, otherwise Plymouth and

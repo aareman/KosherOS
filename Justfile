@@ -186,6 +186,17 @@ usb-image: build
     @echo "  lsblk    # find the stick, e.g. sdb"
     @echo "  sudo dd if=build/image/disk.raw of=/dev/sdX bs=4M status=progress conv=fsync"
 
+# Boot the real disk image and prove it reaches first-boot setup.
+#
+# Every other test exercises a system that is already up; this one covers
+# power-on to wizard, which is where four shipped bugs lived (reinstall
+# loop, GDM race, plymouth-quit-wait deadlock, compositor with no seat).
+# Runs headless with no video device, so setup takes its text path and the
+# test can drive it over the serial console. Works on a throwaway overlay,
+# so the disk image is not modified.
+test-boot DISK="build/qcow2/disk.qcow2":
+    scripts/boot-test.py {{DISK}}
+
 # Boot the installer ISO against a blank disk, to rehearse a real install.
 # `-boot once=d` matters: the kickstart is unattended and reboots when it
 # finishes, and with a permanent CD-first order (-boot d) the machine would

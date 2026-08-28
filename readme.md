@@ -54,6 +54,8 @@ just usb-image     # raw disk image to dd onto a USB stick — try KosherOS on
                    #   real hardware without touching the internal disk
 just boot-iso      # rehearse a real install into a blank disk
 just boot-installed# boot that installed machine (runs the first-boot wizard)
+just test-boot     # boot the disk image and assert it reaches setup
+just test-vm       # six suites against a running VM
 ```
 
 `just vm`, `just iso`, and the podman-in-root steps need sudo, so run those

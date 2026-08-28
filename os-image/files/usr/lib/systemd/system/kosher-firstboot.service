@@ -4,7 +4,13 @@ Description=KosherOS first-boot setup wizard
 # installed machine has no user to log in as. kosherd closes the setup API
 # once the wizard finishes, and FinishSetup disables this unit.
 Before=gdm.service
-After=kosherd.service systemd-user-sessions.service plymouth-quit-wait.service
+After=kosherd.service systemd-user-sessions.service
+# NOT After=plymouth-quit-wait.service: that unit blocks until Plymouth
+# exits, Plymouth exits when the display manager takes over, and GDM is
+# ordered after this wizard — so waiting on it deadlocks the boot at
+# "job plymouth-quit-wait". Conflicts= cancels that wait instead, and the
+# session script tells Plymouth to quit before it needs the console.
+Conflicts=plymouth-quit-wait.service
 Requires=kosherd.service
 ConditionPathExists=!/var/lib/kosher/setup-complete
 

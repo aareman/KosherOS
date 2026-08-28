@@ -21,6 +21,10 @@ if ! command -v cage >/dev/null 2>&1; then
     exit 0
 fi
 
+# Release the boot splash before taking the console, otherwise Plymouth and
+# cage fight over the display and the boot appears to hang.
+plymouth quit --retain-splash >/dev/null 2>&1 || true
+
 export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/kosher-setup}"
 mkdir -p "$XDG_RUNTIME_DIR"
 chmod 700 "$XDG_RUNTIME_DIR"

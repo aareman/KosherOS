@@ -19,6 +19,30 @@ render:
     cd kosherd && PYTHONPATH=src python3 -m kosherd.cli render-nft ../policy/examples/family.json | unshare -rn nft --check -f /dev/stdin
     @echo "example policy renders to a valid ruleset"
 
+# --- Housekeeping -------------------------------------------------------------
+
+# What the build artifacts are actually costing (qcow2 files are sparse, so
+# a "40G" disk usually occupies far less).
+disk-usage:
+    @du -sh build/* 2>/dev/null | sort -rh || true
+    @echo "--- podman images:"
+    @podman system df 2>/dev/null | head -4 || true
+
+# Delete VM disks and built images. Keeps the downloaded Fedora base image,
+# so `just fedora-vm` comes back without re-downloading.
+clean:
+    -scripts/fedora-vm.sh down
+    rm -f build/test-install.qcow2 build/vm/disk.qcow2 build/vm/seed.iso
+    sudo rm -rf build/qcow2 build/bootiso
+    @echo "Reclaimed VM disks. Base image kept; run just disk-usage to check."
+
+# Everything above plus the Fedora base image and the built OS image layers.
+clean-all: clean
+    rm -rf build
+    -podman rmi {{image}}
+    podman system prune -f
+    @echo "All build artifacts removed."
+
 # --- Stage-1 Fedora test VM (plain QEMU/KVM + cloud-init, no libvirt) --------
 
 # Fetch (once), create (once), and boot the Fedora test VM headless.

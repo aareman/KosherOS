@@ -3,17 +3,18 @@ Description=KosherOS first-boot setup wizard
 # Runs INSTEAD of the login screen while no admin account exists: a freshly
 # installed machine has no user to log in as. kosherd closes the setup API
 # once the wizard finishes, and FinishSetup disables this unit.
-Conflicts=gdm.service
 Before=gdm.service
 After=kosherd.service systemd-user-sessions.service plymouth-quit-wait.service
 Requires=kosherd.service
 ConditionPathExists=!/var/lib/kosher/setup-complete
 
 [Service]
-Type=simple
+# oneshot, so GDM (ordered After= this unit) waits for setup to finish
+# instead of racing it.
+Type=oneshot
+RemainAfterExit=yes
 ExecStart=/usr/bin/kosher-setup-session
-Restart=on-failure
-RestartSec=2
+TimeoutStartSec=infinity
 TTYPath=/dev/tty1
 StandardInput=tty
 StandardOutput=journal

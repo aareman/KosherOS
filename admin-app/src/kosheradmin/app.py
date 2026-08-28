@@ -101,7 +101,31 @@ class Window(Adw.ApplicationWindow):
         self.toasts.set_child(self.lock_view)
         self._unlock()  # prompt immediately on open
 
+    def _not_an_admin(self) -> bool:
+        """True when this account is not in kosher-admin.
+
+        Without it, Unlock falls back to polkit's auth_admin, and KosherOS
+        deliberately has no polkit admin identities — so the desktop shows a
+        password prompt that cannot succeed no matter what is typed. Saying
+        so plainly beats an unanswerable dialog.
+        """
+        import grp
+        import os
+
+        try:
+            return os.getuid() not in (0,) and \
+                os.getlogin() not in grp.getgrnam("kosher-admin").gr_mem
+        except (KeyError, OSError):
+            return False  # can't tell; let the normal path try
+
     def _unlock(self) -> None:
+        if self._not_an_admin():
+            self.lock_view.set_description(
+                "This account is not an administrator of this computer, so it "
+                "cannot change settings here. Ask whoever set the computer up.")
+            self.toasts.set_child(self.lock_view)
+            return
+
         def on_done(_r):
             self.toasts.set_child(self.content)
             self.reload()

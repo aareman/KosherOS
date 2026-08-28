@@ -1,25 +1,42 @@
 #!/usr/bin/env bash
-# Run the first-boot wizard in a minimal Wayland session on tty1, then hand
-# the machine over to GDM. Kept deliberately small: cage (a single-app
-# compositor) shows only the wizard, so the machine cannot be used for
-# anything else before it is set up.
-set -euo pipefail
+# Run the first-boot wizard in a minimal Wayland session on tty1, then let
+# GDM take over (it is ordered After= this unit, so it waits for us).
+#
+# Kept deliberately small: cage is a single-app compositor, so the machine
+# shows only the wizard and cannot be used for anything else before it is
+# set up. We always exit 0 — a wizard that cannot run must still leave a
+# bootable machine rather than a black screen.
+set -uo pipefail
 
-if [ -e /var/lib/kosher/setup-complete ]; then
-    exec systemctl start gdm.service
+STAMP=/var/lib/kosher/setup-complete
+ATTEMPTS=3
+
+if [ -e "$STAMP" ]; then
+    echo "setup already complete" >&2
+    exit 0
+fi
+
+if ! command -v cage >/dev/null 2>&1; then
+    echo "cage is not installed; cannot show the setup wizard" >&2
+    exit 0
 fi
 
 export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/kosher-setup}"
 mkdir -p "$XDG_RUNTIME_DIR"
 chmod 700 "$XDG_RUNTIME_DIR"
 
-if command -v cage >/dev/null 2>&1; then
-    cage -- /usr/bin/kosher-setup || true
-else
-    # Fallback: no kiosk compositor available, let GDM run and the wizard
-    # will be launched from the admin's first session instead.
-    echo "cage not installed; deferring setup wizard to the desktop session" >&2
-fi
+for attempt in $(seq "$ATTEMPTS"); do
+    echo "starting setup wizard (attempt $attempt/$ATTEMPTS)" >&2
+    cage -- kosher-setup
+    if [ -e "$STAMP" ]; then
+        echo "setup complete" >&2
+        exit 0
+    fi
+    echo "wizard exited without completing setup" >&2
+done
 
-# Setup finished (or was skipped) — start the normal login screen.
-exec systemctl start gdm.service
+# Out of attempts. Hand over to the login screen anyway: an unconfigured
+# machine is bad, but an unbootable one is worse, and the journal above says
+# what happened.
+echo "giving up on the setup wizard after $ATTEMPTS attempts" >&2
+exit 0

@@ -16,7 +16,8 @@ RUN dnf -y install dnsmasq nftables python3-gobject python3-jsonschema python3-p
 # podman must STAY: bootc (the update mechanism) depends on it in F44+. The
 # skuid firewall contains rootless containers, and SUB_UID_COUNT=0 below
 # denies new users subordinate IDs anyway.
-RUN for p in sudo toolbox gnome-boxes gnome-software PackageKit PackageKit-command-not-found; do \
+RUN for p in sudo toolbox gnome-boxes gnome-software PackageKit \
+        PackageKit-command-not-found gnome-initial-setup; do \
         rpm -q "$p" >/dev/null 2>&1 && dnf -y --setopt=protected_packages= remove "$p"; \
     done; \
     ! rpm -q sudo && rpm -q bootc
@@ -61,6 +62,12 @@ RUN dnf -y install librsvg2-tools plymouth-plugin-script dconf && dnf clean all 
     # bootc images have no /etc/default/grub; create it for the menu title.
     && printf 'GRUB_DISTRIBUTOR="KosherOS"\nGRUB_TIMEOUT=1\n' > /etc/default/grub \
     && dconf update
+
+# Third-party sources are enabled outright rather than prompted for: the
+# catalog allowlist already decides what may be installed, so asking the
+# person setting up a family computer to rule on repositories is a question
+# with no useful answer.
+RUN fedora-third-party enable && fedora-third-party query
 
 RUN passwd -l root \
     && groupadd -r kosher-admin \

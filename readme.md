@@ -18,6 +18,9 @@ See [docs/architecture.md](docs/architecture.md) for how it works.
 | path | what |
 |---|---|
 | `kosherd/` | privileged daemon, policy engine, `kosherctl` CLI (Python) |
+| `admin-app/` | KosherOS Admin — profiles, filters, guest, updates (GTK4) |
+| `store-app/` | KosherOS Store — install approved apps (GTK4, open to all users) |
+| `branding/` | logo and wallpaper source art |
 | `policy/` | policy JSON schema + examples — the contract for device, admin app, and portal |
 | `os-image/` | the distro: Containerfile + system config for the bootc image |
 | `scripts/dev-install.sh` | install the filter stack on a stock Fedora VM (stage-1 testing) |
@@ -46,8 +49,8 @@ just vm            # build a bootable qcow2 from it
 
 1. ✅ Filter core: kosherd, per-user nftables enforcement, dnsmasq whitelist sets, kosherctl
 2. ✅ Bootc OS image (builds, lint-clean, boots to GNOME) — CI publish + signing still pending
-3. Admin app (GTK4), guardian UX, curated flatpak remote
-4. Branding: KosherOS boot-to-welcome (Plymouth, GDM, wallpaper, os-release ✅) — see [docs/branding.md](docs/branding.md)
+3. ✅ Admin app (GTK4) + KosherOS Store: approved-app allowlist over upstream Flathub, installs performed by kosherd with live progress
+4. ✅ Branding: KosherOS identity, boot splash, login screen, wallpaper — see [docs/branding.md](docs/branding.md); real logo artwork still to come
 5. Installable ISO + first-boot wizard
 6. Portal: remote filter config + remote support
 7. TLS-interception filter mode (mitmproxy) — also unlocks URL **path-level** allow/block rules (impossible at the DNS/IP layer; paths are encrypted in HTTPS)

@@ -1,0 +1,23 @@
+# KosherOS desktop branding defaults (dconf; see also 10-kosheros-locks).
+[org/gnome/desktop/background]
+picture-uri='file:///usr/share/backgrounds/kosheros/kosheros.svg'
+picture-uri-dark='file:///usr/share/backgrounds/kosheros/kosheros.svg'
+picture-options='zoom'
+primary-color='#0b1a33'
+
+[org/gnome/desktop/screensaver]
+picture-uri='file:///usr/share/backgrounds/kosheros/kosheros.svg'
+picture-options='zoom'
+primary-color='#0b1a33'
+
+[org/gnome/login-screen]
+logo='/usr/share/pixmaps/kosheros-logo.png'
+disable-user-list=false
+banner-message-enable=true
+banner-message-text='KosherOS'
+
+[org/gnome/desktop/interface]
+color-scheme='prefer-dark'
+
+[org/gnome/shell]
+favorite-apps=['org.mozilla.firefox.desktop', 'org.kosherlinux.Store.desktop', 'org.gnome.Nautilus.desktop', 'org.gnome.Settings.desktop']

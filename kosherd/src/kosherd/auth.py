@@ -11,6 +11,9 @@ from __future__ import annotations
 from gi.repository import Gio, GLib
 
 ACTION_READ_CONFIG = "org.kosherlinux.read-config"
+# Granted to every active local user: the catalog is the allowlist, so
+# installing from it is safe for supervised users too.
+ACTION_USE_STORE = "org.kosherlinux.use-store"
 ACTION_MANAGE_USERS = "org.kosherlinux.manage-users"
 ACTION_MANAGE_FILTER = "org.kosherlinux.manage-filter"
 ACTION_INSTALL_APPS = "org.kosherlinux.install-apps"

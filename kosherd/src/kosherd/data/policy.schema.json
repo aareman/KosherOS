@@ -83,6 +83,11 @@
           "items": { "type": "string" },
           "default": [],
           "description": "Flatpak refs this user may run (enforced via malcontent). Empty = all installed apps."
+        },
+        "can_install_apps": {
+          "type": "boolean",
+          "default": true,
+          "description": "May this user install apps from the approved catalog through the KosherOS app store? Everything installable is pre-approved by the admin, so this is on by default, including for supervised users."
         }
       }
     }

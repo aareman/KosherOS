@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=KosherOS Store
+Comment=Install approved applications
+Exec=kosher-store
+Icon=system-software-install
+Terminal=false
+Categories=System;PackageManager;
+Keywords=install;apps;software;store;

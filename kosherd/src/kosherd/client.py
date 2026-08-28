@@ -67,11 +67,32 @@ class DaemonClient:
     def list_catalog(self) -> dict:
         return json.loads(self._call("Apps", "ListCatalog")[0])
 
+    def list_installed(self) -> list[str]:
+        return self._call("Apps", "ListInstalled")[0]
+
     def install_app(self, ref: str) -> None:
+        """Start an install; watch AppProgress/AppFinished for the outcome."""
         self._call("Apps", "InstallApp", "(s)", ref)
 
     def remove_app(self, ref: str) -> None:
         self._call("Apps", "RemoveApp", "(s)", ref)
+
+    def set_user_can_install(self, uid: int, can_install: bool) -> None:
+        self._call("Apps", "SetUserCanInstall", "(ib)", uid, can_install)
+
+    def connect_app_signals(self, on_progress, on_finished) -> int:
+        """Subscribe to install progress. Returns a subscription id."""
+
+        def handler(_conn, _sender, _path, _iface, signal, params):
+            if signal == "AppProgress":
+                on_progress(*params.unpack())
+            elif signal == "AppFinished":
+                on_finished(*params.unpack())
+
+        return self._conn.signal_subscribe(
+            BUS_NAME, "org.kosherlinux.Daemon1.Apps", None, OBJECT_PATH, None,
+            Gio.DBusSignalFlags.NONE, handler,
+        )
 
     # System
     def check_update(self) -> str:

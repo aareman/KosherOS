@@ -1,9 +1,22 @@
 {
-  "comment": "Approved app catalog. kosherd only installs refs listed here, from the 'kosher' flatpak remote. Later portal-managed.",
+  "comment": "The approved app allowlist. kosherd installs ONLY these refs, from upstream Flathub, and renders this list into a flatpak remote filter. Later portal-managed.",
   "apps": [
-    { "ref": "org.mozilla.firefox", "name": "Firefox" },
-    { "ref": "org.libreoffice.LibreOffice", "name": "LibreOffice" },
-    { "ref": "org.gnome.gnome-2048", "name": "2048" },
-    { "ref": "org.gnome.Calculator", "name": "Calculator" }
+    { "ref": "org.mozilla.firefox", "name": "Firefox", "summary": "Web browser" },
+    { "ref": "org.libreoffice.LibreOffice", "name": "LibreOffice", "summary": "Documents, spreadsheets and presentations" },
+    { "ref": "org.gnome.Calculator", "name": "Calculator", "summary": "Everyday calculations" },
+    { "ref": "org.gnome.TextEditor", "name": "Text Editor", "summary": "Edit plain text files" },
+    { "ref": "org.gnome.Calendar", "name": "Calendar", "summary": "Manage your schedule" },
+    { "ref": "org.gnome.Loupe", "name": "Image Viewer", "summary": "View pictures" },
+    { "ref": "org.gnome.Papers", "name": "Document Viewer", "summary": "Read PDFs and documents" },
+    { "ref": "org.gnome.SimpleScan", "name": "Document Scanner", "summary": "Scan documents to PDF" },
+    { "ref": "org.gnome.Snapshot", "name": "Camera", "summary": "Take pictures and videos" },
+    { "ref": "org.gnome.TwentyFortyEight", "name": "2048", "summary": "Slide numbered tiles" },
+    { "ref": "org.gnome.Sudoku", "name": "Sudoku", "summary": "Number puzzle game" },
+    { "ref": "org.gnome.Chess", "name": "Chess", "summary": "Play chess" },
+    { "ref": "org.gnome.Mahjongg", "name": "Mahjongg", "summary": "Tile matching game" },
+    { "ref": "org.audacityteam.Audacity", "name": "Audacity", "summary": "Record and edit audio" },
+    { "ref": "org.gimp.GIMP", "name": "GIMP", "summary": "Image editing" },
+    { "ref": "org.inkscape.Inkscape", "name": "Inkscape", "summary": "Vector graphics editor" },
+    { "ref": "com.github.tchx84.Flatseal", "name": "Flatseal", "summary": "Review app permissions" }
   ]
 }

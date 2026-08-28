@@ -29,6 +29,11 @@ BUILTIN_SYSTEM_WHITELIST = (
     "*.fedoraproject.org",
     "ghcr.io",
     "pkg-containers.githubusercontent.com",
+    # Flathub: the source for approved app installs (the catalog decides
+    # WHAT may be installed; this only lets the download reach the machine).
+    "flathub.org",
+    "dl.flathub.org",
+    "*.cloudfront.net",
 )
 
 
@@ -44,6 +49,7 @@ class UserPolicy:
     admin: bool = False
     whitelist: list[str] = field(default_factory=list)
     apps: list[str] = field(default_factory=list)
+    can_install_apps: bool = True
 
     def to_dict(self) -> dict:
         d: dict = {"uid": self.uid, "username": self.username, "mode": self.mode}
@@ -53,6 +59,8 @@ class UserPolicy:
             d["whitelist"] = self.whitelist
         if self.apps:
             d["apps"] = self.apps
+        if not self.can_install_apps:
+            d["can_install_apps"] = False
         return d
 
 
@@ -129,6 +137,7 @@ class Policy:
                     admin=u.get("admin", False),
                     whitelist=list(u.get("whitelist", [])),
                     apps=list(u.get("apps", [])),
+                    can_install_apps=u.get("can_install_apps", True),
                 )
                 for u in doc["users"]
             ],

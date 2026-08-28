@@ -19,6 +19,16 @@
     </defaults>
   </action>
 
+  <action id="org.kosherlinux.use-store">
+    <description>Browse and install approved applications</description>
+    <message>Authentication is required to use the app store</message>
+    <defaults>
+      <allow_any>no</allow_any>
+      <allow_inactive>no</allow_inactive>
+      <allow_active>yes</allow_active>
+    </defaults>
+  </action>
+
   <action id="org.kosherlinux.manage-users">
     <description>Manage user accounts and profiles</description>
     <message>Authentication is required to manage user profiles</message>

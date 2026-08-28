@@ -2,11 +2,14 @@
 // never succeed here anyway (no polkit admin identities exist) — returning
 // NO stops desktop components from popping unanswerable password dialogs.
 // OS updates happen via the bootc timer and kosherd's apply-updates action.
+// NB: polkit action ids are case-sensitive and Flatpak's are capitalised
+// (org.freedesktop.Flatpak.app-install), so match case-insensitively.
 polkit.addRule(function(action, subject) {
+    var id = action.id.toLowerCase();
     if (subject.user !== "root" &&
-        (action.id.indexOf("org.freedesktop.packagekit.") === 0 ||
-         action.id.indexOf("org.projectatomic.rpmostree1.") === 0 ||
-         action.id.indexOf("org.freedesktop.flatpak.") === 0)) {
+        (id.indexOf("org.freedesktop.packagekit.") === 0 ||
+         id.indexOf("org.projectatomic.rpmostree1.") === 0 ||
+         id.indexOf("org.freedesktop.flatpak.") === 0)) {
         return polkit.Result.NO;
     }
 });

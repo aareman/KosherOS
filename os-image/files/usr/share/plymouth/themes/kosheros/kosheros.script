@@ -1,0 +1,53 @@
+# KosherOS boot splash: centred logo, subtle pulse, password prompt for
+# encrypted disks. Deliberately plain — brand assets drop in as logo.png.
+
+Window.SetBackgroundTopColor(0.05, 0.09, 0.16);      # deep navy
+Window.SetBackgroundBottomColor(0.02, 0.04, 0.08);
+
+logo.image = Image("logo.png");
+logo.sprite = Sprite(logo.image);
+logo.x = Window.GetWidth() / 2 - logo.image.GetWidth() / 2;
+logo.y = Window.GetHeight() / 2 - logo.image.GetHeight() / 2;
+logo.sprite.SetPosition(logo.x, logo.y, 0);
+
+progress = 0;
+fun refresh_callback() {
+    progress++;
+    # gentle breathing pulse while the system comes up
+    opacity = 0.75 + 0.25 * Math.Cos(progress / 28);
+    logo.sprite.SetOpacity(opacity);
+}
+Plymouth.SetRefreshFunction(refresh_callback);
+
+# --- password prompt (LUKS) -------------------------------------------------
+prompt.bullets = NULL;
+fun display_password_callback(prompt_text, bullet_count) {
+    label.image = Image.Text(prompt_text, 0.9, 0.9, 0.95);
+    label.sprite = Sprite(label.image);
+    label.sprite.SetPosition(
+        Window.GetWidth() / 2 - label.image.GetWidth() / 2,
+        logo.y + logo.image.GetHeight() + 40, 1);
+    bullets = "";
+    for (i = 0; i < bullet_count; i++) bullets += "•";
+    dots.image = Image.Text(bullets, 0.9, 0.9, 0.95);
+    dots.sprite = Sprite(dots.image);
+    dots.sprite.SetPosition(
+        Window.GetWidth() / 2 - dots.image.GetWidth() / 2,
+        logo.y + logo.image.GetHeight() + 75, 1);
+}
+Plymouth.SetDisplayPasswordFunction(display_password_callback);
+
+fun display_normal_callback() {
+    label.sprite = NULL;
+    dots.sprite = NULL;
+}
+Plymouth.SetDisplayNormalFunction(display_normal_callback);
+
+fun message_callback(text) {
+    message.image = Image.Text(text, 0.8, 0.8, 0.85);
+    message.sprite = Sprite(message.image);
+    message.sprite.SetPosition(
+        Window.GetWidth() / 2 - message.image.GetWidth() / 2,
+        Window.GetHeight() - 60, 2);
+}
+Plymouth.SetMessageFunction(message_callback);

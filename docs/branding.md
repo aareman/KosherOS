@@ -4,17 +4,23 @@ Primary brand: **KosherOS**. Secondary attribution: **powered by Fedora** —
 this matches Fedora's trademark policy for derivatives ("Fedora Remix"), so
 Fedora references don't need scrubbing; only primary branding changes.
 
+**Status:** the pipeline is built and wired into the image; the artwork in
+`branding/` is a placeholder logomark and wallpaper. Dropping real artwork
+into `branding/kosheros-logo.svg` (256×256 viewBox) and
+`branding/wallpaper.svg` re-brands every surface below on the next build —
+no other changes needed.
+
 ## Surfaces, boot → desktop (in user-visible order)
 
 | surface | mechanism | needs artwork? |
 |---|---|---|
-| OS identity (About dialog, `hostnamectl`, portal/device lists) | `/usr/lib/os-release` NAME/PRETTY_NAME/VARIANT (done, in Containerfile) | no |
-| Boot splash | Plymouth theme (`/usr/share/plymouth/themes/kosheros/`, `plymouth-set-default-theme` + initramfs regen in image build) | logo SVG |
-| GRUB menu (mostly hidden) | `GRUB_DISTRIBUTOR="KosherOS"` | no |
-| Login screen | GDM logo (`org.gnome.login-screen` dconf key `logo`), optional background CSS | logo SVG (light/dark) |
-| First-boot welcome wizard (stage 4) | our own GTK app — brand it from day one | logo + wordmark |
-| Desktop defaults | dconf db: default + locked wallpaper, favorite apps | wallpaper(s) |
-| Admin app | GTK/libadwaita app icon + header | app icon |
+| OS identity (About dialog, `hostnamectl`, portal/device lists) | ✅ `/usr/lib/os-release` NAME/PRETTY_NAME/VARIANT | no |
+| Boot splash | ✅ Plymouth script theme `kosheros` (navy gradient, pulsing logo, LUKS prompt) | real logo |
+| GRUB menu (mostly hidden) | ✅ `GRUB_DISTRIBUTOR="KosherOS"` | no |
+| Login screen | ✅ GDM logo + banner via locked dconf keys | real logo |
+| First-boot welcome wizard (stage 5) | our own GTK app — brand it from day one | logo + wordmark |
+| Desktop defaults | ✅ dconf: wallpaper (unlocked), dark scheme, favourites incl. the Store | real wallpaper |
+| Admin app / Store | GTK/libadwaita app icons (stock icons today) | app icons |
 | ISO installer (stage 4) | Anaconda product name via bootc-image-builder / kickstart | logo |
 | Portal web UI (stage 5) | shared asset set | logo + wordmark |
 

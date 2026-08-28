@@ -83,6 +83,19 @@ def cmd_adopt(args) -> int:
     return 0
 
 
+def cmd_check_catalog(args) -> int:
+    """Verify every approved app actually exists on the remote."""
+    from kosherd import apps
+
+    available = apps.available_refs()
+    catalog = apps.load_catalog().get("apps", [])
+    missing = [a["ref"] for a in catalog if a["ref"] not in available]
+    print(f"{len(catalog)} approved apps, {len(missing)} unavailable")
+    for ref in missing:
+        print(f"  MISSING: {ref}", file=sys.stderr)
+    return 1 if missing else 0
+
+
 def cmd_captive(args) -> int:
     _client().set_captive_mode(args.uid, args.minutes)
     print(f"captive-portal window open for uid {args.uid} ({args.minutes}m)")
@@ -171,6 +184,10 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("username")
     s.add_argument("mode", choices=policy_mod.MODES)
     s.set_defaults(func=cmd_adopt)
+
+    sub.add_parser(
+        "check-catalog", help="verify approved apps exist on the remote"
+    ).set_defaults(func=cmd_check_catalog)
 
     s = sub.add_parser("captive", help="open a temporary captive-portal window")
     s.add_argument("uid", type=int)

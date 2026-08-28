@@ -1,0 +1,4 @@
+# The login-screen brand is part of the product identity, not a preference.
+# (Wallpaper is deliberately NOT locked — users may change their own.)
+/org/gnome/login-screen/logo
+/org/gnome/login-screen/banner-message-text

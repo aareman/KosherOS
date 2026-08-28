@@ -20,8 +20,9 @@ import gi
 gi.require_version("Gio", "2.0")
 from gi.repository import Gio, GLib
 
-from . import BUS_NAME, OBJECT_PATH, auth, policy as policy_mod
+from . import BUS_NAME, OBJECT_PATH, apps, auth, policy as policy_mod
 from .apply import apply_policy
+from .apps import AppError
 from .guardian import Guardian, GuardianError
 from .policy import MODES, Policy, PolicyError, UserPolicy
 from .session import SessionStore
@@ -75,12 +76,29 @@ INTROSPECTION_XML = """
     <method name="ListCatalog">
       <arg direction="out" type="s" name="catalog_json"/>
     </method>
+    <method name="ListInstalled">
+      <arg direction="out" type="as" name="refs"/>
+    </method>
     <method name="InstallApp">
       <arg direction="in" type="s" name="ref"/>
     </method>
     <method name="RemoveApp">
       <arg direction="in" type="s" name="ref"/>
     </method>
+    <method name="SetUserCanInstall">
+      <arg direction="in" type="i" name="uid"/>
+      <arg direction="in" type="b" name="can_install"/>
+    </method>
+    <signal name="AppProgress">
+      <arg type="s" name="ref"/>
+      <arg type="i" name="percent"/>
+      <arg type="s" name="status"/>
+    </signal>
+    <signal name="AppFinished">
+      <arg type="s" name="ref"/>
+      <arg type="b" name="ok"/>
+      <arg type="s" name="error"/>
+    </signal>
   </interface>
   <interface name="org.kosherlinux.Daemon1.System">
     <method name="CheckUpdate">
@@ -136,9 +154,15 @@ ACTIONS = {
     "AdoptUser": auth.ACTION_MANAGE_USERS,
     "SetGuestConfig": auth.ACTION_MANAGE_FILTER,
     "RemoveUser": auth.ACTION_MANAGE_USERS,
-    "ListCatalog": auth.ACTION_READ_CONFIG,
-    "InstallApp": auth.ACTION_INSTALL_APPS,
+    # The app store is for everyone: browsing and installing from the
+    # pre-approved catalog need no admin password (kosherd still checks the
+    # per-user can_install_apps flag). Removing affects every user, so it
+    # stays an admin action.
+    "ListCatalog": auth.ACTION_USE_STORE,
+    "ListInstalled": auth.ACTION_USE_STORE,
+    "InstallApp": auth.ACTION_USE_STORE,
     "RemoveApp": auth.ACTION_INSTALL_APPS,
+    "SetUserCanInstall": auth.ACTION_INSTALL_APPS,
     "CheckUpdate": auth.ACTION_READ_CONFIG,
     "ApplyUpdate": auth.ACTION_APPLY_UPDATES,
     "SetCaptiveMode": auth.ACTION_MANAGE_NETWORK,
@@ -151,7 +175,7 @@ ACTIONS = {
 GUARDIAN_GATED = {"SetFilterMode", "SetWhitelist", "SetGuestConfig", "DisableGuardian"}
 
 # Methods that need to know which uid called them (session management).
-UID_AWARE = {"Unlock", "Lock", "Status", "VerifyGuardian"}
+UID_AWARE = {"Unlock", "Lock", "Status", "VerifyGuardian", "InstallApp"}
 
 ERROR_NAME = "org.kosherlinux.Daemon1.Error"
 
@@ -161,6 +185,7 @@ class Daemon:
         self.policy = policy_mod.load()
         self.guardian = Guardian()
         self.sessions = SessionStore()
+        self.app_manager = apps.AppManager(self._on_app_progress, self._on_app_finished)
         self.connection: Gio.DBusConnection | None = None
 
     # ---- lifecycle -------------------------------------------------------
@@ -181,6 +206,10 @@ class Daemon:
         except Exception:
             log.exception("failed to apply policy at startup; baseline rules remain")
         self._apply_mct()
+        try:
+            apps.write_remote_filter()
+        except Exception:
+            log.exception("could not apply the flatpak remote filter")
         try:
             loop.run()
         finally:
@@ -214,7 +243,7 @@ class Daemon:
                 if method in UID_AWARE else getattr(self, f"impl_{method}")(*args)
             invocation.return_value(result)
             log.info("%s by %s (uid %s): ok", method, sender, uid)
-        except (auth.NotAuthorized, GuardianError, PolicyError, KeyError, ValueError) as e:
+        except (auth.NotAuthorized, GuardianError, PolicyError, AppError, KeyError, ValueError) as e:
             log.warning("%s by %s refused: %s", method, sender, e)
             invocation.return_dbus_error(ERROR_NAME, str(e))
         except GLib.Error as e:
@@ -385,36 +414,51 @@ class Daemon:
 
     # ---- Apps ------------------------------------------------------------
 
-    def _catalog(self) -> dict:
-        try:
-            return json.loads(CATALOG_PATH.read_text())
-        except FileNotFoundError:
-            return {"apps": []}
-
     def impl_ListCatalog(self):
-        return GLib.Variant("(s)", (json.dumps(self._catalog()),))
+        return GLib.Variant("(s)", (json.dumps(apps.load_catalog()),))
 
-    def impl_InstallApp(self, ref: str):
-        allowed = {a["ref"] for a in self._catalog()["apps"]}
-        if ref not in allowed:
-            raise PolicyError(f"{ref} is not in the approved catalog")
-        self._flatpak("install", FLATPAK_REMOTE, ref)
-        self._apply_mct()  # refresh per-user blocklists for the new app
+    def impl_ListInstalled(self):
+        return GLib.Variant("(as)", (sorted(apps.installed_refs()),))
+
+    def impl_InstallApp(self, ref: str, *, _uid: int):
+        user = self.policy.user(_uid)
+        if _uid != 0 and user is not None and not user.can_install_apps:
+            raise PolicyError("app installation is turned off for this user")
+        self.app_manager.install(ref)  # validates against the allowlist
         return None
 
     def impl_RemoveApp(self, ref: str):
-        self._flatpak("uninstall", ref)
-        self._apply_mct()
+        self.app_manager.remove(ref)
         return None
 
-    @staticmethod
-    def _flatpak(*args: str) -> None:
-        res = subprocess.run(
-            ["flatpak", args[0], "--system", "--noninteractive", "-y", *args[1:]],
-            capture_output=True, text=True,
-        )
-        if res.returncode != 0:
-            raise PolicyError(f"flatpak {args[0]} failed: {res.stderr.strip()}")
+    def impl_SetUserCanInstall(self, uid: int, can_install: bool):
+        user = self.policy.user(uid)
+        if user is None:
+            raise PolicyError(f"uid {uid} is not managed")
+        user.can_install_apps = can_install
+        self._save_and_apply()
+        return None
+
+    # -- app job callbacks (worker threads -> main loop -> D-Bus signals) --
+
+    def _emit_app_signal(self, name: str, signature: str, args: tuple) -> None:
+        def emit():
+            if self.connection:
+                self.connection.emit_signal(
+                    None, OBJECT_PATH, "org.kosherlinux.Daemon1.Apps", name,
+                    GLib.Variant(signature, args),
+                )
+            return False
+
+        GLib.idle_add(emit)
+
+    def _on_app_progress(self, ref: str, percent: int, status: str) -> None:
+        self._emit_app_signal("AppProgress", "(sis)", (ref, percent, status))
+
+    def _on_app_finished(self, ref: str, ok: bool, error: str) -> None:
+        if ok:
+            GLib.idle_add(lambda: (self._apply_mct(), False)[1])
+        self._emit_app_signal("AppFinished", "(sbs)", (ref, ok, error))
 
     # ---- System ----------------------------------------------------------
 

@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  KosherOS placeholder logomark. A rounded shield (protection) enclosing an
+  open doorway/gate (controlled access) over a soft glow. Replace with the
+  real brand asset; keep the 256x256 viewBox and the id hooks so the
+  generated PNGs and themes pick it up unchanged.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <defs>
+    <linearGradient id="shield" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#3b82f6"/>
+      <stop offset="100%" stop-color="#1d4ed8"/>
+    </linearGradient>
+    <linearGradient id="gate" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#ffffff"/>
+      <stop offset="100%" stop-color="#dbeafe"/>
+    </linearGradient>
+  </defs>
+
+  <!-- shield -->
+  <path fill="url(#shield)"
+        d="M128 20 L212 52 v72 c0 52-36 82-84 112 -48-30-84-60-84-112 V52 Z"/>
+
+  <!-- inner gate: an arch standing open -->
+  <path fill="url(#gate)"
+        d="M92 176 v-58 a36 36 0 0 1 72 0 v58 h-20 v-58 a16 16 0 0 0-32 0 v58 Z"/>
+  <!-- threshold -->
+  <rect x="84" y="176" width="88" height="12" rx="6" fill="url(#gate)"/>
+</svg>

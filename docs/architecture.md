@@ -55,6 +55,30 @@ so skuid rules still match.
 **Captive portals**: an admin can open a temporary per-UID window
 (`SetCaptiveMode`) implemented as an nft set element with a timeout.
 
+## Apps: an allowlist over upstream Flathub
+
+KosherOS does not host a package repository. Upstream **Flathub is the
+source**; the **catalog** (`/etc/kosher/catalog.json`, later portal-managed)
+is the allowlist, and **only kosherd installs**:
+
+- polkit denies the Flatpak system-helper actions to every non-root subject
+  (a user running `flatpak install` gets "system operation Deploy not
+  allowed"), and malcontent blocks user-scope installs;
+- the **KosherOS Store** (`store-app/`) is open to every user, including
+  supervised ones — safety comes from the allowlist, not from hiding the
+  store. It asks kosherd to install and shows live progress streamed back
+  over D-Bus (`AppProgress`/`AppFinished` signals);
+- kosherd rejects any ref not in the catalog, resolves the real remote ref
+  (branches aren't always `stable`), and runs a libflatpak transaction on a
+  worker thread. `kosherctl check-catalog` verifies every approved app
+  actually exists on the remote;
+- per user, `can_install_apps` can turn installing off (admin app toggle),
+  and `apps` restricts which installed apps a user may run (malcontent).
+
+A flatpak remote *filter* rendered from the catalog also keeps unapproved
+apps out of enumeration. It is not a boundary against root — but nobody can
+become root here.
+
 ## Policy
 
 `/var/lib/kosher/policy.json` (schema in `policy/schema/`) is the single

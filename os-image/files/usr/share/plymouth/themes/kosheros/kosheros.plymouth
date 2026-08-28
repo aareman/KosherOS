@@ -1,0 +1,8 @@
+[Plymouth Theme]
+Name=KosherOS
+Description=KosherOS boot splash
+ModuleName=script
+
+[script]
+ImageDir=/usr/share/plymouth/themes/kosheros
+ScriptFile=/usr/share/plymouth/themes/kosheros/kosheros.script

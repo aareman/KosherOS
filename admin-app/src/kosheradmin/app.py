@@ -353,6 +353,15 @@ class ProfilesPage(Adw.PreferencesPage):
         if user["mode"] != "whitelist":
             wl_row.set_sensitive(False)
             wl_row.set_subtitle("Only used in Whitelist only mode")
+
+        installs = Adw.SwitchRow(title="Can install approved apps",
+                                 subtitle="Only apps on the approved list, from the KosherOS Store",
+                                 active=user.get("can_install_apps", True))
+        installs.connect("notify::active", lambda s, _p: (
+            s.get_active() != user.get("can_install_apps", True) and self.win.call(
+                lambda: self.win.client.set_user_can_install(user["uid"], s.get_active()),
+                done_msg=f"App installs {'enabled' if s.get_active() else 'disabled'} for {user['username']}")))
+        row.add_row(installs)
         return row
 
     def _unmanaged_users(self) -> list[str]:

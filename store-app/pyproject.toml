@@ -1,0 +1,18 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "kosherstore"
+version = "0.1.0"
+description = "KosherOS Store — install approved applications"
+readme = "README.md"
+requires-python = ">=3.11"
+license = "GPL-3.0-or-later"
+dependencies = ["kosherd"]
+
+[project.scripts]
+kosher-store = "kosherstore.app:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/kosherstore"]

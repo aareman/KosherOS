@@ -40,6 +40,21 @@ RUN . /usr/lib/os-release \
         /usr/lib/os-release \
     && printf 'VARIANT="KosherOS"\nVARIANT_ID=kosheros\n' >> /usr/lib/os-release
 
+# --- Branding: boot splash, login screen, wallpaper, GRUB --------------------
+COPY branding/ /usr/share/kosher/branding/
+RUN dnf -y install librsvg2-tools plymouth-plugin-script dconf && dnf clean all \
+    # logo raster for plymouth + GDM
+    && rsvg-convert -w 256 -h 256 /usr/share/kosher/branding/kosheros-logo.svg \
+         -o /usr/share/plymouth/themes/kosheros/logo.png \
+    && install -D -m644 /usr/share/plymouth/themes/kosheros/logo.png \
+         /usr/share/pixmaps/kosheros-logo.png \
+    && install -D -m644 /usr/share/kosher/branding/wallpaper.svg \
+         /usr/share/backgrounds/kosheros/kosheros.svg \
+    && plymouth-set-default-theme kosheros \
+    # bootc images have no /etc/default/grub; create it for the menu title.
+    && printf 'GRUB_DISTRIBUTOR="KosherOS"\nGRUB_TIMEOUT=1\n' > /etc/default/grub \
+    && dconf update
+
 RUN passwd -l root \
     && groupadd -r kosher-admin \
     && sed -i -e 's/^SUB_UID_COUNT.*/SUB_UID_COUNT 0/' -e 's/^SUB_GID_COUNT.*/SUB_GID_COUNT 0/' /etc/login.defs \
@@ -47,18 +62,26 @@ RUN passwd -l root \
     && systemctl disable sshd.service 2>/dev/null || true \
     && systemctl enable kosherd.service kosher-firewall.service kosher-dns.service \
     && systemctl enable bootc-fetch-apply-updates.timer \
-    && rm -f /etc/flatpak/remotes.d/flathub.flatpakrepo /etc/flatpak/remotes.d/fedora.flatpakrepo
+    && rm -f /etc/flatpak/remotes.d/*.flatpakrepo
 
 # Only images signed for our registry may be switched/updated to.
 # TODO(stage 2): replace with sigstoreSigned policy for the real registry:
 #   /etc/containers/policy.json + /etc/containers/registries.d/kosher.yaml
 
-# --- kosherd + admin app (last layers: change most often) ---------------------
+# Flathub is the SOURCE of apps; the catalog allowlist (+ the remote filter
+# kosherd renders from it) decides what may actually be installed, and only
+# kosherd may install at all.
+RUN flatpak remote-add --system --if-not-exists \
+        flathub https://dl.flathub.org/repo/flathub.flatpakrepo
+
+# --- kosherd + apps (last layers: change most often) --------------------------
 COPY kosherd/ /tmp/kosherd/
 COPY admin-app/ /tmp/admin-app/
+COPY store-app/ /tmp/store-app/
 COPY policy/schema/policy.schema.json /usr/share/kosher/policy.schema.json
-RUN python3 -m pip install --prefix=/usr --no-deps /tmp/kosherd/ /tmp/admin-app/ \
-    && rm -rf /tmp/kosherd /tmp/admin-app
+RUN python3 -m pip install --prefix=/usr --no-deps \
+        /tmp/kosherd/ /tmp/admin-app/ /tmp/store-app/ \
+    && rm -rf /tmp/kosherd /tmp/admin-app /tmp/store-app
 
 # bootc images must pass a container lint.
 RUN bootc container lint

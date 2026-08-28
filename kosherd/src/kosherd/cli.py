@@ -83,6 +83,38 @@ def cmd_adopt(args) -> int:
     return 0
 
 
+def cmd_rules(args) -> int:
+    c = _client()
+    if args.action == "list":
+        user = next((u for u in c.get_policy()["users"] if u["uid"] == args.uid), None)
+        if user is None:
+            print(f"uid {args.uid} is not managed", file=sys.stderr)
+            return 1
+        rules = user.get("rules", [])
+        print(f"{len(rules)} rule(s) for {user['username']} (mode: {user['mode']})")
+        for i, r in enumerate(rules, 1):
+            print(f"  {i}. {r['action']:5} {r['pattern']}")
+        if rules and user["mode"] != "inspect":
+            print("  note: rules only apply in inspect mode", file=sys.stderr)
+        return 0
+
+    user = next((u for u in c.get_policy()["users"] if u["uid"] == args.uid), None)
+    rules = list(user.get("rules", [])) if user else []
+    if args.action in ("allow", "block"):
+        rules.append({"action": args.action, "pattern": args.pattern})
+    elif args.action == "remove":
+        index = int(args.pattern) - 1
+        if not 0 <= index < len(rules):
+            print(f"no rule {args.pattern}", file=sys.stderr)
+            return 1
+        rules.pop(index)
+    elif args.action == "clear":
+        rules = []
+    c.set_url_rules(args.uid, rules, _guardian_pw(args))
+    print(f"{len(rules)} rule(s) now set for uid {args.uid}")
+    return 0
+
+
 def cmd_check_catalog(args) -> int:
     """Verify every approved app actually exists on the remote."""
     from kosherd import apps
@@ -184,6 +216,14 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("username")
     s.add_argument("mode", choices=policy_mod.MODES)
     s.set_defaults(func=cmd_adopt)
+
+    s = sub.add_parser("rules", help="URL allow/block rules (inspect mode)")
+    s.add_argument("uid", type=int)
+    s.add_argument("action", choices=["list", "allow", "block", "remove", "clear"])
+    s.add_argument("pattern", nargs="?", default="",
+                   help="URL pattern, or the rule number for 'remove'")
+    s.add_argument("--guardian-password")
+    s.set_defaults(func=cmd_rules)
 
     sub.add_parser(
         "check-catalog", help="verify approved apps exist on the remote"

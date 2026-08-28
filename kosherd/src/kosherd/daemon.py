@@ -48,6 +48,11 @@ INTROSPECTION_XML = """
       <arg direction="in" type="as" name="domains"/>
       <arg direction="in" type="s" name="guardian_password"/>
     </method>
+    <method name="SetUrlRules">
+      <arg direction="in" type="i" name="uid"/>
+      <arg direction="in" type="s" name="rules_json"/>
+      <arg direction="in" type="s" name="guardian_password"/>
+    </method>
     <method name="CreateUser">
       <arg direction="in" type="s" name="username"/>
       <arg direction="in" type="s" name="full_name"/>
@@ -183,6 +188,7 @@ ACTIONS = {
     "GetPolicy": auth.ACTION_READ_CONFIG,
     "SetFilterMode": auth.ACTION_MANAGE_FILTER,
     "SetWhitelist": auth.ACTION_MANAGE_FILTER,
+    "SetUrlRules": auth.ACTION_MANAGE_FILTER,
     "CreateUser": auth.ACTION_MANAGE_USERS,
     "AdoptUser": auth.ACTION_MANAGE_USERS,
     "SetGuestConfig": auth.ACTION_MANAGE_FILTER,
@@ -209,7 +215,8 @@ ACTIONS = {
 }
 
 # Methods that can weaken the filter: guardian password required when enabled.
-GUARDIAN_GATED = {"SetFilterMode", "SetWhitelist", "SetGuestConfig", "DisableGuardian"}
+GUARDIAN_GATED = {"SetFilterMode", "SetWhitelist", "SetUrlRules", "SetGuestConfig",
+                  "DisableGuardian"}
 
 # Methods that need to know which uid called them (session management).
 UID_AWARE = {"Unlock", "Lock", "Status", "VerifyGuardian", "InstallApp"}
@@ -342,6 +349,21 @@ class Daemon:
         if user is None:
             raise PolicyError(f"uid {uid} is not managed")
         user.whitelist = sorted(set(domains))
+        self._save_and_apply()
+        return None
+
+    def impl_SetUrlRules(self, uid: int, rules_json: str, _guardian_pw: str):
+        from .urlrules import parse_rules
+
+        user = self.policy.user(uid)
+        if user is None:
+            raise PolicyError(f"uid {uid} is not managed")
+        try:
+            raw = json.loads(rules_json)
+        except ValueError as e:
+            raise PolicyError(f"rules are not valid JSON: {e}") from e
+        parse_rules(raw)  # reject bad patterns before they reach the proxy
+        user.rules = raw
         self._save_and_apply()
         return None
 

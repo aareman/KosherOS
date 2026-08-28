@@ -60,6 +60,10 @@ class DaemonClient:
     def set_whitelist(self, uid: int, domains: list[str], guardian_password: str = "") -> None:
         self._call("Profiles", "SetWhitelist", "(iass)", uid, domains, guardian_password)
 
+    def set_url_rules(self, uid: int, rules: list[dict], guardian_password: str = "") -> None:
+        self._call("Profiles", "SetUrlRules", "(iss)",
+                   uid, json.dumps(rules), guardian_password)
+
     def create_user(self, username: str, full_name: str, mode: str) -> int:
         return self._call("Profiles", "CreateUser", "(sss)", username, full_name, mode)[0]
 

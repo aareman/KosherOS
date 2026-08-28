@@ -1,53 +1,123 @@
-# KosherOS boot splash: centred logo, subtle pulse, password prompt for
-# encrypted disks. Deliberately plain — brand assets drop in as logo.png.
+# KosherOS boot splash: logo, a real progress bar, and status text.
+#
+# Plymouth reports a boot fraction estimated from previous boots (it keeps a
+# cache). The first boot after installation has no cache, so rather than sit
+# at zero or jump to full, the bar creeps toward 90% to say "working" without
+# claiming to be finished, and switches to the real fraction once one arrives.
+#
+# The bar is drawn from two scaled images because Plymouth's script language
+# cannot create solid-colour images: bar-track.png and bar-fill.png.
 
 Window.SetBackgroundTopColor(0.05, 0.09, 0.16);      # deep navy
 Window.SetBackgroundBottomColor(0.02, 0.04, 0.08);
 
+screen_width = Window.GetWidth();
+screen_height = Window.GetHeight();
+
+# --- logo --------------------------------------------------------------------
 logo.image = Image("logo.png");
 logo.sprite = Sprite(logo.image);
-logo.x = Window.GetWidth() / 2 - logo.image.GetWidth() / 2;
-logo.y = Window.GetHeight() / 2 - logo.image.GetHeight() / 2;
+logo.x = screen_width / 2 - logo.image.GetWidth() / 2;
+logo.y = screen_height / 2 - logo.image.GetHeight() / 2 - 40;
 logo.sprite.SetPosition(logo.x, logo.y, 0);
 
-progress = 0;
+# --- progress bar ------------------------------------------------------------
+bar.width = screen_width / 4;
+bar.height = 8;
+bar.x = screen_width / 2 - bar.width / 2;
+bar.y = logo.y + logo.image.GetHeight() + 48;
+
+track.original = Image("bar-track.png");
+track.sprite = Sprite(track.original.Scale(bar.width, bar.height));
+track.sprite.SetPosition(bar.x, bar.y, 1);
+
+fill.original = Image("bar-fill.png");
+fill.sprite = Sprite();
+fill.sprite.SetPosition(bar.x, bar.y, 2);
+
+fun draw_fill(fraction) {
+    if (fraction < 0.02) fraction = 0.02;
+    if (fraction > 1) fraction = 1;
+    fill.sprite.SetImage(fill.original.Scale(bar.width * fraction, bar.height));
+}
+
+# --- status text -------------------------------------------------------------
+status.y = bar.y + 28;
+fun show_status(text) {
+    status.image = Image.Text(text, 0.72, 0.79, 0.90);
+    status.sprite = Sprite(status.image);
+    status.sprite.SetPosition(
+        screen_width / 2 - status.image.GetWidth() / 2, status.y, 3);
+}
+
+# --- progress ----------------------------------------------------------------
+ticks = 0;
+fraction = 0;
+have_real_progress = 0;
+
 fun refresh_callback() {
-    progress++;
-    # gentle breathing pulse while the system comes up
-    opacity = 0.75 + 0.25 * Math.Cos(progress / 28);
-    logo.sprite.SetOpacity(opacity);
+    ticks++;
+    if (have_real_progress) {
+        draw_fill(fraction);
+    } else {
+        # Asymptotic crawl: fast at first, never reaching the end.
+        draw_fill((1 - (1 / (1 + ticks / 900))) * 0.9);
+    }
 }
 Plymouth.SetRefreshFunction(refresh_callback);
 
-# --- password prompt (LUKS) -------------------------------------------------
-prompt.bullets = NULL;
+fun boot_progress_callback(duration, progress_fraction) {
+    if (progress_fraction > 0.01) {
+        have_real_progress = 1;
+        fraction = progress_fraction;
+    }
+}
+Plymouth.SetBootProgressFunction(boot_progress_callback);
+
+# systemd's "Starting ..." messages arrive here; showing the latest means a
+# slow boot says what it is waiting on instead of looking hung.
+fun message_callback(text) {
+    show_status(text);
+}
+Plymouth.SetMessageFunction(message_callback);
+
+fun update_status_callback(text) {
+    show_status(text);
+}
+Plymouth.SetUpdateStatusFunction(update_status_callback);
+
+# --- password prompt (LUKS) --------------------------------------------------
 fun display_password_callback(prompt_text, bullet_count) {
+    track.sprite.SetOpacity(0);
+    fill.sprite.SetOpacity(0);
+    status.sprite = NULL;
+
     label.image = Image.Text(prompt_text, 0.9, 0.9, 0.95);
     label.sprite = Sprite(label.image);
     label.sprite.SetPosition(
-        Window.GetWidth() / 2 - label.image.GetWidth() / 2,
-        logo.y + logo.image.GetHeight() + 40, 1);
+        screen_width / 2 - label.image.GetWidth() / 2, bar.y, 4);
+
     bullets = "";
     for (i = 0; i < bullet_count; i++) bullets += "•";
     dots.image = Image.Text(bullets, 0.9, 0.9, 0.95);
     dots.sprite = Sprite(dots.image);
     dots.sprite.SetPosition(
-        Window.GetWidth() / 2 - dots.image.GetWidth() / 2,
-        logo.y + logo.image.GetHeight() + 75, 1);
+        screen_width / 2 - dots.image.GetWidth() / 2, bar.y + 30, 4);
 }
 Plymouth.SetDisplayPasswordFunction(display_password_callback);
 
 fun display_normal_callback() {
     label.sprite = NULL;
     dots.sprite = NULL;
+    track.sprite.SetOpacity(1);
+    fill.sprite.SetOpacity(1);
 }
 Plymouth.SetDisplayNormalFunction(display_normal_callback);
 
-fun message_callback(text) {
-    message.image = Image.Text(text, 0.8, 0.8, 0.85);
-    message.sprite = Sprite(message.image);
-    message.sprite.SetPosition(
-        Window.GetWidth() / 2 - message.image.GetWidth() / 2,
-        Window.GetHeight() - 60, 2);
+# --- shutdown ----------------------------------------------------------------
+fun quit_callback() {
+    fill.sprite = NULL;
+    track.sprite = NULL;
+    status.sprite = NULL;
 }
-Plymouth.SetMessageFunction(message_callback);
+Plymouth.SetQuitFunction(quit_callback);

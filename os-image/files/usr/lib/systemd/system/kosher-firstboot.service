@@ -14,7 +14,11 @@ ConditionPathExists=!/var/lib/kosher/setup-complete
 Type=oneshot
 RemainAfterExit=yes
 ExecStart=/usr/bin/kosher-setup-session
-TimeoutStartSec=infinity
+# Generous, because a person is typing into the wizard — but NOT infinite:
+# GDM is ordered after this unit, so a wizard that wedges (no usable display,
+# a hung compositor) would otherwise leave the machine sitting at the splash
+# screen forever with no way to reach a login screen.
+TimeoutStartSec=30min
 TTYPath=/dev/tty1
 StandardInput=tty
 StandardOutput=journal

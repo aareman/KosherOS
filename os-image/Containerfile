@@ -58,9 +58,21 @@ RUN dnf -y install librsvg2-tools plymouth-plugin-script dconf && dnf clean all 
          -o /usr/share/pixmaps/kosheros-logo-login.png \
     && install -D -m644 /usr/share/kosher/branding/wallpaper.svg \
          /usr/share/backgrounds/kosheros/kosheros.svg \
+    # Boot progress bar: Plymouth's script language cannot draw solid
+    # colours, so the bar is two images the theme scales.
+    && rsvg-convert -w 200 -h 8 /usr/share/kosher/branding/bar-track.svg \
+         -o /usr/share/plymouth/themes/kosheros/bar-track.png \
+    && rsvg-convert -w 200 -h 8 /usr/share/kosher/branding/bar-fill.svg \
+         -o /usr/share/plymouth/themes/kosheros/bar-fill.png \
     && plymouth-set-default-theme kosheros \
     # bootc images have no /etc/default/grub; create it for the menu title.
     && printf 'GRUB_DISTRIBUTOR="KosherOS"\nGRUB_TIMEOUT=1\n' > /etc/default/grub \
+    # systemd.show_status=auto surfaces "Starting ..." lines to Plymouth, so
+    # the splash reports what a slow boot is waiting on instead of just
+    # sitting there looking hung.
+    && mkdir -p /usr/lib/bootc/kargs.d \
+    && printf 'kargs = ["systemd.show_status=auto"]\n' \
+         > /usr/lib/bootc/kargs.d/10-kosheros.toml \
     && dconf update
 
 # Third-party sources are enabled outright rather than prompted for: the

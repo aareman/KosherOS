@@ -1,0 +1,33 @@
+[Unit]
+Description=KosherOS URL filter (mitmproxy, inspect mode)
+After=kosher-firewall.service kosher-dns.service network.target
+Wants=kosher-dns.service
+
+[Service]
+Type=simple
+User=kosher-mitm
+Group=kosher-mitm
+# Transparent mode: nftables redirects inspected users' web traffic here and
+# the proxy recovers the original destination from the socket.
+ExecStart=/usr/bin/mitmdump \
+    --mode transparent \
+    --listen-host 127.0.0.1 \
+    --listen-port 8080 \
+    --set confdir=/var/lib/kosher/mitm \
+    --set block_global=false \
+    --set termlog_verbosity=warn \
+    --set flow_detail=0 \
+    --scripts /usr/share/kosher/mitm/kosher_filter.py
+Restart=on-failure
+RestartSec=2
+StateDirectory=kosher/mitm
+StateDirectoryMode=0750
+# It reads the policy (root-owned 0600) via a group-readable copy; see
+# kosherd, which maintains /var/lib/kosher/mitm/policy.json.
+ProtectSystem=strict
+ReadWritePaths=/var/lib/kosher/mitm
+PrivateTmp=yes
+NoNewPrivileges=yes
+
+[Install]
+WantedBy=multi-user.target

@@ -54,22 +54,17 @@ def test_uid_lookup_survives_missing_files(addon):
     assert lookup.uid_for_port(1234) is None
 
 
-def _policy(tmp_path, users, guest=None):
-    doc = {"schema_version": 1, "revision": 1, "source": "local",
-           "users": users, "guardian": {"enabled": False}}
-    if guest:
-        doc["guest"] = guest
-    path = tmp_path / "policy.json"
-    path.write_text(json.dumps(doc))
+def _rules_file(tmp_path, mapping):
+    path = tmp_path / "rules.json"
+    path.write_text(json.dumps(mapping))
     return path
 
 
 def test_policy_cache_loads_rules_per_uid(addon, tmp_path):
-    path = _policy(tmp_path, [
-        {"uid": 1001, "username": "kid", "mode": "inspect",
-         "rules": [{"action": "block", "pattern": "youtube.com/watch*"}]},
-        {"uid": 1002, "username": "other", "mode": "dnsfilter"},
-    ])
+    path = _rules_file(tmp_path, {
+        "1001": [{"action": "block", "pattern": "youtube.com/watch*"}],
+        "1002": [],
+    })
     cache = addon.PolicyCache(path)
     assert len(cache.rules_for(1001)) == 1
     assert cache.rules_for(1002) == []
@@ -77,30 +72,24 @@ def test_policy_cache_loads_rules_per_uid(addon, tmp_path):
     assert cache.rules_for(4242) == []
 
 
-def test_policy_cache_includes_enabled_guest(addon, tmp_path):
-    path = _policy(tmp_path, [], guest={
-        "enabled": True, "uid": 1010, "mode": "inspect",
-        "rules": [{"action": "block", "pattern": "*"}]})
+def test_policy_cache_includes_guest_uid(addon, tmp_path):
+    path = _rules_file(tmp_path, {"1010": [{"action": "block", "pattern": "*"}]})
     assert len(addon.PolicyCache(path).rules_for(1010)) == 1
 
 
 def test_policy_cache_reloads_on_change(addon, tmp_path):
-    path = _policy(tmp_path, [{"uid": 1001, "username": "k", "mode": "inspect",
-                               "rules": []}])
+    path = _rules_file(tmp_path, {"1001": []})
     cache = addon.PolicyCache(path)
     assert cache.rules_for(1001) == []
     import os
     import time
-    doc = json.loads(path.read_text())
-    doc["users"][0]["rules"] = [{"action": "block", "pattern": "bad.com"}]
-    path.write_text(json.dumps(doc))
+    path.write_text(json.dumps({"1001": [{"action": "block", "pattern": "bad.com"}]}))
     os.utime(path, (time.time() + 10, time.time() + 10))  # ensure mtime differs
     assert len(cache.rules_for(1001)) == 1
 
 
 def test_policy_cache_tolerates_bad_rules(addon, tmp_path):
-    path = _policy(tmp_path, [{"uid": 1001, "username": "k", "mode": "inspect",
-                               "rules": [{"action": "explode", "pattern": "x"}]}])
+    path = _rules_file(tmp_path, {"1001": [{"action": "explode", "pattern": "x"}]})
     assert addon.PolicyCache(path).rules_for(1001) == []
 
 

@@ -9,8 +9,10 @@ Which user made a request is not carried in the packet, so we look the
 client's source port up in /proc/net/tcp{,6} to find the owning uid — the
 same trick tools like `ss -p` use. That uid selects the rule set.
 
-Rules are read from the policy kosherd writes; the file is re-read whenever
-its mtime changes, so policy edits take effect without a restart.
+The proxy runs unprivileged and never reads the policy itself. kosherd
+renders just the URL rules into /var/lib/kosher/mitm/rules.json (uid ->
+rules) for it; the file is re-read whenever its mtime changes, so policy
+edits take effect without a restart.
 """
 
 from __future__ import annotations
@@ -31,7 +33,7 @@ sys.path.insert(0, "/usr/lib/python3.13/site-packages")
 
 from kosherd.urlrules import BLOCK, decide, parse_rules  # noqa: E402
 
-POLICY_PATH = Path("/var/lib/kosher/policy.json")
+RULES_PATH = Path("/var/lib/kosher/mitm/rules.json")
 log = logging.getLogger("kosher-filter")
 
 BLOCK_PAGE = """<!doctype html>
@@ -76,9 +78,9 @@ class UidLookup:
 
 
 class PolicyCache:
-    """Per-uid rules, reloaded when the policy file changes."""
+    """Per-uid rules, reloaded when kosherd rewrites the rules file."""
 
-    def __init__(self, path: Path = POLICY_PATH):
+    def __init__(self, path: Path = RULES_PATH):
         self.path = path
         self._mtime = 0.0
         self._rules: dict[int, list] = {}
@@ -97,23 +99,15 @@ class PolicyCache:
         try:
             doc = json.loads(self.path.read_text())
         except (OSError, ValueError) as e:
-            log.error("cannot read policy: %s", e)
+            log.error("cannot read rules: %s", e)
             return
 
         rules: dict[int, list] = {}
-        entries = list(doc.get("users", []))
-        guest = doc.get("guest") or {}
-        if guest.get("enabled") and guest.get("uid") is not None:
-            entries.append(guest)
-        for entry in entries:
-            uid = entry.get("uid")
-            if uid is None:
-                continue
+        for uid_text, raw in doc.items():
             try:
-                rules[uid] = parse_rules(entry.get("rules", []))
+                rules[int(uid_text)] = parse_rules(raw)
             except Exception as e:  # noqa: BLE001 - one bad rule must not break all
-                log.error("bad rules for uid %s: %s", uid, e)
-                rules[uid] = []
+                log.error("bad rules for uid %s: %s", uid_text, e)
         self._rules = rules
         self._mtime = mtime
         log.info("loaded URL rules for %d users", len(rules))

@@ -7,6 +7,7 @@ the network comes up (fail-closed by unit ordering).
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import pwd
@@ -14,7 +15,7 @@ import subprocess
 import tempfile
 from pathlib import Path
 
-from . import dns, nft
+from . import dns, mitmca, nft
 from .policy import Policy
 
 log = logging.getLogger(__name__)
@@ -22,6 +23,9 @@ log = logging.getLogger(__name__)
 NFT_RULESET_PATH = Path("/etc/kosher/nft/kosher.nft")
 DNSMASQ_DROPIN_PATH = Path(dns.WHITELIST_CONF)
 DNS_SERVICE = "kosher-dns.service"
+MITM_SERVICE = "kosher-mitm.service"
+MITM_DIR = Path("/var/lib/kosher/mitm")
+MITM_RULES_PATH = MITM_DIR / "rules.json"
 
 
 class ApplyError(Exception):
@@ -35,6 +39,28 @@ def dnsmasq_uid() -> int:
         except KeyError:
             continue
     raise ApplyError("no dnsmasq user found")
+
+
+def mitm_uid() -> int | None:
+    try:
+        return pwd.getpwnam("kosher-mitm").pw_uid
+    except KeyError:
+        return None
+
+
+def write_mitm_rules(policy: Policy) -> None:
+    """Render just the URL rules for the unprivileged proxy to read.
+
+    The proxy never sees the policy itself — only uid -> rules, group
+    readable by kosher-mitm.
+    """
+    rules = {
+        str(user.uid): user.rules
+        for user in policy.effective_users()
+        if user.mode == "inspect" and user.rules
+    }
+    MITM_DIR.mkdir(parents=True, exist_ok=True)
+    _write_atomic(MITM_RULES_PATH, json.dumps(rules, indent=2) + "\n", mode=0o644)
 
 
 def _write_atomic(path: Path, content: str, mode: int = 0o644) -> None:
@@ -54,7 +80,7 @@ def _write_atomic(path: Path, content: str, mode: int = 0o644) -> None:
 
 def apply_policy(policy: Policy) -> None:
     """Render and load enforcement for `policy`. Raises ApplyError on failure."""
-    ruleset = nft.render(policy, dns_uid=dnsmasq_uid())
+    ruleset = nft.render(policy, dns_uid=dnsmasq_uid(), mitm_uid=mitm_uid())
 
     # Syntax-check before touching the live ruleset or the boot file.
     with tempfile.NamedTemporaryFile("w", suffix=".nft") as check:
@@ -68,6 +94,20 @@ def apply_policy(policy: Policy) -> None:
     res = subprocess.run(["nft", "-f", str(NFT_RULESET_PATH)], capture_output=True, text=True)
     if res.returncode != 0:
         raise ApplyError(f"nft load failed: {res.stderr}")
+
+    write_mitm_rules(policy)
+    inspected = any(u.mode == "inspect" for u in policy.effective_users())
+    if inspected:
+        # Inspection needs the machine to trust the proxy's CA, or every
+        # HTTPS page would warn. Generated once, on first use.
+        try:
+            mitmca.ensure_ca()
+        except Exception:  # noqa: BLE001 - never leave the firewall unapplied
+            log.exception("could not prepare the inspection CA")
+    subprocess.run(
+        ["systemctl", "restart" if inspected else "stop", MITM_SERVICE],
+        capture_output=True, text=True,
+    )
 
     _write_atomic(DNSMASQ_DROPIN_PATH, dns.render(policy))
     # Full restart, not reload: dnsmasq's SIGHUP re-reads /etc/hosts and clears

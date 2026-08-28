@@ -42,7 +42,10 @@ RUN . /usr/lib/os-release \
         -e "s/^PRETTY_NAME=.*/PRETTY_NAME=\"KosherOS 0.1 (powered by Fedora ${VERSION_ID})\"/" \
         -e '/^VARIANT=/d' -e '/^VARIANT_ID=/d' \
         /usr/lib/os-release \
-    && printf 'VARIANT="KosherOS"\nVARIANT_ID=kosheros\n' >> /usr/lib/os-release
+    && printf 'VARIANT="KosherOS"\nVARIANT_ID=kosheros\n' >> /usr/lib/os-release \
+    # Otherwise the machine calls itself "fedora" at every login prompt and
+    # on the network. The installer or the owner can still change it.
+    && echo kosheros > /etc/hostname
 
 # --- Branding: boot splash, login screen, wallpaper, GRUB --------------------
 COPY branding/ /usr/share/kosher/branding/

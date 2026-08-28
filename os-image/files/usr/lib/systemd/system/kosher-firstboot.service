@@ -25,7 +25,10 @@ ExecStart=/usr/bin/kosher-setup-session
 # a hung compositor) would otherwise leave the machine sitting at the splash
 # screen forever with no way to reach a login screen.
 TimeoutStartSec=30min
-TTYPath=/dev/tty1
+# /dev/console, not /dev/tty1: a machine booted headless or over a serial
+# line has no tty1, and the text setup then has nowhere to prompt. console
+# follows whatever the kernel was told to use.
+TTYPath=/dev/console
 StandardInput=tty
 # journal+console: a machine whose setup failed has no account to log in
 # with and a locked root, so the journal is unreachable. Printing to the

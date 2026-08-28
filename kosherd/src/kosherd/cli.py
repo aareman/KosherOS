@@ -167,6 +167,19 @@ def cmd_setup(args) -> int:
         print("This computer is already set up.", file=sys.stderr)
         return 1
 
+    # Non-interactive: scripted provisioning, remote support, and the
+    # automated boot test all need setup without a console prompt.
+    if args.username:
+        if not args.password_stdin:
+            print("--username requires --password-stdin", file=sys.stderr)
+            return 1
+        password = sys.stdin.readline().rstrip("\n")
+        uid = c.create_first_admin(args.username, args.full_name or args.username,
+                                   password)
+        c.finish_setup(args.guardian_password or "", "")
+        print(f"created {args.username} (uid {uid}); setup complete")
+        return 0
+
     print("\nKosherOS setup\n")
     print("Create the administrator account for this computer.")
     print("It manages profiles, filtering and apps. It has no root access.\n")
@@ -328,9 +341,14 @@ def main(argv: list[str] | None = None) -> int:
                    help="stay silent and succeed even when the portal is unreachable")
     s.set_defaults(func=cmd_sync)
 
-    sub.add_parser(
-        "setup", help="text-mode first-boot setup (fallback for the GUI wizard)"
-    ).set_defaults(func=cmd_setup)
+    s = sub.add_parser(
+        "setup", help="text-mode first-boot setup (fallback for the GUI wizard)")
+    s.add_argument("--username", help="run non-interactively for this admin")
+    s.add_argument("--full-name")
+    s.add_argument("--password-stdin", action="store_true",
+                   help="read the password from stdin (with --username)")
+    s.add_argument("--guardian-password", default="")
+    s.set_defaults(func=cmd_setup)
 
     sub.add_parser(
         "check-catalog", help="verify approved apps exist on the remote"

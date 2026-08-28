@@ -144,3 +144,17 @@ class DaemonClient:
 
     def disable_guardian(self, guardian_password: str) -> None:
         self._call("Guardian", "DisableGuardian", "(s)", guardian_password)
+
+    # Portal
+    def enrol(self, portal_url: str, code: str, guardian_password: str = "") -> str:
+        return self._call("Portal", "Enrol", "(sss)",
+                          portal_url, code, guardian_password)[0]
+
+    def unenrol(self, guardian_password: str = "") -> None:
+        self._call("Portal", "Unenrol", "(s)", guardian_password)
+
+    def sync_now(self) -> bool:
+        return self._call("Portal", "SyncNow")[0]
+
+    def portal_status(self) -> dict:
+        return json.loads(self._call("Portal", "PortalStatus")[0])

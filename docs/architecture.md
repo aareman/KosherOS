@@ -19,11 +19,12 @@ existing privileged services (accountsservice, flatpak, bootc, NetworkManager)
 instead of reimplementing them.
 
 **Guardian dual-control**: optionally, filter-weakening calls
-(`SetFilterMode`, `SetWhitelist`, `DisableGuardian`) additionally require a
+(`SetFilterMode`, `SetWhitelist`, `SetUrlRules`, `SetGuestConfig`,
+`DisableGuardian`) additionally require a
 second password (e.g. the other spouse's), stored as a yescrypt hash in
 `/etc/kosher/guardian.shadow`, rate-limited (5 tries → 15 min lockout).
 
-## Filtering (v1 — no TLS interception)
+## Filtering: the DNS and packet planes
 
 Per-user modes, enforced in two planes:
 
@@ -42,6 +43,7 @@ fail-closed before the network by `kosher-firewall.service`):
 | `none` | loopback + LAN print/mDNS only; everything else rejected |
 | `whitelist` | only IPs in the `@wl4/@wl6` sets (populated by dnsmasq's `nftset=` as it resolves whitelisted domains — direct-IP browsing is blocked for free) plus `@sys4/@sys6` system domains |
 | `dnsfilter` | open, behind family DNS + evasion blocking |
+| `inspect` | as `dnsfilter`, plus URL rules applied by the local proxy (below) |
 
 Users are dispatched by `meta skuid`; unknown human UIDs fall through to
 `mode_none` (fail closed). A shared `evasion_block` chain rejects DoT (853),

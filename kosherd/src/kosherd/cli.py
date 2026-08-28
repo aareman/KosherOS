@@ -115,6 +115,44 @@ def cmd_rules(args) -> int:
     return 0
 
 
+def cmd_portal(args) -> int:
+    c = _client()
+    if args.action == "status":
+        st = c.portal_status()
+        if not st["enrolled"]:
+            print("not enrolled with a portal "
+                  f"(local policy revision {st['revision']})")
+            return 0
+        print(f"enrolled with {st['portal_url']} as {st['device_id']}")
+        print(f"  policy revision {st['revision']} (source: {st['source']})")
+        return 0
+    if args.action == "enrol":
+        if not args.value:
+            print("usage: kosherctl portal enrol <url> --code <code>", file=sys.stderr)
+            return 1
+        device_id = c.enrol(args.value, args.code or "", _guardian_pw(args))
+        print(f"enrolled as {device_id}")
+        return 0
+    if args.action == "unenrol":
+        c.unenrol(_guardian_pw(args))
+        print("unenrolled; the policy on this device stays as it is")
+        return 0
+    return 1
+
+
+def cmd_sync(args) -> int:
+    try:
+        updated = _client().sync_now()
+    except Exception:  # noqa: BLE001 - the timer must not spam failures
+        if args.quiet:
+            return 0
+        raise
+    if not args.quiet:
+        print("applied a new policy from the portal" if updated
+              else "already up to date")
+    return 0
+
+
 def cmd_check_catalog(args) -> int:
     """Verify every approved app actually exists on the remote."""
     from kosherd import apps
@@ -224,6 +262,18 @@ def main(argv: list[str] | None = None) -> int:
                    help="URL pattern, or the rule number for 'remove'")
     s.add_argument("--guardian-password")
     s.set_defaults(func=cmd_rules)
+
+    s = sub.add_parser("portal", help="enrol with, or check, a remote portal")
+    s.add_argument("action", choices=["status", "enrol", "unenrol"])
+    s.add_argument("value", nargs="?", default="", help="portal URL when enrolling")
+    s.add_argument("--code", help="one-time enrolment code")
+    s.add_argument("--guardian-password")
+    s.set_defaults(func=cmd_portal)
+
+    s = sub.add_parser("sync", help="pull policy from the portal now")
+    s.add_argument("--quiet", action="store_true",
+                   help="stay silent and succeed even when the portal is unreachable")
+    s.set_defaults(func=cmd_sync)
 
     sub.add_parser(
         "check-catalog", help="verify approved apps exist on the remote"

@@ -13,6 +13,7 @@ vmssh := "ssh -F build/vm/ssh_config"
 # Run the unit test suite (pure policy engine — no root, no D-Bus needed).
 test:
     cd kosherd && python3 -m pytest tests/ -q
+    cd portal && PYTHONPATH=src:../kosherd/src python3 -m pytest tests/ -q
 
 # Render + syntax-check the example policy (fast feedback on enforcement changes).
 render:
@@ -159,3 +160,20 @@ boot-image:
 switch VM: build
     podman push {{image}} --tls-verify=false $(hostname -I | awk '{print $1}'):5000/kosher-linux:dev
     ssh {{VM}} "bootc switch --transport registry --enforce-container-sigpolicy=false $(hostname -I | awk '{print $1}'):5000/kosher-linux:dev && systemctl reboot"
+
+# --- Portal (stage 6) ---------------------------------------------------------
+
+# Portal API tests (FastAPI TestClient; no server or network needed).
+portal-test:
+    cd portal && PYTHONPATH=src:../kosherd/src python3 -m pytest tests/ -q
+
+# Run the portal locally for development (admin token printed once).
+portal-run:
+    @mkdir -p build/portal
+    cd portal && KOSHER_PORTAL_DB=../build/portal/portal.db \
+        KOSHER_PORTAL_ADMIN_TOKEN="${KOSHER_PORTAL_ADMIN_TOKEN:-dev-admin-token}" \
+        PYTHONPATH=src python3 -m uvicorn kosherportal.main:app --reload --port 8000
+
+# Build the portal container image.
+portal-image:
+    podman build -t kosher-portal -f portal/Containerfile portal

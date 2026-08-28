@@ -9,7 +9,7 @@ FROM quay.io/fedora/fedora-bootc:44
 RUN dnf -y install --exclude=toolbox --exclude=podman @workstation-product-environment && dnf clean all
 RUN dnf -y install dnsmasq nftables python3-gobject python3-jsonschema python3-pip \
         malcontent malcontent-tools flatpak accountsservice cage \
-        mitmproxy ca-certificates && dnf clean all \
+        ca-certificates && dnf clean all \
     # The proxy runs unprivileged; kosherd hands it only the URL rules.
     && useradd -r -s /usr/sbin/nologin -d /var/lib/kosher-mitm kosher-mitm
 # sudo is on dnf's protected list; removing it here is the whole point.
@@ -88,6 +88,9 @@ COPY store-app/ /tmp/store-app/
 COPY setup-app/ /tmp/setup-app/
 COPY policy/schema/policy.schema.json /usr/share/kosher/policy.schema.json
 COPY mitm/ /usr/share/kosher/mitm/
+# mitmproxy is not packaged for Fedora 44, so install it from PyPI (with its
+# dependencies — unlike our own packages, which are --no-deps).
+RUN python3 -m pip install --prefix=/usr mitmproxy
 RUN python3 -m pip install --prefix=/usr --no-deps \
         /tmp/kosherd/ /tmp/admin-app/ /tmp/store-app/ /tmp/setup-app/ \
     && rm -rf /tmp/kosherd /tmp/admin-app /tmp/store-app /tmp/setup-app \

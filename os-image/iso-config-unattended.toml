@@ -1,0 +1,22 @@
+# DEV ONLY: an installer ISO that wipes every attached disk without asking.
+#
+# This exists so `just iso-unattended && just boot-iso` can rehearse a full
+# install in a VM without clicking through Anaconda. Never hand this ISO to
+# anyone: it destroys all disks in the machine it is booted on.
+# The shipped installer is os-image/iso-config.toml, which asks.
+
+[customizations.installer.kickstart]
+contents = """
+clearpart --all --initlabel --disklabel=gpt
+autopart --type=lvm --noswap
+timezone America/New_York --utc
+keyboard us
+lang en_US.UTF-8
+reboot --eject
+"""
+
+[customizations.installer.modules]
+disable = [
+  "org.fedoraproject.Anaconda.Modules.Users",
+  "org.fedoraproject.Anaconda.Modules.Subscription",
+]

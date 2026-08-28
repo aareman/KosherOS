@@ -1,12 +1,17 @@
-# bootc-image-builder config for the INSTALLER ISO.
+# bootc-image-builder config for the INSTALLER ISO (the one people install from).
+#
 # No users and no passwords are baked in: the installed machine runs the
 # KosherOS first-boot wizard, which creates the administrator account.
+#
+# Deliberately NO clearpart/autopart here. Anaconda shows its Installation
+# Destination screen so whoever is installing picks the disk and sees what
+# will be erased. An automatic wipe of every attached disk is fine for a
+# throwaway VM and unacceptable on a laptop with a second drive.
+# For repeat VM rehearsals use os-image/iso-config-unattended.toml
+# (just iso-unattended).
 
 [customizations.installer.kickstart]
 contents = """
-# Wipe and use the whole disk; no interactive partitioning questions.
-clearpart --all --initlabel --disklabel=gpt
-autopart --type=lvm --noswap
 timezone America/New_York --utc
 keyboard us
 lang en_US.UTF-8
@@ -15,7 +20,7 @@ reboot --eject
 
 [customizations.installer.modules]
 # Trim the installer to what KosherOS needs: no user creation (the wizard
-# does that) and no network-storage screens.
+# does that) and no subscription screens.
 disable = [
   "org.fedoraproject.Anaconda.Modules.Users",
   "org.fedoraproject.Anaconda.Modules.Subscription",

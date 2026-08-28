@@ -48,7 +48,8 @@ just deploy-kosherd# push local kosherd code into the VM and restart it (~1 s)
 just fedora-ssh    # shell into the VM
 just build         # build the OS image (layer-cached)
 just vm            # build a bootable qcow2 from it (dev login: abba/kosher)
-just iso           # build the installable ISO (no preset users)
+just iso           # installable ISO (asks which disk; no preset users)
+just iso-unattended# DEV ONLY: same but wipes every disk without asking
 just usb-image     # raw disk image to dd onto a USB stick — try KosherOS on
                    #   real hardware without touching the internal disk
 just boot-iso      # rehearse a real install into a blank disk

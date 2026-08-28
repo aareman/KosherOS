@@ -136,9 +136,16 @@ vm: build
     sudo chown -R "$USER:" build/qcow2
     @echo "qcow2 at build/qcow2/disk.qcow2 — boot with: just boot-image"
 
-# Build the installable ISO (Anaconda). Installs KosherOS with no preset
-# users — the machine runs the first-boot wizard after installation.
-iso: build
+# Build the installable ISO (Anaconda). No preset users — the machine runs
+# the first-boot wizard after installation — and Anaconda asks which disk to
+# install to, so nothing is erased without someone seeing the target.
+iso: (_iso "os-image/iso-config.toml")
+
+# DEV ONLY: an ISO that wipes every attached disk without asking, so a VM
+# rehearsal needs no clicking. Never give this one to anyone.
+iso-unattended: (_iso "os-image/iso-config-unattended.toml")
+
+_iso config: build
     mkdir -p build/podman-home/.config/containers
     printf '{"default":[{"type":"insecureAcceptAnything"}]}' > build/podman-home/.config/containers/policy.json
     sudo env HOME="$PWD/build/podman-home" "$(command -v podman)" pull \
@@ -146,7 +153,7 @@ iso: build
     sudo env HOME="$PWD/build/podman-home" "$(command -v podman)" run --rm -i --privileged \
         --security-opt label=type:unconfined_t \
         -v ./build:/output \
-        -v ./os-image/iso-config.toml:/config.toml:ro \
+        -v ./{{config}}:/config.toml:ro \
         -v /var/lib/containers/storage:/var/lib/containers/storage \
         quay.io/centos-bootc/bootc-image-builder:latest \
         --type anaconda-iso --rootfs ext4 {{image}}

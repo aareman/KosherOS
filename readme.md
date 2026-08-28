@@ -50,4 +50,4 @@ just vm            # build a bootable qcow2 from it
 4. Branding: KosherOS boot-to-welcome (Plymouth, GDM, wallpaper, os-release ✅) — see [docs/branding.md](docs/branding.md)
 5. Installable ISO + first-boot wizard
 6. Portal: remote filter config + remote support
-7. TLS-interception filter mode (mitmproxy)
+7. TLS-interception filter mode (mitmproxy) — also unlocks URL **path-level** allow/block rules (impossible at the DNS/IP layer; paths are encrypted in HTTPS)

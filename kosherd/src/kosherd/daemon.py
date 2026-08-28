@@ -326,6 +326,16 @@ class Daemon:
             GLib.Variant("(ssi)", (username, full_name, 0)),
             GLib.VariantType("(o)"), Gio.DBusCallFlags.NONE, -1, None,
         )[0]
+        # A fresh accountsservice user has a LOCKED password, and GDM hides
+        # locked accounts. "Set password at first login" (what GNOME Settings
+        # does) unlocks it, shows it on the login screen, and lets the person
+        # choose their own password on first sign-in.
+        self.connection.call_sync(
+            "org.freedesktop.Accounts", path,
+            "org.freedesktop.Accounts.User", "SetPasswordMode",
+            GLib.Variant("(i)", (1,)),  # 1 = SET_AT_LOGIN
+            None, Gio.DBusCallFlags.NONE, -1, None,
+        )
         uid = self.connection.call_sync(
             "org.freedesktop.Accounts", path,
             "org.freedesktop.DBus.Properties", "Get",

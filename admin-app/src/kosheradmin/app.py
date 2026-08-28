@@ -213,7 +213,7 @@ class ProfilesPage(Adw.PreferencesPage):
         mode_row.connect("notify::selected", on_mode)
         row.add_row(mode_row)
 
-        wl = Adw.EntryRow(title="Whitelisted domains (comma separated)")
+        wl = Adw.EntryRow(title="Whitelisted domains, comma separated (each includes its subdomains)")
         wl.set_text(", ".join(user.get("whitelist", [])))
 
         def on_wl(_entry):

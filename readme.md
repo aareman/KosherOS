@@ -49,6 +49,8 @@ just fedora-ssh    # shell into the VM
 just build         # build the OS image (layer-cached)
 just vm            # build a bootable qcow2 from it (dev login: abba/kosher)
 just iso           # build the installable ISO (no preset users)
+just usb-image     # raw disk image to dd onto a USB stick — try KosherOS on
+                   #   real hardware without touching the internal disk
 just boot-iso      # rehearse a real install into a blank disk
 just boot-installed# boot that installed machine (runs the first-boot wizard)
 ```
@@ -64,4 +66,7 @@ in a normal terminal.
 4. ✅ Branding: KosherOS identity, boot splash, login screen, wallpaper — see [docs/branding.md](docs/branding.md); real logo artwork still to come
 5. ✅ Installable ISO (`just iso`) + first-boot wizard (admin account, guardian, boot password, firmware checklist)
 6. ✅ Portal: signed policy sync (`portal/`) — remote-support channel and web UI still to come
+8. **Live "try it" ISO** — the installer ISO installs immediately; there is no
+   boot-into-the-desktop-and-click-Install experience yet. `just usb-image`
+   (raw image on a USB stick) and `just vm` are the current ways to try it.
 7. ✅ Inspect mode: local TLS interception (mitmproxy) with URL **path-level** allow/block rules

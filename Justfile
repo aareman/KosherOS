@@ -153,6 +153,32 @@ iso: build
     sudo chown -R "$USER:" build/bootiso
     @echo "ISO at build/bootiso/install.iso — write it to a USB stick, or: just boot-iso"
 
+# Build a raw disk image to write to a USB stick, so KosherOS can be tried on
+# real hardware WITHOUT touching the machine's internal disk: the stick holds a
+# complete, persistent system that boots like an installed one.
+# (This is not a live ISO — see docs/branding.md and the readme; a true
+# "try then click Install" live image is still missing.)
+usb-image: build
+    mkdir -p build/podman-home/.config/containers
+    printf '{"default":[{"type":"insecureAcceptAnything"}]}' > build/podman-home/.config/containers/policy.json
+    key="$(cat ~/.ssh/id_ed25519.pub 2>/dev/null || cat ~/.ssh/id_rsa.pub 2>/dev/null || cat build/vm/id_ed25519.pub)" \
+        && sed "s|@SSH_KEY@|$key|" os-image/dev-config.toml > build/dev-config.toml
+    sudo env HOME="$PWD/build/podman-home" "$(command -v podman)" pull \
+        "containers-storage:[overlay@{{env_var("HOME")}}/.local/share/containers/storage]{{image}}"
+    sudo env HOME="$PWD/build/podman-home" "$(command -v podman)" run --rm -i --privileged \
+        --security-opt label=type:unconfined_t \
+        -v ./build:/output \
+        -v ./build/dev-config.toml:/config.toml:ro \
+        -v /var/lib/containers/storage:/var/lib/containers/storage \
+        quay.io/centos-bootc/bootc-image-builder:latest \
+        --type raw --rootfs ext4 {{image}}
+    sudo chown -R "$USER:" build/image
+    @echo
+    @echo "Raw image: build/image/disk.raw"
+    @echo "Write it to a USB stick (CHECK THE DEVICE — this erases it):"
+    @echo "  lsblk    # find the stick, e.g. sdb"
+    @echo "  sudo dd if=build/image/disk.raw of=/dev/sdX bs=4M status=progress conv=fsync"
+
 # Boot the installer ISO against a blank disk, to rehearse a real install.
 # `-boot once=d` matters: the kickstart is unattended and reboots when it
 # finishes, and with a permanent CD-first order (-boot d) the machine would

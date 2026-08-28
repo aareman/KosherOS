@@ -10,10 +10,30 @@
 image := env_var_or_default("KOSHER_IMAGE", "localhost/kosher-linux:dev")
 vmssh := "ssh -F build/vm/ssh_config"
 
-# Run the unit test suite (pure policy engine — no root, no D-Bus needed).
-test:
-    cd kosherd && python3 -m pytest tests/ -q
-    cd portal && PYTHONPATH=src:../kosherd/src python3 -m pytest tests/ -q
+# Run the unit test suites (pure logic — no root, no D-Bus, no VM needed).
+test *ARGS:
+    cd kosherd && python3 -m pytest tests/ -q {{ARGS}}
+    cd portal && PYTHONPATH=src:../kosherd/src python3 -m pytest tests/ -q {{ARGS}}
+
+# Unit tests with a coverage report over the modules that can run here.
+# The D-Bus surface is excluded (see kosherd/pyproject.toml) because it
+# needs a live bus; the VM suites cover it.
+test-cov:
+    cd kosherd && python3 -m pytest tests/ -q \
+        --cov=kosherd --cov-report=term-missing:skip-covered \
+        --cov-fail-under=80
+
+# Integration suites INSIDE the dev VM: services, enforcement, apps, guest,
+# inspect mode, persistence. Pass suite prefixes to narrow (just test-vm
+# kosher-fedora 50). Creates test users and changes filter modes — dev VMs only.
+test-vm VM="kosher-fedora" *SUITES:
+    rsync -a -e "{{vmssh}}" scripts/vm-tests/ {{VM}}:/tmp/kosher-vm-tests/
+    {{vmssh}} {{VM}} "S=\$([ \$(id -u) = 0 ] || echo sudo); \$S bash /tmp/kosher-vm-tests/run.sh {{SUITES}}"
+
+# Everything that can be checked without building an image.
+test-all: test render
+    @echo "--- integration suites (needs the dev VM: just fedora-vm)"
+    @just test-vm
 
 # Render + syntax-check the example policy (fast feedback on enforcement changes).
 render:

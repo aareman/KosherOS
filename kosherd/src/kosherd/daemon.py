@@ -20,7 +20,7 @@ import gi
 gi.require_version("Gio", "2.0")
 from gi.repository import Gio, GLib
 
-from . import BUS_NAME, OBJECT_PATH, apps, auth, policy as policy_mod
+from . import BUS_NAME, OBJECT_PATH, access, apps, auth, policy as policy_mod
 from .apply import apply_policy
 from .apps import AppError
 from .guardian import Guardian, GuardianError
@@ -196,64 +196,10 @@ INTROSPECTION_XML = """
 """
 
 # method name -> polkit action id
-ACTIONS = {
-    # First-boot setup. These are authorized ONLY while the machine has no
-    # admin yet (see _handle_call); afterwards they are refused outright,
-    # so this is not a standing privilege-escalation path.
-    "IsComplete": auth.ACTION_READ_CONFIG,
-    "CreateFirstAdmin": auth.ACTION_MANAGE_USERS,
-    "FinishSetup": auth.ACTION_MANAGE_USERS,
-    # Unlock is THE prompt: one polkit check opens a sliding session, after
-    # which the admin works without re-authenticating (see session.py).
-    "Unlock": auth.ACTION_MANAGE_USERS,
-    "Lock": auth.ACTION_READ_CONFIG,
-    "Status": auth.ACTION_READ_CONFIG,
-    "VerifyGuardian": auth.ACTION_READ_CONFIG,
-    "GetPolicy": auth.ACTION_READ_CONFIG,
-    "SetFilterMode": auth.ACTION_MANAGE_FILTER,
-    "SetWhitelist": auth.ACTION_MANAGE_FILTER,
-    # Enrolling hands filter control to a portal, so it is a filter change.
-    "Enrol": auth.ACTION_MANAGE_FILTER,
-    "Unenrol": auth.ACTION_MANAGE_FILTER,
-    "SyncNow": auth.ACTION_READ_CONFIG,
-    "PortalStatus": auth.ACTION_READ_CONFIG,
-    "SetUrlRules": auth.ACTION_MANAGE_FILTER,
-    "CreateUser": auth.ACTION_MANAGE_USERS,
-    "AdoptUser": auth.ACTION_MANAGE_USERS,
-    "SetGuestConfig": auth.ACTION_MANAGE_FILTER,
-    "RemoveUser": auth.ACTION_MANAGE_USERS,
-    # The app store is for everyone: browsing and installing from the
-    # pre-approved catalog need no admin password (kosherd still checks the
-    # per-user can_install_apps flag). Removing affects every user, so it
-    # stays an admin action.
-    "ListCatalog": auth.ACTION_USE_STORE,
-    "ListInstalled": auth.ACTION_USE_STORE,
-    "ListInstalledDetails": auth.ACTION_READ_CONFIG,
-    "SetUserApps": auth.ACTION_INSTALL_APPS,
-    "InstallApp": auth.ACTION_USE_STORE,
-    "RemoveApp": auth.ACTION_INSTALL_APPS,
-    "SetUserCanInstall": auth.ACTION_INSTALL_APPS,
-    # Curating the allowlist is an admin act; searching it is read-only.
-    "SearchApps": auth.ACTION_READ_CONFIG,
-    "ApproveApp": auth.ACTION_INSTALL_APPS,
-    "UnapproveApp": auth.ACTION_INSTALL_APPS,
-    "CheckUpdate": auth.ACTION_READ_CONFIG,
-    "ApplyUpdate": auth.ACTION_APPLY_UPDATES,
-    "SetCaptiveMode": auth.ACTION_MANAGE_NETWORK,
-    "IsEnabled": auth.ACTION_READ_CONFIG,
-    "SetGuardianPassword": auth.ACTION_MANAGE_GUARDIAN,
-    "DisableGuardian": auth.ACTION_MANAGE_GUARDIAN,
-}
-
-# Methods that can weaken the filter: guardian password required when enabled.
-GUARDIAN_GATED = {"SetFilterMode", "SetWhitelist", "SetUrlRules", "SetGuestConfig",
-                  "DisableGuardian", "Enrol", "Unenrol"}
-
-# Methods that need to know which uid called them (session management).
-UID_AWARE = {"Unlock", "Lock", "Status", "VerifyGuardian", "InstallApp"}
-
-# First-boot only; closed forever once an admin exists.
-SETUP_METHODS = {"IsComplete", "CreateFirstAdmin", "FinishSetup"}
+# The gating tables and decision live in access.py so they can be tested
+# without a D-Bus bus; see tests/test_access.py.
+ACTIONS = access.ACTIONS
+UID_AWARE = access.UID_AWARE
 
 SETUP_STAMP = Path("/var/lib/kosher/setup-complete")
 GRUB_USER_CFG = Path("/boot/grub2/user.cfg")
@@ -308,24 +254,23 @@ class Daemon:
     def _handle_call(self, connection, sender, path, iface, method, params, invocation) -> None:
         try:
             uid = auth.caller_uid(connection, sender)
-            if method in SETUP_METHODS:
-                # The first-boot wizard runs before any admin exists, so
-                # there is nobody who could authorize it. Once setup is
-                # complete these methods are permanently closed.
-                if method != "IsComplete" and self.setup_complete():
-                    raise PolicyError("initial setup is already complete")
-            # One prompt per session: an unlocked admin skips the polkit check
-            # (Unlock itself always goes through it).
-            elif method == "Unlock" or not self.sessions.is_unlocked(uid):
-                auth.require(connection, sender, ACTIONS[method])
+            requirement = access.evaluate(
+                method,
+                setup_complete=self.setup_complete(),
+                session_unlocked=self.sessions.is_unlocked(uid),
+                guardian_enabled=self.policy.guardian_enabled,
+                guardian_proven=self.sessions.has_guardian(uid),
+            )
+            if not requirement.allowed:
+                raise PolicyError(requirement.refusal)
+            if requirement.polkit_action is not None:
+                auth.require(connection, sender, requirement.polkit_action)
             args = list(params.unpack())
-            if method in GUARDIAN_GATED and self.policy.guardian_enabled:
-                # guardian_password is the trailing string argument; an
-                # already-proven guardian session skips the re-prompt.
-                if not self.sessions.has_guardian(uid):
-                    if not self.guardian.verify(args[-1]):
-                        raise GuardianError("guardian password incorrect")
-                    self.sessions.grant_guardian(uid)
+            if requirement.needs_guardian:
+                # guardian_password is the trailing string argument.
+                if not self.guardian.verify(args[-1]):
+                    raise GuardianError("guardian password incorrect")
+                self.sessions.grant_guardian(uid)
             result = getattr(self, f"impl_{method}")(*args, _uid=uid) \
                 if method in UID_AWARE else getattr(self, f"impl_{method}")(*args)
             invocation.return_value(result)

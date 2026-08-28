@@ -15,24 +15,50 @@ and after each install/remove.
 from __future__ import annotations
 
 import logging
-import subprocess
+from dataclasses import dataclass, field
 
-import gi
-
-gi.require_version("Malcontent", "0")
-from gi.repository import Gio, GLib, Malcontent  # noqa: E402
-
-from .policy import Policy  # noqa: E402
+from .policy import Policy, UserPolicy
 
 log = logging.getLogger(__name__)
 
 
-def _installed_apps() -> list[tuple[str, str]]:
-    """(app id, full ref) for each installed app.
+@dataclass
+class FilterSpec:
+    """What one user's malcontent filter should say.
 
-    malcontent matches blocklisted refs exactly — a wildcard like
-    app/id/*/* silently matches nothing — so we need the real refs.
+    Deciding this is pure, so it is separated from talking to malcontent:
+    the per-user blocklist once used a wildcard ref (app/id/*/*), which
+    malcontent silently never matches, and "blocked" apps stayed runnable.
     """
+
+    uid: int
+    allow_user_installation: bool
+    allow_system_installation: bool
+    blocklist: list[str] = field(default_factory=list)
+
+
+def filter_spec(user: UserPolicy, installed: list[tuple[str, str]]) -> FilterSpec:
+    """The filter for `user`, given (app id, full ref) pairs of what is installed."""
+    if user.admin:
+        # Admins install through kosherd; leaving the capability on keeps
+        # the stock tooling coherent for them.
+        return FilterSpec(user.uid, True, True)
+
+    blocklist = []
+    if user.apps:
+        # An allow-list is expressed to malcontent as "block everything
+        # installed that is not on it", using EXACT refs.
+        blocklist = [full_ref for app_id, full_ref in installed
+                     if app_id not in user.apps]
+    return FilterSpec(user.uid, False, False, blocklist)
+
+
+def specs_for(policy: Policy, installed: list[tuple[str, str]]) -> list[FilterSpec]:
+    return [filter_spec(user, installed) for user in policy.effective_users()]
+
+
+def _installed_apps() -> list[tuple[str, str]]:
+    """(app id, full ref) for each installed app."""
     import gi as _gi
 
     _gi.require_version("Flatpak", "1.0")
@@ -48,29 +74,29 @@ def _installed_apps() -> list[tuple[str, str]]:
 
 def apply_malcontent(policy: Policy) -> None:
     """Write app filters for all managed users. Raises on manager failure."""
-    manager = Malcontent.Manager.new(Gio.bus_get_sync(Gio.BusType.SYSTEM, None))
-    installed = None
+    import gi
 
-    for user in policy.effective_users():
+    gi.require_version("Malcontent", "0")
+    from gi.repository import Gio, GLib, Malcontent
+
+    manager = Malcontent.Manager.new(Gio.bus_get_sync(Gio.BusType.SYSTEM, None))
+    # Only look up what is installed if some user actually restricts apps.
+    installed = _installed_apps() if any(
+        u.apps and not u.admin for u in policy.effective_users()) else []
+
+    for spec in specs_for(policy, installed):
         builder = Malcontent.AppFilterBuilder.new()
-        if user.admin:
-            builder.set_allow_user_installation(True)
-            builder.set_allow_system_installation(True)
-        else:
-            builder.set_allow_user_installation(False)
-            builder.set_allow_system_installation(False)
-            if user.apps:
-                if installed is None:
-                    installed = _installed_apps()
-                for app_id, full_ref in installed:
-                    if app_id not in user.apps:
-                        builder.blocklist_flatpak_ref(full_ref)
-        app_filter = builder.end()
+        builder.set_allow_user_installation(spec.allow_user_installation)
+        builder.set_allow_system_installation(spec.allow_system_installation)
+        for ref in spec.blocklist:
+            builder.blocklist_flatpak_ref(ref)
         try:
             manager.set_app_filter(
-                user.uid, app_filter, Malcontent.ManagerSetValueFlags.INTERACTIVE, None
+                spec.uid, builder.end(),
+                Malcontent.ManagerSetValueFlags.INTERACTIVE, None,
             )
         except GLib.Error as e:
-            log.error("malcontent filter for uid %d failed: %s", user.uid, e)
+            log.error("malcontent filter for uid %d failed: %s", spec.uid, e)
 
-    log.info("malcontent filters applied for %d users", len(policy.effective_users()))
+    log.info("malcontent filters applied for %d users",
+             len(policy.effective_users()))

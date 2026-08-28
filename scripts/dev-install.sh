@@ -18,6 +18,13 @@ semodule_package -o "$tmpdir/kosher-dnsmasq-nftset.pp" -m "$tmpdir/kosher-dnsmas
 semodule -i "$tmpdir/kosher-dnsmasq-nftset.pp"
 rm -rf "$tmpdir"
 
+echo "== installing mitmproxy (inspect mode)"
+# Not packaged for Fedora 44, so it comes from PyPI here as in the image.
+command -v mitmdump >/dev/null 2>&1 || python3 -m pip install --quiet --prefix=/usr mitmproxy
+id kosher-mitm >/dev/null 2>&1 \
+    || useradd -r -s /usr/sbin/nologin -d /var/lib/kosher-mitm kosher-mitm
+install -D -m 0644 "$repo/mitm/kosher_filter.py" /usr/share/kosher/mitm/kosher_filter.py
+
 echo "== installing kosherd"
 python3 -m pip install --prefix=/usr --no-deps "$repo/kosherd/"
 install -D -m 0644 "$repo/policy/schema/policy.schema.json" /usr/share/kosher/policy.schema.json

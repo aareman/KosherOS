@@ -2,6 +2,8 @@
 Description=KosherOS URL filter (mitmproxy, inspect mode)
 After=kosher-firewall.service kosher-dns.service network.target
 Wants=kosher-dns.service
+# Restarted on every policy change; see kosher-dns.service.
+StartLimitIntervalSec=0
 
 [Service]
 Type=simple

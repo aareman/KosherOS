@@ -11,7 +11,8 @@ on the machine can weaken the filter or touch the OS underneath it. An
 optional second "guardian" password (e.g. the other spouse) is required on
 top for any filter change.
 
-See [docs/architecture.md](docs/architecture.md) for how it works.
+See [docs/architecture.md](docs/architecture.md) for how it works, and
+[docs/testing.md](docs/testing.md) for how it is verified.
 
 ## Layout
 
@@ -36,7 +37,10 @@ the host. `devenv shell` (or just `cd` in, with direnv) provides python +
 pytest, just, nft, qemu, cloud-localds, and podman.
 
 ```sh
-just test          # unit tests for the policy engine (< 1 s)
+just test          # unit tests (< 2 s, no root or VM needed)
+just test-cov      # ...with a coverage report
+just test-vm       # integration suites inside the dev VM
+just test-all      # both
 just render        # render + nft-syntax-check the example policy
 just fedora-vm     # fetch + boot a Fedora test VM (plain QEMU/KVM, no libvirt)
 just dev-install   # install the whole filter stack into that VM

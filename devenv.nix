@@ -23,6 +23,7 @@ in
   packages = [
     (python.withPackages (ps: [
       ps.pytest
+      ps.pytest-cov
       ps.jsonschema
       ps.build
       ps.pygobject3 # gi.repository for kosherd client/daemon code
@@ -33,6 +34,7 @@ in
     ]))
     pkgs.just
     pkgs.nftables # `nft --check` of rendered rulesets
+    pkgs.shellcheck # the VM test suites and installer scripts
     # Fedora test VM (plain QEMU + cloud-init; no libvirt needed)
     pkgs.qemu_kvm
     pkgs.cloud-utils # cloud-localds for the cloud-init seed

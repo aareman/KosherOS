@@ -1,0 +1,91 @@
+name: Checks
+
+# Everything that can be verified without a VM or an image build. The
+# in-VM integration suites (scripts/vm-tests/) need KVM and a provisioned
+# Fedora guest, so they stay a local `just test-vm` step.
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+jobs:
+  unit:
+    name: Unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install pytest pytest-cov jsonschema cryptography fastapi httpx
+      - name: Install nftables
+        # test_nft.py syntax-checks the rendered ruleset with the real
+        # parser; it skips itself if the runner forbids user namespaces.
+        run: sudo apt-get install -y nftables
+      - name: Device tests with coverage
+        run: |
+          cd kosherd
+          python -m pytest tests/ -q \
+            --cov=kosherd --cov-report=term-missing:skip-covered \
+            --cov-fail-under=80
+      - name: Portal tests
+        run: cd portal && PYTHONPATH=src:../kosherd/src python -m pytest tests/ -q
+
+  compile:
+    name: Apps compile
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Byte-compile every app
+        # The GTK apps and the daemon need GObject typelibs to RUN, which
+        # CI has no reason to install — but a syntax error must still fail
+        # here rather than in a VM.
+        run: |
+          python -m compileall -q \
+            kosherd/src admin-app/src store-app/src setup-app/src portal/src mitm
+
+  shell:
+    name: Shell scripts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: shellcheck
+        run: |
+          sudo apt-get install -y shellcheck
+          # SC1091: lib.sh is sourced at runtime inside the VM.
+          shellcheck -e SC1091 scripts/*.sh scripts/vm-tests/*.sh
+
+  image:
+    name: Build OS image
+    needs: [unit, compile, shell]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      id-token: write # cosign keyless signing
+    env:
+      IMAGE: ghcr.io/${{ github.repository_owner }}/kosher-linux
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build image
+        run: podman build -t "$IMAGE:${GITHUB_SHA::12}" -t "$IMAGE:latest" -f os-image/Containerfile .
+
+      - name: Push
+        if: github.event_name == 'push'
+        run: |
+          podman login ghcr.io -u "$GITHUB_ACTOR" -p "${{ secrets.GITHUB_TOKEN }}"
+          podman push "$IMAGE:${GITHUB_SHA::12}"
+          podman push "$IMAGE:latest"
+
+      - name: Sign (cosign keyless)
+        if: github.event_name == 'push'
+        uses: sigstore/cosign-installer@v3
+      - if: github.event_name == 'push'
+        run: |
+          cosign sign --yes "$IMAGE:${GITHUB_SHA::12}"
+          cosign sign --yes "$IMAGE:latest"

@@ -6,11 +6,16 @@ set -uo pipefail
 section "Enabling"
 check "guest can be enabled" 0 kosherctl guest enable --mode whitelist chinuch.org --guardian-password ""
 guid=$(id -u kosher-guest 2>/dev/null)
-[ -n "$guid" ] && ok "the guest account exists (uid $guid)" || { bad "no guest account"; report; exit 1; }
-[ -d /home/kosher-guest ] && ok "guest home exists" || bad "guest home missing"
+if [ -z "$guid" ]; then
+    bad "no guest account was created"
+    report
+    exit 1
+fi
+ok "the guest account exists (uid $guid)"
+assert_that "guest home exists" test -d /home/kosher-guest
 
 state=$(passwd -S kosher-guest | awk '{print $2}')
-[ "$state" = "NP" ] && ok "guest signs in without a password" || bad "guest passwd state is $state"
+assert_that "guest signs in without a password (state $state)" test "$state" = "NP"
 
 section "Enforcement"
 check_contains "guest traffic is filtered like any user" "$guid : jump mode_whitelist" \
@@ -19,8 +24,9 @@ if command -v malcontent-client >/dev/null 2>&1; then
     check_contains "guest cannot install apps" "installation is disallowed" \
         malcontent-client get-app-filter "$guid"
 fi
-check "guest cannot reach non-whitelisted sites" 1 \
-    as kosher-guest $CURL https://www.wikipedia.org
+code=$(http_code_as kosher-guest https://www.wikipedia.org)
+assert_that "guest cannot reach non-whitelisted sites (got $code)" \
+    test "$code" = "000"
 
 section "Data is erased at sign-out"
 touch /home/kosher-guest/leftover.txt

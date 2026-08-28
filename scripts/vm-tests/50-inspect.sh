@@ -35,8 +35,8 @@ else
     bad "blocked URL returned '$code' (expected 403)"
 fi
 code=$(http_code_as wlkid https://example.com/)
-[ "$code" = "200" ] && ok "an allowed URL loads with TLS trusted" \
-    || bad "allowed URL returned '$code' (expected 200)"
+assert_that "an allowed URL loads with TLS trusted (got $code)" \
+    test "$code" = "200"
 
 code=$(http_code_as dnskid https://example.com/blocked/page /tmp/other.html)
 if [ "$code" != "403" ] && ! grep -qi "KosherOS" /tmp/other.html 2>/dev/null; then

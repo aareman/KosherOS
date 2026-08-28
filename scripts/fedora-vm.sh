@@ -115,7 +115,7 @@ cmd_up() {
         -enable-kvm -cpu host -m 4096 -smp 4 \
         -drive file="$disk",if=virtio \
         -drive file="$seed",if=virtio,format=raw,readonly=on \
-        -netdev user,id=n0,hostfwd=tcp:127.0.0.1:${ssh_port}-:22 \
+        -netdev user,id=n0,hostfwd=tcp:127.0.0.1:"${ssh_port}"-:22 \
         -device virtio-net-pci,netdev=n0 \
         -display none -serial "file:$vm_dir/console.log" \
         -daemonize -pidfile "$pidfile"

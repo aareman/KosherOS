@@ -38,6 +38,6 @@ else
     bad "adult domain resolved to $answer — family upstream not in effect"
 fi
 check "DNS-over-TLS is rejected" 1 as dnskid nc -w 3 1.1.1.1 853
-check "DoH to a public resolver IP is rejected" 1 as dnskid $CURL https://1.1.1.1
+check "DoH to a public resolver IP is rejected" 1 fetch_as dnskid https://1.1.1.1
 
 report

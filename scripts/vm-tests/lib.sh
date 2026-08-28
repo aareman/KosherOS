@@ -1,3 +1,4 @@
+# shellcheck shell=bash
 # Shared harness for the in-VM integration suites.
 # Sourced by each scripts/vm-tests/*.sh; not executable on its own.
 
@@ -34,6 +35,13 @@ check_contains() {
     fi
 }
 
+# assert_that <description> <command...> — passes when the command succeeds.
+assert_that() {
+    local desc="$1"
+    shift
+    if "$@"; then ok "$desc"; else bad "$desc"; fi
+}
+
 # Run a command as a test user.
 as() { local u="$1"; shift; runuser -u "$u" -- "$@"; }
 
@@ -43,7 +51,10 @@ http_code_as() {
     runuser -u "$u" -- curl -sS -o "$out" -w '%{http_code}' --max-time 20 "$url" 2>/dev/null
 }
 
-CURL="curl -sS --max-time 15 -o /dev/null"
+# Did a fetch succeed? (Functions, not a command string, so call sites do
+# not have to leave a variable unquoted to split it into arguments.)
+fetch()    { curl -sS --max-time 15 -o /dev/null "$@"; }
+fetch_as() { runuser -u "$1" -- curl -sS --max-time 15 -o /dev/null "${@:2}"; }
 
 # Guardian is disabled in the test fixture, so filter changes pass "".
 kctl() { kosherctl "$@" --guardian-password "" 2>&1; }
@@ -52,17 +63,18 @@ require_root() {
     [ "$(id -u)" = 0 ] || { echo "must run as root inside the test VM" >&2; exit 2; }
 }
 
-# Test users the suites share. Modes are set per-suite.
-TEST_USERS="wlkid nokid dnskid"
+# Test users the suites share, with the mode each starts in.
+TEST_USERS=(wlkid nokid dnskid)
+TEST_USER_MODES=(whitelist none dnsfilter)
 
 ensure_test_users() {
-    for u in $TEST_USERS; do
-        id "$u" >/dev/null 2>&1 || useradd -m "$u"
-    done
-    for spec in "wlkid whitelist" "nokid none" "dnskid dnsfilter"; do
-        set -- $spec
-        kosherctl get-policy 2>/dev/null | grep -q "\"$1\"" \
-            || kosherctl adopt "$1" "$2" >/dev/null 2>&1
+    local i user mode
+    for i in "${!TEST_USERS[@]}"; do
+        user="${TEST_USERS[$i]}"
+        mode="${TEST_USER_MODES[$i]}"
+        id "$user" >/dev/null 2>&1 || useradd -m "$user"
+        kosherctl get-policy 2>/dev/null | grep -q "\"$user\"" \
+            || kosherctl adopt "$user" "$mode" >/dev/null 2>&1
     done
 }
 

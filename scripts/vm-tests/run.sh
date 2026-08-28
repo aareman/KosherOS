@@ -11,7 +11,7 @@
 set -uo pipefail
 
 here="$(cd "$(dirname "$0")" && pwd)"
-cd "$here"
+cd "$here" || exit 2
 
 suites=()
 for f in [0-9]*.sh; do suites+=("$f"); done

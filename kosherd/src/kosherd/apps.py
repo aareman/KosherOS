@@ -362,6 +362,7 @@ class AppManager:
         self._lock = threading.Lock()
         self._queue: deque[tuple[str, object]] = deque()
         self._pending: set[str] = set()   # queued or running
+        self._running: str | None = None
         self._worker: threading.Thread | None = None
 
     @property
@@ -383,7 +384,9 @@ class AppManager:
                 raise AppError(f"{ref} is already in progress")
             self._pending.add(ref)
             self._queue.append((ref, work))
-            position = len(self._queue)
+            # The job being worked on is no longer in the queue, so count it
+            # too — otherwise the first waiting job reports "0 ahead".
+            position = len(self._queue) + (1 if self._running else 0)
             if self._worker is None or not self._worker.is_alive():
                 self._worker = threading.Thread(target=self._drain, daemon=True)
                 self._worker.start()
@@ -397,10 +400,13 @@ class AppManager:
                     self._worker = None
                     return
                 ref, work = self._queue.popleft()
+                self._running = ref
             try:
                 work(ref)
             except Exception as e:  # noqa: BLE001 - reported to the caller
-                message = e.message if isinstance(e, GLib.Error) else str(e)
+                # GLib.Error carries .message; anything else stringifies. Asking for
+                # the attribute avoids depending on GLib being importable here.
+                message = getattr(e, "message", None) or str(e)
                 log.error("%s failed: %s", ref, message)
                 self._finish(ref, False, message)
             else:
@@ -409,6 +415,8 @@ class AppManager:
     def _finish(self, ref: str, ok: bool, error: str) -> None:
         with self._lock:
             self._pending.discard(ref)
+            if self._running == ref:
+                self._running = None
         self._on_finished(ref, ok, error)
 
     def _transaction(self, ref: str) -> Flatpak.Transaction:

@@ -26,3 +26,24 @@ packages = ["src/kosherd"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
+
+[tool.coverage.run]
+source = ["kosherd"]
+omit = [
+    # The D-Bus and GObject surface needs a live system bus, a polkit
+    # authority and real system services, so it cannot run here. It is
+    # covered by the in-VM suites instead (scripts/vm-tests/, just test-vm)
+    # — and the decisions it used to embed now live in access.py, which is
+    # fully covered above.
+    "*/kosherd/daemon.py",
+    "*/kosherd/client.py",
+    "*/kosherd/auth.py",
+    "*/kosherd/cli.py",
+]
+
+[tool.coverage.report]
+exclude_also = [
+    "if TYPE_CHECKING:",
+    "raise NotImplementedError",
+    "except ImportError",
+]

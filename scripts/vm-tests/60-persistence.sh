@@ -10,8 +10,8 @@ section "Revisions"
 before=$(kosherctl get-policy | python3 -c 'import json,sys; print(json.load(sys.stdin)["revision"])')
 kctl set-mode "$uid" whitelist >/dev/null
 after=$(kosherctl get-policy | python3 -c 'import json,sys; print(json.load(sys.stdin)["revision"])')
-[ "$after" -gt "$before" ] && ok "every change bumps the revision (portal sync depends on it)" \
-    || bad "revision did not advance ($before -> $after)"
+assert_that "every change bumps the revision ($before -> $after; portal sync depends on it)" \
+    test "$after" -gt "$before"
 
 check_contains "the policy on disk is root-only" "600" \
     stat -c '%a' /var/lib/kosher/policy.json

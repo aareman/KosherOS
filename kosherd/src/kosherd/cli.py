@@ -153,6 +153,59 @@ def cmd_sync(args) -> int:
     return 0
 
 
+def cmd_setup(args) -> int:
+    """Text-mode first-boot setup, for when the graphical wizard cannot run.
+
+    Without this a machine whose GUI wizard fails has no account, no root
+    password and no way in — an unrecoverable brick. A console prompt is
+    ugly but it always works.
+    """
+    import re
+
+    c = _client()
+    if c.setup_complete():
+        print("This computer is already set up.", file=sys.stderr)
+        return 1
+
+    print("\nKosherOS setup\n")
+    print("Create the administrator account for this computer.")
+    print("It manages profiles, filtering and apps. It has no root access.\n")
+
+    while True:
+        username = input("Username: ").strip()
+        if re.fullmatch(r"[a-z_][a-z0-9_-]*", username or ""):
+            break
+        print("  Use lowercase letters, digits, - or _ (starting with a letter).")
+
+    full_name = input(f"Full name [{username}]: ").strip() or username
+
+    while True:
+        password = getpass.getpass("Password: ")
+        if len(password) < 6:
+            print("  At least 6 characters, please.")
+            continue
+        if password != getpass.getpass("Confirm password: "):
+            print("  Those did not match.")
+            continue
+        break
+
+    uid = c.create_first_admin(username, full_name, password)
+    print(f"\nCreated {username} (uid {uid}).")
+
+    guardian = ""
+    if input("\nSet a guardian password (a second password required to "
+             "change filter settings)? [y/N]: ").strip().lower().startswith("y"):
+        while True:
+            guardian = getpass.getpass("Guardian password: ")
+            if len(guardian) >= 6 and guardian == getpass.getpass("Confirm: "):
+                break
+            print("  At least 6 characters, and both must match.")
+
+    c.finish_setup(guardian, "")
+    print("\nSetup complete. Starting the login screen.\n")
+    return 0
+
+
 def cmd_check_catalog(args) -> int:
     """Verify every approved app actually exists on the remote."""
     from kosherd import apps
@@ -274,6 +327,10 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("--quiet", action="store_true",
                    help="stay silent and succeed even when the portal is unreachable")
     s.set_defaults(func=cmd_sync)
+
+    sub.add_parser(
+        "setup", help="text-mode first-boot setup (fallback for the GUI wizard)"
+    ).set_defaults(func=cmd_setup)
 
     sub.add_parser(
         "check-catalog", help="verify approved apps exist on the remote"

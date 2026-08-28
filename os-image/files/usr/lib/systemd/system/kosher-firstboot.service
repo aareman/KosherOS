@@ -27,7 +27,11 @@ ExecStart=/usr/bin/kosher-setup-session
 TimeoutStartSec=30min
 TTYPath=/dev/tty1
 StandardInput=tty
-StandardOutput=journal
+# journal+console: a machine whose setup failed has no account to log in
+# with and a locked root, so the journal is unreachable. Printing to the
+# console is the only way the failure is visible at all.
+StandardOutput=journal+console
+StandardError=journal+console
 TTYReset=yes
 TTYVHangup=yes
 

@@ -9,7 +9,16 @@
 set -uo pipefail
 
 STAMP=/var/lib/kosher/setup-complete
+LOG=/var/log/kosher-setup.log
 ATTEMPTS=3
+
+# Everything here also goes to a file that survives the boot. A machine whose
+# setup failed has no account to log in with and no root password, so the
+# journal is unreachable from the console — this log is the only way to find
+# out what happened without taking the disk apart.
+mkdir -p "$(dirname "$LOG")"
+exec > >(tee -a "$LOG") 2>&1
+echo "=== kosher-setup-session $(date -Is) ==="
 
 if [ -e "$STAMP" ]; then
     echo "setup already complete" >&2
@@ -17,8 +26,17 @@ if [ -e "$STAMP" ]; then
 fi
 
 if ! command -v cage >/dev/null 2>&1; then
-    echo "cage is not installed; cannot show the setup wizard" >&2
+    echo "FATAL: cage is not installed; cannot show the setup wizard"
     exit 0
+fi
+if ! command -v kosher-setup >/dev/null 2>&1; then
+    echo "FATAL: kosher-setup is not installed"
+    exit 0
+fi
+# cage needs a DRM device. Say so plainly rather than failing three times.
+if ! ls /dev/dri/card* >/dev/null 2>&1; then
+    echo "WARNING: no /dev/dri device — cage has no display to draw on."
+    echo "  video drivers present: $(ls /sys/class/drm 2>/dev/null | tr '\n' ' ')"
 fi
 
 # Release the boot splash before taking the console, otherwise Plymouth and
@@ -29,18 +47,38 @@ export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/kosher-setup}"
 mkdir -p "$XDG_RUNTIME_DIR"
 chmod 700 "$XDG_RUNTIME_DIR"
 
+# cage/wlroots asks libseat for a seat. We run as root from a systemd unit,
+# with no logind session and no seatd, so the default backends fail. The
+# builtin backend takes DRM and input devices directly, which is exactly the
+# case it exists for and requires the root we already have.
+export LIBSEAT_BACKEND="${LIBSEAT_BACKEND:-builtin}"
+export XDG_SESSION_TYPE=wayland
+
 for attempt in $(seq "$ATTEMPTS"); do
-    echo "starting setup wizard (attempt $attempt/$ATTEMPTS)" >&2
+    echo "starting setup wizard (attempt $attempt/$ATTEMPTS)"
     cage -- kosher-setup
+    rc=$?
     if [ -e "$STAMP" ]; then
-        echo "setup complete" >&2
+        echo "setup complete"
         exit 0
     fi
-    echo "wizard exited without completing setup" >&2
+    echo "wizard exited rc=$rc without completing setup"
 done
 
 # Out of attempts. Hand over to the login screen anyway: an unconfigured
 # machine is bad, but an unbootable one is worse, and the journal above says
 # what happened.
-echo "giving up on the setup wizard after $ATTEMPTS attempts" >&2
+echo "giving up on the graphical wizard after $ATTEMPTS attempts"
+echo "Falling back to text setup on this console."
+
+# A machine with no account, no root password and no way in is worse than an
+# ugly prompt. This runs on tty1, where StandardInput=tty gives us a console.
+if kosherctl setup; then
+    echo "text setup completed"
+    exit 0
+fi
+
+echo
+echo "Setup could not complete. The login screen will start, but no account"
+echo "exists yet. See $LOG or: journalctl -u kosher-firstboot"
 exit 0

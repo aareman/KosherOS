@@ -24,7 +24,9 @@ NFT_RULESET_PATH = Path("/etc/kosher/nft/kosher.nft")
 DNSMASQ_DROPIN_PATH = Path(dns.WHITELIST_CONF)
 DNS_SERVICE = "kosher-dns.service"
 MITM_SERVICE = "kosher-mitm.service"
-MITM_DIR = Path("/var/lib/kosher/mitm")
+# The proxy runs unprivileged and cannot traverse /var/lib/kosher
+# (root-only: it holds the policy), so it gets its own state dir.
+MITM_DIR = Path("/var/lib/kosher-mitm")
 MITM_RULES_PATH = MITM_DIR / "rules.json"
 
 

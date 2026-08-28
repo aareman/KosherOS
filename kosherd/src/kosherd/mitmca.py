@@ -18,7 +18,7 @@ from pathlib import Path
 
 log = logging.getLogger(__name__)
 
-MITM_DIR = Path("/var/lib/kosher/mitm")
+MITM_DIR = Path("/var/lib/kosher-mitm")
 CA_PEM = MITM_DIR / "mitmproxy-ca-cert.pem"
 ANCHOR = Path("/etc/pki/ca-trust/source/anchors/kosheros-inspect-ca.crt")
 

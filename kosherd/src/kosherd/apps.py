@@ -38,6 +38,9 @@ log = logging.getLogger(__name__)
 
 CATALOG_PATH = Path("/etc/kosher/catalog.json")
 FILTER_PATH = Path("/etc/kosher/flathub.filter")
+# Apps install system-wide, so who asked for one is not recoverable from
+# flatpak afterwards — kosherd records it here for the admin app.
+LEDGER_PATH = Path("/var/lib/kosher/installs.json")
 REMOTE = "flathub"
 
 
@@ -228,6 +231,49 @@ def search_remote(query: str, limit: int = 60) -> list[dict]:
     ]
     hits.sort(key=rank)
     return hits[:limit]
+
+
+def _load_ledger() -> dict:
+    try:
+        return json.loads(LEDGER_PATH.read_text())
+    except (OSError, ValueError):
+        return {}
+
+
+def record_install(ref: str, uid: int, username: str) -> None:
+    ledger = _load_ledger()
+    ledger[ref] = {"uid": uid, "username": username}
+    LEDGER_PATH.parent.mkdir(parents=True, exist_ok=True)
+    LEDGER_PATH.write_text(json.dumps(ledger, indent=2) + "\n")
+
+
+def forget_install(ref: str) -> None:
+    ledger = _load_ledger()
+    if ledger.pop(ref, None) is not None:
+        LEDGER_PATH.write_text(json.dumps(ledger, indent=2) + "\n")
+
+
+def installed_details() -> list[dict]:
+    """Installed apps with display names and who installed each one."""
+    catalog = {a["ref"]: a for a in load_catalog().get("apps", [])}
+    ledger = _load_ledger()
+    installation = Flatpak.Installation.new_system(None)
+    details = []
+    for r in installation.list_installed_refs(None):
+        if r.get_kind() != Flatpak.RefKind.APP:
+            continue
+        ref = r.get_name()
+        entry = ledger.get(ref, {})
+        details.append({
+            "ref": ref,
+            "name": r.get_appdata_name() or catalog.get(ref, {}).get("name") or ref,
+            "size": r.get_installed_size(),
+            "installed_by": entry.get("username", ""),
+            "installed_by_uid": entry.get("uid", -1),
+            "approved": ref in catalog,
+        })
+    details.sort(key=lambda a: a["name"].lower())
+    return details
 
 
 def installed_refs() -> set[str]:

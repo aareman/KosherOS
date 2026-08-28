@@ -10,7 +10,7 @@ client's source port up in /proc/net/tcp{,6} to find the owning uid — the
 same trick tools like `ss -p` use. That uid selects the rule set.
 
 The proxy runs unprivileged and never reads the policy itself. kosherd
-renders just the URL rules into /var/lib/kosher/mitm/rules.json (uid ->
+renders just the URL rules into /var/lib/kosher-mitm/rules.json (uid ->
 rules) for it; the file is re-read whenever its mtime changes, so policy
 edits take effect without a restart.
 """
@@ -33,7 +33,7 @@ sys.path.insert(0, "/usr/lib/python3.13/site-packages")
 
 from kosherd.urlrules import BLOCK, decide, parse_rules  # noqa: E402
 
-RULES_PATH = Path("/var/lib/kosher/mitm/rules.json")
+RULES_PATH = Path("/var/lib/kosher-mitm/rules.json")
 log = logging.getLogger("kosher-filter")
 
 BLOCK_PAGE = """<!doctype html>

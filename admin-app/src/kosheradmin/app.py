@@ -24,6 +24,12 @@ MODE_LABELS = {
     "none": "No internet",
     "whitelist": "Whitelist only",
     "dnsfilter": "Filtered internet",
+    "inspect": "Filtered internet + page rules",
+}
+
+MODE_HINTS = {
+    "inspect": "Reads web addresses to apply page rules. This decrypts this "
+               "user's web traffic on this computer.",
 }
 
 
@@ -354,6 +360,22 @@ class ProfilesPage(Adw.PreferencesPage):
         if user["mode"] != "whitelist":
             wl_row.set_sensitive(False)
             wl_row.set_subtitle("Only used in Whitelist only mode")
+
+        rules = user.get("rules", [])
+        rules_row = Adw.ActionRow(
+            title="Page rules",
+            subtitle=f"{len(rules)} rule{'s' if len(rules) != 1 else ''}",
+            activatable=True)
+        rules_row.add_suffix(Gtk.Image(icon_name="go-next-symbolic"))
+        rules_row.connect("activated", lambda _r: RulesDialog(
+            self.win, f"Page rules — {user['username']}", rules,
+            lambda new: self.win.with_guardian(lambda pw: self.win.call(
+                lambda: self.win.client.set_url_rules(user["uid"], new, pw),
+                done_msg=f"Page rules saved for {user['username']}"))).present(self.win))
+        if user["mode"] != "inspect":
+            rules_row.set_sensitive(False)
+            rules_row.set_subtitle("Only used in “Filtered internet + page rules” mode")
+        row.add_row(rules_row)
 
         installs = Adw.SwitchRow(title="Can install approved apps",
                                  subtitle="Only apps on the approved list, from the KosherOS Store",

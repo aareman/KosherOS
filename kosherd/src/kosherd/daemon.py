@@ -84,6 +84,13 @@ INTROSPECTION_XML = """
     <method name="ListInstalled">
       <arg direction="out" type="as" name="refs"/>
     </method>
+    <method name="ListInstalledDetails">
+      <arg direction="out" type="s" name="details_json"/>
+    </method>
+    <method name="SetUserApps">
+      <arg direction="in" type="i" name="uid"/>
+      <arg direction="in" type="as" name="refs"/>
+    </method>
     <method name="InstallApp">
       <arg direction="in" type="s" name="ref"/>
     </method>
@@ -199,6 +206,8 @@ ACTIONS = {
     # stays an admin action.
     "ListCatalog": auth.ACTION_USE_STORE,
     "ListInstalled": auth.ACTION_USE_STORE,
+    "ListInstalledDetails": auth.ACTION_READ_CONFIG,
+    "SetUserApps": auth.ACTION_INSTALL_APPS,
     "InstallApp": auth.ACTION_USE_STORE,
     "RemoveApp": auth.ACTION_INSTALL_APPS,
     "SetUserCanInstall": auth.ACTION_INSTALL_APPS,
@@ -491,15 +500,35 @@ class Daemon:
     def impl_ListInstalled(self):
         return GLib.Variant("(as)", (sorted(apps.installed_refs()),))
 
+    def impl_ListInstalledDetails(self):
+        return GLib.Variant("(s)", (json.dumps(apps.installed_details()),))
+
+    def impl_SetUserApps(self, uid: int, refs: list[str]):
+        """Restrict which installed apps a user may run (empty = all)."""
+        user = self.policy.user(uid)
+        if user is None:
+            raise PolicyError(f"uid {uid} is not managed")
+        user.apps = sorted(set(refs))
+        self._save_and_apply()  # re-applies malcontent filters
+        return None
+
     def impl_InstallApp(self, ref: str, *, _uid: int):
+        import pwd
+
         user = self.policy.user(_uid)
         if _uid != 0 and user is not None and not user.can_install_apps:
             raise PolicyError("app installation is turned off for this user")
         self.app_manager.install(ref)  # validates against the allowlist
+        try:
+            username = pwd.getpwuid(_uid).pw_name
+        except KeyError:
+            username = str(_uid)
+        apps.record_install(ref, _uid, username)
         return None
 
     def impl_RemoveApp(self, ref: str):
         self.app_manager.remove(ref)
+        apps.forget_install(ref)
         return None
 
     def impl_SearchApps(self, query: str):

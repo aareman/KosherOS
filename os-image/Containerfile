@@ -11,7 +11,7 @@ RUN dnf -y install dnsmasq nftables python3-gobject python3-jsonschema python3-p
         malcontent malcontent-tools flatpak accountsservice cage \
         mitmproxy ca-certificates && dnf clean all \
     # The proxy runs unprivileged; kosherd hands it only the URL rules.
-    && useradd -r -s /usr/sbin/nologin -d /var/lib/kosher/mitm kosher-mitm
+    && useradd -r -s /usr/sbin/nologin -d /var/lib/kosher-mitm kosher-mitm
 # sudo is on dnf's protected list; removing it here is the whole point.
 # podman must STAY: bootc (the update mechanism) depends on it in F44+. The
 # skuid firewall contains rootless containers, and SUB_UID_COUNT=0 below

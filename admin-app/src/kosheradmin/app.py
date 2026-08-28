@@ -248,6 +248,118 @@ class WhitelistDialog(Adw.Dialog):
             self.list_box.append(row)
 
 
+class RulesDialog(Adw.Dialog):
+    """Ordered URL allow/block rules.
+
+    The first matching rule wins, so order is meaningful and rows can be
+    moved up and down. Rules only do anything in inspect mode, which is
+    where the URL is visible.
+    """
+
+    def __init__(self, win: Window, title: str, rules: list[dict], on_save):
+        super().__init__(title=title, content_width=580, content_height=660)
+        self.win = win
+        self.rules = [dict(r) for r in rules]
+
+        header = Adw.HeaderBar()
+        save = Gtk.Button(label="Save")
+        save.add_css_class("suggested-action")
+        save.connect("clicked", lambda _b: (on_save(self.rules), self.close()))
+        header.pack_end(save)
+
+        self.entry = Gtk.Entry(
+            placeholder_text="youtube.com/watch*   ·   *.example.com   ·   site.com/dir/*",
+            hexpand=True)
+        self.entry.connect("activate", lambda _e: self._add("block"))
+        block_btn = Gtk.Button(label="Block", tooltip_text="Add a block rule")
+        block_btn.add_css_class("destructive-action")
+        block_btn.connect("clicked", lambda _b: self._add("block"))
+        allow_btn = Gtk.Button(label="Allow", tooltip_text="Add an allow rule")
+        allow_btn.add_css_class("suggested-action")
+        allow_btn.connect("clicked", lambda _b: self._add("allow"))
+
+        add_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6,
+                          margin_start=12, margin_end=12, margin_top=12, margin_bottom=4)
+        add_box.append(self.entry)
+        add_box.append(allow_btn)
+        add_box.append(block_btn)
+
+        hint = Gtk.Label(
+            label="Checked from top to bottom; the first rule that matches wins. "
+                  "Anything not matched is allowed — end with a “block *” rule to "
+                  "allow only what is listed above it.",
+            wrap=True, xalign=0, margin_start=14, margin_end=14, margin_bottom=8)
+        hint.add_css_class("dim-label")
+        hint.add_css_class("caption")
+
+        self.list_box = Gtk.ListBox(selection_mode=Gtk.SelectionMode.NONE,
+                                    margin_start=12, margin_end=12, margin_bottom=12)
+        self.list_box.add_css_class("boxed-list")
+        scroller = Gtk.ScrolledWindow(vexpand=True)
+        scroller.set_child(self.list_box)
+
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        box.append(header)
+        box.append(add_box)
+        box.append(hint)
+        box.append(scroller)
+        self.set_child(box)
+        self._rebuild()
+
+    def _add(self, action: str) -> None:
+        pattern = self.entry.get_text().strip()
+        if not pattern:
+            return
+        for raw in pattern.split():
+            cleaned = raw.removeprefix("https://").removeprefix("http://")
+            if cleaned:
+                self.rules.append({"action": action, "pattern": cleaned})
+        self.entry.set_text("")
+        self._rebuild()
+
+    def _move(self, index: int, delta: int) -> None:
+        target = index + delta
+        if 0 <= target < len(self.rules):
+            self.rules[index], self.rules[target] = self.rules[target], self.rules[index]
+            self._rebuild()
+
+    def _rebuild(self) -> None:
+        while (child := self.list_box.get_first_child()) is not None:
+            self.list_box.remove(child)
+        if not self.rules:
+            row = Adw.ActionRow(title="No rules yet",
+                                subtitle="Every page is allowed (behind the DNS filter)")
+            row.set_sensitive(False)
+            self.list_box.append(row)
+            return
+        for index, rule in enumerate(self.rules):
+            blocked = rule["action"] == "block"
+            row = Adw.ActionRow(title=rule["pattern"],
+                                subtitle="Blocked" if blocked else "Allowed")
+            icon = Gtk.Image(icon_name="action-unavailable-symbolic" if blocked
+                             else "emblem-ok-symbolic")
+            icon.add_css_class("error" if blocked else "success")
+            row.add_prefix(icon)
+
+            up = Gtk.Button(icon_name="go-up-symbolic", valign=Gtk.Align.CENTER,
+                            tooltip_text="Check earlier", sensitive=index > 0)
+            up.add_css_class("flat")
+            up.connect("clicked", lambda _b, i=index: self._move(i, -1))
+            down = Gtk.Button(icon_name="go-down-symbolic", valign=Gtk.Align.CENTER,
+                              tooltip_text="Check later",
+                              sensitive=index < len(self.rules) - 1)
+            down.add_css_class("flat")
+            down.connect("clicked", lambda _b, i=index: self._move(i, 1))
+            remove = Gtk.Button(icon_name="user-trash-symbolic", valign=Gtk.Align.CENTER,
+                                tooltip_text="Remove")
+            remove.add_css_class("flat")
+            remove.connect("clicked", lambda _b, i=index: (
+                self.rules.pop(i), self._rebuild()))
+            for btn in (up, down, remove):
+                row.add_suffix(btn)
+            self.list_box.append(row)
+
+
 class UserAppsDialog(Adw.Dialog):
     """Apps on this computer, from one user's point of view.
 

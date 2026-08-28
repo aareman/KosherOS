@@ -19,19 +19,23 @@ from __future__ import annotations
 
 import json
 import logging
-import socket
-import struct
 from pathlib import Path
 
 from mitmproxy import http
 
 import sys
 
-# The addon runs inside mitmproxy's interpreter, which may not have kosherd
-# on its path when running from a checkout.
-sys.path.insert(0, "/usr/lib/python3.13/site-packages")
+try:
+    from kosherd.urlrules import BLOCK, decide, parse_rules
+except ImportError:  # pragma: no cover - only when interpreters differ
+    # mitmproxy may run under a different interpreter than the one kosherd
+    # is installed for. Discover site-packages instead of hardcoding a
+    # version: the image moved from Python 3.13 to 3.14 and a pinned path
+    # silently rotted.
+    import glob
 
-from kosherd.urlrules import BLOCK, decide, parse_rules  # noqa: E402
+    sys.path.extend(sorted(glob.glob("/usr/lib/python3.*/site-packages")))
+    from kosherd.urlrules import BLOCK, decide, parse_rules
 
 RULES_PATH = Path("/var/lib/kosher-mitm/rules.json")
 log = logging.getLogger("kosher-filter")

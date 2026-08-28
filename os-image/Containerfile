@@ -95,7 +95,10 @@ RUN python3 -m pip install --prefix=/usr --no-deps \
         /tmp/kosherd/ /tmp/admin-app/ /tmp/store-app/ /tmp/setup-app/ \
     && rm -rf /tmp/kosherd /tmp/admin-app /tmp/store-app /tmp/setup-app \
     && chmod 755 /usr/bin/kosher-setup-session \
-    && systemctl enable kosher-firstboot.service
+    && systemctl enable kosher-firstboot.service \
+    # Portal sync is inert until the device enrols (the unit and timer
+    # both carry ConditionPathExists on the enrolment file).
+    && systemctl enable kosher-sync.timer
 
 # bootc images must pass a container lint.
 RUN bootc container lint

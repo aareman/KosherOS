@@ -55,6 +55,39 @@ so skuid rules still match.
 **Captive portals**: an admin can open a temporary per-UID window
 (`SetCaptiveMode`) implemented as an nft set element with a timeout.
 
+## Inspect mode: URL-level filtering
+
+At the DNS/IP layer a request is only ever "some host" — the path is
+encrypted, so `site.com/videos` cannot be told from `site.com/learn`.
+Inspect mode is the fourth filter mode, and the only one that can act on
+paths: it terminates TLS locally so the full URL is visible.
+
+- **Rules** (`kosherd/urlrules.py`) are an ordered allow/block list, first
+  match wins, matched case-insensitively and ignoring scheme and `www`
+  (a rule blocking `/videos` must not be dodged with `/Videos`). Bare hosts
+  cover the whole site, `*.host` includes subdomains, `host/dir/*` covers
+  the directory itself. Unmatched requests are allowed — inspect mode sits
+  on the family-DNS baseline — so a trailing `block *` makes it
+  deny-by-default.
+- **Plumbing**: nftables redirects *only inspected users'* tcp/80,443 into
+  a local mitmproxy (`kosher-mitm.service`), which runs as the unprivileged
+  `kosher-mitm` user. kosherd starts it when someone is in the mode and
+  stops it when nobody is.
+- **Whose request is it?** Packets carry no user identity, so the addon
+  resolves the client's source port through `/proc/net/tcp{,6}` to the
+  owning uid, then applies that user's rules and serves a branded block
+  page. The proxy never reads the policy: kosherd renders only
+  `uid -> rules` into `/var/lib/kosher-mitm/rules.json`.
+- **The certificate**: reading URLs requires the proxy to present its own
+  certificates, so kosherd generates a CA once, installs it in the system
+  trust store, and enables Firefox's enterprise-roots policy. The honest
+  cost — this user's HTTPS is decrypted on this machine — is stated in the
+  admin app next to the mode.
+
+Manage rules with `kosherctl rules <uid> list|allow|block|remove|clear`, or
+the Page rules editor in each profile. `scripts/inspect-verify.sh` drives
+the whole path in a VM (11 checks).
+
 ## Apps: an allowlist over upstream Flathub
 
 KosherOS does not host a package repository. Upstream **Flathub is the

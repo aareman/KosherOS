@@ -59,5 +59,5 @@ in a normal terminal.
 3. ✅ Admin app (GTK4) + KosherOS Store: approved-app allowlist over upstream Flathub, installs performed by kosherd with live progress
 4. ✅ Branding: KosherOS identity, boot splash, login screen, wallpaper — see [docs/branding.md](docs/branding.md); real logo artwork still to come
 5. ✅ Installable ISO (`just iso`) + first-boot wizard (admin account, guardian, boot password, firmware checklist)
-6. Portal: remote filter config + remote support
-7. TLS-interception filter mode (mitmproxy) — also unlocks URL **path-level** allow/block rules (impossible at the DNS/IP layer; paths are encrypted in HTTPS)
+6. Portal: remote filter config + remote support (next)
+7. ✅ Inspect mode: local TLS interception (mitmproxy) with URL **path-level** allow/block rules

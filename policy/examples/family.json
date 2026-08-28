@@ -15,6 +15,25 @@
       "mode": "dnsfilter"
     },
     {
+      "uid": 1004,
+      "username": "teen",
+      "mode": "inspect",
+      "rules": [
+        {
+          "action": "allow",
+          "pattern": "wikipedia.org"
+        },
+        {
+          "action": "block",
+          "pattern": "youtube.com/shorts*"
+        },
+        {
+          "action": "block",
+          "pattern": "*/search?*safe=off*"
+        }
+      ]
+    },
+    {
       "uid": 1002,
       "username": "kid1",
       "mode": "whitelist",

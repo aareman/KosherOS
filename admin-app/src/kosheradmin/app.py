@@ -557,6 +557,8 @@ class ProfilesPage(Adw.PreferencesPage):
         mode_row = Adw.ComboRow(title="Filter mode",
                                 model=Gtk.StringList.new([MODE_LABELS[m] for m in MODES]))
         mode_row.set_selected(MODES.index(user["mode"]))
+        # Inspect mode decrypts this user's web traffic; say so plainly.
+        mode_row.set_subtitle(MODE_HINTS.get(user["mode"], ""))
 
         def on_mode(combo, _p):
             new_mode = MODES[combo.get_selected()]

@@ -47,10 +47,14 @@ dev-install VM="kosher-fedora":
 # GUI VM (kosher-gui, as root by key — the image has no sudo).
 deploy-kosherd VM="kosher-fedora":
     rsync -a -e "{{vmssh}}" kosherd/src/kosherd/ policy/schema/policy.schema.json \
+        os-image/files/usr/share/polkit-1/actions/org.kosherlinux.policy \
+        os-image/files/etc/polkit-1/rules.d/49-kosher-admin.rules \
         {{VM}}:/tmp/kosherd-src/
     {{vmssh}} {{VM}} "S=\$([ \$(id -u) = 0 ] || echo sudo); \
         \$S install -m644 /tmp/kosherd-src/policy.schema.json /usr/share/kosher/policy.schema.json \
-        && \$S rm /tmp/kosherd-src/policy.schema.json \
+        && \$S install -m644 /tmp/kosherd-src/org.kosherlinux.policy /usr/share/polkit-1/actions/ \
+        && \$S install -m644 /tmp/kosherd-src/49-kosher-admin.rules /etc/polkit-1/rules.d/ \
+        && \$S rm /tmp/kosherd-src/policy.schema.json /tmp/kosherd-src/org.kosherlinux.policy /tmp/kosherd-src/49-kosher-admin.rules \
         && \$S rsync -a /tmp/kosherd-src/ \$(\$S python3 -c 'import kosherd,os;print(os.path.dirname(kosherd.__file__))')/ \
         && \$S systemctl restart kosherd && systemctl --no-pager status kosherd | head -3"
 

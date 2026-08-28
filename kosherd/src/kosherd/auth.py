@@ -31,6 +31,12 @@ def require(connection: Gio.DBusConnection, sender: str, action_id: str) -> None
     Interactive: polkit will pop the desktop auth agent for the admin's own
     password (AUTH_SELF_KEEP) — the call blocks until answered.
     """
+    # A caller already running as root has full control of the machine; a
+    # polkit check adds nothing. This is also what makes kosherctl usable
+    # from a root shell (support, first-boot wizard, tests) where no
+    # interactive polkit agent exists.
+    if caller_uid(connection, sender) == 0:
+        return
     subject = ("system-bus-name", {"name": GLib.Variant("s", sender)})
     result = connection.call_sync(
         "org.freedesktop.PolicyKit1",

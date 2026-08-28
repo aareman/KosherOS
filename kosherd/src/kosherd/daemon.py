@@ -24,6 +24,7 @@ from . import BUS_NAME, OBJECT_PATH, auth, policy as policy_mod
 from .apply import apply_policy
 from .guardian import Guardian, GuardianError
 from .policy import MODES, Policy, PolicyError, UserPolicy
+from .session import SessionStore
 
 log = logging.getLogger("kosherd")
 
@@ -93,6 +94,18 @@ INTROSPECTION_XML = """
       <arg direction="in" type="i" name="minutes"/>
     </method>
   </interface>
+  <interface name="org.kosherlinux.Daemon1.Session">
+    <method name="Unlock"/>
+    <method name="Lock"/>
+    <method name="Status">
+      <arg direction="out" type="b" name="unlocked"/>
+      <arg direction="out" type="i" name="seconds_remaining"/>
+      <arg direction="out" type="b" name="guardian_satisfied"/>
+    </method>
+    <method name="VerifyGuardian">
+      <arg direction="in" type="s" name="password"/>
+    </method>
+  </interface>
   <interface name="org.kosherlinux.Daemon1.Guardian">
     <method name="IsEnabled">
       <arg direction="out" type="b" name="enabled"/>
@@ -110,6 +123,12 @@ INTROSPECTION_XML = """
 
 # method name -> polkit action id
 ACTIONS = {
+    # Unlock is THE prompt: one polkit check opens a sliding session, after
+    # which the admin works without re-authenticating (see session.py).
+    "Unlock": auth.ACTION_MANAGE_USERS,
+    "Lock": auth.ACTION_READ_CONFIG,
+    "Status": auth.ACTION_READ_CONFIG,
+    "VerifyGuardian": auth.ACTION_READ_CONFIG,
     "GetPolicy": auth.ACTION_READ_CONFIG,
     "SetFilterMode": auth.ACTION_MANAGE_FILTER,
     "SetWhitelist": auth.ACTION_MANAGE_FILTER,
@@ -131,6 +150,9 @@ ACTIONS = {
 # Methods that can weaken the filter: guardian password required when enabled.
 GUARDIAN_GATED = {"SetFilterMode", "SetWhitelist", "SetGuestConfig", "DisableGuardian"}
 
+# Methods that need to know which uid called them (session management).
+UID_AWARE = {"Unlock", "Lock", "Status", "VerifyGuardian"}
+
 ERROR_NAME = "org.kosherlinux.Daemon1.Error"
 
 
@@ -138,6 +160,7 @@ class Daemon:
     def __init__(self) -> None:
         self.policy = policy_mod.load()
         self.guardian = Guardian()
+        self.sessions = SessionStore()
         self.connection: Gio.DBusConnection | None = None
 
     # ---- lifecycle -------------------------------------------------------
@@ -174,15 +197,23 @@ class Daemon:
 
     def _handle_call(self, connection, sender, path, iface, method, params, invocation) -> None:
         try:
-            auth.require(connection, sender, ACTIONS[method])
+            uid = auth.caller_uid(connection, sender)
+            # One prompt per session: an unlocked admin skips the polkit check
+            # (Unlock itself always goes through it).
+            if method == "Unlock" or not self.sessions.is_unlocked(uid):
+                auth.require(connection, sender, ACTIONS[method])
             args = list(params.unpack())
             if method in GUARDIAN_GATED and self.policy.guardian_enabled:
-                # guardian_password is always the trailing string argument
-                if not self.guardian.verify(args[-1]):
-                    raise GuardianError("guardian password incorrect")
-            result = getattr(self, f"impl_{method}")(*args)
+                # guardian_password is the trailing string argument; an
+                # already-proven guardian session skips the re-prompt.
+                if not self.sessions.has_guardian(uid):
+                    if not self.guardian.verify(args[-1]):
+                        raise GuardianError("guardian password incorrect")
+                    self.sessions.grant_guardian(uid)
+            result = getattr(self, f"impl_{method}")(*args, _uid=uid) \
+                if method in UID_AWARE else getattr(self, f"impl_{method}")(*args)
             invocation.return_value(result)
-            log.info("%s by %s (uid %s): ok", method, sender, auth.caller_uid(connection, sender))
+            log.info("%s by %s (uid %s): ok", method, sender, uid)
         except (auth.NotAuthorized, GuardianError, PolicyError, KeyError, ValueError) as e:
             log.warning("%s by %s refused: %s", method, sender, e)
             invocation.return_dbus_error(ERROR_NAME, str(e))
@@ -409,6 +440,32 @@ class Daemon:
         )
         if res.returncode != 0:
             raise PolicyError(f"could not open captive window: {res.stderr.strip()}")
+        return None
+
+    # ---- Session ---------------------------------------------------------
+
+    def impl_Unlock(self, *, _uid: int):
+        self.sessions.unlock(_uid)
+        log.info("admin session opened for uid %d", _uid)
+        return None
+
+    def impl_Lock(self, *, _uid: int):
+        self.sessions.lock(_uid)
+        return None
+
+    def impl_Status(self, *, _uid: int):
+        return GLib.Variant("(bib)", (
+            self.sessions.is_unlocked(_uid),
+            int(self.sessions.seconds_remaining(_uid)),
+            not self.policy.guardian_enabled or self.sessions.has_guardian(_uid),
+        ))
+
+    def impl_VerifyGuardian(self, password: str, *, _uid: int):
+        if not self.policy.guardian_enabled:
+            return None
+        if not self.guardian.verify(password):
+            raise GuardianError("guardian password incorrect")
+        self.sessions.grant_guardian(_uid)
         return None
 
     # ---- Guardian --------------------------------------------------------

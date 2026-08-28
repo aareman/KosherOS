@@ -55,11 +55,13 @@ class Window(Adw.ApplicationWindow):
         super().__init__(**kwargs, title="KosherOS Admin", default_width=760, default_height=640)
         self.client = DaemonClient()
         self.policy: dict = {"users": [], "guardian": {"enabled": False}}
+        self.guardian_ok = False
 
         self.toasts = Adw.ToastOverlay()
         self.set_content(self.toasts)
 
         stack = Adw.ViewStack()
+        self.stack = stack
         self.profiles_page = ProfilesPage(self)
         self.apps_page = AppsPage(self)
         self.system_page = SystemPage(self)
@@ -68,13 +70,43 @@ class Window(Adw.ApplicationWindow):
         stack.add_titled_with_icon(self.system_page, "system", "System", "emblem-system-symbolic")
 
         switcher = Adw.ViewSwitcher(stack=stack, policy=Adw.ViewSwitcherPolicy.WIDE)
-        header = Adw.HeaderBar(title_widget=switcher)
-        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
-        box.append(header)
-        box.append(stack)
-        self.toasts.set_child(box)
+        self.header = Adw.HeaderBar(title_widget=switcher)
+        lock_btn = Gtk.Button(icon_name="changes-prevent-symbolic",
+                              tooltip_text="Lock now")
+        lock_btn.connect("clicked", lambda _b: self._lock())
+        self.header.pack_end(lock_btn)
 
-        self.reload()
+        self.content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        self.content.append(self.header)
+        self.content.append(stack)
+
+        # Locked state: one password, then everything works.
+        self.lock_view = Adw.StatusPage(
+            icon_name="changes-prevent-symbolic",
+            title="KosherOS Admin",
+            description="Unlock once to manage profiles, filters, and apps.")
+        unlock_btn = Gtk.Button(label="Unlock", halign=Gtk.Align.CENTER)
+        unlock_btn.add_css_class("suggested-action")
+        unlock_btn.add_css_class("pill")
+        unlock_btn.connect("clicked", lambda _b: self._unlock())
+        self.lock_view.set_child(unlock_btn)
+
+        self.toasts.set_child(self.lock_view)
+        self._unlock()  # prompt immediately on open
+
+    def _unlock(self) -> None:
+        def on_done(_r):
+            self.toasts.set_child(self.content)
+            self.reload()
+            self.apps_page.refresh()
+
+        _run_async(self.client.unlock, on_done, lambda e: (
+            self.toasts.set_child(self.lock_view), self.toast(_error_text(e))))
+
+    def _lock(self) -> None:
+        self.guardian_ok = False
+        self.toasts.set_child(self.lock_view)
+        _run_async(self.client.lock, lambda _r: None, lambda e: self.toast(_error_text(e)))
 
     # -- shared helpers ------------------------------------------------------
 
@@ -99,12 +131,22 @@ class Window(Adw.ApplicationWindow):
         _run_async(self.client.get_policy, on_done, lambda e: self.toast(_error_text(e)))
 
     def with_guardian(self, then) -> None:
-        """Ask for the guardian password when enabled, then call `then(pw)`."""
-        if not self.policy["guardian"]["enabled"]:
+        """Ask for the guardian password once per session, then call `then(pw)`."""
+        if not self.policy["guardian"]["enabled"] or self.guardian_ok:
             then("")
             return
-        dialog = Adw.AlertDialog(heading="Guardian password",
-                                 body="A filter change requires the guardian password.")
+
+        def proceed(pw: str):
+            def on_verified(_r):
+                self.guardian_ok = True
+                then("")
+
+            _run_async(lambda: self.client.verify_guardian(pw), on_verified,
+                       lambda e: self.toast(_error_text(e)))
+
+        dialog = Adw.AlertDialog(
+            heading="Guardian password",
+            body="Required once per session to change filter settings.")
         entry = Gtk.PasswordEntry(show_peek_icon=True, hexpand=True)
         dialog.set_extra_child(entry)
         dialog.add_response("cancel", "Cancel")
@@ -114,10 +156,89 @@ class Window(Adw.ApplicationWindow):
 
         def on_response(_d, response):
             if response == "ok":
-                then(entry.get_text())
+                proceed(entry.get_text())
 
         dialog.connect("response", on_response)
         dialog.present(self)
+
+
+class WhitelistDialog(Adw.Dialog):
+    """Scalable domain list editor: search, add, remove, save."""
+
+    def __init__(self, win: Window, title: str, domains: list[str], on_save):
+        super().__init__(title=title, content_width=520, content_height=620)
+        self.win = win
+        self.on_save = on_save
+        self.domains = sorted(domains)
+
+        header = Adw.HeaderBar()
+        save = Gtk.Button(label="Save")
+        save.add_css_class("suggested-action")
+        save.connect("clicked", lambda _b: (on_save(self.domains), self.close()))
+        header.pack_end(save)
+
+        self.entry = Gtk.Entry(placeholder_text="example.com  (includes subdomains)",
+                               hexpand=True)
+        self.entry.connect("activate", lambda _e: self._add())
+        add_btn = Gtk.Button(icon_name="list-add-symbolic", tooltip_text="Add domain")
+        add_btn.add_css_class("suggested-action")
+        add_btn.connect("clicked", lambda _b: self._add())
+        add_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6,
+                          margin_start=12, margin_end=12, margin_top=12, margin_bottom=6)
+        add_box.append(self.entry)
+        add_box.append(add_btn)
+
+        self.search = Gtk.SearchEntry(placeholder_text="Search domains",
+                                      margin_start=12, margin_end=12, margin_bottom=6)
+        self.search.connect("search-changed", lambda _e: self._rebuild())
+
+        self.list_box = Gtk.ListBox(selection_mode=Gtk.SelectionMode.NONE,
+                                    margin_start=12, margin_end=12, margin_bottom=12)
+        self.list_box.add_css_class("boxed-list")
+        scroller = Gtk.ScrolledWindow(vexpand=True)
+        scroller.set_child(self.list_box)
+
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        box.append(header)
+        box.append(add_box)
+        box.append(self.search)
+        box.append(scroller)
+        self.set_child(box)
+        self._rebuild()
+
+    def _add(self) -> None:
+        text = self.entry.get_text().strip().lower()
+        if not text:
+            return
+        for raw in text.replace(",", " ").split():
+            d = raw.strip().removeprefix("https://").removeprefix("http://").split("/")[0]
+            if d and d not in self.domains:
+                self.domains.append(d)
+        self.domains.sort()
+        self.entry.set_text("")
+        self._rebuild()
+
+    def _rebuild(self) -> None:
+        while (child := self.list_box.get_first_child()) is not None:
+            self.list_box.remove(child)
+        needle = self.search.get_text().strip().lower()
+        shown = [d for d in self.domains if needle in d]
+        if not shown:
+            empty = Adw.ActionRow(
+                title="No domains yet" if not self.domains else "No matches",
+                subtitle="Add a domain above" if not self.domains else None)
+            empty.set_sensitive(False)
+            self.list_box.append(empty)
+            return
+        for d in shown:
+            row = Adw.ActionRow(title=d)
+            rm = Gtk.Button(icon_name="user-trash-symbolic", valign=Gtk.Align.CENTER,
+                            tooltip_text="Remove")
+            rm.add_css_class("flat")
+            rm.connect("clicked", lambda _b, dom=d: (
+                self.domains.remove(dom), self._rebuild()))
+            row.add_suffix(rm)
+            self.list_box.append(row)
 
 
 class ProfilesPage(Adw.PreferencesPage):
@@ -182,13 +303,18 @@ class ProfilesPage(Adw.PreferencesPage):
                          push(guest["enabled"], MODES[c.get_selected()], wl_domains))
         group.add(mode_row)
 
-        wl = Adw.EntryRow(title="Guest whitelist (comma separated)")
-        wl.set_text(", ".join(wl_domains))
-        wl.set_show_apply_button(True)
-        wl.connect("apply", lambda _e: push(
-            guest["enabled"], mode,
-            [d.strip() for d in wl.get_text().split(",") if d.strip()]))
-        group.add(wl)
+        wl_row = Adw.ActionRow(
+            title="Guest whitelist",
+            subtitle=f"{len(wl_domains)} domain{'s' if len(wl_domains) != 1 else ''}",
+            activatable=True)
+        wl_row.add_suffix(Gtk.Image(icon_name="go-next-symbolic"))
+        wl_row.connect("activated", lambda _r: WhitelistDialog(
+            self.win, "Whitelist — Guest", wl_domains,
+            lambda new: push(guest["enabled"], mode, new)).present(self.win))
+        if mode != "whitelist":
+            wl_row.set_sensitive(False)
+            wl_row.set_subtitle("Only used in Whitelist only mode")
+        group.add(wl_row)
         return group
 
     def _user_row(self, user: dict) -> Adw.ExpanderRow:
@@ -213,18 +339,20 @@ class ProfilesPage(Adw.PreferencesPage):
         mode_row.connect("notify::selected", on_mode)
         row.add_row(mode_row)
 
-        wl = Adw.EntryRow(title="Whitelisted domains, comma separated (each includes its subdomains)")
-        wl.set_text(", ".join(user.get("whitelist", [])))
-
-        def on_wl(_entry):
-            domains = [d.strip() for d in wl.get_text().split(",") if d.strip()]
-            self.win.with_guardian(lambda pw: self.win.call(
-                lambda: self.win.client.set_whitelist(user["uid"], domains, pw),
-                done_msg=f"Whitelist saved for {user['username']}"))
-
-        wl.connect("apply", on_wl)
-        wl.set_show_apply_button(True)
-        row.add_row(wl)
+        domains = user.get("whitelist", [])
+        wl_row = Adw.ActionRow(title="Whitelist",
+                               subtitle=f"{len(domains)} domain{'s' if len(domains) != 1 else ''}")
+        wl_row.set_activatable(True)
+        wl_row.add_suffix(Gtk.Image(icon_name="go-next-symbolic"))
+        wl_row.connect("activated", lambda _r: WhitelistDialog(
+            self.win, f"Whitelist — {user['username']}", domains,
+            lambda new: self.win.with_guardian(lambda pw: self.win.call(
+                lambda: self.win.client.set_whitelist(user["uid"], new, pw),
+                done_msg=f"Whitelist saved for {user['username']}"))).present(self.win))
+        row.add_row(wl_row)
+        if user["mode"] != "whitelist":
+            wl_row.set_sensitive(False)
+            wl_row.set_subtitle("Only used in Whitelist only mode")
         return row
 
     def _unmanaged_users(self) -> list[str]:

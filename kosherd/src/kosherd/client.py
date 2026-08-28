@@ -26,6 +26,19 @@ class DaemonClient:
         )
         return result.unpack() if result else ()
 
+    # Session — one polkit prompt, then a sliding-timeout admin session
+    def unlock(self) -> None:
+        self._call("Session", "Unlock")
+
+    def lock(self) -> None:
+        self._call("Session", "Lock")
+
+    def session_status(self) -> tuple[bool, int, bool]:
+        return self._call("Session", "Status")
+
+    def verify_guardian(self, password: str) -> None:
+        self._call("Session", "VerifyGuardian", "(s)", password)
+
     # Profiles
     def get_policy(self) -> dict:
         return json.loads(self._call("Profiles", "GetPolicy")[0])

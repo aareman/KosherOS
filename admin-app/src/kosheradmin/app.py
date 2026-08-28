@@ -488,6 +488,15 @@ class ProfilesPage(Adw.PreferencesPage):
             rules_row.set_subtitle("Only used in “Filtered internet + page rules” mode")
         row.add_row(rules_row)
 
+        apps_row = Adw.ActionRow(
+            title="Installed apps",
+            subtitle="See what is installed and uninstall or hide apps",
+            activatable=True)
+        apps_row.add_suffix(Gtk.Image(icon_name="go-next-symbolic"))
+        apps_row.connect("activated", lambda _r: UserAppsDialog(
+            self.win, user, self.win.reload).present(self.win))
+        row.add_row(apps_row)
+
         installs = Adw.SwitchRow(title="Can install approved apps",
                                  subtitle="Only apps on the approved list, from the KosherOS Store",
                                  active=user.get("can_install_apps", True))

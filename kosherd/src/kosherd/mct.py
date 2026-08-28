@@ -27,12 +27,23 @@ from .policy import Policy  # noqa: E402
 log = logging.getLogger(__name__)
 
 
-def _installed_app_ids() -> list[str]:
-    res = subprocess.run(
-        ["flatpak", "list", "--system", "--app", "--columns=application"],
-        capture_output=True, text=True,
-    )
-    return [line.strip() for line in res.stdout.splitlines() if line.strip()]
+def _installed_apps() -> list[tuple[str, str]]:
+    """(app id, full ref) for each installed app.
+
+    malcontent matches blocklisted refs exactly — a wildcard like
+    app/id/*/* silently matches nothing — so we need the real refs.
+    """
+    import gi as _gi
+
+    _gi.require_version("Flatpak", "1.0")
+    from gi.repository import Flatpak
+
+    installation = Flatpak.Installation.new_system(None)
+    return [
+        (r.get_name(), r.format_ref())
+        for r in installation.list_installed_refs(None)
+        if r.get_kind() == Flatpak.RefKind.APP
+    ]
 
 
 def apply_malcontent(policy: Policy) -> None:
@@ -50,10 +61,10 @@ def apply_malcontent(policy: Policy) -> None:
             builder.set_allow_system_installation(False)
             if user.apps:
                 if installed is None:
-                    installed = _installed_app_ids()
-                for app_id in installed:
+                    installed = _installed_apps()
+                for app_id, full_ref in installed:
                     if app_id not in user.apps:
-                        builder.blocklist_flatpak_ref(f"app/{app_id}/*/*")
+                        builder.blocklist_flatpak_ref(full_ref)
         app_filter = builder.end()
         try:
             manager.set_app_filter(

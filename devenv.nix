@@ -1,13 +1,27 @@
 { pkgs, ... }:
 
+let
+  # inline-snapshot arrives as a test dependency of the portal's HTTP stack,
+  # and its own test suite fails to build in this nixpkgs revision — which
+  # took the whole dev shell down with it. We never run that suite, so skip
+  # it rather than pinning the whole stack backwards.
+  python = pkgs.python312.override {
+    self = python;
+    packageOverrides = _self: super: {
+      inline-snapshot = super.inline-snapshot.overridePythonAttrs (_: {
+        doCheck = false;
+        doInstallCheck = false;
+      });
+    };
+  };
+in
 {
   # yescrypt hashing for guardian.py (ctypes); production Fedora has this natively.
   env.KOSHERD_LIBCRYPT = "${pkgs.libxcrypt}/lib/libcrypt.so.2";
 
   # Everything the local dev loop needs; nothing is installed on the host.
   packages = [
-    # policy engine + tests (pytest picks up src/ via pyproject pythonpath)
-    (pkgs.python312.withPackages (ps: [
+    (python.withPackages (ps: [
       ps.pytest
       ps.jsonschema
       ps.build

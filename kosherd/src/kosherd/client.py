@@ -91,6 +91,15 @@ class DaemonClient:
     def set_user_can_install(self, uid: int, can_install: bool) -> None:
         self._call("Apps", "SetUserCanInstall", "(ib)", uid, can_install)
 
+    def search_apps(self, query: str) -> list[dict]:
+        return json.loads(self._call("Apps", "SearchApps", "(s)", query)[0])
+
+    def approve_app(self, ref: str, name: str = "", summary: str = "") -> None:
+        self._call("Apps", "ApproveApp", "(sss)", ref, name, summary)
+
+    def unapprove_app(self, ref: str) -> None:
+        self._call("Apps", "UnapproveApp", "(s)", ref)
+
     def connect_app_signals(self, on_progress, on_finished) -> int:
         """Subscribe to install progress. Returns a subscription id."""
 

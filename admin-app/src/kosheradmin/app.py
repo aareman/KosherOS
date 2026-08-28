@@ -6,7 +6,6 @@ prompt, which blocks the call); UI updates hop back via GLib.idle_add.
 
 from __future__ import annotations
 
-import subprocess
 import threading
 from pathlib import Path
 
@@ -65,6 +64,8 @@ class Window(Adw.ApplicationWindow):
         self.profiles_page = ProfilesPage(self)
         self.apps_page = AppsPage(self)
         self.system_page = SystemPage(self)
+        # Pages must not talk to the daemon before Unlock, or their calls
+        # race the unlock prompt.
         stack.add_titled_with_icon(self.profiles_page, "profiles", "Profiles", "system-users-symbolic")
         stack.add_titled_with_icon(self.apps_page, "apps", "Apps", "view-grid-symbolic")
         stack.add_titled_with_icon(self.system_page, "system", "System", "emblem-system-symbolic")
@@ -458,53 +459,119 @@ class ProfilesPage(Adw.PreferencesPage):
 
 
 class AppsPage(Adw.PreferencesPage):
+    """Curates the approved-app list. Installing is the Store's job."""
+
     def __init__(self, win: Window):
         super().__init__()
         self.win = win
         self.group: Adw.PreferencesGroup | None = None
-        self.refresh()
-
-    def _installed(self) -> set[str]:
-        try:
-            out = subprocess.run(
-                ["flatpak", "list", "--system", "--app", "--columns=application"],
-                capture_output=True, text=True, timeout=15).stdout
-            return {line.strip() for line in out.splitlines() if line.strip()}
-        except Exception:  # noqa: BLE001
-            return set()
+        self.search_group: Adw.PreferencesGroup | None = None
+        self.approved: list[dict] = []
+        self.installed: set[str] = set()
+        # No daemon calls here: Window refreshes this page after Unlock.
 
     def refresh(self) -> None:
         def load():
-            return self.win.client.list_catalog(), self._installed()
+            return (self.win.client.list_catalog().get("apps", []),
+                    set(self.win.client.list_installed()))
 
         def on_done(result):
-            catalog, installed = result
-            if self.group is not None:
-                self.remove(self.group)
-            group = Adw.PreferencesGroup(
-                title="Approved Apps",
-                description="Only apps from the KosherOS catalog can be installed")
-            for app in catalog.get("apps", []):
-                row = Adw.ActionRow(title=app.get("name", app["ref"]), subtitle=app["ref"])
-                ref = app["ref"]
-                if ref in installed:
-                    btn = Gtk.Button(label="Remove", valign=Gtk.Align.CENTER)
-                    btn.add_css_class("destructive-action")
-                    btn.connect("clicked", lambda _b, r=ref: self.win.call(
-                        lambda: self.win.client.remove_app(r), refresh=False,
-                        done_msg=f"Removed {r}") or self.refresh())
-                else:
-                    btn = Gtk.Button(label="Install", valign=Gtk.Align.CENTER)
-                    btn.add_css_class("suggested-action")
-                    btn.connect("clicked", lambda _b, r=ref: self.win.call(
-                        lambda: self.win.client.install_app(r), refresh=False,
-                        done_msg=f"Installed {r}") or self.refresh())
-                row.add_suffix(btn)
-                group.add(row)
-            self.group = group
-            self.add(group)
+            self.approved, self.installed = result
+            self._render_approved()
+            if self.search_group is None:
+                self._build_search()
 
         _run_async(load, on_done, lambda e: self.win.toast(_error_text(e)))
+
+    def _render_approved(self) -> None:
+        if self.group is not None:
+            self.remove(self.group)
+        group = Adw.PreferencesGroup(
+            title=f"Approved apps ({len(self.approved)})",
+            description="Anyone using this computer may install these from the "
+                        "KosherOS Store. Nothing else can be installed.")
+        if not self.approved:
+            row = Adw.ActionRow(title="No apps approved yet",
+                                subtitle="Search below to approve apps")
+            row.set_sensitive(False)
+            group.add(row)
+        for app in self.approved:
+            ref = app["ref"]
+            row = Adw.ActionRow(title=app.get("name", ref), subtitle=ref)
+            if ref in self.installed:
+                badge = Gtk.Label(label="Installed", valign=Gtk.Align.CENTER)
+                badge.add_css_class("dim-label")
+                row.add_suffix(badge)
+            btn = Gtk.Button(label="Unapprove", valign=Gtk.Align.CENTER)
+            btn.add_css_class("destructive-action")
+            btn.set_tooltip_text("Remove from the approved list"
+                                 + (" (does not uninstall it)" if ref in self.installed else ""))
+            btn.connect("clicked", lambda _b, r=ref: self.win.call(
+                lambda: self.win.client.unapprove_app(r), refresh=False,
+                done_msg=f"{r} is no longer approved") or GLib.timeout_add(
+                    400, lambda: (self.refresh(), False)[1]))
+            row.add_suffix(btn)
+            group.add(row)
+        self.group = group
+        self.add(group)
+        if self.search_group is not None:
+            self.remove(self.search_group)
+            self.add(self.search_group)
+
+    def _build_search(self) -> None:
+        group = Adw.PreferencesGroup(
+            title="Add apps",
+            description="Search everything available, then approve what you "
+                        "want people on this computer to be able to install.")
+        entry = Adw.EntryRow(title="Search all apps")
+        entry.set_show_apply_button(True)
+        self.results_box = Gtk.ListBox(selection_mode=Gtk.SelectionMode.NONE,
+                                       margin_top=6)
+        self.results_box.add_css_class("boxed-list")
+        group.add(entry)
+        group.add(self.results_box)
+
+        def do_search(_w):
+            query = entry.get_text().strip()
+            self._show_results_message("Searching…")
+
+            def on_done(results):
+                approved = {a["ref"] for a in self.approved}
+                shown = [r for r in results if r["ref"] not in approved][:40]
+                if not shown:
+                    self._show_results_message("No matches")
+                    return
+                self._clear_results()
+                for app in shown:
+                    row = Adw.ActionRow(title=app["name"],
+                                        subtitle=app.get("summary") or app["ref"])
+                    btn = Gtk.Button(label="Approve", valign=Gtk.Align.CENTER)
+                    btn.add_css_class("suggested-action")
+                    btn.connect("clicked", lambda _b, a=app: self.win.call(
+                        lambda: self.win.client.approve_app(
+                            a["ref"], a["name"], a.get("summary", "")),
+                        refresh=False, done_msg=f"{a['name']} approved")
+                        or GLib.timeout_add(400, lambda: (self.refresh(), False)[1]))
+                    row.add_suffix(btn)
+                    self.results_box.append(row)
+
+            _run_async(lambda: self.win.client.search_apps(query), on_done,
+                       lambda e: self._show_results_message(_error_text(e)))
+
+        entry.connect("apply", do_search)
+        entry.connect("entry-activated", do_search)
+        self.search_group = group
+        self.add(group)
+
+    def _clear_results(self) -> None:
+        while (child := self.results_box.get_first_child()) is not None:
+            self.results_box.remove(child)
+
+    def _show_results_message(self, text: str) -> None:
+        self._clear_results()
+        row = Adw.ActionRow(title=text)
+        row.set_sensitive(False)
+        self.results_box.append(row)
 
 
 class SystemPage(Adw.PreferencesPage):

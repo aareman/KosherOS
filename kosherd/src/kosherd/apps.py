@@ -26,6 +26,7 @@ from __future__ import annotations
 import json
 import logging
 import threading
+from collections import deque
 from pathlib import Path
 
 import gi
@@ -83,6 +84,152 @@ def write_remote_filter() -> None:
     log.info("applied flatpak remote filter (%d approved apps)", len(allowed_refs()))
 
 
+def save_catalog(catalog: dict) -> None:
+    """Persist the allowlist and re-apply the remote filter."""
+    CATALOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+    tmp = CATALOG_PATH.with_suffix(".tmp")
+    tmp.write_text(json.dumps(catalog, indent=2) + "\n")
+    tmp.replace(CATALOG_PATH)
+    write_remote_filter()
+
+
+def approve(ref: str, name: str = "", summary: str = "") -> None:
+    catalog = load_catalog()
+    apps_list = catalog.setdefault("apps", [])
+    if any(a["ref"] == ref for a in apps_list):
+        raise AppError(f"{ref} is already approved")
+    entry = {"ref": ref, "name": name or ref}
+    if summary:
+        entry["summary"] = summary
+    apps_list.append(entry)
+    apps_list.sort(key=lambda a: a.get("name", a["ref"]).lower())
+    save_catalog(catalog)
+    log.info("approved app %s", ref)
+
+
+def unapprove(ref: str) -> None:
+    catalog = load_catalog()
+    before = len(catalog.get("apps", []))
+    catalog["apps"] = [a for a in catalog.get("apps", []) if a["ref"] != ref]
+    if len(catalog["apps"]) == before:
+        raise AppError(f"{ref} is not on the approved list")
+    save_catalog(catalog)
+    log.info("removed app %s from the approved list", ref)
+
+
+# -- searching the remote ----------------------------------------------------
+
+_APPSTREAM_MAX_AGE = 24 * 3600
+_index_cache: tuple[float, list[dict]] | None = None
+
+
+def _appstream_path() -> Path:
+    return Path(
+        f"/var/lib/flatpak/appstream/{REMOTE}/{Flatpak.get_default_arch()}"
+        "/active/appstream.xml.gz"
+    )
+
+
+def ensure_appstream() -> None:
+    """Fetch/refresh the remote's app metadata if it is missing or stale."""
+    import time
+
+    path = _appstream_path()
+    fresh = path.exists() and (time.time() - path.stat().st_mtime) < _APPSTREAM_MAX_AGE
+    if fresh:
+        return
+    installation = Flatpak.Installation.new_system(None)
+    installation.update_appstream_sync(REMOTE, Flatpak.get_default_arch(), None)
+
+
+_XML_LANG = "{http://www.w3.org/XML/1998/namespace}lang"
+APP_COMPONENT_TYPES = frozenset({
+    "desktop-application", "desktop", "console-application", None,
+})
+
+
+def _untranslated(component, tag: str) -> str:
+    """The English text for a tag.
+
+    AppStream repeats <name>/<summary> once per language; the untranslated
+    entry is the one with no xml:lang. Taking the first match gives whatever
+    translation happens to come first (GIMP came back in Arabic), which also
+    wrecks search ranking.
+    """
+    fallback = ""
+    for element in component.findall(tag):
+        if element.get(_XML_LANG) is None:
+            return (element.text or "").strip()
+        fallback = fallback or (element.text or "").strip()
+    return fallback
+
+
+def _load_index() -> list[dict]:
+    """Parse the remote's appstream catalogue into a light search index."""
+    global _index_cache
+    import gzip
+    import xml.etree.ElementTree as ET
+
+    path = _appstream_path()
+    if not path.exists():
+        return []
+    mtime = path.stat().st_mtime
+    if _index_cache is not None and _index_cache[0] == mtime:
+        return _index_cache[1]
+
+    index: list[dict] = []
+    with gzip.open(path, "rb") as fh:
+        for _event, element in ET.iterparse(fh, events=("end",)):
+            if element.tag != "component":
+                continue
+            # Flathub mixes the modern "desktop-application" type with the
+            # legacy "desktop" one (Firefox uses it) — accept both, plus
+            # console apps; skip runtimes, addons and localisation packs.
+            if element.get("type") in APP_COMPONENT_TYPES:
+                app_id = (element.findtext("id") or "").removesuffix(".desktop")
+                name = _untranslated(element, "name") or app_id
+                summary = _untranslated(element, "summary")
+                if app_id:
+                    index.append({"ref": app_id, "name": name, "summary": summary})
+            element.clear()
+
+    # Only keep apps the remote actually offers for this architecture.
+    available = available_refs()
+    index = [a for a in index if a["ref"] in available]
+    index.sort(key=lambda a: a["name"].lower())
+    _index_cache = (mtime, index)
+    log.info("indexed %d apps from %s", len(index), REMOTE)
+    return index
+
+
+def search_remote(query: str, limit: int = 60) -> list[dict]:
+    """Search every app the remote offers (for the admin's approval UI)."""
+    ensure_appstream()
+    needle = query.strip().lower()
+    index = _load_index()
+    if not needle:
+        return index[:limit]
+
+    def rank(app: dict) -> tuple[int, str]:
+        name = app["name"].lower()
+        if name == needle:
+            return (0, name)
+        if name.startswith(needle):
+            return (1, name)
+        if needle in name:
+            return (2, name)
+        return (3, name)
+
+    hits = [
+        a for a in index
+        if needle in a["name"].lower()
+        or needle in a["ref"].lower()
+        or needle in a["summary"].lower()
+    ]
+    hits.sort(key=rank)
+    return hits[:limit]
+
+
 def installed_refs() -> set[str]:
     installation = Flatpak.Installation.new_system(None)
     return {
@@ -131,47 +278,68 @@ def available_refs() -> set[str]:
 
 
 class AppManager:
-    """Serializes flatpak transactions and reports progress."""
+    """Queues flatpak jobs and reports progress.
+
+    flatpak cannot run two transactions against the same installation at
+    once, so jobs run one at a time — but requests are QUEUED, never
+    refused: someone can click install on several apps and walk away. Queued
+    jobs report a "Queued" status until their turn comes.
+    """
 
     def __init__(self, on_progress, on_finished):
         """on_progress(ref, percent, status); on_finished(ref, ok, error)."""
         self._on_progress = on_progress
         self._on_finished = on_finished
         self._lock = threading.Lock()
-        self._busy: str | None = None
+        self._queue: deque[tuple[str, object]] = deque()
+        self._pending: set[str] = set()   # queued or running
+        self._worker: threading.Thread | None = None
 
     @property
-    def busy_with(self) -> str | None:
-        return self._busy
+    def pending(self) -> set[str]:
+        with self._lock:
+            return set(self._pending)
 
     def install(self, ref: str) -> None:
         if ref not in allowed_refs():
             raise AppError(f"{ref} is not on the approved app list")
-        self._start(ref, self._do_install)
+        self._enqueue(ref, self._do_install)
 
     def remove(self, ref: str) -> None:
-        self._start(ref, self._do_remove)
+        self._enqueue(ref, self._do_remove)
 
-    def _start(self, ref: str, work) -> None:
+    def _enqueue(self, ref: str, work) -> None:
         with self._lock:
-            if self._busy is not None:
-                raise AppError(f"busy installing {self._busy}; try again shortly")
-            self._busy = ref
-        threading.Thread(target=self._run, args=(ref, work), daemon=True).start()
+            if ref in self._pending:
+                raise AppError(f"{ref} is already in progress")
+            self._pending.add(ref)
+            self._queue.append((ref, work))
+            position = len(self._queue)
+            if self._worker is None or not self._worker.is_alive():
+                self._worker = threading.Thread(target=self._drain, daemon=True)
+                self._worker.start()
+        if position > 1:
+            self._on_progress(ref, 0, f"Queued ({position - 1} ahead)")
 
-    def _run(self, ref: str, work) -> None:
-        try:
-            work(ref)
-        except Exception as e:  # noqa: BLE001 - reported to the caller
-            message = e.message if isinstance(e, GLib.Error) else str(e)
-            log.error("%s failed: %s", ref, message)
-            self._finish(ref, False, message)
-        else:
-            self._finish(ref, True, "")
+    def _drain(self) -> None:
+        while True:
+            with self._lock:
+                if not self._queue:
+                    self._worker = None
+                    return
+                ref, work = self._queue.popleft()
+            try:
+                work(ref)
+            except Exception as e:  # noqa: BLE001 - reported to the caller
+                message = e.message if isinstance(e, GLib.Error) else str(e)
+                log.error("%s failed: %s", ref, message)
+                self._finish(ref, False, message)
+            else:
+                self._finish(ref, True, "")
 
     def _finish(self, ref: str, ok: bool, error: str) -> None:
         with self._lock:
-            self._busy = None
+            self._pending.discard(ref)
         self._on_finished(ref, ok, error)
 
     def _transaction(self, ref: str) -> Flatpak.Transaction:

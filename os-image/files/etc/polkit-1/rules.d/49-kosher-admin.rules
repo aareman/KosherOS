@@ -5,10 +5,16 @@ polkit.addRule(function(action, subject) {
     if (action.id.indexOf("org.kosherlinux.") === 0 &&
         subject.isInGroup("kosher-admin") &&
         subject.active && subject.local) {
-        // Reads are free for admins — no password just to LOOK at settings.
-        if (action.id === "org.kosherlinux.read-config") {
+        // Reads and the app store are free — no password just to LOOK at
+        // settings or to install an already-approved app. A rule beats the
+        // action's own default, so these must be listed explicitly or they
+        // would inherit the password prompt below.
+        if (action.id === "org.kosherlinux.read-config" ||
+            action.id === "org.kosherlinux.use-store") {
             return polkit.Result.YES;
         }
+        // Everything that CHANGES something: one prompt, then kosherd's
+        // session covers the rest of the sitting (see session.py).
         return polkit.Result.AUTH_SELF_KEEP;
     }
 });

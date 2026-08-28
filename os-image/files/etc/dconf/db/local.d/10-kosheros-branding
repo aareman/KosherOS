@@ -11,10 +11,12 @@ picture-options='zoom'
 primary-color='#0b1a33'
 
 [org/gnome/login-screen]
-logo='/usr/share/pixmaps/kosheros-logo.png'
+# A small logo: GDM draws it at native size next to the login controls, and
+# a large one overlaps the account hints (e.g. "you need to set a password
+# at first login"). No banner message — the logo is the branding.
+logo='/usr/share/pixmaps/kosheros-logo-login.png'
 disable-user-list=false
-banner-message-enable=true
-banner-message-text='KosherOS'
+banner-message-enable=false
 
 [org/gnome/desktop/interface]
 color-scheme='prefer-dark'

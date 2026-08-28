@@ -79,7 +79,8 @@ class AppRow(Adw.ActionRow):
 
     def _on_clicked(self, _b) -> None:
         installing = self.state != "installed"
-        self.set_state("working", 0, "Starting…")
+        # Several apps can be requested at once; kosherd queues them.
+        self.set_state("working", 0, "Queued…")
         work = (self.store.client.install_app if installing
                 else self.store.client.remove_app)
 

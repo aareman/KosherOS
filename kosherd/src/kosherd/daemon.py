@@ -89,6 +89,18 @@ INTROSPECTION_XML = """
       <arg direction="in" type="i" name="uid"/>
       <arg direction="in" type="b" name="can_install"/>
     </method>
+    <method name="SearchApps">
+      <arg direction="in" type="s" name="query"/>
+      <arg direction="out" type="s" name="results_json"/>
+    </method>
+    <method name="ApproveApp">
+      <arg direction="in" type="s" name="ref"/>
+      <arg direction="in" type="s" name="name"/>
+      <arg direction="in" type="s" name="summary"/>
+    </method>
+    <method name="UnapproveApp">
+      <arg direction="in" type="s" name="ref"/>
+    </method>
     <signal name="AppProgress">
       <arg type="s" name="ref"/>
       <arg type="i" name="percent"/>
@@ -184,6 +196,10 @@ ACTIONS = {
     "InstallApp": auth.ACTION_USE_STORE,
     "RemoveApp": auth.ACTION_INSTALL_APPS,
     "SetUserCanInstall": auth.ACTION_INSTALL_APPS,
+    # Curating the allowlist is an admin act; searching it is read-only.
+    "SearchApps": auth.ACTION_READ_CONFIG,
+    "ApproveApp": auth.ACTION_INSTALL_APPS,
+    "UnapproveApp": auth.ACTION_INSTALL_APPS,
     "CheckUpdate": auth.ACTION_READ_CONFIG,
     "ApplyUpdate": auth.ACTION_APPLY_UPDATES,
     "SetCaptiveMode": auth.ACTION_MANAGE_NETWORK,
@@ -462,6 +478,17 @@ class Daemon:
 
     def impl_RemoveApp(self, ref: str):
         self.app_manager.remove(ref)
+        return None
+
+    def impl_SearchApps(self, query: str):
+        return GLib.Variant("(s)", (json.dumps(apps.search_remote(query)),))
+
+    def impl_ApproveApp(self, ref: str, name: str, summary: str):
+        apps.approve(ref, name, summary)
+        return None
+
+    def impl_UnapproveApp(self, ref: str):
+        apps.unapprove(ref)
         return None
 
     def impl_SetUserCanInstall(self, uid: int, can_install: bool):

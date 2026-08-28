@@ -48,6 +48,10 @@ RUN dnf -y install librsvg2-tools plymouth-plugin-script dconf && dnf clean all 
          -o /usr/share/plymouth/themes/kosheros/logo.png \
     && install -D -m644 /usr/share/plymouth/themes/kosheros/logo.png \
          /usr/share/pixmaps/kosheros-logo.png \
+    # GDM draws the logo at native size, so ship a small one for the login
+    # screen — a big logo overlaps the account hints.
+    && rsvg-convert -w 64 -h 64 /usr/share/kosher/branding/kosheros-logo.svg \
+         -o /usr/share/pixmaps/kosheros-logo-login.png \
     && install -D -m644 /usr/share/kosher/branding/wallpaper.svg \
          /usr/share/backgrounds/kosheros/kosheros.svg \
     && plymouth-set-default-theme kosheros \

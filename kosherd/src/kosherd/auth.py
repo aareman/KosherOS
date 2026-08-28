@@ -10,16 +10,17 @@ from __future__ import annotations
 
 from gi.repository import Gio, GLib
 
-ACTION_READ_CONFIG = "org.kosherlinux.read-config"
-# Granted to every active local user: the catalog is the allowlist, so
-# installing from it is safe for supervised users too.
-ACTION_USE_STORE = "org.kosherlinux.use-store"
-ACTION_MANAGE_USERS = "org.kosherlinux.manage-users"
-ACTION_MANAGE_FILTER = "org.kosherlinux.manage-filter"
-ACTION_INSTALL_APPS = "org.kosherlinux.install-apps"
-ACTION_MANAGE_NETWORK = "org.kosherlinux.manage-network"
-ACTION_APPLY_UPDATES = "org.kosherlinux.apply-updates"
-ACTION_MANAGE_GUARDIAN = "org.kosherlinux.manage-guardian"
+# Action ids live in access.py, which is importable without GObject.
+from .access import (  # noqa: E402,F401
+    ACTION_APPLY_UPDATES,
+    ACTION_INSTALL_APPS,
+    ACTION_MANAGE_FILTER,
+    ACTION_MANAGE_GUARDIAN,
+    ACTION_MANAGE_NETWORK,
+    ACTION_MANAGE_USERS,
+    ACTION_READ_CONFIG,
+    ACTION_USE_STORE,
+)
 
 _ALLOW_USER_INTERACTION = 1
 

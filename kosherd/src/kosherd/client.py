@@ -26,6 +26,17 @@ class DaemonClient:
         )
         return result.unpack() if result else ()
 
+    # First-boot setup (only available until an admin exists)
+    def setup_complete(self) -> bool:
+        return self._call("Setup", "IsComplete")[0]
+
+    def create_first_admin(self, username: str, full_name: str, password: str) -> int:
+        return self._call("Setup", "CreateFirstAdmin", "(sss)",
+                          username, full_name, password)[0]
+
+    def finish_setup(self, guardian_password: str, grub_password: str) -> None:
+        self._call("Setup", "FinishSetup", "(ss)", guardian_password, grub_password)
+
     # Session — one polkit prompt, then a sliding-timeout admin session
     def unlock(self) -> None:
         self._call("Session", "Unlock")

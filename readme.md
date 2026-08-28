@@ -20,6 +20,7 @@ See [docs/architecture.md](docs/architecture.md) for how it works.
 | `kosherd/` | privileged daemon, policy engine, `kosherctl` CLI (Python) |
 | `admin-app/` | KosherOS Admin — profiles, filters, guest, updates (GTK4) |
 | `store-app/` | KosherOS Store — install approved apps (GTK4, open to all users) |
+| `setup-app/` | KosherOS Setup — the first-boot wizard (GTK4) |
 | `branding/` | logo and wallpaper source art |
 | `policy/` | policy JSON schema + examples — the contract for device, admin app, and portal |
 | `os-image/` | the distro: Containerfile + system config for the bootc image |
@@ -42,8 +43,14 @@ just dev-install   # install the whole filter stack into that VM
 just deploy-kosherd# push local kosherd code into the VM and restart it (~1 s)
 just fedora-ssh    # shell into the VM
 just build         # build the OS image (layer-cached)
-just vm            # build a bootable qcow2 from it
+just vm            # build a bootable qcow2 from it (dev login: abba/kosher)
+just iso           # build the installable ISO (no preset users)
+just boot-iso      # rehearse a real install into a blank disk
+just boot-installed# boot that installed machine (runs the first-boot wizard)
 ```
+
+`just vm`, `just iso`, and the podman-in-root steps need sudo, so run those
+in a normal terminal.
 
 ## Roadmap
 
@@ -51,6 +58,6 @@ just vm            # build a bootable qcow2 from it
 2. ✅ Bootc OS image (builds, lint-clean, boots to GNOME) — CI publish + signing still pending
 3. ✅ Admin app (GTK4) + KosherOS Store: approved-app allowlist over upstream Flathub, installs performed by kosherd with live progress
 4. ✅ Branding: KosherOS identity, boot splash, login screen, wallpaper — see [docs/branding.md](docs/branding.md); real logo artwork still to come
-5. Installable ISO + first-boot wizard
+5. ✅ Installable ISO (`just iso`) + first-boot wizard (admin account, guardian, boot password, firmware checklist)
 6. Portal: remote filter config + remote support
 7. TLS-interception filter mode (mitmproxy) — also unlocks URL **path-level** allow/block rules (impossible at the DNS/IP layer; paths are encrypted in HTTPS)

@@ -8,7 +8,7 @@ FROM quay.io/fedora/fedora-bootc:44
 # dnf5 can't mix a @group with plain packages in one install, hence two calls.
 RUN dnf -y install --exclude=toolbox --exclude=podman @workstation-product-environment && dnf clean all
 RUN dnf -y install dnsmasq nftables python3-gobject python3-jsonschema python3-pip \
-        malcontent malcontent-tools flatpak accountsservice && dnf clean all
+        malcontent malcontent-tools flatpak accountsservice cage && dnf clean all
 # sudo is on dnf's protected list; removing it here is the whole point.
 # podman must STAY: bootc (the update mechanism) depends on it in F44+. The
 # skuid firewall contains rootless containers, and SUB_UID_COUNT=0 below
@@ -78,10 +78,13 @@ RUN flatpak remote-add --system --if-not-exists \
 COPY kosherd/ /tmp/kosherd/
 COPY admin-app/ /tmp/admin-app/
 COPY store-app/ /tmp/store-app/
+COPY setup-app/ /tmp/setup-app/
 COPY policy/schema/policy.schema.json /usr/share/kosher/policy.schema.json
 RUN python3 -m pip install --prefix=/usr --no-deps \
-        /tmp/kosherd/ /tmp/admin-app/ /tmp/store-app/ \
-    && rm -rf /tmp/kosherd /tmp/admin-app /tmp/store-app
+        /tmp/kosherd/ /tmp/admin-app/ /tmp/store-app/ /tmp/setup-app/ \
+    && rm -rf /tmp/kosherd /tmp/admin-app /tmp/store-app /tmp/setup-app \
+    && chmod 755 /usr/bin/kosher-setup-session \
+    && systemctl enable kosher-firstboot.service
 
 # bootc images must pass a container lint.
 RUN bootc container lint

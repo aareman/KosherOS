@@ -86,6 +86,30 @@ contract between kosherd, the admin app, and the future portal. `revision` +
 `source` fields make the portal just another writer, synced by a device-
 initiated agent (see `portal/README.md`).
 
+## Installation & first boot
+
+`just iso` produces an Anaconda installer ISO (bootc-image-builder) that
+installs KosherOS with **no preset users and no passwords** — the installer's
+user-creation screens are disabled, because accounts are created by the
+first-boot wizard instead.
+
+On first boot `kosher-firstboot.service` runs *instead of* the login screen
+(there is nobody to log in as yet): a `cage` kiosk session showing only
+`kosher-setup`, so the machine cannot be used before it is configured. The
+wizard creates the administrator (a real password, added to `kosher-admin`,
+filter mode `dnsfilter`), optionally sets the guardian password and a GRUB
+boot-menu password (pbkdf2 into `/boot/grub2/user.cfg`), and shows the
+firmware checklist KosherOS cannot enforce itself (UEFI password, disable
+USB/network boot, keep Secure Boot). Finishing writes
+`/var/lib/kosher/setup-complete`, disables the unit, and starts GDM.
+
+The setup D-Bus interface is the one path that runs without an authorized
+admin — necessarily, since none exists yet. It is bounded precisely:
+`CreateFirstAdmin` refuses once any admin is in the policy, and every setup
+method is refused once the stamp exists, so it is not a standing escalation
+path. (A wizard interrupted after creating the admin can still resume,
+because completion is the stamp — not the mere existence of an admin.)
+
 ## Update & release
 
 The OS is a container image (`os-image/Containerfile`) on `fedora-bootc`.

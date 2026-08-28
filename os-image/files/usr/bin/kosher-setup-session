@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+# Run the first-boot wizard in a minimal Wayland session on tty1, then hand
+# the machine over to GDM. Kept deliberately small: cage (a single-app
+# compositor) shows only the wizard, so the machine cannot be used for
+# anything else before it is set up.
+set -euo pipefail
+
+if [ -e /var/lib/kosher/setup-complete ]; then
+    exec systemctl start gdm.service
+fi
+
+export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/kosher-setup}"
+mkdir -p "$XDG_RUNTIME_DIR"
+chmod 700 "$XDG_RUNTIME_DIR"
+
+if command -v cage >/dev/null 2>&1; then
+    cage -- /usr/bin/kosher-setup || true
+else
+    # Fallback: no kiosk compositor available, let GDM run and the wizard
+    # will be launched from the admin's first session instead.
+    echo "cage not installed; deferring setup wizard to the desktop session" >&2
+fi
+
+# Setup finished (or was skipped) — start the normal login screen.
+exec systemctl start gdm.service

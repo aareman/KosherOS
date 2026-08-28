@@ -1,0 +1,22 @@
+# bootc-image-builder config for the INSTALLER ISO.
+# No users and no passwords are baked in: the installed machine runs the
+# KosherOS first-boot wizard, which creates the administrator account.
+
+[customizations.installer.kickstart]
+contents = """
+# Wipe and use the whole disk; no interactive partitioning questions.
+clearpart --all --initlabel --disklabel=gpt
+autopart --type=lvm --noswap
+timezone America/New_York --utc
+keyboard us
+lang en_US.UTF-8
+reboot --eject
+"""
+
+[customizations.installer.modules]
+# Trim the installer to what KosherOS needs: no user creation (the wizard
+# does that) and no network-storage screens.
+disable = [
+  "org.fedoraproject.Anaconda.Modules.Users",
+  "org.fedoraproject.Anaconda.Modules.Subscription",
+]

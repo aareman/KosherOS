@@ -112,6 +112,21 @@ INTROSPECTION_XML = """
       <arg direction="in" type="i" name="minutes"/>
     </method>
   </interface>
+  <interface name="org.kosherlinux.Daemon1.Setup">
+    <method name="IsComplete">
+      <arg direction="out" type="b" name="complete"/>
+    </method>
+    <method name="CreateFirstAdmin">
+      <arg direction="in" type="s" name="username"/>
+      <arg direction="in" type="s" name="full_name"/>
+      <arg direction="in" type="s" name="password"/>
+      <arg direction="out" type="i" name="uid"/>
+    </method>
+    <method name="FinishSetup">
+      <arg direction="in" type="s" name="guardian_password"/>
+      <arg direction="in" type="s" name="grub_password"/>
+    </method>
+  </interface>
   <interface name="org.kosherlinux.Daemon1.Session">
     <method name="Unlock"/>
     <method name="Lock"/>
@@ -141,6 +156,12 @@ INTROSPECTION_XML = """
 
 # method name -> polkit action id
 ACTIONS = {
+    # First-boot setup. These are authorized ONLY while the machine has no
+    # admin yet (see _handle_call); afterwards they are refused outright,
+    # so this is not a standing privilege-escalation path.
+    "IsComplete": auth.ACTION_READ_CONFIG,
+    "CreateFirstAdmin": auth.ACTION_MANAGE_USERS,
+    "FinishSetup": auth.ACTION_MANAGE_USERS,
     # Unlock is THE prompt: one polkit check opens a sliding session, after
     # which the admin works without re-authenticating (see session.py).
     "Unlock": auth.ACTION_MANAGE_USERS,
@@ -176,6 +197,12 @@ GUARDIAN_GATED = {"SetFilterMode", "SetWhitelist", "SetGuestConfig", "DisableGua
 
 # Methods that need to know which uid called them (session management).
 UID_AWARE = {"Unlock", "Lock", "Status", "VerifyGuardian", "InstallApp"}
+
+# First-boot only; closed forever once an admin exists.
+SETUP_METHODS = {"IsComplete", "CreateFirstAdmin", "FinishSetup"}
+
+SETUP_STAMP = Path("/var/lib/kosher/setup-complete")
+GRUB_USER_CFG = Path("/boot/grub2/user.cfg")
 
 ERROR_NAME = "org.kosherlinux.Daemon1.Error"
 
@@ -227,9 +254,15 @@ class Daemon:
     def _handle_call(self, connection, sender, path, iface, method, params, invocation) -> None:
         try:
             uid = auth.caller_uid(connection, sender)
+            if method in SETUP_METHODS:
+                # The first-boot wizard runs before any admin exists, so
+                # there is nobody who could authorize it. Once setup is
+                # complete these methods are permanently closed.
+                if method != "IsComplete" and self.setup_complete():
+                    raise PolicyError("initial setup is already complete")
             # One prompt per session: an unlocked admin skips the polkit check
             # (Unlock itself always goes through it).
-            if method == "Unlock" or not self.sessions.is_unlocked(uid):
+            elif method == "Unlock" or not self.sessions.is_unlocked(uid):
                 auth.require(connection, sender, ACTIONS[method])
             args = list(params.unpack())
             if method in GUARDIAN_GATED and self.policy.guardian_enabled:
@@ -485,6 +518,82 @@ class Daemon:
         if res.returncode != 0:
             raise PolicyError(f"could not open captive window: {res.stderr.strip()}")
         return None
+
+    # ---- First-boot setup ------------------------------------------------
+
+    def setup_complete(self) -> bool:
+        """Setup is finished only when FinishSetup has stamped it.
+
+        Deliberately NOT "an admin exists": the wizard creates the admin and
+        then still has to set the guardian and boot passwords, and a wizard
+        interrupted midway must be able to resume. CreateFirstAdmin carries
+        its own guard against a second admin.
+        """
+        return SETUP_STAMP.exists()
+
+    def impl_IsComplete(self):
+        return GLib.Variant("(b)", (self.setup_complete(),))
+
+    def impl_CreateFirstAdmin(self, username: str, full_name: str, password: str):
+        import pwd
+
+        if any(u.admin for u in self.policy.users):
+            raise PolicyError("an administrator account already exists")
+        if len(password) < 6:
+            raise PolicyError("password must be at least 6 characters")
+        try:
+            pwd.getpwnam(username)
+        except KeyError:
+            pass
+        else:
+            raise PolicyError(f"'{username}' already exists")
+
+        uid = self._accounts_create_user(username, full_name)
+        # The admin sets a real password here (not SET_AT_LOGIN): they will
+        # need it immediately for polkit prompts.
+        res = subprocess.run(["chpasswd"], input=f"{username}:{password}",
+                             capture_output=True, text=True)
+        if res.returncode != 0:
+            raise PolicyError(f"could not set password: {res.stderr.strip()}")
+        subprocess.run(["usermod", "-aG", "kosher-admin", username], check=False)
+
+        self.policy.users.append(UserPolicy(
+            uid=uid, username=username, mode="dnsfilter", admin=True))
+        self._save_and_apply()
+        log.info("first admin created: %s (uid %d)", username, uid)
+        return GLib.Variant("(i)", (uid,))
+
+    def impl_FinishSetup(self, guardian_password: str, grub_password: str):
+        if not any(u.admin for u in self.policy.users):
+            raise PolicyError("create the administrator account first")
+        if guardian_password:
+            self.guardian.set_password(guardian_password)
+            self.policy.guardian_enabled = True
+            self._save_and_apply()
+        if grub_password:
+            self._set_grub_password(grub_password)
+        SETUP_STAMP.parent.mkdir(parents=True, exist_ok=True)
+        SETUP_STAMP.write_text("1\n")
+        subprocess.run(["systemctl", "disable", "kosher-firstboot.service"],
+                       capture_output=True)
+        log.info("initial setup complete")
+        return None
+
+    @staticmethod
+    def _set_grub_password(password: str) -> None:
+        """Password-protect the boot menu (blocks kernel-argument edits)."""
+        res = subprocess.run(["grub2-mkpasswd-pbkdf2"], text=True,
+                             input=f"{password}\n{password}\n", capture_output=True)
+        if res.returncode != 0:
+            raise PolicyError(f"could not hash the boot password: {res.stderr.strip()}")
+        digest = next((line.split()[-1] for line in res.stdout.splitlines()
+                       if "grub.pbkdf2" in line), None)
+        if digest is None:
+            raise PolicyError("unexpected grub2-mkpasswd-pbkdf2 output")
+        GRUB_USER_CFG.parent.mkdir(parents=True, exist_ok=True)
+        GRUB_USER_CFG.write_text(
+            f"GRUB2_PASSWORD={digest}\n")
+        GRUB_USER_CFG.chmod(0o600)
 
     # ---- Session ---------------------------------------------------------
 

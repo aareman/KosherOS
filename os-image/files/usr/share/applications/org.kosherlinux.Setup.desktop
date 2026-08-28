@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=KosherOS Setup
+Comment=Finish setting up this computer
+Exec=kosher-setup
+Icon=security-high
+Terminal=false
+NoDisplay=true
+Categories=System;Settings;

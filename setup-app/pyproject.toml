@@ -1,0 +1,18 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "koshersetup"
+version = "0.1.0"
+description = "KosherOS first-boot setup wizard"
+readme = "README.md"
+requires-python = ">=3.11"
+license = "GPL-3.0-or-later"
+dependencies = ["kosherd"]
+
+[project.scripts]
+kosher-setup = "koshersetup.app:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/koshersetup"]

@@ -90,6 +90,39 @@ vm: build
     sudo chown -R "$USER:" build/qcow2
     @echo "qcow2 at build/qcow2/disk.qcow2 — boot with: just boot-image"
 
+# Build the installable ISO (Anaconda). Installs KosherOS with no preset
+# users — the machine runs the first-boot wizard after installation.
+iso: build
+    mkdir -p build/podman-home/.config/containers
+    printf '{"default":[{"type":"insecureAcceptAnything"}]}' > build/podman-home/.config/containers/policy.json
+    sudo env HOME="$PWD/build/podman-home" "$(command -v podman)" pull \
+        "containers-storage:[overlay@{{env_var("HOME")}}/.local/share/containers/storage]{{image}}"
+    sudo env HOME="$PWD/build/podman-home" "$(command -v podman)" run --rm -i --privileged \
+        --security-opt label=type:unconfined_t \
+        -v ./build:/output \
+        -v ./os-image/iso-config.toml:/config.toml:ro \
+        -v /var/lib/containers/storage:/var/lib/containers/storage \
+        quay.io/centos-bootc/bootc-image-builder:latest \
+        --type anaconda-iso --rootfs ext4 {{image}}
+    sudo chown -R "$USER:" build/bootiso
+    @echo "ISO at build/bootiso/install.iso — write it to a USB stick, or: just boot-iso"
+
+# Boot the installer ISO against a blank disk, to rehearse a real install.
+boot-iso:
+    [ -f build/test-install.qcow2 ] || qemu-img create -f qcow2 build/test-install.qcow2 40G
+    qemu-system-x86_64 -enable-kvm -cpu host -m 4096 -smp 4 \
+        -drive file=build/test-install.qcow2,if=virtio \
+        -cdrom build/bootiso/install.iso -boot d \
+        -netdev user,id=n0 -device virtio-net-pci,netdev=n0 \
+        -display gtk
+
+# Boot the machine installed by `just boot-iso` (first boot runs the wizard).
+boot-installed:
+    qemu-system-x86_64 -enable-kvm -cpu host -m 4096 -smp 4 \
+        -drive file=build/test-install.qcow2,if=virtio \
+        -netdev user,id=n0 -device virtio-net-pci,netdev=n0 \
+        -display gtk
+
 # Boot the built qcow2 (headless, ssh on localhost:2223 if the image has sshd).
 boot-image:
     qemu-system-x86_64 -enable-kvm -cpu host -m 4096 -smp 4 \

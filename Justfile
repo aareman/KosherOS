@@ -21,7 +21,7 @@ test *ARGS:
 test-cov:
     cd kosherd && python3 -m pytest tests/ -q \
         --cov=kosherd --cov-report=term-missing:skip-covered \
-        --cov-fail-under=80
+        --cov-fail-under=85
 
 # Integration suites INSIDE the dev VM: services, enforcement, apps, guest,
 # inspect mode, persistence. Pass suite prefixes to narrow (just test-vm

@@ -1,0 +1,150 @@
+"""KosherOS mitmproxy addon: per-user URL filtering.
+
+Runs inside mitmproxy in transparent mode. nftables redirects the web
+traffic of users in "inspect" mode here (see kosherd/nft.py), so every
+request arrives with its real destination recoverable and, after TLS
+interception, its full URL visible.
+
+Which user made a request is not carried in the packet, so we look the
+client's source port up in /proc/net/tcp{,6} to find the owning uid — the
+same trick tools like `ss -p` use. That uid selects the rule set.
+
+Rules are read from the policy kosherd writes; the file is re-read whenever
+its mtime changes, so policy edits take effect without a restart.
+"""
+
+from __future__ import annotations
+
+import json
+import logging
+import socket
+import struct
+from pathlib import Path
+
+from mitmproxy import http
+
+import sys
+
+# The addon runs inside mitmproxy's interpreter, which may not have kosherd
+# on its path when running from a checkout.
+sys.path.insert(0, "/usr/lib/python3.13/site-packages")
+
+from kosherd.urlrules import BLOCK, decide, parse_rules  # noqa: E402
+
+POLICY_PATH = Path("/var/lib/kosher/policy.json")
+log = logging.getLogger("kosher-filter")
+
+BLOCK_PAGE = """<!doctype html>
+<html><head><meta charset="utf-8"><title>Blocked — KosherOS</title>
+<style>
+ body {{ font-family: system-ui, sans-serif; background:#0b1a33; color:#e8eefc;
+        display:flex; min-height:100vh; align-items:center; justify-content:center;
+        margin:0; }}
+ .card {{ max-width:32rem; padding:2.5rem; background:#111f3d; border-radius:1rem;
+         box-shadow:0 20px 60px rgba(0,0,0,.45); }}
+ h1 {{ margin:0 0 .5rem; font-size:1.5rem; }}
+ p {{ line-height:1.6; color:#b8c6e4; }}
+ code {{ background:#0b1a33; padding:.15rem .4rem; border-radius:.3rem;
+        color:#93b4ff; word-break:break-all; }}
+</style></head>
+<body><div class="card">
+  <h1>This page is blocked</h1>
+  <p>KosherOS blocked <code>{url}</code>.</p>
+  <p>If you need access to this page, ask the administrator of this computer.</p>
+</div></body></html>
+"""
+
+
+class UidLookup:
+    """Map a local TCP source port to the uid that owns the socket."""
+
+    PATHS = ("/proc/net/tcp", "/proc/net/tcp6")
+
+    def uid_for_port(self, port: int) -> int | None:
+        for path in self.PATHS:
+            try:
+                with open(path) as fh:
+                    next(fh)  # header
+                    for line in fh:
+                        fields = line.split()
+                        local = fields[1]
+                        if int(local.rsplit(":", 1)[1], 16) == port:
+                            return int(fields[7])
+            except (OSError, IndexError, ValueError):
+                continue
+        return None
+
+
+class PolicyCache:
+    """Per-uid rules, reloaded when the policy file changes."""
+
+    def __init__(self, path: Path = POLICY_PATH):
+        self.path = path
+        self._mtime = 0.0
+        self._rules: dict[int, list] = {}
+
+    def rules_for(self, uid: int | None):
+        self._refresh()
+        return self._rules.get(uid, []) if uid is not None else []
+
+    def _refresh(self) -> None:
+        try:
+            mtime = self.path.stat().st_mtime
+        except OSError:
+            return
+        if mtime == self._mtime:
+            return
+        try:
+            doc = json.loads(self.path.read_text())
+        except (OSError, ValueError) as e:
+            log.error("cannot read policy: %s", e)
+            return
+
+        rules: dict[int, list] = {}
+        entries = list(doc.get("users", []))
+        guest = doc.get("guest") or {}
+        if guest.get("enabled") and guest.get("uid") is not None:
+            entries.append(guest)
+        for entry in entries:
+            uid = entry.get("uid")
+            if uid is None:
+                continue
+            try:
+                rules[uid] = parse_rules(entry.get("rules", []))
+            except Exception as e:  # noqa: BLE001 - one bad rule must not break all
+                log.error("bad rules for uid %s: %s", uid, e)
+                rules[uid] = []
+        self._rules = rules
+        self._mtime = mtime
+        log.info("loaded URL rules for %d users", len(rules))
+
+
+class KosherFilter:
+    def __init__(self):
+        self.uids = UidLookup()
+        self.policy = PolicyCache()
+
+    def request(self, flow: http.HTTPFlow) -> None:
+        client_port = flow.client_conn.peername[1] if flow.client_conn.peername else None
+        uid = self.uids.uid_for_port(client_port) if client_port else None
+        rules = self.policy.rules_for(uid)
+        if not rules:
+            return
+
+        url = flow.request.pretty_url
+        action, pattern = decide(rules, url)
+        if action == BLOCK:
+            log.info("blocked uid=%s %s (rule: %s)", uid, url, pattern)
+            flow.response = http.Response.make(
+                403,
+                BLOCK_PAGE.format(url=_escape(url)).encode(),
+                {"Content-Type": "text/html; charset=utf-8"},
+            )
+
+
+def _escape(text: str) -> str:
+    return (text.replace("&", "&amp;").replace("<", "&lt;")
+                .replace(">", "&gt;").replace('"', "&quot;"))[:300]
+
+
+addons = [KosherFilter()]

@@ -45,12 +45,26 @@
       "properties": {
         "enabled": { "type": "boolean" },
         "uid": { "type": ["integer", "null"], "minimum": 1000, "description": "Set by kosherd when the guest account is created." },
-        "mode": { "enum": ["none", "whitelist", "dnsfilter"], "default": "whitelist" },
-        "whitelist": { "type": "array", "items": { "$ref": "#/$defs/domain" }, "default": [] }
+        "mode": { "enum": ["none", "whitelist", "dnsfilter", "inspect"], "default": "whitelist" },
+        "whitelist": { "type": "array", "items": { "$ref": "#/$defs/domain" }, "default": [] },
+        "rules": { "type": "array", "items": { "$ref": "#/$defs/rule" }, "default": [] }
       }
     }
   },
   "$defs": {
+    "rule": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["action", "pattern"],
+      "properties": {
+        "action": { "enum": ["allow", "block"] },
+        "pattern": {
+          "type": "string",
+          "minLength": 1,
+          "description": "host, host/path, or wildcards: *.host, host/dir/*, host/page*"
+        }
+      }
+    },
     "domain": {
       "type": "string",
       "pattern": "^(\\*\\.)?([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\\.)+[a-z]{2,}$",
@@ -64,8 +78,14 @@
         "uid": { "type": "integer", "minimum": 1000 },
         "username": { "type": "string", "pattern": "^[a-z_][a-z0-9_-]*$" },
         "mode": {
-          "enum": ["none", "whitelist", "dnsfilter"],
-          "description": "none = no internet; whitelist = only whitelisted domains; dnsfilter = open web behind Cloudflare family DNS"
+          "enum": ["none", "whitelist", "dnsfilter", "inspect"],
+          "description": "none = no internet; whitelist = only whitelisted domains; dnsfilter = open web behind Cloudflare family DNS; inspect = dnsfilter plus URL-level rules, which requires decrypting HTTPS locally"
+        },
+        "rules": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/rule" },
+          "default": [],
+          "description": "URL allow/block rules, first match wins. Only enforced in inspect mode (paths are encrypted otherwise)."
         },
         "admin": {
           "type": "boolean",

@@ -20,7 +20,10 @@ import jsonschema
 POLICY_PATH = Path("/var/lib/kosher/policy.json")
 SCHEMA_PATH = Path("/usr/share/kosher/policy.schema.json")
 
-MODES = ("none", "whitelist", "dnsfilter")
+MODES = ("none", "whitelist", "dnsfilter", "inspect")
+
+# Modes whose traffic is decrypted and filtered by URL (see mitm/).
+INSPECTED_MODES = ("inspect",)
 
 # Reachable in whitelist mode for every user, so the OS itself keeps working:
 # update registry, flatpak remote, GNOME connectivity check, NTP.
@@ -50,6 +53,7 @@ class UserPolicy:
     whitelist: list[str] = field(default_factory=list)
     apps: list[str] = field(default_factory=list)
     can_install_apps: bool = True
+    rules: list[dict] = field(default_factory=list)
 
     def to_dict(self) -> dict:
         d: dict = {"uid": self.uid, "username": self.username, "mode": self.mode}
@@ -57,6 +61,8 @@ class UserPolicy:
             d["admin"] = True
         if self.whitelist:
             d["whitelist"] = self.whitelist
+        if self.rules:
+            d["rules"] = self.rules
         if self.apps:
             d["apps"] = self.apps
         if not self.can_install_apps:
@@ -73,6 +79,7 @@ class GuestPolicy:
     uid: int | None = None
     mode: str = "whitelist"
     whitelist: list[str] = field(default_factory=list)
+    rules: list[dict] = field(default_factory=list)
 
     def to_dict(self) -> dict:
         d: dict = {"enabled": self.enabled}
@@ -82,6 +89,8 @@ class GuestPolicy:
             d["mode"] = self.mode
         if self.whitelist:
             d["whitelist"] = self.whitelist
+        if self.rules:
+            d["rules"] = self.rules
         return d
 
 
@@ -105,6 +114,7 @@ class Policy:
             users.append(UserPolicy(
                 uid=self.guest.uid, username=GUEST_USERNAME,
                 mode=self.guest.mode, whitelist=list(self.guest.whitelist),
+                rules=list(self.guest.rules),
             ))
         return users
 
@@ -138,6 +148,7 @@ class Policy:
                     whitelist=list(u.get("whitelist", [])),
                     apps=list(u.get("apps", [])),
                     can_install_apps=u.get("can_install_apps", True),
+                    rules=list(u.get("rules", [])),
                 )
                 for u in doc["users"]
             ],
@@ -148,6 +159,7 @@ class Policy:
                 uid=guest_doc.get("uid"),
                 mode=guest_doc.get("mode", "whitelist"),
                 whitelist=list(guest_doc.get("whitelist", [])),
+                rules=list(guest_doc.get("rules", [])),
             ),
         )
 

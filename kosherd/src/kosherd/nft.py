@@ -28,7 +28,12 @@ MODE_CHAINS = {
     "none": "mode_none",
     "whitelist": "mode_whitelist",
     "dnsfilter": "mode_dnsfilter",
+    "inspect": "mode_dnsfilter",  # same egress policy; the difference is the
+                                  # web redirect into mitmproxy (dns_redirect)
 }
+
+# mitmproxy listens here; inspected users' web traffic is redirected to it.
+MITM_PORT = 8080
 
 # Known DoH-on-tcp-443 resolver IPs (indistinguishable from HTTPS, so blocked
 # by address). Curated, shipped with the OS image, portal-refreshed later.
@@ -67,7 +72,8 @@ def _set_block(name: str, addr_type: str, elements: tuple[str, ...] = (), *, int
     return "\n".join(lines)
 
 
-def render(policy: Policy, *, dns_uid: int, doh_block4: tuple[str, ...] = DEFAULT_DOH_BLOCK4) -> str:
+def render(policy: Policy, *, dns_uid: int, mitm_uid: int | None = None,
+           doh_block4: tuple[str, ...] = DEFAULT_DOH_BLOCK4) -> str:
     """Return a complete `nft -f`-loadable ruleset for this policy.
 
     dns_uid: UID dnsmasq runs as — exempt from the port-53 redirect so its
@@ -78,6 +84,20 @@ def render(policy: Policy, *, dns_uid: int, doh_block4: tuple[str, ...] = DEFAUL
         for u in sorted(policy.effective_users(), key=lambda u: u.uid)
     )
     vmap_rule = f"        meta skuid vmap {{ {vmap_entries} }}\n" if vmap_entries else ""
+
+    # Inspect mode: send this user's web traffic into the local mitmproxy,
+    # which decrypts it and applies URL rules. Everything else about the
+    # mode matches dnsfilter.
+    inspected = sorted(u.uid for u in policy.effective_users() if u.mode == "inspect")
+    if inspected and mitm_uid is not None:
+        uids = ", ".join(str(u) for u in inspected)
+        web_redirect = (
+            f"        meta skuid {{ {uids} }} tcp dport {{ 80, 443 }} "
+            f"redirect to :{MITM_PORT}\n"
+        )
+    else:
+        web_redirect = ""
+    mitm_exempt = f", {mitm_uid}" if mitm_uid is not None else ""
 
     return f"""#!/usr/sbin/nft -f
 # Rendered by kosherd from policy revision {policy.revision}. DO NOT EDIT.
@@ -97,10 +117,12 @@ table {TABLE} {{
 
     chain dns_redirect {{
         type nat hook output priority dstnat; policy accept;
-        meta skuid {{ 0, {dns_uid} }} return
+        # Never redirect the resolver's or the proxy's own traffic, or they
+        # would loop back into themselves.
+        meta skuid {{ 0, {dns_uid}{mitm_exempt} }} return
         udp dport 53 redirect to :53
         tcp dport 53 redirect to :53
-    }}
+{web_redirect}    }}
 
     chain output {{
         type filter hook output priority filter; policy accept;

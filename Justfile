@@ -6,7 +6,8 @@
 #   Stage-1 VM  (minutes):  just fedora-vm && just dev-install
 #   Image loop  (minutes):  just build | just switch VM
 
-image := "localhost/kosher-linux:dev"
+# Overridable so parallel worktrees/sessions do not clobber one tag.
+image := env_var_or_default("KOSHER_IMAGE", "localhost/kosher-linux:dev")
 vmssh := "ssh -F build/vm/ssh_config"
 
 # Run the unit test suite (pure policy engine — no root, no D-Bus needed).

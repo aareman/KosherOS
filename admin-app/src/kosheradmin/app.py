@@ -248,6 +248,117 @@ class WhitelistDialog(Adw.Dialog):
             self.list_box.append(row)
 
 
+class UserAppsDialog(Adw.Dialog):
+    """Apps on this computer, from one user's point of view.
+
+    Apps install system-wide, so 'uninstall' removes an app for everyone —
+    that is spelled out. To restrict a single user, turn the app off for
+    them instead (enforced by malcontent).
+    """
+
+    def __init__(self, win: Window, user: dict, on_changed):
+        super().__init__(title=f"Apps — {user['username']}",
+                         content_width=560, content_height=640)
+        self.win = win
+        self.user = user
+        self.on_changed = on_changed
+        # An empty allow-list means "every installed app".
+        self.allowed: set[str] | None = set(user.get("apps") or []) or None
+
+        header = Adw.HeaderBar()
+        self.list_box = Gtk.ListBox(selection_mode=Gtk.SelectionMode.NONE,
+                                    margin_start=12, margin_end=12, margin_bottom=12)
+        self.list_box.add_css_class("boxed-list")
+        scroller = Gtk.ScrolledWindow(vexpand=True)
+        scroller.set_child(self.list_box)
+
+        self.hint = Gtk.Label(
+            label="Turning an app off hides it from this user only. "
+                  "Uninstalling removes it from the whole computer.",
+            wrap=True, xalign=0, margin_start=14, margin_end=14,
+            margin_top=10, margin_bottom=4)
+        self.hint.add_css_class("dim-label")
+        self.hint.add_css_class("caption")
+
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        box.append(header)
+        box.append(self.hint)
+        box.append(scroller)
+        self.set_child(box)
+        self.refresh()
+
+    def refresh(self) -> None:
+        def on_done(details):
+            while (child := self.list_box.get_first_child()) is not None:
+                self.list_box.remove(child)
+            if not details:
+                row = Adw.ActionRow(title="No apps installed yet")
+                row.set_sensitive(False)
+                self.list_box.append(row)
+                return
+            for app in details:
+                self.list_box.append(self._row(app, details))
+
+        _run_async(self.win.client.list_installed_details, on_done,
+                   lambda e: self.win.toast(_error_text(e)))
+
+    def _row(self, app: dict, all_apps: list[dict]) -> Adw.ActionRow:
+        subtitle = app["ref"]
+        if app["installed_by"]:
+            subtitle += f" · installed by {app['installed_by']}"
+        if not app["approved"]:
+            subtitle += " · no longer approved"
+        row = Adw.ActionRow(title=app["name"], subtitle=subtitle)
+
+        allowed = self.allowed is None or app["ref"] in self.allowed
+        switch = Gtk.Switch(active=allowed, valign=Gtk.Align.CENTER,
+                            tooltip_text="Allow this user to run the app")
+        switch.connect("state-set", lambda _s, state, r=app["ref"], every=all_apps:
+                       self._set_allowed(r, state, every))
+        row.add_suffix(switch)
+
+        remove = Gtk.Button(icon_name="user-trash-symbolic", valign=Gtk.Align.CENTER,
+                            tooltip_text="Uninstall for everyone")
+        remove.add_css_class("flat")
+        remove.connect("clicked", lambda _b, a=app: self._confirm_uninstall(a))
+        row.add_suffix(remove)
+        return row
+
+    def _set_allowed(self, ref: str, allowed: bool, all_apps: list[dict]) -> bool:
+        if self.allowed is None:
+            # Was "everything"; materialise the list so one app can be dropped.
+            self.allowed = {a["ref"] for a in all_apps}
+        if allowed:
+            self.allowed.add(ref)
+        else:
+            self.allowed.discard(ref)
+        refs = [] if self.allowed == {a["ref"] for a in all_apps} else sorted(self.allowed)
+        self.win.call(lambda: self.win.client.set_user_apps(self.user["uid"], refs),
+                      refresh=False,
+                      done_msg=f"{'Allowed' if allowed else 'Blocked'} for {self.user['username']}")
+        return False
+
+    def _confirm_uninstall(self, app: dict) -> None:
+        dialog = Adw.AlertDialog(
+            heading=f"Uninstall {app['name']}?",
+            body="Apps are installed for the whole computer, so this removes "
+                 f"{app['name']} for every user. To keep it but hide it from "
+                 f"{self.user['username']}, turn it off instead.")
+        dialog.add_response("cancel", "Cancel")
+        dialog.add_response("remove", "Uninstall")
+        dialog.set_response_appearance("remove", Adw.ResponseAppearance.DESTRUCTIVE)
+
+        def on_response(_d, response):
+            if response != "remove":
+                return
+            self.win.call(lambda: self.win.client.remove_app(app["ref"]),
+                          refresh=False, done_msg=f"Uninstalling {app['name']}…")
+            GLib.timeout_add_seconds(3, lambda: (self.refresh(), self.on_changed(), False)[2])
+
+        dialog.connect("response", on_response)
+        dialog.present(self.win)
+
+
 class ProfilesPage(Adw.PreferencesPage):
     def __init__(self, win: Window):
         super().__init__()

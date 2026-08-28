@@ -85,6 +85,12 @@ class DaemonClient:
     def list_installed(self) -> list[str]:
         return self._call("Apps", "ListInstalled")[0]
 
+    def list_installed_details(self) -> list[dict]:
+        return json.loads(self._call("Apps", "ListInstalledDetails")[0])
+
+    def set_user_apps(self, uid: int, refs: list[str]) -> None:
+        self._call("Apps", "SetUserApps", "(ias)", uid, refs)
+
     def install_app(self, ref: str) -> None:
         """Start an install; watch AppProgress/AppFinished for the outcome."""
         self._call("Apps", "InstallApp", "(s)", ref)

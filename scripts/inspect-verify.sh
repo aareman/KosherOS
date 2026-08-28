@@ -21,7 +21,7 @@ systemctl is-active --quiet kosher-mitm && ok "kosher-mitm running" \
     || { bad "kosher-mitm not running"; journalctl -u kosher-mitm -n 5 --no-pager | tail -3; }
 [ -f /etc/pki/ca-trust/source/anchors/kosheros-inspect-ca.crt ] \
     && ok "inspection CA installed in system trust" || bad "CA not installed"
-grep -q "blocked" /var/lib/kosher/mitm/rules.json \
+grep -q "blocked" /var/lib/kosher-mitm/rules.json \
     && ok "rules rendered for the proxy" || bad "rules file missing the rule"
 [ -f /etc/firefox/policies/policies.json ] \
     && ok "Firefox enterprise-roots policy written" || bad "Firefox policy missing"

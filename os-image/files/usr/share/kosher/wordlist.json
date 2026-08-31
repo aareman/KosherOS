@@ -1,0 +1,24 @@
+{
+  "version": "seed-1",
+  "comment": "Default substitutions. Deliberately short and mild: a list that rewrites ordinary words makes pages read strangely and gets the whole feature switched off. Admins can replace this file (or the portal can) with their own.",
+  "replacements": {
+    "fuck": "freak",
+    "fucking": "freaking",
+    "fucked": "messed up",
+    "shit": "junk",
+    "bullshit": "nonsense",
+    "bitch": "jerk",
+    "bastard": "jerk",
+    "asshole": "jerk",
+    "damn": "darn",
+    "goddamn": "darn",
+    "crap": "junk",
+    "dick": "jerk",
+    "piss": "annoy",
+    "slut": "person",
+    "whore": "person",
+    "cunt": "jerk",
+    "nigger": "[removed]",
+    "faggot": "[removed]"
+  }
+}

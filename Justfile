@@ -186,6 +186,30 @@ usb-image: build
     @echo "  lsblk    # find the stick, e.g. sdb"
     @echo "  sudo dd if=build/image/disk.raw of=/dev/sdX bs=4M status=progress conv=fsync"
 
+# Try a disk image by hand, in a window, on a THROWAWAY overlay — the image
+# itself is not modified, so you can reinstall-and-retry as often as you like.
+# (just boot-image boots the real disk and does persist changes.)
+try DISK="build/qcow2/disk.qcow2":
+    @mkdir -p build/try
+    qemu-img create -q -f qcow2 -b "$PWD/{{DISK}}" -F qcow2 build/try/overlay.qcow2 40G
+    qemu-system-x86_64 -enable-kvm -cpu host -m 4096 -smp 4 \
+        -drive file=build/try/overlay.qcow2,if=virtio \
+        -netdev user,id=n0,hostfwd=tcp:127.0.0.1:2223-:22 \
+        -device virtio-net-pci,netdev=n0 -display gtk
+    rm -f build/try/overlay.qcow2
+
+# Same, but headless with the console in this terminal: no video device, so
+# setup takes its text path and you answer the prompts here. This is exactly
+# what `just test-boot` automates. Quit with Ctrl-a then x.
+try-serial DISK="build/qcow2/disk.qcow2":
+    @mkdir -p build/try
+    qemu-img create -q -f qcow2 -b "$PWD/{{DISK}}" -F qcow2 build/try/serial.qcow2 40G
+    -qemu-system-x86_64 -enable-kvm -cpu host -m 3072 -smp 2 \
+        -drive file=build/try/serial.qcow2,if=virtio \
+        -vga none -display none -serial mon:stdio \
+        -netdev user,id=n0 -device virtio-net-pci,netdev=n0
+    rm -f build/try/serial.qcow2
+
 # Boot the real disk image and prove it reaches first-boot setup.
 #
 # Every other test exercises a system that is already up; this one covers

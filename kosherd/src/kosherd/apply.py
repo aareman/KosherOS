@@ -72,12 +72,14 @@ def write_mitm_rules(policy: Policy) -> None:
         if user.mode not in INSPECTED_MODES:
             continue
         if not (user.rules or user.blocked_categories
-                or user.media_level != "none" or user.youtube):
+                or user.media_level != "none" or user.youtube
+                or getattr(user, "language_filter", "off") != "off"):
             continue
         per_user[str(user.uid)] = {
             "rules": user.rules,
             "blocked_categories": user.blocked_categories,
             "media_level": user.media_level,
+            "language_filter": getattr(user, "language_filter", "off"),
             "youtube": user.youtube,
         }
     MITM_DIR.mkdir(parents=True, exist_ok=True)

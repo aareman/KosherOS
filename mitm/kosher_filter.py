@@ -29,6 +29,8 @@ import sys
 
 try:
     from kosherd import categories as categories_mod
+    from kosherd import content as content_mod
+    from kosherd import language as language_mod
     from kosherd.uidmap import UidLookup
     from kosherd.urlrules import BLOCK, decide, parse_rules
 except ImportError:  # pragma: no cover - only when interpreters differ
@@ -40,6 +42,8 @@ except ImportError:  # pragma: no cover - only when interpreters differ
 
     sys.path.extend(sorted(glob.glob("/usr/lib/python3.*/site-packages")))
     from kosherd import categories as categories_mod
+    from kosherd import content as content_mod
+    from kosherd import language as language_mod
     from kosherd.uidmap import UidLookup
     from kosherd.urlrules import BLOCK, decide, parse_rules
 
@@ -76,6 +80,7 @@ class PolicyCache:
         self._rules: dict[int, list] = {}
         self._blocked: dict[int, list] = {}
         self._media: dict[int, str] = {}
+        self._language: dict[int, str] = {}
         self._youtube: dict[int, dict] = {}
 
     def rules_for(self, uid: int | None):
@@ -89,6 +94,10 @@ class PolicyCache:
     def media_level_for(self, uid: int | None) -> str:
         self._refresh()
         return self._media.get(uid, "none") if uid is not None else "none"
+
+    def language_filter_for(self, uid: int | None) -> str:
+        self._refresh()
+        return self._language.get(uid, "off") if uid is not None else "off"
 
     def youtube_for(self, uid: int | None) -> dict:
         self._refresh()
@@ -110,6 +119,7 @@ class PolicyCache:
         rules: dict[int, list] = {}
         blocked: dict[int, list] = {}
         media: dict[int, str] = {}
+        language: dict[int, str] = {}
         youtube: dict[int, dict] = {}
         for uid_text, raw in doc.items():
             try:
@@ -120,12 +130,14 @@ class PolicyCache:
                 rules[uid] = parse_rules(entry.get("rules", []))
                 blocked[uid] = list(entry.get("blocked_categories", []))
                 media[uid] = entry.get("media_level", "none")
+                language[uid] = entry.get("language_filter", "off")
                 youtube[uid] = dict(entry.get("youtube", {}))
             except Exception as e:  # noqa: BLE001 - one bad entry must not break all
                 log.error("bad entry for uid %s: %s", uid_text, e)
         self._rules = rules
         self._blocked = blocked
         self._media = media
+        self._language = language
         self._youtube = youtube
         self._mtime = mtime
         log.info("loaded rules for %d users", len(rules))
@@ -250,11 +262,28 @@ class YouTube:
                 handle.group(1) if handle else None)
 
 
+# How much a page may say before it is blocked, per media level — the same
+# ladder the search results use, so a page reached by clicking a link and a
+# page reached from search are judged alike.
+CONTENT_TOLERANCE = {
+    "none": content_mod.NSFW,
+    "nsfw": content_mod.NSFW,
+    "suggestive": content_mod.SUGGESTIVE,
+    "immodest": content_mod.IMMODEST,
+    "all": content_mod.IMMODEST,
+}
+# Reading a whole page costs real time on a slow machine, and the character
+# of a page is in its head and its first screens.
+MAX_SCORED_BYTES = 200_000
+
+
 class KosherFilter:
     def __init__(self):
         self.uids = UidLookup()
         self.policy = PolicyCache()
         self.categories = categories_mod.load_any()
+        self.scorer = content_mod.load()
+        self.wordlist = language_mod.load()
 
     def request(self, flow: http.HTTPFlow) -> None:
         # Everything reaching this proxy belongs to a filtered user: only
@@ -313,6 +342,52 @@ class KosherFilter:
 
         if YouTube.applies(flow.request.pretty_host):
             self._filter_youtube(flow, uid)
+            return
+
+        self._filter_page(flow, uid)
+
+    def _filter_page(self, flow: http.HTTPFlow, uid: int) -> None:
+        """Judge a page by its words when no list has anything to say about it.
+
+        Domain lists are the backbone of the filter, but they only know
+        sites somebody has already catalogued. A page on a host nothing has
+        classified is exactly what gets through, and here — unlike at the
+        DNS layer — we can simply read it.
+        """
+        level = self.policy.media_level_for(uid)
+        language_filter = self.policy.language_filter_for(uid)
+        if level == "none" and language_filter == "off":
+            return
+        content_type = (flow.response.headers.get("content-type") or "").lower()
+        if "text/html" not in content_type:
+            return
+        body = flow.response.get_text(strict=False) or ""
+        if not body:
+            return
+        text = content_mod.visible_text(body[:MAX_SCORED_BYTES])
+
+        if language_filter != "off" and self.wordlist.contains_any(text):
+            if language_filter == "block":
+                self._block(flow, flow.request.pretty_url,
+                            " because of the language on it")
+                return
+            cleaned, count = language_mod.clean_html(body, self.wordlist)
+            if count:
+                flow.response.text = cleaned
+                flow.response.headers["x-kosheros"] = f"language-cleaned={count}"
+            # The page has been rewritten; score the cleaned copy below.
+            text = content_mod.visible_text(cleaned[:MAX_SCORED_BYTES])
+
+        tolerance = CONTENT_TOLERANCE.get(level)
+        if tolerance is None:
+            return
+        verdict = self.scorer.score(text)
+        if verdict.at_least(tolerance):
+            log.info("blocked uid=%s %s (content: %s, %d points, %s)",
+                     uid, flow.request.pretty_url, verdict.level,
+                     verdict.points, ", ".join(verdict.hits))
+            self._block(flow, flow.request.pretty_url,
+                        f" because the page reads as {verdict.level}")
 
     def _filter_image(self, flow: http.HTTPFlow, uid: int) -> None:
         level = self.policy.media_level_for(uid)

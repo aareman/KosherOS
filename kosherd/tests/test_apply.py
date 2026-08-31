@@ -178,7 +178,8 @@ def test_only_inspected_users_rules_reach_the_proxy(tmp_path, monkeypatch):
     write_mitm_rules(policy)
     assert rules_written(tmp_path) == {
         "1001": {"rules": block, "blocked_categories": [],
-                 "media_level": "none", "youtube": {}}}
+                 "media_level": "none", "language_filter": "off",
+                  "youtube": {}}}
 
 
 def test_guest_rules_reach_the_proxy(tmp_path, monkeypatch):
@@ -248,7 +249,8 @@ def test_categories_alone_are_enough_to_reach_the_proxy(tmp_path, monkeypatch):
     write_mitm_rules(policy)
     assert rules_written(tmp_path) == {
         "1001": {"rules": [], "blocked_categories": ["adult"],
-                 "media_level": "none", "youtube": {}}}
+                 "media_level": "none", "language_filter": "off",
+                  "youtube": {}}}
 
 
 def test_a_media_level_alone_reaches_the_proxy(tmp_path, monkeypatch):

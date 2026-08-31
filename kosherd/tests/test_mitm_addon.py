@@ -207,3 +207,19 @@ def test_other_sites_are_not_treated_as_searches(addon):
                                      {"q": "parsha"})) is None
     assert addon._search_query(_Flow("googleusercontent.evil.example",
                                      "/search", {"q": "x"})) is None
+
+
+# -- judging a page by its words ----------------------------------------------
+
+def test_cache_reads_the_language_filter(addon, tmp_path):
+    path = _rules_file(tmp_path, {"1001": {"rules": [], "language_filter": "block"}})
+    cache = addon.PolicyCache(path)
+    assert cache.language_filter_for(1001) == "block"
+    assert cache.language_filter_for(4242) == "off"
+
+
+def test_page_scoring_uses_the_same_ladder_as_search(addon):
+    # A page reached by clicking a link and a page reached from search
+    # must be judged alike, or the filter is arbitrary.
+    from kosherd import search as search_mod
+    assert addon.CONTENT_TOLERANCE == search_mod.CONTENT_TOLERANCE

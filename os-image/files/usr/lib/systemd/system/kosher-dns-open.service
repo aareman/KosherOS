@@ -1,0 +1,11 @@
+[Unit]
+Description=KosherOS DNS for unfiltered users (no safe search, no family filter)
+After=kosher-firewall.service network.target
+# Started by kosherd only while some user is in unfiltered mode.
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+ExecStart=/usr/sbin/dnsmasq --keep-in-foreground --conf-file=/etc/kosher/dnsmasq-open.conf
+Restart=on-failure
+RestartSec=2

@@ -117,12 +117,46 @@ class PolicyCache:
         log.info("loaded URL rules for %d users", len(rules))
 
 
+# Safe search, enforced on the request itself. DNS already points these
+# hostnames at their safe-search addresses for every filtered user; doing it
+# here too catches the cases DNS cannot — a query that explicitly asks for
+# safe search to be off, and YouTube, which wants a header rather than an
+# address.
+SAFESEARCH_PARAMS = {
+    "google.": {"safe": "active"},
+    "bing.": {"adlt": "strict"},
+    "duckduckgo.": {"kp": "1"},
+    "search.yahoo.": {"vm": "r"},
+    "yandex.": {"fyandex": "1"},
+}
+
+
+def _force_safesearch(flow: http.HTTPFlow) -> None:
+    host = (flow.request.pretty_host or "").lower()
+
+    for marker, params in SAFESEARCH_PARAMS.items():
+        if marker in host:
+            query = flow.request.query
+            for key, value in params.items():
+                query[key] = value
+            break
+
+    if "youtube.com" in host or "youtube-nocookie.com" in host:
+        # YouTube honours this header on every request, including the app
+        # and embedded players.
+        flow.request.headers["YouTube-Restrict"] = "Moderate"
+
+
 class KosherFilter:
     def __init__(self):
         self.uids = UidLookup()
         self.policy = PolicyCache()
 
     def request(self, flow: http.HTTPFlow) -> None:
+        # Everything reaching this proxy belongs to a filtered user: only
+        # their traffic is redirected here.
+        _force_safesearch(flow)
+
         client_port = flow.client_conn.peername[1] if flow.client_conn.peername else None
         uid = self.uids.uid_for_port(client_port) if client_port else None
         rules = self.policy.rules_for(uid)

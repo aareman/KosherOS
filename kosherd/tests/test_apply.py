@@ -49,6 +49,7 @@ def env(tmp_path, monkeypatch):
     monkeypatch.setattr(apply_mod.subprocess, "run", run)
     monkeypatch.setattr(apply_mod, "NFT_RULESET_PATH", tmp_path / "nft" / "kosher.nft")
     monkeypatch.setattr(apply_mod, "DNSMASQ_DROPIN_PATH", tmp_path / "dnsmasq" / "wl.conf")
+    monkeypatch.setattr(apply_mod, "SAFESEARCH_PATH", tmp_path / "dnsmasq" / "safesearch.conf")
     monkeypatch.setattr(apply_mod, "MITM_DIR", tmp_path / "mitm")
     monkeypatch.setattr(apply_mod, "MITM_RULES_PATH", tmp_path / "mitm" / "rules.json")
     monkeypatch.setattr(apply_mod, "dnsmasq_uid", lambda: 989)

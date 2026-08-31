@@ -116,3 +116,40 @@ def test_no_mitm_redirect_without_filtered_users():
     pol.guest.mode = "whitelist"
     out = nft.render(pol, dns_uid=989, mitm_uid=988)
     assert "redirect to :8080" not in out
+
+
+# -- the five modes -----------------------------------------------------------
+
+def policy_of(*modes: str) -> Policy:
+    from kosherd.policy import UserPolicy
+
+    return Policy(users=[UserPolicy(uid=1000 + i, username=f"u{i}", mode=m)
+                         for i, m in enumerate(modes)])
+
+
+def test_every_mode_has_a_chain():
+    from kosherd.policy import MODES
+
+    out = nft.render(policy_of(*MODES), dns_uid=989, mitm_uid=988)
+    for i, mode in enumerate(MODES):
+        assert f"{1000 + i} : jump {nft.MODE_CHAINS[mode]}" in out
+
+
+def test_only_filtered_traffic_is_decrypted():
+    out = nft.render(policy_of("dnsfilter", "filtered", "unfiltered"),
+                     dns_uid=989, mitm_uid=988)
+    # uid 1001 is the filtered one; nobody else is redirected to the proxy.
+    assert "meta skuid { 1001 } tcp dport { 80, 443 } redirect to :8080" in out
+
+
+def test_unfiltered_users_get_the_plain_resolver():
+    out = nft.render(policy_of("dnsfilter", "unfiltered"), dns_uid=989, mitm_uid=988)
+    assert f"meta skuid {{ 1001 }} udp dport 53 redirect to :{nft.OPEN_DNS_PORT}" in out
+    # ...and everyone else still lands on the filtering resolver.
+    assert "udp dport 53 redirect to :53" in out
+
+
+def test_unfiltered_mode_does_not_block_evasion():
+    out = nft.render(policy_of("unfiltered"), dns_uid=989, mitm_uid=988)
+    chain = out.split("chain mode_unfiltered")[1].split("chain")[0]
+    assert "evasion_block" not in chain

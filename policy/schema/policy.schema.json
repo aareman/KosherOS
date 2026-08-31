@@ -77,7 +77,9 @@
           "enum": [
             "none",
             "whitelist",
-            "filtered"
+            "dnsfilter",
+            "filtered",
+            "unfiltered"
           ],
           "default": "whitelist"
         },
@@ -146,9 +148,11 @@
           "enum": [
             "none",
             "whitelist",
-            "filtered"
+            "dnsfilter",
+            "filtered",
+            "unfiltered"
           ],
-          "description": "none = no internet; whitelist = only whitelisted domains; filtered = family DNS plus URL rules (which requires decrypting HTTPS locally). Older policies using dnsfilter/inspect are migrated to filtered on load."
+          "description": "none = no internet; whitelist = only whitelisted domains; dnsfilter = family DNS and forced safe search, connection not read; filtered = content filtering (safe search, categories, page rules), which reads the connection on this machine; unfiltered = no filtering. Policies naming the old 'inspect' mode are migrated to 'filtered'."
         },
         "rules": {
           "type": "array",

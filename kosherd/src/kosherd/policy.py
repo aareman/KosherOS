@@ -20,15 +20,28 @@ import jsonschema
 POLICY_PATH = Path("/var/lib/kosher/policy.json")
 SCHEMA_PATH = Path("/usr/share/kosher/policy.schema.json")
 
-MODES = ("none", "whitelist", "filtered")
+# The ladder, from most restrictive to least:
+#   none       no internet at all
+#   whitelist  only named domains
+#   dnsfilter  family DNS + forced safe search; the connection is not read
+#   filtered   content filtering: safe search, category lists and page rules,
+#              which requires reading the connection on this machine
+#   unfiltered no filtering — an adult's own machine
+MODES = ("none", "whitelist", "dnsfilter", "filtered", "unfiltered")
 
-# "Filtered" always inspects: page rules are the point of it, and a URL
-# cannot be read without terminating TLS locally. Two near-identical filtered
-# modes only asked the admin a question they had no basis to answer.
+# Modes whose traffic is decrypted so content can be judged (see mitm/).
 INSPECTED_MODES = ("filtered",)
 
+# Modes that get safe search forced on them. dnsfilter cannot read the
+# connection, so its safe search is done in DNS; filtered gets it in the
+# proxy as well, which is stricter and covers more sites.
+SAFESEARCH_MODES = ("dnsfilter", "filtered", "whitelist")
+
+# Modes that must not reach the family resolver at all.
+UNFILTERED_MODES = ("unfiltered",)
+
 # What earlier policies called these modes.
-LEGACY_MODES = {"dnsfilter": "filtered", "inspect": "filtered"}
+LEGACY_MODES = {"inspect": "filtered"}
 
 
 def migrate(doc: dict) -> dict:

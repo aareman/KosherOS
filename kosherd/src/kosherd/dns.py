@@ -11,9 +11,33 @@ destination.
 
 from __future__ import annotations
 
-from .policy import Policy
+from .policy import SAFESEARCH_MODES, Policy
 
 WHITELIST_CONF = "/etc/kosher/dnsmasq.d/whitelist.conf"
+SAFESEARCH_CONF = "/etc/kosher/dnsmasq.d/safesearch.conf"
+
+# Search engines publish hostnames that always answer with safe search on.
+# Pointing the normal hostname at them is how safe search is enforced for
+# users whose traffic we do NOT read (dnsfilter mode); verified against a
+# live resolver — dnsmasq follows a cname to an external target.
+SAFESEARCH_CNAMES = {
+    "forcesafesearch.google.com": [
+        "google.com", "www.google.com",
+        "google.co.il", "www.google.co.il",
+        "google.co.uk", "www.google.co.uk",
+        "google.ca", "www.google.ca",
+    ],
+    "strict.bing.com": ["bing.com", "www.bing.com"],
+    "safe.duckduckgo.com": ["duckduckgo.com", "www.duckduckgo.com"],
+    # Moderate rather than Strict: Strict hides a great deal of ordinary
+    # material (including much Torah content), which drives people to turn
+    # the filter off entirely.
+    "restrictmoderate.youtube.com": [
+        "youtube.com", "www.youtube.com", "m.youtube.com",
+        "youtubei.googleapis.com", "youtube.googleapis.com",
+        "www.youtube-nocookie.com",
+    ],
+}
 
 
 def _nftset_line(domain: str, set4: str, set6: str) -> str:
@@ -43,4 +67,25 @@ def render(policy: Policy) -> str:
     lines += [_nftset_line(d, "sys4", "sys6") for d in system_domains]
     lines += ["", "# User whitelists -> wl4/wl6"]
     lines += [_nftset_line(d, "wl4", "wl6") for d in user_domains]
+    return "\n".join(lines) + "\n"
+
+
+def render_safesearch(policy: Policy) -> str:
+    """dnsmasq CNAMEs that force safe search, for the filtered resolver.
+
+    This resolver answers everyone except unfiltered users (who are sent to
+    a separate plain resolver), because one resolver cannot give different
+    answers to different users on the same machine.
+    """
+    wanted = any(u.mode in SAFESEARCH_MODES for u in policy.effective_users())
+    lines = [
+        f"# Rendered by kosherd from policy revision {policy.revision}. DO NOT EDIT.",
+    ]
+    if not wanted:
+        lines.append("# No user needs safe search.")
+        return "\n".join(lines) + "\n"
+    lines.append("# Safe search is forced for every user of this resolver.")
+    for target, names in SAFESEARCH_CNAMES.items():
+        for name in names:
+            lines.append(f"cname={name},{target}")
     return "\n".join(lines) + "\n"

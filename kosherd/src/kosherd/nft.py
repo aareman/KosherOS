@@ -17,7 +17,7 @@ Design (see docs/architecture.md):
 
 from __future__ import annotations
 
-from .policy import Policy
+from .policy import INSPECTED_MODES, UNFILTERED_MODES, Policy
 
 # First human UID. Everything below is trusted system territory.
 UID_MIN = 1000
@@ -27,11 +27,18 @@ TABLE = "inet kosher"
 MODE_CHAINS = {
     "none": "mode_none",
     "whitelist": "mode_whitelist",
+    "dnsfilter": "mode_dnsfilter",
     "filtered": "mode_filtered",
+    "unfiltered": "mode_unfiltered",
 }
 
-# mitmproxy listens here; inspected users' web traffic is redirected to it.
+# mitmproxy listens here; filtered users' web traffic is redirected to it.
 MITM_PORT = 8080
+
+# The resolver that answers everyone else: family DNS plus safe-search
+# redirects. Unfiltered users get a second, plain resolver instead, because
+# one machine-wide resolver cannot give different answers per user.
+OPEN_DNS_PORT = 5354
 
 # Known DoH-on-tcp-443 resolver IPs (indistinguishable from HTTPS, so blocked
 # by address). Curated, shipped with the OS image, portal-refreshed later.
@@ -86,7 +93,7 @@ def render(policy: Policy, *, dns_uid: int, mitm_uid: int | None = None,
     # Filtered mode: send this user's web traffic into the local mitmproxy,
     # which decrypts it so URL rules can be applied.
     inspected = sorted(u.uid for u in policy.effective_users()
-                       if u.mode == "filtered")
+                       if u.mode in INSPECTED_MODES)
     if inspected and mitm_uid is not None:
         uids = ", ".join(str(u) for u in inspected)
         web_redirect = (
@@ -95,6 +102,19 @@ def render(policy: Policy, *, dns_uid: int, mitm_uid: int | None = None,
         )
     else:
         web_redirect = ""
+
+    # Unfiltered users are sent to the plain resolver, so the safe-search
+    # answers the filtered resolver hands out do not reach them.
+    unfiltered = sorted(u.uid for u in policy.effective_users()
+                        if u.mode in UNFILTERED_MODES)
+    if unfiltered:
+        uids = ", ".join(str(u) for u in unfiltered)
+        open_dns = (
+            f"        meta skuid {{ {uids} }} udp dport 53 redirect to :{OPEN_DNS_PORT}\n"
+            f"        meta skuid {{ {uids} }} tcp dport 53 redirect to :{OPEN_DNS_PORT}\n"
+        )
+    else:
+        open_dns = ""
     mitm_exempt = f", {mitm_uid}" if mitm_uid is not None else ""
 
     return f"""#!/usr/sbin/nft -f
@@ -118,7 +138,7 @@ table {TABLE} {{
         # Never redirect the resolver's or the proxy's own traffic, or they
         # would loop back into themselves.
         meta skuid {{ 0, {dns_uid}{mitm_exempt} }} return
-        udp dport 53 redirect to :53
+{open_dns}        udp dport 53 redirect to :53
         tcp dport 53 redirect to :53
 {web_redirect}    }}
 
@@ -175,8 +195,19 @@ table {TABLE} {{
         reject
     }}
 
+    chain mode_dnsfilter {{
+        jump evasion_block
+        accept
+    }}
+
     chain mode_filtered {{
         jump evasion_block
+        accept
+    }}
+
+    # No filtering at all: an adult's own machine. Evasion blocking would be
+    # pointless here — there is nothing to evade.
+    chain mode_unfiltered {{
         accept
     }}
 

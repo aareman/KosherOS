@@ -8,7 +8,7 @@ set -euo pipefail
 repo="$(cd "$(dirname "$0")/.." && pwd)"
 
 echo "== installing packages"
-dnf -y install dnsmasq nftables python3-gobject python3-jsonschema python3-pip malcontent malcontent-tools flatpak checkpolicy policycoreutils accountsservice
+dnf -y install dnsmasq nftables python3-gobject python3-jsonschema python3-pip malcontent malcontent-tools flatpak checkpolicy policycoreutils policycoreutils-python-utils accountsservice
 
 echo "== SELinux module (dnsmasq needs netfilter netlink for nftset)"
 tmpdir="$(mktemp -d)"
@@ -16,6 +16,12 @@ checkmodule -M -m -o "$tmpdir/kosher-dnsmasq-nftset.mod" \
     "$repo/os-image/files/usr/share/kosher/selinux/kosher-dnsmasq-nftset.te"
 semodule_package -o "$tmpdir/kosher-dnsmasq-nftset.pp" -m "$tmpdir/kosher-dnsmasq-nftset.mod"
 semodule -i "$tmpdir/kosher-dnsmasq-nftset.pp"
+# The plain resolver for unfiltered users listens on 5354; SELinux must be
+# told that is a DNS port or dnsmasq cannot bind it.
+semanage port -a -t dns_port_t -p udp 5354 2>/dev/null || \
+    semanage port -m -t dns_port_t -p udp 5354 || true
+semanage port -a -t dns_port_t -p tcp 5354 2>/dev/null || \
+    semanage port -m -t dns_port_t -p tcp 5354 || true
 rm -rf "$tmpdir"
 
 echo "== installing mitmproxy (inspect mode)"

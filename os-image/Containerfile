@@ -27,7 +27,13 @@ COPY os-image/files/ /
 
 # SELinux: dnsmasq needs a netfilter netlink socket to feed the nft whitelist
 # sets (not covered by Fedora's stock dnsmasq policy).
-RUN dnf -y install checkpolicy policycoreutils && \
+RUN dnf -y install checkpolicy policycoreutils policycoreutils-python-utils && \
+    # The plain resolver for unfiltered users listens on 5354, which SELinux
+    # does not know is DNS; without this dnsmasq cannot bind it at all.
+    (semanage port -a -t dns_port_t -p udp 5354 || \
+     semanage port -m -t dns_port_t -p udp 5354) && \
+    (semanage port -a -t dns_port_t -p tcp 5354 || \
+     semanage port -m -t dns_port_t -p tcp 5354) && \
     checkmodule -M -m -o /tmp/kosher-dnsmasq-nftset.mod /usr/share/kosher/selinux/kosher-dnsmasq-nftset.te && \
     semodule_package -o /tmp/kosher-dnsmasq-nftset.pp -m /tmp/kosher-dnsmasq-nftset.mod && \
     semodule -i /tmp/kosher-dnsmasq-nftset.pp && rm -f /tmp/kosher-dnsmasq-nftset.* && \

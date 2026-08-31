@@ -16,13 +16,16 @@ import tempfile
 from pathlib import Path
 
 from . import dns, mitmca, nft
-from .policy import Policy
+from .policy import UNFILTERED_MODES, Policy
 
 log = logging.getLogger(__name__)
 
 NFT_RULESET_PATH = Path("/etc/kosher/nft/kosher.nft")
 DNSMASQ_DROPIN_PATH = Path(dns.WHITELIST_CONF)
+SAFESEARCH_PATH = Path(dns.SAFESEARCH_CONF)
 DNS_SERVICE = "kosher-dns.service"
+# Only runs while somebody is unfiltered (see nft.OPEN_DNS_PORT).
+OPEN_DNS_SERVICE = "kosher-dns-open.service"
 MITM_SERVICE = "kosher-mitm.service"
 # The proxy runs unprivileged and cannot traverse /var/lib/kosher
 # (root-only: it holds the policy), so it gets its own state dir.
@@ -123,6 +126,17 @@ def apply_policy(policy: Policy) -> None:
         ["systemctl", "stop", MITM_SERVICE], capture_output=True, text=True)
 
     _write_atomic(DNSMASQ_DROPIN_PATH, dns.render(policy))
+    _write_atomic(SAFESEARCH_PATH, dns.render_safesearch(policy))
+
+    # The plain resolver exists only for unfiltered users; running it when
+    # nobody is unfiltered would just be an unfiltered resolver sitting on
+    # the machine.
+    unfiltered = any(u.mode in UNFILTERED_MODES for u in policy.effective_users())
+    if unfiltered:
+        _restart(OPEN_DNS_SERVICE)
+    else:
+        subprocess.run(["systemctl", "stop", OPEN_DNS_SERVICE],
+                       capture_output=True, text=True)
     # Full restart, not reload: dnsmasq's SIGHUP re-reads /etc/hosts and clears
     # the cache but does NOT re-read config files, so new nftset= directives
     # would never take effect. Restart also flushes cached answers, which is

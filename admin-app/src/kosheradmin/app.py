@@ -23,12 +23,20 @@ APP_ID = "org.kosherlinux.Admin"
 MODE_LABELS = {
     "none": "No internet",
     "whitelist": "Whitelist only",
+    "dnsfilter": "DNS filter",
     "filtered": "Filtered internet",
+    "unfiltered": "Unfiltered",
 }
 
 MODE_HINTS = {
-    "filtered": "Family DNS plus page rules. Reads web addresses on this "
-                "computer, which means this user's HTTPS is decrypted here.",
+    "none": "No web access at all. Printing and local network still work.",
+    "whitelist": "Only the sites listed below, and safe search is forced.",
+    "dnsfilter": "Blocks known adult sites and forces safe search. This "
+                 "user's connections are not read.",
+    "filtered": "Safe search, page rules and content filtering. To judge "
+                "pages this reads the connection, so this user's HTTPS is "
+                "decrypted on this computer.",
+    "unfiltered": "No filtering of any kind for this account.",
 }
 
 

@@ -1,0 +1,209 @@
+"""Looking at pictures: the mapping, the caching, and what happens when
+the model is not there.
+
+The model itself is not exercised here — it is a 5 MB ONNX file that the
+test environment does not have, and pinning a test to its exact scores
+would test the model rather than our use of it. What is tested is
+everything around it, and in particular the two failure directions: a
+picture that cannot be judged must not be shown, and a picture that is
+merely small must not cost inference.
+"""
+
+import pytest
+
+from kosherd import imageedit, vision
+from kosherd.vision import CLEAN, IMMODEST, NSFW, SUGGESTIVE, Detection
+
+
+def det(label, score=0.9, box=(10, 20, 30, 40)):
+    return Detection(label=label, score=score, box=box)
+
+
+# -- the ladder ---------------------------------------------------------------
+
+def test_exposure_is_explicit():
+    assert vision.level_of([det("FEMALE_BREAST_EXPOSED")]) == NSFW
+    assert vision.level_of([det("MALE_GENITALIA_EXPOSED")]) == NSFW
+
+
+def test_covered_but_prominent_is_suggestive():
+    assert vision.level_of([det("FEMALE_BREAST_COVERED")]) == SUGGESTIVE
+    assert vision.level_of([det("BELLY_EXPOSED")]) == SUGGESTIVE
+
+
+def test_the_weakest_signals_are_immodest():
+    assert vision.level_of([det("FEET_EXPOSED")]) == IMMODEST
+    assert vision.level_of([det("BELLY_COVERED")]) == IMMODEST
+
+
+def test_a_face_alone_is_not_a_finding():
+    # Otherwise every photograph of a person is a finding, which is not a
+    # filter, it is an off switch with extra steps.
+    assert vision.level_of([det("FEMALE_FACE"), det("MALE_FACE")]) == CLEAN
+
+
+def test_the_strongest_finding_wins():
+    assert vision.level_of([det("FEET_EXPOSED"),
+                            det("FEMALE_BREAST_EXPOSED")]) == NSFW
+
+
+def test_a_low_confidence_guess_is_not_a_finding():
+    assert vision.level_of([det("FEMALE_BREAST_EXPOSED", score=0.05)]) == CLEAN
+
+
+def test_the_verdict_carries_the_regions_worth_covering():
+    verdict = vision.judge([det("FEMALE_BREAST_EXPOSED", box=(1, 2, 3, 4)),
+                            det("FEMALE_FACE", box=(5, 6, 7, 8))])
+    assert verdict.level == NSFW
+    # The face is not the problem and covering it helps nobody.
+    assert verdict.regions == ((1, 2, 3, 4),)
+
+
+# -- what each setting hides --------------------------------------------------
+
+@pytest.mark.parametrize("level,expect_hidden", [
+    ("none", []),
+    ("nsfw", [NSFW]),
+    ("suggestive", [NSFW, SUGGESTIVE]),
+    ("immodest", [NSFW, SUGGESTIVE, IMMODEST]),
+    ("all", [NSFW, SUGGESTIVE, IMMODEST, CLEAN]),
+])
+def test_each_media_level_hides_what_it_says(level, expect_hidden):
+    for found in (CLEAN, IMMODEST, SUGGESTIVE, NSFW):
+        verdict = vision.ImageVerdict(found, ())
+        assert vision.hides(level, verdict) == (found in expect_hidden), \
+            f"{level} vs {found}"
+
+
+def test_hide_everything_needs_no_detector_at_all():
+    # Which is exactly why it is the setting to fall back to.
+    assert vision.hides("all", vision.ImageVerdict(CLEAN, ()))
+
+
+# -- caching ------------------------------------------------------------------
+
+def test_the_same_picture_is_judged_once(tmp_path):
+    calls = []
+
+    class Once:
+        available = True
+
+        def detect(self, data):
+            calls.append(data)
+            return [det("FEMALE_BREAST_EXPOSED")]
+
+    f = vision.ImageFilter(detector=Once(),
+                           cache=vision.VerdictCache(tmp_path / "i.sqlite"))
+    blob = b"x" * 10_000
+    assert f.verdict(blob).level == NSFW
+    assert f.verdict(blob).level == NSFW
+    assert len(calls) == 1
+
+
+def test_regions_survive_the_cache(tmp_path):
+    cache = vision.VerdictCache(tmp_path / "i.sqlite")
+    cache.put("abc", vision.ImageVerdict(NSFW, ((1, 2, 3, 4), (5, 6, 7, 8))))
+    assert cache.get("abc").regions == ((1, 2, 3, 4), (5, 6, 7, 8))
+
+
+def test_an_expired_verdict_is_judged_again(tmp_path):
+    cache = vision.VerdictCache(tmp_path / "i.sqlite", ttl=-1)
+    cache.put("abc", vision.ImageVerdict(NSFW, ()))
+    assert cache.get("abc") is None
+
+
+# -- failure directions -------------------------------------------------------
+
+def test_a_tiny_picture_never_reaches_the_model(tmp_path):
+    class Never:
+        available = True
+
+        def detect(self, data):
+            raise AssertionError("should not be called for an icon")
+
+    f = vision.ImageFilter(detector=Never(),
+                           cache=vision.VerdictCache(tmp_path / "i.sqlite"))
+    assert f.verdict(b"tiny").level == CLEAN
+
+
+def test_no_model_means_unjudged_not_clean(tmp_path):
+    # The distinction the caller depends on: "looked and found nothing"
+    # must not be confused with "could not look".
+    f = vision.ImageFilter(detector=vision.NullDetector(),
+                           cache=vision.VerdictCache(tmp_path / "i.sqlite"))
+    assert f.verdict(b"x" * 10_000) is None
+    assert not f.available
+
+
+def test_a_slow_picture_gives_up_rather_than_stalling_the_page(tmp_path):
+    import time
+
+    class Slow:
+        available = True
+
+        def detect(self, data):
+            time.sleep(5)
+            return []
+
+    f = vision.ImageFilter(detector=Slow(),
+                           cache=vision.VerdictCache(tmp_path / "i.sqlite"),
+                           timeout=0.1)
+    started = time.monotonic()
+    assert f.verdict(b"x" * 10_000) is None
+    assert time.monotonic() - started < 2
+
+
+def test_a_detector_that_throws_is_not_a_clean_verdict(tmp_path):
+    class Broken:
+        available = True
+
+        def detect(self, data):
+            raise RuntimeError("model exploded")
+
+    f = vision.ImageFilter(detector=Broken(),
+                           cache=vision.VerdictCache(tmp_path / "i.sqlite"))
+    assert f.verdict(b"x" * 10_000) is None
+
+
+# -- covering regions ---------------------------------------------------------
+
+@pytest.fixture
+def photo():
+    Image = pytest.importorskip("PIL.Image")
+    import io
+
+    image = Image.new("RGB", (200, 200), (10, 200, 10))
+    # A fine checkerboard inside the region: a flat colour would pixelate
+    # to the same flat colour and prove nothing.
+    for x in range(40, 120):
+        for y in range(40, 120):
+            image.putpixel((x, y), (255, 0, 0) if (x + y) % 2 else (0, 0, 255))
+    out = io.BytesIO()
+    image.save(out, "PNG")
+    return out.getvalue()
+
+
+def test_covering_changes_the_region_and_leaves_the_rest(photo):
+    from PIL import Image
+    import io
+
+    covered = imageedit.cover(photo, [(40, 40, 80, 80)])
+    assert covered is not None
+    after = Image.open(io.BytesIO(covered)).convert("RGB")
+    # Outside the region (with its margin), the picture is untouched.
+    assert after.getpixel((5, 5)) == (10, 200, 10)
+    # Inside, the fine detail is gone: the checkerboard has averaged into
+    # a handful of flat blocks, so nothing of it is recoverable.
+    patch = {after.getpixel((x, y)) for x in range(50, 110, 2)
+             for y in range(50, 110, 2)}
+    assert patch & {(255, 0, 0), (0, 0, 255)} == set()
+    assert len(patch) < 40
+
+
+def test_covering_nothing_is_not_an_edit(photo):
+    assert imageedit.cover(photo, []) is None
+
+
+def test_an_unreadable_picture_reports_failure_rather_than_returning_it():
+    # Returning the original would be the one failure mode that matters.
+    assert imageedit.cover(b"not an image at all", [(0, 0, 10, 10)]) is None

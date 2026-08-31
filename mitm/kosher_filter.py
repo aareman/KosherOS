@@ -30,7 +30,9 @@ import sys
 try:
     from kosherd import categories as categories_mod
     from kosherd import content as content_mod
+    from kosherd import imageedit as imageedit_mod
     from kosherd import language as language_mod
+    from kosherd import vision as vision_mod
     from kosherd.uidmap import UidLookup
     from kosherd.urlrules import BLOCK, decide, parse_rules
 except ImportError:  # pragma: no cover - only when interpreters differ
@@ -43,7 +45,9 @@ except ImportError:  # pragma: no cover - only when interpreters differ
     sys.path.extend(sorted(glob.glob("/usr/lib/python3.*/site-packages")))
     from kosherd import categories as categories_mod
     from kosherd import content as content_mod
+    from kosherd import imageedit as imageedit_mod
     from kosherd import language as language_mod
+    from kosherd import vision as vision_mod
     from kosherd.uidmap import UidLookup
     from kosherd.urlrules import BLOCK, decide, parse_rules
 
@@ -284,6 +288,7 @@ class KosherFilter:
         self.categories = categories_mod.load_any()
         self.scorer = content_mod.load()
         self.wordlist = language_mod.load()
+        self.vision = vision_mod.ImageFilter()
 
     def request(self, flow: http.HTTPFlow) -> None:
         # Everything reaching this proxy belongs to a filtered user: only
@@ -397,20 +402,43 @@ class KosherFilter:
         if len(body) < MIN_IMAGE_BYTES:
             return  # icons, spacers, tracking pixels
 
-        # "all" needs no judgement, which is why it is the only level that is
-        # right every time. The others need a classifier and are not wired
-        # up yet — see docs/media-filtering.md.
+        # "all" needs no judgement, which is why it is the only level that
+        # is right every time.
         if level == "all":
             self._blank_image(flow)
             return
 
         # Source-based suppression costs nothing and covers the worst of the
         # web: if the page's own domain is in a category this user blocks,
-        # its imagery goes too.
+        # its imagery goes too — no model needed and no chance of a model
+        # being wrong.
         host = flow.request.pretty_host or ""
         if self.categories.blocked_categories_of(
                 host, self.policy.blocked_categories_for(uid)):
             self._blank_image(flow)
+            return
+
+        verdict = self.vision.verdict(body)
+        if verdict is None:
+            # Could not look — no model installed, or it took too long.
+            # Hiding is the safe direction, and it is the honest one: an
+            # account that asked for pictures to be checked should not
+            # quietly get unchecked pictures.
+            self._blank_image(flow)
+            return
+        if not vision_mod.hides(level, verdict):
+            return
+
+        # Cover only what was found, so the rest of the picture — and the
+        # page's layout — survives. If that cannot be done, hide it all.
+        covered = imageedit_mod.cover(body, verdict.regions)
+        if covered is None:
+            self._blank_image(flow)
+            return
+        flow.response.content = covered
+        flow.response.headers["content-type"] = (
+            "image/jpeg" if covered[:2] == b"\xff\xd8" else "image/png")
+        flow.response.headers["x-kosheros"] = f"image-covered={verdict.level}"
 
     @staticmethod
     def _blank_image(flow: http.HTTPFlow) -> None:

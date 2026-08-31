@@ -223,3 +223,77 @@ def test_page_scoring_uses_the_same_ladder_as_search(addon):
     # must be judged alike, or the filter is arbitrary.
     from kosherd import search as search_mod
     assert addon.CONTENT_TOLERANCE == search_mod.CONTENT_TOLERANCE
+
+
+# -- pictures -----------------------------------------------------------------
+
+def test_the_proxy_hides_a_picture_it_could_not_judge(addon):
+    # No model installed, or inference timed out. An account that asked for
+    # pictures to be checked must not quietly get unchecked pictures.
+    from kosherd import vision
+
+    filt = addon.KosherFilter.__new__(addon.KosherFilter)
+    filt.policy = _stub_policy(media="immodest")
+    filt.categories = _stub_categories()
+    filt.vision = _stub_vision(None)
+    flow = _image_flow()
+    filt._filter_image(flow, 1001)
+    assert flow.response.content == addon.BLANK_PNG
+
+
+def test_a_clean_picture_is_left_alone(addon):
+    from kosherd import vision
+
+    filt = addon.KosherFilter.__new__(addon.KosherFilter)
+    filt.policy = _stub_policy(media="immodest")
+    filt.categories = _stub_categories()
+    filt.vision = _stub_vision(vision.ImageVerdict(vision.CLEAN, ()))
+    flow = _image_flow()
+    original = flow.response.content
+    filt._filter_image(flow, 1001)
+    assert flow.response.content == original
+
+
+def test_hiding_everything_never_consults_the_model(addon):
+    class Never:
+        def verdict(self, data):
+            raise AssertionError("'all' needs no judgement")
+
+    filt = addon.KosherFilter.__new__(addon.KosherFilter)
+    filt.policy = _stub_policy(media="all")
+    filt.categories = _stub_categories()
+    filt.vision = Never()
+    flow = _image_flow()
+    filt._filter_image(flow, 1001)
+    assert flow.response.content == addon.BLANK_PNG
+
+
+class _Resp:
+    def __init__(self, content, headers):
+        self.content = content
+        self.headers = headers
+
+
+def _image_flow():
+    return type("F", (), {
+        "request": type("R", (), {"pretty_host": "example.com"})(),
+        "response": _Resp(b"\x89PNG" + b"x" * 20_000,
+                          {"content-type": "image/png"}),
+    })()
+
+
+def _stub_policy(media="none", blocked=()):
+    return type("P", (), {
+        "media_level_for": staticmethod(lambda uid: media),
+        "blocked_categories_for": staticmethod(lambda uid: list(blocked)),
+    })()
+
+
+def _stub_categories():
+    return type("C", (), {
+        "blocked_categories_of": staticmethod(lambda host, blocked: set()),
+    })()
+
+
+def _stub_vision(verdict):
+    return type("V", (), {"verdict": staticmethod(lambda data: verdict)})()

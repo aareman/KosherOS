@@ -134,6 +134,13 @@ RUN rm -f /tmp/fetch-categories.py
 # mitmproxy is not packaged for Fedora 44, so install it from PyPI (with its
 # dependencies — unlike our own packages, which are --no-deps).
 RUN python3 -m pip install --prefix=/usr mitmproxy
+# The image detector: NudeNet's ONNX model is about 5 MB and runs on the
+# CPU in tens of milliseconds, which is the only kind of model that fits a
+# product whose premise is that it works on a weak machine with nothing
+# leaving the house. onnxruntime and Pillow come with it; Pillow is also
+# what covers a detected region instead of blanking the whole picture.
+RUN python3 -m pip install --prefix=/usr nudenet onnxruntime pillow \
+    || echo "WARNING: no image model; picture filtering will hide pictures"
 # SearXNG is the metasearch engine behind our search page. It is a large
 # dependency and the only reason it is here is that scraping search
 # engines is the part that breaks constantly, and SearXNG is the project

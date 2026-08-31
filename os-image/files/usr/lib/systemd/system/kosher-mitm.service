@@ -27,7 +27,9 @@ RestartSec=2
 StateDirectory=kosher-mitm
 StateDirectoryMode=0750
 # It never reads the policy; kosherd renders uid -> URL rules into
-# /var/lib/kosher-mitm/rules.json for it.
+# /var/lib/kosher-mitm/rules.json for it. images.sqlite, beside it, caches
+# what the detector concluded about a picture, keyed by content hash — the
+# same logo comes back on every page of a site.
 ProtectSystem=strict
 ReadWritePaths=/var/lib/kosher-mitm
 PrivateTmp=yes

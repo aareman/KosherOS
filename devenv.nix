@@ -31,6 +31,7 @@ in
       ps.fastapi
       ps.uvicorn
       ps.httpx # portal tests + the device-side sync client
+      ps.pillow # covering regions of a picture (imageedit.py)
     ]))
     pkgs.just
     pkgs.nftables # `nft --check` of rendered rulesets

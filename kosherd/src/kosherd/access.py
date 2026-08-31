@@ -83,8 +83,8 @@ ACTIONS = {
 
 # Methods that can weaken the filter: guardian password required when enabled.
 GUARDIAN_GATED = frozenset({
-    "SetFilterMode", "SetWhitelist", "SetUrlRules", "SetGuestConfig",
-    "DisableGuardian", "Enrol", "Unenrol",
+    "SetFilterMode", "SetWhitelist", "SetUrlRules", "SetBlockedCategories",
+    "SetGuestConfig", "DisableGuardian", "Enrol", "Unenrol",
 })
 
 # First-boot only; closed forever once setup is stamped complete.

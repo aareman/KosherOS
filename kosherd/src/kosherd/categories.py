@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import json
 import logging
+import sqlite3
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -132,3 +133,76 @@ def load(*directories: Path) -> Bundle:
         return bundle
     log.warning("no category bundle found; category filtering is inactive")
     return Bundle()
+
+
+class SqliteBundle:
+    """A category database too large to hold in memory.
+
+    The imported lists run to millions of domains; a dict of those costs
+    hundreds of megabytes of RAM, which is exactly what the family machine
+    does not have. SQLite keeps them on disk and answers a lookup in
+    microseconds from page cache.
+
+    Lookups walk the domain's suffixes — at most a handful of indexed
+    queries per host — so `cdn.example.com` still matches an entry for
+    `example.com`, and the longest match wins as it does in memory.
+    """
+
+    def __init__(self, path: Path):
+        self.path = Path(path)
+        # check_same_thread: the proxy answers requests on worker threads;
+        # reads are safe and SQLite serialises them.
+        self._db = sqlite3.connect(self.path, check_same_thread=False)
+        self._db.execute("PRAGMA query_only = ON")
+        meta = dict(self._db.execute("SELECT key, value FROM meta").fetchall())
+        self.version = meta.get("version", "0")
+        self.source = meta.get("source", "")
+        self._count = self._db.execute(
+            "SELECT count(*) FROM domains").fetchone()[0]
+
+    def __len__(self) -> int:
+        return self._count
+
+    @property
+    def categories(self) -> set[str]:
+        return {row[0] for row in
+                self._db.execute("SELECT DISTINCT category FROM domains")}
+
+    def categories_of(self, host: str) -> set[str]:
+        host = (host or "").lower().strip(".")
+        if not host:
+            return set()
+        labels = host.split(".")
+        # Longest suffix first, so a specific subdomain beats its parent.
+        for start in range(len(labels) - 1):
+            candidate = ".".join(labels[start:])
+            rows = self._db.execute(
+                "SELECT category FROM domains WHERE domain = ?",
+                (candidate,)).fetchall()
+            if rows:
+                return {row[0] for row in rows}
+        return set()
+
+    def blocked_categories_of(self, host: str, blocked) -> set[str]:
+        return self.categories_of(host) & set(blocked)
+
+
+def load_any(*directories: Path):
+    """Load the best available bundle: the database if built, else JSON.
+
+    A runtime bundle (portal-delivered, or an admin update) beats the one
+    baked into the image.
+    """
+    searched = directories or (LOCAL_BUNDLE_DIR, BUNDLE_DIR)
+    for directory in searched:
+        database = Path(directory) / "categories.sqlite"
+        if database.exists():
+            try:
+                bundle = SqliteBundle(database)
+                log.info("loaded %d categorised domains (version %s) from %s",
+                         len(bundle), bundle.version, database)
+                return bundle
+            except sqlite3.Error as e:
+                log.error("ignoring unusable category database %s: %s",
+                          database, e)
+    return load(*directories)

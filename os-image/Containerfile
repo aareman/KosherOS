@@ -116,6 +116,17 @@ COPY store-app/ /tmp/store-app/
 COPY setup-app/ /tmp/setup-app/
 COPY policy/schema/policy.schema.json /usr/share/kosher/policy.schema.json
 COPY mitm/ /usr/share/kosher/mitm/
+
+# The category database is built here rather than committed: a family must
+# not have to assemble lists, and the shipped JSON seed is only a fallback
+# for a build with no network. Millions of domains in SQLite cost a few MB
+# of page cache to query; the same data in a dict would cost hundreds of MB
+# of RAM on exactly the low-end machine this has to run on.
+COPY scripts/fetch-categories.py /tmp/fetch-categories.py
+RUN python3 /tmp/fetch-categories.py \
+        --out /usr/share/kosher/categories/categories.sqlite \
+    || echo "WARNING: category import failed; falling back to the seed list"
+RUN rm -f /tmp/fetch-categories.py
 # mitmproxy is not packaged for Fedora 44, so install it from PyPI (with its
 # dependencies — unlike our own packages, which are --no-deps).
 RUN python3 -m pip install --prefix=/usr mitmproxy

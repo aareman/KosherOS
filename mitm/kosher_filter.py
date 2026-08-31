@@ -239,7 +239,7 @@ class KosherFilter:
     def __init__(self):
         self.uids = UidLookup()
         self.policy = PolicyCache()
-        self.categories = categories_mod.load()
+        self.categories = categories_mod.load_any()
 
     def request(self, flow: http.HTTPFlow) -> None:
         # Everything reaching this proxy belongs to a filtered user: only

@@ -352,7 +352,7 @@ class Daemon:
     def impl_ListCategories(self):
         from . import categories as categories_mod
 
-        bundle = categories_mod.load()
+        bundle = categories_mod.load_any()
         return GLib.Variant("(s)", (json.dumps({
             "version": bundle.version,
             "source": bundle.source,

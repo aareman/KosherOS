@@ -101,3 +101,69 @@ def test_the_shipped_seed_bundle_parses():
     b = parse(json.loads(seed.read_text()))
     assert len(b) > 0
     assert "adult" in b.categories
+
+
+# -- the on-disk database (what actually ships) -------------------------------
+
+def build_db(path, rows, version="test"):
+    import sqlite3
+
+    db = sqlite3.connect(path)
+    db.executescript(
+        "CREATE TABLE domains (domain TEXT, category TEXT, "
+        "PRIMARY KEY (domain, category)) WITHOUT ROWID;"
+        "CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT);")
+    db.executemany("INSERT INTO domains VALUES (?, ?)", rows)
+    db.execute("INSERT INTO meta VALUES ('version', ?)", (version,))
+    db.execute("INSERT INTO meta VALUES ('source', 'test')")
+    db.commit()
+    db.close()
+    return path
+
+
+def test_the_database_matches_like_the_json_bundle(tmp_path):
+    from kosherd.categories import SqliteBundle
+
+    build_db(tmp_path / "categories.sqlite",
+             [("bad.com", "adult"), ("chat.com", "social"),
+              ("nsfw.example.com", "adult"), ("example.com", "video")])
+    bundle = SqliteBundle(tmp_path / "categories.sqlite")
+    assert bundle.categories_of("bad.com") == {"adult"}
+    assert bundle.categories_of("cdn.bad.com") == {"adult"}       # subdomains
+    assert bundle.categories_of("nsfw.example.com") == {"adult"}  # longest wins
+    assert bundle.categories_of("www.example.com") == {"video"}
+    assert bundle.categories_of("unlisted.org") == set()
+    assert len(bundle) == 4
+    assert bundle.categories == {"adult", "social", "video"}
+
+
+def test_the_database_is_preferred_over_json(tmp_path):
+    import json as _json
+
+    from kosherd.categories import load_any
+
+    build_db(tmp_path / "categories.sqlite", [("bad.com", "adult")], version="db")
+    (tmp_path / "categories.json").write_text(_json.dumps(
+        {"version": "json", "domains": {"adult": ["other.com"]}}))
+    assert load_any(tmp_path).version == "db"
+
+
+def test_json_is_still_used_when_no_database_exists(tmp_path):
+    import json as _json
+
+    from kosherd.categories import load_any
+
+    (tmp_path / "categories.json").write_text(_json.dumps(
+        {"version": "json-only", "domains": {"adult": ["bad.com"]}}))
+    assert load_any(tmp_path).version == "json-only"
+
+
+def test_a_corrupt_database_falls_back_rather_than_failing(tmp_path):
+    import json as _json
+
+    from kosherd.categories import load_any
+
+    (tmp_path / "categories.sqlite").write_bytes(b"not a database")
+    (tmp_path / "categories.json").write_text(_json.dumps(
+        {"version": "fallback", "domains": {"adult": ["bad.com"]}}))
+    assert load_any(tmp_path).version == "fallback"

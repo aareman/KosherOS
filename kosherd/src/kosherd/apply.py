@@ -138,7 +138,7 @@ def apply_policy(policy: Policy) -> None:
     _write_atomic(DNSMASQ_DROPIN_PATH, dns.render(policy))
     _write_atomic(SAFESEARCH_PATH, dns.render_safesearch(policy))
     _write_atomic(CATEGORY_BLOCK_PATH,
-                  dns.render_category_blocks(policy, categories_mod.load()))
+                  dns.render_category_blocks(policy, categories_mod.load_any()))
 
     # The plain resolver exists only for unfiltered users; running it when
     # nobody is unfiltered would just be an unfiltered resolver sitting on

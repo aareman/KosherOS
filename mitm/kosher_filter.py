@@ -21,6 +21,7 @@ import base64
 import json
 import logging
 from pathlib import Path
+from urllib.parse import urlencode
 
 from mitmproxy import http
 
@@ -28,6 +29,7 @@ import sys
 
 try:
     from kosherd import categories as categories_mod
+    from kosherd.uidmap import UidLookup
     from kosherd.urlrules import BLOCK, decide, parse_rules
 except ImportError:  # pragma: no cover - only when interpreters differ
     # mitmproxy may run under a different interpreter than the one kosherd
@@ -38,6 +40,7 @@ except ImportError:  # pragma: no cover - only when interpreters differ
 
     sys.path.extend(sorted(glob.glob("/usr/lib/python3.*/site-packages")))
     from kosherd import categories as categories_mod
+    from kosherd.uidmap import UidLookup
     from kosherd.urlrules import BLOCK, decide, parse_rules
 
 RULES_PATH = Path("/var/lib/kosher-mitm/rules.json")
@@ -62,26 +65,6 @@ BLOCK_PAGE = """<!doctype html>
   <p>If you need access to this page, ask the administrator of this computer.</p>
 </div></body></html>
 """
-
-
-class UidLookup:
-    """Map a local TCP source port to the uid that owns the socket."""
-
-    PATHS = ("/proc/net/tcp", "/proc/net/tcp6")
-
-    def uid_for_port(self, port: int) -> int | None:
-        for path in self.PATHS:
-            try:
-                with open(path) as fh:
-                    next(fh)  # header
-                    for line in fh:
-                        fields = line.split()
-                        local = fields[1]
-                        if int(local.rsplit(":", 1)[1], 16) == port:
-                            return int(fields[7])
-            except (OSError, IndexError, ValueError):
-                continue
-        return None
 
 
 class PolicyCache:
@@ -160,6 +143,38 @@ SAFESEARCH_PARAMS = {
     "search.yahoo.": {"vm": "r"},
     "yandex.": {"fyandex": "1"},
 }
+
+
+# Search engines whose result pages are replaced by the local, filtered
+# one. Sending a filtered user to Google and then blocking half of what
+# they click is the worst of both worlds: they see the explicit snippets
+# on the results page anyway, and they learn that the computer is broken.
+# KosherOS runs its own search, so use it.
+SEARCH_HOSTS = (
+    "google.", "bing.com", "duckduckgo.com", "search.yahoo.", "yandex.",
+    "search.brave.com", "ecosia.org", "startpage.com", "ask.com",
+    "search.marcia", "lite.duckduckgo.com", "html.duckduckgo.com",
+)
+LOCAL_SEARCH = "http://127.0.0.1:8888/search"
+# The query parameter each of them uses.
+QUERY_PARAMS = ("q", "p", "text", "query", "wd")
+
+
+def _search_query(flow: http.HTTPFlow) -> str | None:
+    """The search terms, if this request is a search-engine result page."""
+    host = (flow.request.pretty_host or "").lower()
+    if not any(marker in host for marker in SEARCH_HOSTS):
+        return None
+    path = flow.request.path.split("?", 1)[0].rstrip("/")
+    # "/" and "/search" are result pages; /maps, /images/thumb, api calls
+    # and everything else are not, and redirecting those breaks the site.
+    if path not in ("", "/search", "/web", "/html", "/lite", "/search.php"):
+        return None
+    for key in QUERY_PARAMS:
+        value = flow.request.query.get(key)
+        if value:
+            return value
+    return None
 
 
 def _force_safesearch(flow: http.HTTPFlow) -> None:
@@ -249,6 +264,14 @@ class KosherFilter:
         client_port = flow.client_conn.peername[1] if flow.client_conn.peername else None
         uid = self.uids.uid_for_port(client_port) if client_port else None
         flow.metadata["kosher_uid"] = uid
+
+        query = _search_query(flow)
+        if query is not None:
+            params = urlencode({"q": query})
+            flow.response = http.Response.make(
+                302, b"", {"Location": f"{LOCAL_SEARCH}?{params}",
+                           "Cache-Control": "no-store"})
+            return
 
         if YouTube.applies(flow.request.pretty_host):
             header = YouTube.restrict_header(self.policy.youtube_for(uid))

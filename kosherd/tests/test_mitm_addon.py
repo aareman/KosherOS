@@ -168,3 +168,42 @@ def test_youtube_metadata_missing_is_not_a_crash(addon):
 def test_the_placeholder_is_a_real_png(addon):
     # A broken image icon makes a page look broken; a valid 1x1 keeps layout.
     assert addon.BLANK_PNG[:8] == b"\x89PNG\r\n\x1a\n"
+
+
+# -- sending searches to the local, filtered search page ----------------------
+
+class _Req:
+    def __init__(self, host, path, query=None):
+        self.pretty_host = host
+        self.path = path
+        self.query = query or {}
+
+
+class _Flow:
+    def __init__(self, host, path, query=None):
+        self.request = _Req(host, path, query)
+
+
+def test_a_search_result_page_is_recognised(addon):
+    assert addon._search_query(_Flow("www.google.com", "/search",
+                                     {"q": "kosher recipes"})) == "kosher recipes"
+    assert addon._search_query(_Flow("duckduckgo.com", "/",
+                                     {"q": "chinuch"})) == "chinuch"
+    assert addon._search_query(_Flow("yandex.com", "/search",
+                                     {"text": "shiur"})) == "shiur"
+
+
+def test_the_rest_of_a_search_engine_is_left_alone(addon):
+    # Redirecting these breaks the site rather than filtering it.
+    assert addon._search_query(_Flow("www.google.com", "/maps",
+                                     {"q": "pizza"})) is None
+    assert addon._search_query(_Flow("www.google.com", "/complete/search",
+                                     {"q": "k"})) is None
+    assert addon._search_query(_Flow("www.google.com", "/", {})) is None
+
+
+def test_other_sites_are_not_treated_as_searches(addon):
+    assert addon._search_query(_Flow("chinuch.org", "/search",
+                                     {"q": "parsha"})) is None
+    assert addon._search_query(_Flow("googleusercontent.evil.example",
+                                     "/search", {"q": "x"})) is None

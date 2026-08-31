@@ -35,6 +35,13 @@ MODE_CHAINS = {
 # mitmproxy listens here; filtered users' web traffic is redirected to it.
 MITM_PORT = 8080
 
+# The KosherOS search front end (the page users get) and the metasearch
+# engine behind it. Only the front end filters, so the backend must not be
+# reachable by a person: its raw results carry the very snippets the
+# filter exists to withhold.
+SEARCH_PORT = 8888
+SEARCH_BACKEND_PORT = 8889
+
 # The resolver that answers everyone else: family DNS plus safe-search
 # redirects. Unfiltered users get a second, plain resolver instead, because
 # one machine-wide resolver cannot give different answers per user.
@@ -78,6 +85,7 @@ def _set_block(name: str, addr_type: str, elements: tuple[str, ...] = (), *, int
 
 
 def render(policy: Policy, *, dns_uid: int, mitm_uid: int | None = None,
+           search_uid: int | None = None,
            doh_block4: tuple[str, ...] = DEFAULT_DOH_BLOCK4) -> str:
     """Return a complete `nft -f`-loadable ruleset for this policy.
 
@@ -116,6 +124,14 @@ def render(policy: Policy, *, dns_uid: int, mitm_uid: int | None = None,
     else:
         open_dns = ""
     mitm_exempt = f", {mitm_uid}" if mitm_uid is not None else ""
+    search_exempt = f", {search_uid}" if search_uid is not None else ""
+    # Loopback is otherwise wide open (see the output chain), which is what
+    # lets a user reach the search page at all — so the backend is closed
+    # by name here rather than left to the general rules.
+    backend_guard = (
+        f'        oif "lo" tcp dport {SEARCH_BACKEND_PORT} '
+        f"meta skuid >= {UID_MIN} reject\n"
+        if search_uid is not None else "")
 
     return f"""#!/usr/sbin/nft -f
 # Rendered by kosherd from policy revision {policy.revision}. DO NOT EDIT.
@@ -137,14 +153,14 @@ table {TABLE} {{
         type nat hook output priority dstnat; policy accept;
         # Never redirect the resolver's or the proxy's own traffic, or they
         # would loop back into themselves.
-        meta skuid {{ 0, {dns_uid}{mitm_exempt} }} return
+        meta skuid {{ 0, {dns_uid}{mitm_exempt}{search_exempt} }} return
 {open_dns}        udp dport 53 redirect to :53
         tcp dport 53 redirect to :53
 {web_redirect}    }}
 
     chain output {{
         type filter hook output priority filter; policy accept;
-        oif "lo" accept
+{backend_guard}        oif "lo" accept
         # Continuation of already-permitted connections (incl. the reply side
         # of inbound ones, e.g. an admin ssh session). A filtered user cannot
         # INITIATE anything with this: their first SYN/datagram is dispatched

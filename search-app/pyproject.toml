@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "kosher-search"
+version = "0.1.0"
+description = "KosherOS search front end: filtered results from a local SearXNG"
+requires-python = ">=3.11"
+dependencies = ["kosherd"]
+
+[project.scripts]
+kosher-search = "kosher_search.server:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["kosher_search*"]
+
+[tool.setuptools.package-data]
+kosher_search = ["*.css"]

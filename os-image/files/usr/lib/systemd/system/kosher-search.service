@@ -1,0 +1,25 @@
+[Unit]
+Description=KosherOS search (the filtered page users see)
+After=kosher-searxng.service
+Wants=kosher-searxng.service
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+User=kosher-search
+Group=kosher-search
+ExecStart=/usr/bin/kosher-search
+Restart=on-failure
+RestartSec=2
+StateDirectory=kosher-search
+StateDirectoryMode=0755
+# It needs /proc/net/tcp to tell which user is searching, and the category
+# database and word lists to filter with. Nothing else.
+ProtectSystem=strict
+ReadWritePaths=/var/lib/kosher-search
+PrivateTmp=yes
+NoNewPrivileges=yes
+ProtectHome=yes
+
+[Install]
+WantedBy=multi-user.target

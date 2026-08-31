@@ -17,6 +17,7 @@ from pathlib import Path
 
 from . import categories as categories_mod
 from . import dns, mitmca, nft
+from . import search as search_mod
 from .policy import INSPECTED_MODES, SAFESEARCH_MODES, UNFILTERED_MODES, Policy
 
 log = logging.getLogger(__name__)
@@ -33,6 +34,11 @@ MITM_SERVICE = "kosher-mitm.service"
 # (root-only: it holds the policy), so it gets its own state dir.
 MITM_DIR = Path("/var/lib/kosher-mitm")
 MITM_RULES_PATH = MITM_DIR / "rules.json"
+# The search front end and the metasearch engine behind it, likewise
+# unprivileged and likewise given only what they filter with.
+SEARCH_SERVICES = ("kosher-searxng.service", "kosher-search.service")
+SEARCH_DIR = Path("/var/lib/kosher-search")
+SEARCH_POLICY_PATH = Path(search_mod.SEARCH_POLICY_PATH)
 
 
 class ApplyError(Exception):
@@ -78,6 +84,19 @@ def write_mitm_rules(policy: Policy) -> None:
     _write_atomic(MITM_RULES_PATH, json.dumps(per_user, indent=2) + "\n", mode=0o644)
 
 
+def search_uid() -> int | None:
+    try:
+        return pwd.getpwnam("kosher-search").pw_uid
+    except KeyError:
+        return None
+
+
+def write_search_policy(policy: Policy) -> None:
+    SEARCH_DIR.mkdir(parents=True, exist_ok=True)
+    _write_atomic(SEARCH_POLICY_PATH, search_mod.render_policy(policy),
+                  mode=0o644)
+
+
 def _write_atomic(path: Path, content: str, mode: int = 0o644) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp = tempfile.mkstemp(dir=path.parent)
@@ -108,7 +127,8 @@ def _restart(service: str):
 
 def apply_policy(policy: Policy) -> None:
     """Render and load enforcement for `policy`. Raises ApplyError on failure."""
-    ruleset = nft.render(policy, dns_uid=dnsmasq_uid(), mitm_uid=mitm_uid())
+    ruleset = nft.render(policy, dns_uid=dnsmasq_uid(), mitm_uid=mitm_uid(),
+                         search_uid=search_uid())
 
     # Syntax-check before touching the live ruleset or the boot file.
     with tempfile.NamedTemporaryFile("w", suffix=".nft") as check:
@@ -134,6 +154,18 @@ def apply_policy(policy: Policy) -> None:
             log.exception("could not prepare the inspection CA")
     _restart(MITM_SERVICE) if inspected else subprocess.run(
         ["systemctl", "stop", MITM_SERVICE], capture_output=True, text=True)
+
+    write_search_policy(policy)
+    # Search is only useful to somebody whose results need filtering; an
+    # unfiltered account has a real search engine already.
+    if any(u.mode not in UNFILTERED_MODES and u.mode != "none"
+           for u in policy.effective_users()):
+        for service in SEARCH_SERVICES:
+            _restart(service)
+    else:
+        for service in reversed(SEARCH_SERVICES):
+            subprocess.run(["systemctl", "stop", service],
+                           capture_output=True, text=True)
 
     _write_atomic(DNSMASQ_DROPIN_PATH, dns.render(policy))
     _write_atomic(SAFESEARCH_PATH, dns.render_safesearch(policy))

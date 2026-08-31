@@ -11,6 +11,10 @@ from kosherd.policy import Policy
 EXAMPLE = Path(__file__).parents[2] / "policy" / "examples" / "family.json"
 
 
+def _example() -> Policy:
+    return Policy.from_dict(json.loads(EXAMPLE.read_text()))
+
+
 def rendered(policy=None) -> str:
     pol = policy or Policy.from_dict(json.loads(EXAMPLE.read_text()))
     return nft.render(pol, dns_uid=989)
@@ -153,3 +157,26 @@ def test_unfiltered_mode_does_not_block_evasion():
     out = nft.render(policy_of("unfiltered"), dns_uid=989, mitm_uid=988)
     chain = out.split("chain mode_unfiltered")[1].split("chain")[0]
     assert "evasion_block" not in chain
+
+
+# -- the search service -------------------------------------------------------
+
+def test_the_search_backend_is_closed_to_human_users():
+    # Loopback is otherwise wide open, which is what lets a user reach the
+    # search page at all. The engine behind it must stay shut: its raw
+    # results carry the snippets the filter exists to withhold.
+    ruleset = nft.render(_example(), dns_uid=989, search_uid=987)
+    line = f'oif "lo" tcp dport {nft.SEARCH_BACKEND_PORT} meta skuid >= {nft.UID_MIN} reject'
+    assert line in ruleset
+    # and it must come before loopback is accepted, or it never runs
+    assert ruleset.index(line) < ruleset.index('oif "lo" accept')
+
+
+def test_the_search_service_resolves_names_without_being_redirected():
+    ruleset = nft.render(_example(), dns_uid=989, search_uid=987)
+    assert "meta skuid { 0, 989, 987 } return" in ruleset
+
+
+def test_without_a_search_user_nothing_about_search_is_rendered():
+    ruleset = nft.render(_example(), dns_uid=989)
+    assert str(nft.SEARCH_BACKEND_PORT) not in ruleset

@@ -1,0 +1,100 @@
+# SearXNG configuration for KosherOS.
+#
+# This instance is not a general-purpose metasearch engine: it is the
+# back end of kosher-search, which filters everything it returns. So it
+# listens on loopback only, answers JSON as well as HTML, and has every
+# setting a user could otherwise weaken locked down here.
+#
+# secret_key is replaced with a random value on first boot (see
+# kosher-firstboot); the placeholder must never survive into a running
+# system, because it signs the preference cookies.
+use_default_settings: true
+
+general:
+  instance_name: "KosherOS Search"
+  # Nothing here should invite a user to reconfigure the engine.
+  enable_metrics: false
+  donation_url: false
+  contact_url: false
+
+server:
+  secret_key: "kosheros-placeholder-replaced-on-first-boot"
+  bind_address: "127.0.0.1"
+  port: 8889
+  limiter: false          # only one local client ever connects
+  public_instance: false
+  image_proxy: false      # see below
+  method: "GET"
+
+search:
+  # Forced, and locked below so a preferences cookie cannot lower it. The
+  # proxy and the resolver force safe search too; this is the third place,
+  # and the only one the engines themselves see.
+  safe_search: 2
+  autocomplete: ""        # every keystroke would otherwise leave the machine
+  default_lang: "en"
+  formats:
+    - html
+    - json
+
+ui:
+  static_use_hash: true
+  default_locale: "en"
+  query_in_title: true
+
+# Users never see SearXNG's own preferences page, but locking these means
+# a crafted URL cannot turn the filter off either.
+preferences:
+  lock:
+    - safesearch
+    - autocomplete
+    - categories
+    - language
+    - image_proxy
+    - method
+    - safe_search
+
+outgoing:
+  request_timeout: 4.0
+  max_request_timeout: 8.0
+  pool_connections: 16
+  pool_maxsize: 8
+
+# image_proxy is off on purpose. With it on, every thumbnail would be
+# served from 127.0.0.1 and would therefore bypass the filtering proxy
+# entirely — image results would be the one part of the web nothing
+# inspected. Off, thumbnails load from their origin, which means a
+# whitelist user simply does not get them and a filtered user gets them
+# through the proxy like any other picture.
+
+engines:
+  # Engines that exist to index material this machine filters have no
+  # business being queried at all: they are a second front door.
+  - name: piratebay
+    disabled: true
+  - name: 1337x
+    disabled: true
+  - name: nyaa
+    disabled: true
+  - name: torznab
+    disabled: true
+  - name: btdigg
+    disabled: true
+  - name: kickass
+    disabled: true
+  - name: solidtorrents
+    disabled: true
+  - name: deviantart
+    disabled: true
+  - name: unsplash
+    disabled: true
+  - name: flickr
+    disabled: true
+  - name: 9gag
+    disabled: true
+  - name: imgur
+    disabled: true
+  - name: reddit
+    disabled: true
+  - name: tumblr
+    disabled: true

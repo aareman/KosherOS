@@ -54,6 +54,10 @@ def env(tmp_path, monkeypatch):
                         tmp_path / "dnsmasq" / "categories.conf")
     monkeypatch.setattr(apply_mod, "MITM_DIR", tmp_path / "mitm")
     monkeypatch.setattr(apply_mod, "MITM_RULES_PATH", tmp_path / "mitm" / "rules.json")
+    monkeypatch.setattr(apply_mod, "SEARCH_DIR", tmp_path / "search")
+    monkeypatch.setattr(apply_mod, "SEARCH_POLICY_PATH",
+                        tmp_path / "search" / "policy.json")
+    monkeypatch.setattr(apply_mod, "search_uid", lambda: 987, raising=False)
     monkeypatch.setattr(apply_mod, "dnsmasq_uid", lambda: 989)
     monkeypatch.setattr(apply_mod, "mitm_uid", lambda: 988)
     ca_calls = []
@@ -159,6 +163,10 @@ def rules_written(tmp_path) -> dict:
 def test_only_inspected_users_rules_reach_the_proxy(tmp_path, monkeypatch):
     monkeypatch.setattr(apply_mod, "MITM_DIR", tmp_path / "mitm")
     monkeypatch.setattr(apply_mod, "MITM_RULES_PATH", tmp_path / "mitm" / "rules.json")
+    monkeypatch.setattr(apply_mod, "SEARCH_DIR", tmp_path / "search")
+    monkeypatch.setattr(apply_mod, "SEARCH_POLICY_PATH",
+                        tmp_path / "search" / "policy.json")
+    monkeypatch.setattr(apply_mod, "search_uid", lambda: 987, raising=False)
     block = [{"action": "block", "pattern": "x.com"}]
     policy = Policy(users=[
         UserPolicy(uid=1001, username="filtered", mode="filtered", rules=block),
@@ -176,6 +184,10 @@ def test_only_inspected_users_rules_reach_the_proxy(tmp_path, monkeypatch):
 def test_guest_rules_reach_the_proxy(tmp_path, monkeypatch):
     monkeypatch.setattr(apply_mod, "MITM_DIR", tmp_path / "mitm")
     monkeypatch.setattr(apply_mod, "MITM_RULES_PATH", tmp_path / "mitm" / "rules.json")
+    monkeypatch.setattr(apply_mod, "SEARCH_DIR", tmp_path / "search")
+    monkeypatch.setattr(apply_mod, "SEARCH_POLICY_PATH",
+                        tmp_path / "search" / "policy.json")
+    monkeypatch.setattr(apply_mod, "search_uid", lambda: 987, raising=False)
     policy = Policy()
     policy.guest.enabled = True
     policy.guest.uid = 1010
@@ -188,6 +200,10 @@ def test_guest_rules_reach_the_proxy(tmp_path, monkeypatch):
 def test_rules_file_is_readable_by_the_unprivileged_proxy(tmp_path, monkeypatch):
     monkeypatch.setattr(apply_mod, "MITM_DIR", tmp_path / "mitm")
     monkeypatch.setattr(apply_mod, "MITM_RULES_PATH", tmp_path / "mitm" / "rules.json")
+    monkeypatch.setattr(apply_mod, "SEARCH_DIR", tmp_path / "search")
+    monkeypatch.setattr(apply_mod, "SEARCH_POLICY_PATH",
+                        tmp_path / "search" / "policy.json")
+    monkeypatch.setattr(apply_mod, "search_uid", lambda: 987, raising=False)
     write_mitm_rules(Policy())
     mode = (tmp_path / "mitm" / "rules.json").stat().st_mode & 0o777
     assert mode == 0o644
@@ -223,6 +239,10 @@ def test_categories_alone_are_enough_to_reach_the_proxy(tmp_path, monkeypatch):
     # or the proxy would let their traffic through untouched.
     monkeypatch.setattr(apply_mod, "MITM_DIR", tmp_path / "mitm")
     monkeypatch.setattr(apply_mod, "MITM_RULES_PATH", tmp_path / "mitm" / "rules.json")
+    monkeypatch.setattr(apply_mod, "SEARCH_DIR", tmp_path / "search")
+    monkeypatch.setattr(apply_mod, "SEARCH_POLICY_PATH",
+                        tmp_path / "search" / "policy.json")
+    monkeypatch.setattr(apply_mod, "search_uid", lambda: 987, raising=False)
     policy = Policy(users=[UserPolicy(uid=1001, username="k", mode="filtered",
                                       blocked_categories=["adult"])])
     write_mitm_rules(policy)
@@ -236,6 +256,10 @@ def test_a_media_level_alone_reaches_the_proxy(tmp_path, monkeypatch):
     # user's traffic would pass through untouched.
     monkeypatch.setattr(apply_mod, "MITM_DIR", tmp_path / "mitm")
     monkeypatch.setattr(apply_mod, "MITM_RULES_PATH", tmp_path / "mitm" / "rules.json")
+    monkeypatch.setattr(apply_mod, "SEARCH_DIR", tmp_path / "search")
+    monkeypatch.setattr(apply_mod, "SEARCH_POLICY_PATH",
+                        tmp_path / "search" / "policy.json")
+    monkeypatch.setattr(apply_mod, "search_uid", lambda: 987, raising=False)
     policy = Policy(users=[UserPolicy(uid=1001, username="k", mode="filtered",
                                       media_level="all")])
     write_mitm_rules(policy)
@@ -245,6 +269,10 @@ def test_a_media_level_alone_reaches_the_proxy(tmp_path, monkeypatch):
 def test_youtube_settings_alone_reach_the_proxy(tmp_path, monkeypatch):
     monkeypatch.setattr(apply_mod, "MITM_DIR", tmp_path / "mitm")
     monkeypatch.setattr(apply_mod, "MITM_RULES_PATH", tmp_path / "mitm" / "rules.json")
+    monkeypatch.setattr(apply_mod, "SEARCH_DIR", tmp_path / "search")
+    monkeypatch.setattr(apply_mod, "SEARCH_POLICY_PATH",
+                        tmp_path / "search" / "policy.json")
+    monkeypatch.setattr(apply_mod, "search_uid", lambda: 987, raising=False)
     policy = Policy(users=[UserPolicy(uid=1001, username="k", mode="filtered",
                                       youtube={"allowed_channels": ["@torah"]})])
     write_mitm_rules(policy)

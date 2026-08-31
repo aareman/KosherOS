@@ -1,0 +1,25 @@
+{
+  "policies": {
+    "Homepage": {
+      "URL": "http://127.0.0.1:8888/",
+      "StartPage": "homepage",
+      "Locked": false
+    },
+    "NewTabPage": true,
+    "SearchEngines": {
+      "Add": [
+        {
+          "Name": "KosherOS",
+          "URLTemplate": "http://127.0.0.1:8888/search?q={searchTerms}",
+          "Method": "GET",
+          "Description": "Filtered search on this computer"
+        }
+      ],
+      "Default": "KosherOS"
+    },
+    "SearchSuggestEnabled": false,
+    "DisablePocket": true,
+    "DisableTelemetry": true,
+    "DisableFirefoxStudies": true
+  }
+}

@@ -11,7 +11,10 @@ RUN dnf -y install dnsmasq nftables python3-gobject python3-jsonschema python3-p
         malcontent malcontent-tools flatpak accountsservice cage \
         ca-certificates && dnf clean all \
     # The proxy runs unprivileged; kosherd hands it only the URL rules.
-    && useradd -r -s /usr/sbin/nologin -d /var/lib/kosher-mitm kosher-mitm
+    && useradd -r -s /usr/sbin/nologin -d /var/lib/kosher-mitm kosher-mitm \
+    # Same for search: the front end and the engine behind it run as one
+    # unprivileged user and are given only what they filter with.
+    && useradd -r -s /usr/sbin/nologin -d /var/lib/kosher-search kosher-search
 # sudo is on dnf's protected list; removing it here is the whole point.
 # podman must STAY: bootc (the update mechanism) depends on it in F44+. The
 # skuid firewall contains rootless containers, and SUB_UID_COUNT=0 below
@@ -111,6 +114,7 @@ RUN flatpak remote-add --system --if-not-exists \
 
 # --- kosherd + apps (last layers: change most often) --------------------------
 COPY kosherd/ /tmp/kosherd/
+COPY search-app/ /tmp/search-app/
 COPY admin-app/ /tmp/admin-app/
 COPY store-app/ /tmp/store-app/
 COPY setup-app/ /tmp/setup-app/
@@ -130,11 +134,29 @@ RUN rm -f /tmp/fetch-categories.py
 # mitmproxy is not packaged for Fedora 44, so install it from PyPI (with its
 # dependencies — unlike our own packages, which are --no-deps).
 RUN python3 -m pip install --prefix=/usr mitmproxy
+# SearXNG is the metasearch engine behind our search page. It is a large
+# dependency and the only reason it is here is that scraping search
+# engines is the part that breaks constantly, and SearXNG is the project
+# that keeps up with it. Everything version-specific stays behind its JSON
+# API, which is stable, so an upgrade cannot reach our filtering.
+#
+# From git, not PyPI: the name "searxng" on PyPI belongs to an unrelated
+# project, and upstream publishes no wheel. TODO(stage 2): pin a commit
+# rather than tracking master, so an image rebuild is reproducible.
+ARG SEARXNG_REF=master
+RUN dnf -y install git-core && dnf clean all \
+    && python3 -m pip install --prefix=/usr \
+        "git+https://github.com/searxng/searxng@${SEARXNG_REF}" \
+    || echo "WARNING: SearXNG did not install; search will be unavailable"
 RUN python3 -m pip install --prefix=/usr --no-deps \
         /tmp/kosherd/ /tmp/admin-app/ /tmp/store-app/ /tmp/setup-app/ \
+        /tmp/search-app/ \
     && rm -rf /tmp/kosherd /tmp/admin-app /tmp/store-app /tmp/setup-app \
+        /tmp/search-app \
     && chmod 755 /usr/bin/kosher-setup-session \
     && systemctl enable kosher-firstboot.service \
+    && systemctl enable kosher-search-secret.service kosher-searxng.service \
+        kosher-search.service \
     # Portal sync is inert until the device enrols (the unit and timer
     # both carry ConditionPathExists on the enrolment file).
     && systemctl enable kosher-sync.timer

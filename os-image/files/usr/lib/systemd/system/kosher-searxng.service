@@ -1,0 +1,35 @@
+[Unit]
+Description=KosherOS metasearch engine (SearXNG, loopback only)
+After=kosher-firewall.service kosher-dns.service kosher-search-secret.service network-online.target
+Requires=kosher-search-secret.service
+Wants=kosher-dns.service
+# Restarted on every policy change; see kosher-dns.service.
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+User=kosher-search
+Group=kosher-search
+Environment=SEARXNG_SETTINGS_PATH=/usr/share/kosher/searxng/settings.yml
+Environment=SEARXNG_BIND_ADDRESS=127.0.0.1
+Environment=SEARXNG_PORT=8889
+EnvironmentFile=/var/lib/kosher-search/secret.env
+# This is the engine, not the page. It answers only kosher-search: the
+# firewall rejects any human user's connection to 8889, because raw
+# results carry the snippets the filter exists to withhold.
+ExecStart=/usr/bin/env python3 -m searx.webapp
+Restart=on-failure
+RestartSec=3
+StateDirectory=kosher-search
+StateDirectoryMode=0755
+ProtectSystem=strict
+ReadWritePaths=/var/lib/kosher-search
+PrivateTmp=yes
+NoNewPrivileges=yes
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+
+[Install]
+WantedBy=multi-user.target

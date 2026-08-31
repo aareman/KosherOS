@@ -69,7 +69,9 @@ in a normal terminal.
 4. ✅ Branding: KosherOS identity, boot splash, login screen, wallpaper — see [docs/branding.md](docs/branding.md); real logo artwork still to come
 5. ✅ Installable ISO (`just iso`) + first-boot wizard (admin account, guardian, boot password, firmware checklist)
 6. ✅ Portal: signed policy sync (`portal/`) — remote-support channel and web UI still to come
-8. **Live "try it" ISO** — the installer ISO installs immediately; there is no
+8. **Real content filtering** — category lists, enforced safe search, and a
+   request-and-approve path; see [docs/content-filtering.md](docs/content-filtering.md)
+9. **Live "try it" ISO** — the installer ISO installs immediately; there is no
    boot-into-the-desktop-and-click-Install experience yet. `just usb-image`
    (raw image on a USB stick) and `just vm` are the current ways to try it.
 7. ✅ Inspect mode: local TLS interception (mitmproxy) with URL **path-level** allow/block rules

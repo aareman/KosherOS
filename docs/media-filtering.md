@@ -80,6 +80,65 @@ suppression, then a classifier for `nsfw`/`suggestive` with blur, then
 rather than a promise.
 
 
+
+## Running on the family's own computer, including a slow one
+
+Filtering happens on the device. No image and no browsing history leaves
+the house, the filter keeps working without a subscription, and there is no
+service to breach. The cost of that choice is that the accuracy ceiling is
+whatever a CPU-only laptop can do — often an old one — so every layer has
+to be designed for that machine rather than a developer's.
+
+### Cheapest thing that can decide, first
+
+Each stage only runs if the one before it could not settle the question:
+
+| stage | cost per image | settles |
+|---|---|---|
+| category of the page's domain | none (already known) | most of the bad web |
+| shopping department / page metadata | microseconds | most of the shopping case |
+| size threshold | none | icons, spacers, tracking pixels |
+| on-disk cache hit by content hash | ~1 ms | everything seen before |
+| small NSFW classifier, quantised | 5–20 ms | the clear cases |
+| detector (NudeNet-class) | 50–200 ms | only the borderline ones |
+
+The last row is the one that hurts on weak hardware, which is exactly why
+it runs last and rarely. A two-stage gate — skip the detector when the fast
+model is confident the image is safe — is the difference between a usable
+page and an unusable one.
+
+### A time budget, and what happens when it runs out
+
+Every page gets a budget. When an image cannot be judged inside it, the
+answer is **hide the image**, not "let it through while we think". A slow
+machine then degrades into a stricter filter rather than a broken browser
+or a silent hole. The placeholder says the image was not checked, so the
+person can ask for it rather than wonder.
+
+### Profiles, chosen by measuring the machine
+
+At setup the machine times a classification and picks a profile:
+
+- **thorough** — detector on borderline images, full resolution;
+- **balanced** — quantised classifier, detector only on strong signals;
+- **light** — classifier only, smaller input, wider cache reuse;
+- **images off** — for hardware that cannot keep up at all, `media_level`
+  falls back to `all`, which needs no model and is never wrong.
+
+That last profile matters: on a machine too slow to classify, hiding images
+outright is *better* filtering than a classifier that times out, and it is
+honest about what the computer can do.
+
+### Caching
+
+Keyed by the SHA-256 of the image bytes plus the model version, stored on
+disk and shared by every user on the machine. Repeat views cost nothing,
+which is most views. A weak machine benefits from this more than a fast
+one, so the cache is sized generously rather than kept small.
+
+Deliberately no Redis on the device: another daemon holding RAM on a
+machine already short of it, to cache something SQLite handles.
+
 ## Training a tzniut classifier: how hard, really
 
 Two problems get conflated here, and only one of them needs a model.

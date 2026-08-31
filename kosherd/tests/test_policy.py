@@ -77,3 +77,51 @@ def test_user_lookup_missing():
 def test_user_policy_to_dict_omits_defaults():
     d = UserPolicy(uid=1000, username="x", mode="none").to_dict()
     assert d == {"uid": 1000, "username": "x", "mode": "none"}
+
+
+# -- media and YouTube --------------------------------------------------------
+
+def test_media_level_defaults_to_showing_everything():
+    from kosherd.policy import DEFAULT_MEDIA_LEVEL, UserPolicy
+
+    user = UserPolicy(uid=1000, username="x", mode="filtered")
+    assert user.media_level == DEFAULT_MEDIA_LEVEL == "none"
+    assert "media_level" not in user.to_dict()  # omitted when default
+
+
+def test_media_level_roundtrips():
+    from kosherd.policy import UserPolicy
+
+    pol = Policy(users=[UserPolicy(uid=1000, username="x", mode="filtered",
+                                   media_level="immodest")])
+    assert Policy.from_dict(pol.to_dict()).users[0].media_level == "immodest"
+
+
+def test_media_levels_run_from_permissive_to_strict():
+    from kosherd.policy import MEDIA_LEVELS
+
+    # Order matters: enforcement compares positions to decide what to hide.
+    assert MEDIA_LEVELS.index("none") < MEDIA_LEVELS.index("nsfw")
+    assert MEDIA_LEVELS.index("nsfw") < MEDIA_LEVELS.index("suggestive")
+    assert MEDIA_LEVELS.index("suggestive") < MEDIA_LEVELS.index("immodest")
+    assert MEDIA_LEVELS.index("immodest") < MEDIA_LEVELS.index("all")
+
+
+def test_youtube_settings_roundtrip():
+    from kosherd.policy import UserPolicy
+
+    yt = {"blocked_categories": ["24"], "allowed_channels": ["@torah"],
+          "restrict": "strict"}
+    pol = Policy(users=[UserPolicy(uid=1000, username="x", mode="filtered",
+                                   youtube=yt)])
+    assert Policy.from_dict(pol.to_dict()).users[0].youtube == yt
+
+
+def test_an_invalid_media_level_is_rejected():
+    from kosherd.policy import UserPolicy
+
+    pol = Policy(users=[UserPolicy(uid=1000, username="x", mode="filtered")])
+    doc = pol.to_dict()
+    doc["users"][0]["media_level"] = "somewhat"
+    with pytest.raises(PolicyError):
+        Policy.from_dict(doc)

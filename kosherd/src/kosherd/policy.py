@@ -40,6 +40,33 @@ SAFESEARCH_MODES = ("dnsfilter", "filtered", "whitelist")
 # Modes that must not reach the family resolver at all.
 UNFILTERED_MODES = ("unfiltered",)
 
+# How much of the imagery on an allowed page a user may see, strictest last.
+# Only meaningful in filtered mode: judging a picture means holding it, which
+# means reading the connection.
+#   none           show everything
+#   nsfw           hide explicit imagery
+#   suggestive     also hide suggestive imagery
+#   immodest       also hide immodest imagery (the frum default)
+#   all            show no remote images at all
+MEDIA_LEVELS = ("none", "nsfw", "suggestive", "immodest", "all")
+MEDIA_LEVEL_LABELS = {
+    "none": "Show all images",
+    "nsfw": "Hide explicit images",
+    "suggestive": "Hide explicit and suggestive images",
+    "immodest": "Hide explicit, suggestive and immodest images",
+    "all": "Hide all images from the web",
+}
+DEFAULT_MEDIA_LEVEL = "none"
+
+# YouTube is enough of the web on its own to deserve its own settings.
+YOUTUBE_CATEGORIES = {
+    "1": "Film & Animation", "2": "Autos & Vehicles", "10": "Music",
+    "15": "Pets & Animals", "17": "Sports", "19": "Travel & Events",
+    "20": "Gaming", "22": "People & Blogs", "23": "Comedy",
+    "24": "Entertainment", "25": "News & Politics", "26": "How-to & Style",
+    "27": "Education", "28": "Science & Technology", "29": "Nonprofits",
+}
+
 # What earlier policies called these modes.
 LEGACY_MODES = {"inspect": "filtered"}
 
@@ -83,6 +110,8 @@ class UserPolicy:
     can_install_apps: bool = True
     rules: list[dict] = field(default_factory=list)
     blocked_categories: list[str] = field(default_factory=list)
+    media_level: str = DEFAULT_MEDIA_LEVEL
+    youtube: dict = field(default_factory=dict)
 
     def to_dict(self) -> dict:
         d: dict = {"uid": self.uid, "username": self.username, "mode": self.mode}
@@ -94,6 +123,10 @@ class UserPolicy:
             d["rules"] = self.rules
         if self.blocked_categories:
             d["blocked_categories"] = self.blocked_categories
+        if self.media_level != DEFAULT_MEDIA_LEVEL:
+            d["media_level"] = self.media_level
+        if self.youtube:
+            d["youtube"] = self.youtube
         if self.apps:
             d["apps"] = self.apps
         if not self.can_install_apps:
@@ -186,6 +219,8 @@ class Policy:
                     can_install_apps=u.get("can_install_apps", True),
                     rules=list(u.get("rules", [])),
                     blocked_categories=list(u.get("blocked_categories", [])),
+                    media_level=u.get("media_level", DEFAULT_MEDIA_LEVEL),
+                    youtube=dict(u.get("youtube", {})),
                 )
                 for u in doc["users"]
             ],

@@ -203,6 +203,50 @@
           },
           "default": [],
           "description": "Category names this user may not reach (see kosherd.categories). Enforced precisely in the proxy for filtered users; for dnsfilter users the resolver blocks the union of categories across all such users, because one resolver cannot answer differently per user."
+        },
+        "media_level": {
+          "enum": [
+            "none",
+            "nsfw",
+            "suggestive",
+            "immodest",
+            "all"
+          ],
+          "default": "none",
+          "description": "How much imagery on an allowed page this user may see. Only meaningful in filtered mode: judging a picture means holding it, which means reading the connection."
+        },
+        "youtube": {
+          "type": "object",
+          "additionalProperties": false,
+          "default": {},
+          "description": "YouTube-specific limits for this user.",
+          "properties": {
+            "blocked_categories": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "default": [],
+              "description": "YouTube category ids this user may not watch."
+            },
+            "allowed_channels": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "default": [],
+              "description": "Channel ids or handles this user may watch. When non-empty, everything else on YouTube is blocked."
+            },
+            "restrict": {
+              "enum": [
+                "none",
+                "moderate",
+                "strict"
+              ],
+              "default": "moderate",
+              "description": "YouTube's own Restricted Mode level."
+            }
+          }
         }
       }
     }

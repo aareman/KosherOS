@@ -13,6 +13,7 @@ vmssh := "ssh -F build/vm/ssh_config"
 # Run the unit test suites (pure logic — no root, no D-Bus, no VM needed).
 test *ARGS:
     cd kosherd && python3 -m pytest tests/ -q {{ARGS}}
+    PYTHONPATH=kosherd/src:search-app python3 -m pytest search-app/tests -q {{ARGS}}
     cd portal && PYTHONPATH=src:../kosherd/src python3 -m pytest tests/ -q {{ARGS}}
 
 # Unit tests with a coverage report over the modules that can run here.

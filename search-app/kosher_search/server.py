@@ -21,7 +21,6 @@ import argparse
 import html
 import json
 import logging
-import socketserver
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -300,7 +299,7 @@ class Handler(BaseHTTPRequestHandler):
         return f'<a href="/search?{params}">{esc(label)}</a>'
 
 
-class Server(socketserver.ThreadingMixIn, ThreadingHTTPServer):
+class Server(ThreadingHTTPServer):
     daemon_threads = True
     allow_reuse_address = True
 

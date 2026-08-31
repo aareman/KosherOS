@@ -169,7 +169,8 @@ def test_only_inspected_users_rules_reach_the_proxy(tmp_path, monkeypatch):
     ])
     write_mitm_rules(policy)
     assert rules_written(tmp_path) == {
-        "1001": {"rules": block, "blocked_categories": []}}
+        "1001": {"rules": block, "blocked_categories": [],
+                 "media_level": "none", "youtube": {}}}
 
 
 def test_guest_rules_reach_the_proxy(tmp_path, monkeypatch):
@@ -226,4 +227,25 @@ def test_categories_alone_are_enough_to_reach_the_proxy(tmp_path, monkeypatch):
                                       blocked_categories=["adult"])])
     write_mitm_rules(policy)
     assert rules_written(tmp_path) == {
-        "1001": {"rules": [], "blocked_categories": ["adult"]}}
+        "1001": {"rules": [], "blocked_categories": ["adult"],
+                 "media_level": "none", "youtube": {}}}
+
+
+def test_a_media_level_alone_reaches_the_proxy(tmp_path, monkeypatch):
+    # Hiding images needs no URL rules and no categories; without this the
+    # user's traffic would pass through untouched.
+    monkeypatch.setattr(apply_mod, "MITM_DIR", tmp_path / "mitm")
+    monkeypatch.setattr(apply_mod, "MITM_RULES_PATH", tmp_path / "mitm" / "rules.json")
+    policy = Policy(users=[UserPolicy(uid=1001, username="k", mode="filtered",
+                                      media_level="all")])
+    write_mitm_rules(policy)
+    assert rules_written(tmp_path)["1001"]["media_level"] == "all"
+
+
+def test_youtube_settings_alone_reach_the_proxy(tmp_path, monkeypatch):
+    monkeypatch.setattr(apply_mod, "MITM_DIR", tmp_path / "mitm")
+    monkeypatch.setattr(apply_mod, "MITM_RULES_PATH", tmp_path / "mitm" / "rules.json")
+    policy = Policy(users=[UserPolicy(uid=1001, username="k", mode="filtered",
+                                      youtube={"allowed_channels": ["@torah"]})])
+    write_mitm_rules(policy)
+    assert rules_written(tmp_path)["1001"]["youtube"] == {"allowed_channels": ["@torah"]}

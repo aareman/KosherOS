@@ -122,3 +122,49 @@ def test_categories_are_empty_for_unknown_users(addon, tmp_path):
     cache = addon.PolicyCache(_rules_file(tmp_path, {}))
     assert cache.blocked_categories_for(4242) == []
     assert cache.blocked_categories_for(None) == []
+
+
+# -- media level and YouTube --------------------------------------------------
+
+def test_cache_reads_media_level_and_youtube(addon, tmp_path):
+    path = _rules_file(tmp_path, {"1001": {
+        "rules": [], "blocked_categories": [], "media_level": "immodest",
+        "youtube": {"allowed_channels": ["@torah"], "restrict": "strict"}}})
+    cache = addon.PolicyCache(path)
+    assert cache.media_level_for(1001) == "immodest"
+    assert cache.youtube_for(1001)["restrict"] == "strict"
+    assert cache.media_level_for(4242) == "none"  # unknown user unaffected
+
+
+def test_youtube_restrict_header_per_level(addon):
+    assert addon.YouTube.restrict_header({"restrict": "strict"}) == "Strict"
+    assert addon.YouTube.restrict_header({"restrict": "moderate"}) == "Moderate"
+    # "none" means do not send the header at all, not send an empty one.
+    assert addon.YouTube.restrict_header({"restrict": "none"}) is None
+    assert addon.YouTube.restrict_header({}) == "Moderate"  # default
+
+
+def test_youtube_recognises_its_own_hosts(addon):
+    assert addon.YouTube.applies("www.youtube.com")
+    assert addon.YouTube.applies("www.youtube-nocookie.com")
+    assert not addon.YouTube.applies("youtube.evil.com.attacker.net")
+    assert not addon.YouTube.applies("chinuch.org")
+
+
+def test_youtube_category_and_channel_are_read_from_the_page(addon):
+    body = ('{"videoDetails":{"channelId":"UC123","title":"x"},'
+            '"category":"27","canonicalBaseUrl":"/@torahchannel"}')
+    assert addon.YouTube.category_of(body) == "27"
+    channel_id, handle = addon.YouTube.channel_of(body)
+    assert channel_id == "UC123"
+    assert handle == "@torahchannel"
+
+
+def test_youtube_metadata_missing_is_not_a_crash(addon):
+    assert addon.YouTube.category_of("<html>nothing here</html>") is None
+    assert addon.YouTube.channel_of("") == (None, None)
+
+
+def test_the_placeholder_is_a_real_png(addon):
+    # A broken image icon makes a page look broken; a valid 1x1 keeps layout.
+    assert addon.BLANK_PNG[:8] == b"\x89PNG\r\n\x1a\n"

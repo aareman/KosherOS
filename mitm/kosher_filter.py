@@ -17,6 +17,7 @@ edits take effect without a restart.
 
 from __future__ import annotations
 
+import base64
 import json
 import logging
 from pathlib import Path
@@ -91,6 +92,8 @@ class PolicyCache:
         self._mtime = 0.0
         self._rules: dict[int, list] = {}
         self._blocked: dict[int, list] = {}
+        self._media: dict[int, str] = {}
+        self._youtube: dict[int, dict] = {}
 
     def rules_for(self, uid: int | None):
         self._refresh()
@@ -99,6 +102,14 @@ class PolicyCache:
     def blocked_categories_for(self, uid: int | None) -> list:
         self._refresh()
         return self._blocked.get(uid, []) if uid is not None else []
+
+    def media_level_for(self, uid: int | None) -> str:
+        self._refresh()
+        return self._media.get(uid, "none") if uid is not None else "none"
+
+    def youtube_for(self, uid: int | None) -> dict:
+        self._refresh()
+        return self._youtube.get(uid, {}) if uid is not None else {}
 
     def _refresh(self) -> None:
         try:
@@ -115,6 +126,8 @@ class PolicyCache:
 
         rules: dict[int, list] = {}
         blocked: dict[int, list] = {}
+        media: dict[int, str] = {}
+        youtube: dict[int, dict] = {}
         for uid_text, raw in doc.items():
             try:
                 uid = int(uid_text)
@@ -123,10 +136,14 @@ class PolicyCache:
                 entry = raw if isinstance(raw, dict) else {"rules": raw}
                 rules[uid] = parse_rules(entry.get("rules", []))
                 blocked[uid] = list(entry.get("blocked_categories", []))
+                media[uid] = entry.get("media_level", "none")
+                youtube[uid] = dict(entry.get("youtube", {}))
             except Exception as e:  # noqa: BLE001 - one bad entry must not break all
                 log.error("bad entry for uid %s: %s", uid_text, e)
         self._rules = rules
         self._blocked = blocked
+        self._media = media
+        self._youtube = youtube
         self._mtime = mtime
         log.info("loaded rules for %d users", len(rules))
 
@@ -155,10 +172,67 @@ def _force_safesearch(flow: http.HTTPFlow) -> None:
                 query[key] = value
             break
 
-    if "youtube.com" in host or "youtube-nocookie.com" in host:
-        # YouTube honours this header on every request, including the app
-        # and embedded players.
-        flow.request.headers["YouTube-Restrict"] = "Moderate"
+
+
+
+# A 1x1 transparent PNG: replacing an image with this keeps page layout
+# intact, which matters — a page whose pictures became broken icons looks
+# broken, and people route around things that look broken.
+BLANK_PNG = base64.b64decode(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
+)
+
+IMAGE_TYPES = ("image/",)
+# Below this, an image is an icon, a spacer or a tracking pixel: not worth
+# hiding and not worth a classifier's time.
+MIN_IMAGE_BYTES = 6000
+
+
+def _is_image(flow) -> bool:
+    content_type = (flow.response.headers.get("content-type") or "").lower()
+    return content_type.startswith(IMAGE_TYPES)
+
+
+class YouTube:
+    """YouTube limits: restricted mode, categories, and a channel allow-list.
+
+    Restricted Mode is far too coarse on its own for a family that wants
+    shiurim but not entertainment, which is why the other two exist.
+    """
+
+    WATCH_PATHS = ("/watch", "/shorts", "/embed")
+
+    @staticmethod
+    def applies(host: str) -> bool:
+        host = (host or "").lower()
+        return "youtube.com" in host or "youtube-nocookie.com" in host
+
+    @staticmethod
+    def restrict_header(settings: dict) -> str | None:
+        level = (settings or {}).get("restrict", "moderate")
+        return {"moderate": "Moderate", "strict": "Strict"}.get(level)
+
+    @staticmethod
+    def category_of(body: str) -> str | None:
+        """The video's category id, read from the watch page."""
+        import re
+
+        match = re.search(r'"category"\s*:\s*"([^"]+)"', body)
+        if match:
+            return match.group(1)
+        match = re.search(r'categoryId["\\:\s]+(\d+)', body)
+        return match.group(1) if match else None
+
+    @staticmethod
+    def channel_of(body: str) -> tuple[str | None, str | None]:
+        """(channel id, handle) from the watch page, either of which may be
+        what an admin listed."""
+        import re
+
+        channel_id = re.search(r'"channelId"\s*:\s*"([^"]+)"', body)
+        handle = re.search(r'"canonicalBaseUrl"\s*:\s*"/(@[^"]+)"', body)
+        return (channel_id.group(1) if channel_id else None,
+                handle.group(1) if handle else None)
 
 
 class KosherFilter:
@@ -174,6 +248,15 @@ class KosherFilter:
 
         client_port = flow.client_conn.peername[1] if flow.client_conn.peername else None
         uid = self.uids.uid_for_port(client_port) if client_port else None
+        flow.metadata["kosher_uid"] = uid
+
+        if YouTube.applies(flow.request.pretty_host):
+            header = YouTube.restrict_header(self.policy.youtube_for(uid))
+            if header:
+                # Per-user rather than blanket: a family may want shiurim
+                # unrestricted for a parent and strict for a child.
+                flow.request.headers["YouTube-Restrict"] = header
+
         rules = self.policy.rules_for(uid)
 
         url = flow.request.pretty_url
@@ -193,6 +276,77 @@ class KosherFilter:
                 names = ", ".join(sorted(hit))
                 log.info("blocked uid=%s %s (category: %s)", uid, url, names)
                 self._block(flow, url, f" because it is {names}")
+
+
+
+    def response(self, flow: http.HTTPFlow) -> None:
+        uid = flow.metadata.get("kosher_uid")
+        if uid is None:
+            return
+
+        if _is_image(flow):
+            self._filter_image(flow, uid)
+            return
+
+        if YouTube.applies(flow.request.pretty_host):
+            self._filter_youtube(flow, uid)
+
+    def _filter_image(self, flow: http.HTTPFlow, uid: int) -> None:
+        level = self.policy.media_level_for(uid)
+        if level == "none":
+            return
+        body = flow.response.content or b""
+        if len(body) < MIN_IMAGE_BYTES:
+            return  # icons, spacers, tracking pixels
+
+        # "all" needs no judgement, which is why it is the only level that is
+        # right every time. The others need a classifier and are not wired
+        # up yet — see docs/media-filtering.md.
+        if level == "all":
+            self._blank_image(flow)
+            return
+
+        # Source-based suppression costs nothing and covers the worst of the
+        # web: if the page's own domain is in a category this user blocks,
+        # its imagery goes too.
+        host = flow.request.pretty_host or ""
+        if self.categories.blocked_categories_of(
+                host, self.policy.blocked_categories_for(uid)):
+            self._blank_image(flow)
+
+    @staticmethod
+    def _blank_image(flow: http.HTTPFlow) -> None:
+        flow.response.content = BLANK_PNG
+        flow.response.headers["content-type"] = "image/png"
+        flow.response.headers["x-kosheros"] = "image-hidden"
+
+    def _filter_youtube(self, flow: http.HTTPFlow, uid: int) -> None:
+        settings = self.policy.youtube_for(uid)
+        allowed = settings.get("allowed_channels") or []
+        blocked = settings.get("blocked_categories") or []
+        if not allowed and not blocked:
+            return
+        path = flow.request.path or ""
+        if not any(path.startswith(p) for p in YouTube.WATCH_PATHS):
+            return
+
+        content_type = (flow.response.headers.get("content-type") or "").lower()
+        if "text/html" not in content_type:
+            return
+        body = flow.response.get_text(strict=False) or ""
+
+        if allowed:
+            channel_id, handle = YouTube.channel_of(body)
+            if not ({channel_id, handle} & set(allowed)):
+                self._block(flow, flow.request.pretty_url,
+                            " because only approved channels are allowed")
+                return
+
+        if blocked:
+            category = YouTube.category_of(body)
+            if category and category in blocked:
+                self._block(flow, flow.request.pretty_url,
+                            f" because that kind of video is turned off")
 
     def _block(self, flow: http.HTTPFlow, url: str, because: str) -> None:
         flow.response = http.Response.make(

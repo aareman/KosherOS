@@ -65,11 +65,14 @@ def write_mitm_rules(policy: Policy) -> None:
     for user in policy.effective_users():
         if user.mode not in INSPECTED_MODES:
             continue
-        if not user.rules and not user.blocked_categories:
+        if not (user.rules or user.blocked_categories
+                or user.media_level != "none" or user.youtube):
             continue
         per_user[str(user.uid)] = {
             "rules": user.rules,
             "blocked_categories": user.blocked_categories,
+            "media_level": user.media_level,
+            "youtube": user.youtube,
         }
     MITM_DIR.mkdir(parents=True, exist_ok=True)
     _write_atomic(MITM_RULES_PATH, json.dumps(per_user, indent=2) + "\n", mode=0o644)

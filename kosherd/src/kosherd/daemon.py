@@ -215,6 +215,19 @@ GRUB_USER_CFG = Path("/boot/grub2/user.cfg")
 ERROR_NAME = "org.kosherlinux.Daemon1.Error"
 
 
+
+def _default_categories(mode: str) -> tuple[str, ...]:
+    """What a new account of this mode blocks before anyone configures it.
+
+    An admin who creates an account and walks away should still get a
+    filter; "filtered" that filters nothing is the worst outcome, because
+    it looks protected and is not.
+    """
+    from .categories import DEFAULT_BLOCKED
+
+    return DEFAULT_BLOCKED if mode in ("dnsfilter", "filtered", "whitelist") else ()
+
+
 class Daemon:
     def __init__(self) -> None:
         self.policy = policy_mod.load()
@@ -390,7 +403,9 @@ class Daemon:
                 f"'{username}' already exists — use Adopt Existing User to manage it"
             )
         uid = self._accounts_create_user(username, full_name)
-        self.policy.users.append(UserPolicy(uid=uid, username=username, mode=mode))
+        self.policy.users.append(UserPolicy(
+            uid=uid, username=username, mode=mode,
+            blocked_categories=list(_default_categories(mode))))
         self._save_and_apply()
         return GLib.Variant("(i)", (uid,))
 
@@ -443,7 +458,9 @@ class Daemon:
             raise PolicyError("cannot manage system accounts")
         if self.policy.user(uid) is not None:
             raise PolicyError(f"{username} is already managed")
-        self.policy.users.append(UserPolicy(uid=uid, username=username, mode=mode))
+        self.policy.users.append(UserPolicy(
+            uid=uid, username=username, mode=mode,
+            blocked_categories=list(_default_categories(mode))))
         self._save_and_apply()
         return GLib.Variant("(i)", (uid,))
 

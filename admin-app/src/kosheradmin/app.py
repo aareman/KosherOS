@@ -391,6 +391,64 @@ class RulesDialog(Adw.Dialog):
             self.list_box.append(row)
 
 
+class CategoryDialog(Adw.Dialog):
+    """Choose which kinds of content this person may not reach.
+
+    Categories come from the list bundle on the machine, so the choices
+    shown are the ones actually enforceable — an option that filters
+    nothing would be worse than no option at all.
+    """
+
+    def __init__(self, win: Window, user: dict, on_save):
+        super().__init__(title=f"Blocked content — {user['username']}",
+                         content_width=520, content_height=620)
+        self.win = win
+        self.chosen = set(user.get("blocked_categories", []))
+        self.switches: dict[str, Gtk.Switch] = {}
+
+        header = Adw.HeaderBar()
+        save = Gtk.Button(label="Save")
+        save.add_css_class("suggested-action")
+        save.connect("clicked", lambda _b: (on_save(sorted(self.chosen)), self.close()))
+        header.pack_end(save)
+
+        self.group = Adw.PreferencesGroup(
+            margin_start=12, margin_end=12, margin_top=6, margin_bottom=12)
+        page = Adw.PreferencesPage()
+        page.add(self.group)
+        scroller = Gtk.ScrolledWindow(vexpand=True)
+        scroller.set_child(page)
+
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        box.append(header)
+        box.append(scroller)
+        self.set_child(box)
+        self._load()
+
+    def _load(self) -> None:
+        def on_done(info):
+            self.group.set_title(f"{info['domains']} sites classified")
+            self.group.set_description(
+                f"List version {info['version']}. Sites not on the list are "
+                "judged by the other settings, so this is a floor, not a "
+                "guarantee.")
+            for category in info["categories"]:
+                name = category["name"]
+                switch = Adw.SwitchRow(title=category["label"], subtitle=name,
+                                       active=name in self.chosen)
+                switch.connect("notify::active", self._toggle, name)
+                self.group.add(switch)
+
+        _run_async(self.win.client.list_categories, on_done,
+                   lambda e: self.win.toast(_error_text(e)))
+
+    def _toggle(self, row, _param, name: str) -> None:
+        if row.get_active():
+            self.chosen.add(name)
+        else:
+            self.chosen.discard(name)
+
+
 class UserAppsDialog(Adw.Dialog):
     """Apps on this computer, from one user's point of view.
 
@@ -632,6 +690,24 @@ class ProfilesPage(Adw.PreferencesPage):
             rules_row.set_sensitive(False)
             rules_row.set_subtitle("Only used in “Filtered internet” mode")
         row.add_row(rules_row)
+
+        blocked = user.get("blocked_categories", [])
+        cats_row = Adw.ActionRow(
+            title="Blocked content",
+            subtitle=(", ".join(sorted(blocked)) if blocked else "Nothing blocked"),
+            activatable=True)
+        cats_row.add_suffix(Gtk.Image(icon_name="go-next-symbolic"))
+        cats_row.connect("activated", lambda _r: CategoryDialog(
+            self.win, user,
+            lambda chosen: self.win.with_guardian(lambda pw: self.win.call(
+                lambda: self.win.client.set_blocked_categories(
+                    user["uid"], chosen, pw),
+                done_msg=f"Content settings saved for {user['username']}"))
+            ).present(self.win))
+        if user["mode"] == "unfiltered":
+            cats_row.set_sensitive(False)
+            cats_row.set_subtitle("An unfiltered account blocks nothing")
+        row.add_row(cats_row)
 
         apps_row = Adw.ActionRow(
             title="Installed apps",

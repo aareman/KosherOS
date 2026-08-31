@@ -1,0 +1,50 @@
+{
+  "version": "seed-1",
+  "source": "KosherOS seed list",
+  "comment": "A SEED, not a filter. It exists so the mechanism works out of the box and can be tested; real coverage comes from an imported list (scripts/fetch-categories.py) and later from the portal. See docs/content-filtering.md.",
+  "domains": {
+    "adult": [
+      "pornhub.com", "xvideos.com", "xnxx.com", "xhamster.com", "redtube.com",
+      "youporn.com", "onlyfans.com", "chaturbate.com", "stripchat.com",
+      "adultfriendfinder.com", "playboy.com", "penthouse.com", "brazzers.com",
+      "erome.com", "rule34.xxx", "e-hentai.org", "nhentai.net", "spankbang.com",
+      "motherless.com", "fapello.com", "porn.com", "sex.com", "xxx.com"
+    ],
+    "gambling": [
+      "bet365.com", "pokerstars.com", "888casino.com", "draftkings.com",
+      "fanduel.com", "williamhill.com", "bovada.lv", "betfair.com",
+      "stake.com", "roobet.com", "casino.com"
+    ],
+    "dating": [
+      "tinder.com", "bumble.com", "match.com", "okcupid.com", "hinge.co",
+      "plentyoffish.com", "eharmony.com", "grindr.com", "badoo.com",
+      "ashleymadison.com"
+    ],
+    "social": [
+      "facebook.com", "instagram.com", "x.com", "twitter.com", "tiktok.com",
+      "snapchat.com", "reddit.com", "tumblr.com", "discord.com",
+      "pinterest.com", "linkedin.com", "threads.net", "vk.com"
+    ],
+    "video": [
+      "youtube.com", "netflix.com", "hulu.com", "twitch.tv", "vimeo.com",
+      "dailymotion.com", "disneyplus.com", "primevideo.com", "max.com"
+    ],
+    "shopping": [
+      "amazon.com", "ebay.com", "aliexpress.com", "temu.com", "shein.com",
+      "etsy.com", "walmart.com", "target.com", "wish.com"
+    ],
+    "games": [
+      "roblox.com", "steampowered.com", "epicgames.com", "miniclip.com",
+      "poki.com", "crazygames.com", "y8.com", "addictinggames.com"
+    ],
+    "proxy": [
+      "hidemyass.com", "proxysite.com", "kproxy.com", "croxyproxy.com",
+      "nordvpn.com", "expressvpn.com", "protonvpn.com", "tunnelbear.com",
+      "torproject.org", "psiphon.ca", "ultrasurf.us", "hola.org",
+      "1.1.1.1", "opendns.com"
+    ],
+    "malware": [
+      "malware.testing.google.test", "eicar.org"
+    ]
+  }
+}

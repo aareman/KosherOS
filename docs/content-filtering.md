@@ -46,7 +46,23 @@ The interception layer already exists — every filtered user's HTTPS passes
 through our proxy, where the full URL and the response body are visible.
 Everything below is a policy layer on top of infrastructure we have.
 
-### 1. Category lists (the foundation)
+### 1. Category lists (the foundation) — BUILT
+
+The image now imports the University of Toulouse blacklists at build time:
+**10.5 million domains across 24 categories** (4.6M of them adult), stored
+as SQLite at 190 MB, answering a lookup in **4.6 microseconds** with about
+60 MB resident. A Python dict of the same data would cost hundreds of
+megabytes of RAM, which the family machine does not have.
+
+Spot-checked against sites that matter: chinuch.org, torahanytime.com,
+artscroll.com, ou.org, chabad.org, sefaria.org, hebrewbooks.org, yeshiva.co,
+matzav.com, theyeshivaworld.com, kosher.com, wikipedia.org and several
+government and medical sites all come back clean, while pornhub, xvideos,
+onlyfans, chaturbate, stripchat, tinder, bet365, nordvpn and hidemyass are
+all caught. A list that blocked chinuch.org would be worse than no list, so
+that check runs before shipping.
+
+### The original plan for this piece
 
 A signed, versioned list bundle the device downloads and the proxy consults
 per request: `{domain or URL pattern -> categories}`. Per-user policy then

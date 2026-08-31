@@ -73,6 +73,12 @@ MAPPING = {
     "bank": "financial",
     "filehosting": "filehosting",
     "download": "filehosting",
+    # Torrent and warez sites: a filter that misses them leaks everything
+    # else, since what arrives through them is not filtered at all.
+    "warez": "filehosting",
+    "tricheur": "cheating",
+    "dangerous_material": "violence",
+    "marketingware": "ads",
     "manga": "manga",
     "sports": "sports",
     "radio": "radio",
@@ -108,14 +114,27 @@ def fetch(name: str, workdir: Path) -> Path | None:
 
 
 def domains_in(archive: Path, name: str) -> list[str]:
+    """Every domain in the archive's `domains` file.
+
+    The directory inside an archive is not always the name it was fetched
+    under — `ads.tar.gz` unpacks to `publicite/`. Looking for whatever
+    member ends in /domains avoids depending on that, and one archive that
+    does not match must never abort the whole import.
+    """
     try:
         with tarfile.open(archive) as tar:
-            member = tar.extractfile(f"{name}/domains")
+            path = next((m for m in tar.getnames()
+                         if m.endswith("/domains") or m == "domains"), None)
+            if path is None:
+                print(f"  ! {name}: no domains file in the archive",
+                      file=sys.stderr)
+                return []
+            member = tar.extractfile(path)
             if member is None:
                 return []
             return [line.decode("utf-8", "ignore").strip().lower()
                     for line in member]
-    except (tarfile.TarError, OSError) as e:
+    except Exception as e:  # noqa: BLE001 - one bad archive must not stop the build
         print(f"  ! {name}: {e}", file=sys.stderr)
         return []
 
@@ -140,14 +159,19 @@ def build(out: Path, only: set[str] | None) -> int:
             archive = fetch(source_name, workdir)
             if archive is None:
                 continue
-            rows = [(d, category) for d in domains_in(archive, source_name)
-                    if d and "." in d and " " not in d]
-            db.executemany(
-                "INSERT OR IGNORE INTO domains (domain, category) VALUES (?, ?)",
-                rows)
-            db.commit()
-            total += len(rows)
-            archive.unlink()
+            try:
+                rows = [(d, category) for d in domains_in(archive, source_name)
+                        if d and "." in d and " " not in d]
+                db.executemany(
+                    "INSERT OR IGNORE INTO domains (domain, category) VALUES (?, ?)",
+                    rows)
+                db.commit()
+                total += len(rows)
+                print(f"    {len(rows):,}")
+            except Exception as e:  # noqa: BLE001
+                print(f"  ! {source_name}: {e}", file=sys.stderr)
+            finally:
+                archive.unlink(missing_ok=True)
 
     db.execute("INSERT OR REPLACE INTO meta VALUES ('version', ?)",
                (time.strftime("%Y-%m-%d"),))

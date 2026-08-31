@@ -109,7 +109,8 @@ def test_the_guardian_gate_covers_every_filter_weakening_method():
     # Anything that can loosen filtering must be dual-controlled. If a new
     # filter method is added, it belongs in this list AND in GUARDIAN_GATED.
     expected = {"SetFilterMode", "SetWhitelist", "SetUrlRules",
-                "SetBlockedCategories", "SetGuestConfig", "DisableGuardian",
+                "SetBlockedCategories", "ApplyProfile", "SetGuestConfig",
+                "DisableGuardian",
                 "Enrol", "Unenrol"}
     assert GUARDIAN_GATED == expected
     filter_actions = {m for m, a in ACTIONS.items()

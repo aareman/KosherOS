@@ -112,6 +112,7 @@ class UserPolicy:
     blocked_categories: list[str] = field(default_factory=list)
     media_level: str = DEFAULT_MEDIA_LEVEL
     youtube: dict = field(default_factory=dict)
+    language_filter: str = "off"
 
     def to_dict(self) -> dict:
         d: dict = {"uid": self.uid, "username": self.username, "mode": self.mode}
@@ -127,6 +128,8 @@ class UserPolicy:
             d["media_level"] = self.media_level
         if self.youtube:
             d["youtube"] = self.youtube
+        if self.language_filter != "off":
+            d["language_filter"] = self.language_filter
         if self.apps:
             d["apps"] = self.apps
         if not self.can_install_apps:
@@ -221,6 +224,7 @@ class Policy:
                     blocked_categories=list(u.get("blocked_categories", [])),
                     media_level=u.get("media_level", DEFAULT_MEDIA_LEVEL),
                     youtube=dict(u.get("youtube", {})),
+                    language_filter=u.get("language_filter", "off"),
                 )
                 for u in doc["users"]
             ],

@@ -53,6 +53,14 @@ INTROSPECTION_XML = """
       <arg direction="in" type="as" name="categories"/>
       <arg direction="in" type="s" name="guardian_password"/>
     </method>
+    <method name="ApplyProfile">
+      <arg direction="in" type="i" name="uid"/>
+      <arg direction="in" type="s" name="profile"/>
+      <arg direction="in" type="s" name="guardian_password"/>
+    </method>
+    <method name="ListProfiles">
+      <arg direction="out" type="s" name="profiles_json"/>
+    </method>
     <method name="ListCategories">
       <arg direction="out" type="s" name="categories_json"/>
     </method>
@@ -347,6 +355,35 @@ class Daemon:
             raise PolicyError(f"uid {uid} is not managed")
         user.whitelist = sorted(set(domains))
         self._save_and_apply()
+        return None
+
+    def impl_ListProfiles(self):
+        from . import profiles
+
+        described = profiles.describe()
+        for entry in described:
+            entry["default"] = entry["key"] == profiles.DEFAULT_PROFILE
+        return GLib.Variant("(s)", (json.dumps(described),))
+
+    def impl_ApplyProfile(self, uid: int, profile_key: str, _guardian_pw: str):
+        from . import profiles
+
+        user = self.policy.user(uid)
+        if user is None:
+            raise PolicyError(f"uid {uid} is not managed")
+        try:
+            profile = profiles.get(profile_key)
+        except KeyError as e:
+            raise PolicyError(str(e)) from None
+
+        user.mode = profile.mode
+        user.blocked_categories = list(profile.blocked_categories)
+        user.media_level = profile.media_level
+        user.language_filter = profile.language_filter
+        user.youtube = dict(profile.youtube)
+        user.can_install_apps = profile.can_install_apps
+        self._save_and_apply()
+        log.info("applied profile %s to uid %d", profile_key, uid)
         return None
 
     def impl_ListCategories(self):

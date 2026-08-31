@@ -115,6 +115,19 @@ def cmd_rules(args) -> int:
     return 0
 
 
+def cmd_profile(args) -> int:
+    c = _client()
+    if args.action == "list":
+        for p in c.list_profiles():
+            mark = " (default)" if p.get("default") else ""
+            print(f"  {p['key']:<12} {p['label']}{mark}")
+            print(f"               {p['description']}")
+        return 0
+    c.apply_profile(args.uid, args.profile, _guardian_pw(args))
+    print(f"uid {args.uid} set to the {args.profile} profile")
+    return 0
+
+
 def cmd_categories(args) -> int:
     c = _client()
     if args.action == "available":
@@ -362,6 +375,13 @@ def main(argv: list[str] | None = None) -> int:
                    help="URL pattern, or the rule number for 'remove'")
     s.add_argument("--guardian-password")
     s.set_defaults(func=cmd_rules)
+
+    s = sub.add_parser("profile", help="apply a ready-made profile to a user")
+    s.add_argument("action", choices=["list", "set"])
+    s.add_argument("uid", type=int, nargs="?", default=0)
+    s.add_argument("profile", nargs="?", default="")
+    s.add_argument("--guardian-password")
+    s.set_defaults(func=cmd_profile)
 
     s = sub.add_parser("categories", help="content categories to block for a user")
     s.add_argument("uid", type=int, nargs="?", default=0)

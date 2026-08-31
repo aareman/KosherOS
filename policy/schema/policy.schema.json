@@ -247,6 +247,15 @@
               "description": "YouTube's own Restricted Mode level."
             }
           }
+        },
+        "language_filter": {
+          "enum": [
+            "off",
+            "substitute",
+            "block"
+          ],
+          "default": "off",
+          "description": "Bad language: leave it, substitute a milder word, or block the page. Only enforced in filtered mode, which is the only mode that can read the page."
         }
       }
     }

@@ -69,6 +69,14 @@ class DaemonClient:
         self._call("Profiles", "SetBlockedCategories", "(iass)",
                    uid, categories, guardian_password)
 
+    def apply_profile(self, uid: int, profile: str,
+                      guardian_password: str = "") -> None:
+        self._call("Profiles", "ApplyProfile", "(iss)", uid, profile,
+                   guardian_password)
+
+    def list_profiles(self) -> list[dict]:
+        return json.loads(self._call("Profiles", "ListProfiles")[0])
+
     def list_categories(self) -> dict:
         return json.loads(self._call("Profiles", "ListCategories")[0])
 

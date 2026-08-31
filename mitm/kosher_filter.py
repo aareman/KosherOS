@@ -214,6 +214,16 @@ BLANK_PNG = base64.b64decode(
 )
 
 IMAGE_TYPES = ("image/",)
+# Video is judged by where it comes from, not by what is in it. Decoding
+# frames would mean ffmpeg and a second or more per clip on a machine that
+# may have two cores, for a stream the person is already watching — so the
+# levers that work are the source (a blocked category), the page (scored by
+# its words), the thumbnail (an image, filtered like any other) and, for
+# YouTube, the category and channel limits above.
+VIDEO_TYPES = ("video/", "application/vnd.apple.mpegurl",
+               "application/x-mpegurl", "application/dash+xml")
+# Levels that mean "no video from the open web".
+VIDEO_BLOCKED_LEVELS = ("all", "immodest", "suggestive")
 # Below this, an image is an icon, a spacer or a tracking pixel: not worth
 # hiding and not worth a classifier's time.
 MIN_IMAGE_BYTES = 6000
@@ -222,6 +232,11 @@ MIN_IMAGE_BYTES = 6000
 def _is_image(flow) -> bool:
     content_type = (flow.response.headers.get("content-type") or "").lower()
     return content_type.startswith(IMAGE_TYPES)
+
+
+def _is_video(flow) -> bool:
+    content_type = (flow.response.headers.get("content-type") or "").lower()
+    return content_type.startswith(VIDEO_TYPES)
 
 
 class YouTube:
@@ -345,6 +360,10 @@ class KosherFilter:
             self._filter_image(flow, uid)
             return
 
+        if _is_video(flow):
+            self._filter_video(flow, uid)
+            return
+
         if YouTube.applies(flow.request.pretty_host):
             self._filter_youtube(flow, uid)
             return
@@ -439,6 +458,28 @@ class KosherFilter:
         flow.response.headers["content-type"] = (
             "image/jpeg" if covered[:2] == b"\xff\xd8" else "image/png")
         flow.response.headers["x-kosheros"] = f"image-covered={verdict.level}"
+
+    def _filter_video(self, flow: http.HTTPFlow, uid: int) -> None:
+        """Video, judged by its source rather than its frames.
+
+        YouTube is handled separately and precisely (categories and an
+        approved-channel list). This is everything else: a clip from a
+        site in a category this account blocks, or any clip at all for an
+        account whose pictures are filtered, since a video is pictures at
+        thirty a second and nothing here can look inside one in time.
+        """
+        level = self.policy.media_level_for(uid)
+        if level == "none":
+            return
+        host = flow.request.pretty_host or ""
+        from_blocked_source = bool(self.categories.blocked_categories_of(
+            host, self.policy.blocked_categories_for(uid)))
+        if level not in VIDEO_BLOCKED_LEVELS and not from_blocked_source:
+            return
+        log.info("blocked video uid=%s %s", uid, flow.request.pretty_url)
+        flow.response = http.Response.make(
+            403, b"", {"Content-Type": "text/plain",
+                       "x-kosheros": "video-blocked"})
 
     @staticmethod
     def _blank_image(flow: http.HTTPFlow) -> None:

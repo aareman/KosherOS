@@ -28,27 +28,52 @@ and will be wrong sometimes in both directions.
 instant, completely reliable. Also genuinely usable: many sites remain
 readable, and a person who needs a picture can ask for the page.
 
-**`nsfw` / `suggestive` / `immodest`** — these need a classifier, and the
-cost lands per image on the family's own laptop:
+**`nsfw` / `suggestive` / `immodest`** — built, in `kosherd/vision.py`, in
+this order, each stage running only because the one before it could not
+settle the question:
 
-1. **Source-based first (free).** If the page's domain is in a blocked
-   category, its images never load anyway. This already covers the worst
-   of the web at no CPU cost, and should run before anything expensive.
-2. **A local classifier** on images above a size threshold (small images are
-   icons and spacers). NudeNet-class ONNX models run on CPU in roughly
-   50–200 ms for a 640px image. A news page with 30 photographs is then
-   several seconds of CPU — noticeable, and worse on the low-end hardware a
-   family machine often is.
-3. **Caching by content hash** makes repeat views free and is what keeps
-   this tolerable in practice.
+1. **Size threshold (free).** Under 6 KB an image is an icon, a spacer or a
+   tracking pixel. It never reaches the model.
+2. **Source (free).** If the page's domain is in a category this account
+   blocks, its imagery goes with it. No model, and no chance of a model
+   being wrong.
+3. **Cache by content hash (~1 ms).** The same logo, banner and avatar come
+   back on every page of a site, and a verdict is kept for a month.
+4. **The detector (tens of ms).** NudeNet's ONNX model, about 5 MB, on the
+   CPU, in a small thread pool with a 2 s deadline.
 
-The honest position: `nsfw` is achievable with a public model. `immodest`
-is not a category any public model was trained for — modest dress is a
-judgement about clothing coverage, not nudity — so it will need either a
-custom-trained model or a person-detection proxy (any uncovered arms/legs
-in a detected person), which will over-block beach photographs of children
-and under-block a great deal else. That gap should be stated to families
-rather than papered over.
+The detector returns **labelled regions**, not one score, which is what
+makes the ladder meaningful: exposure maps to `nsfw`, covered-but-prominent
+to `suggestive`, weaker signals to `immodest`. A detected face on its own
+is never a finding — otherwise every photograph of a person trips the
+filter, which is an off switch with extra steps rather than a filter.
+
+**When it cannot look, it hides.** No model installed, inference timed out,
+a corrupt image: the answer is to hide the picture, never to show it. The
+null detector returns *nothing* rather than "clean" specifically so that
+"looked and found nothing" cannot be confused with "could not look".
+
+The honest position on `immodest`: it is genuinely weaker than the two
+levels above it. The detector has no label for bare arms or bare legs, so
+this level catches what the model can see and no more. A family that wants
+tzniut enforced strictly should choose **hide all pictures**, which is the
+only setting that needs no judgement and is therefore the only one that is
+right every time. The sections below on a tzniut classifier are the plan
+for closing that gap; nothing in them has been built.
+
+## Video
+
+Judged by where it comes from, not by what is in it. Decoding frames means
+ffmpeg and a second or more per clip, for a stream the person is already
+watching, on a machine that may have two cores.
+
+So the levers that actually work are used instead: the source (a blocked
+category), the page (scored by its words), the poster thumbnail (an image,
+filtered like any other), and for YouTube the per-category and
+approved-channel limits, which are precise because YouTube labels its own
+videos. Beyond that, an account at `suggestive` or stricter gets no
+open-web video at all — a video is pictures at thirty a second, and nothing
+here can look inside one in time.
 
 ## Inpainting people out of images
 
@@ -74,10 +99,15 @@ mean shipping ~500 MB of model weights in the image.
    on capable hardware, or done ahead of time for a small set of frequently
    visited pages. Worth prototyping; not worth putting in the default path.
 
-So the build order is: `all` first (works now, no model), then source-based
-suppression, then a classifier for `nsfw`/`suggestive` with blur, then
-`immodest` — and inpainting last, as an experiment with a measured verdict
-rather than a promise.
+**What shipped:** option 1. `kosherd/imageedit.py` pixelates the detected
+regions (grown by 12%, since a tight box leaves a fringe of exactly what it
+was meant to cover) and leaves the rest of the picture alone, so the page
+still works. If the picture cannot be edited — an unreadable format, no
+Pillow — the whole image is hidden rather than passed through, which is the
+one failure mode that would matter.
+
+Inpainting stays where it belongs: an experiment on capable hardware with a
+measured verdict, not a promise in the default path.
 
 
 

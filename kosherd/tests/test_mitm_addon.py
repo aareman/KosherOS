@@ -22,7 +22,11 @@ def addon(monkeypatch):
     mitmproxy = types.ModuleType("mitmproxy")
     http_mod = types.ModuleType("mitmproxy.http")
     http_mod.HTTPFlow = object
-    http_mod.Response = types.SimpleNamespace(make=lambda *a, **k: ("response", a))
+    # A response object real enough to assert on: the addon replaces a
+    # flow's response with one of these and then nothing else touches it.
+    http_mod.Response = types.SimpleNamespace(
+        make=lambda status=200, content=b"", headers=None: types.SimpleNamespace(
+            status_code=status, content=content, headers=dict(headers or {})))
     mitmproxy.http = http_mod
     monkeypatch.setitem(sys.modules, "mitmproxy", mitmproxy)
     monkeypatch.setitem(sys.modules, "mitmproxy.http", http_mod)
@@ -297,3 +301,53 @@ def _stub_categories():
 
 def _stub_vision(verdict):
     return type("V", (), {"verdict": staticmethod(lambda data: verdict)})()
+
+
+# -- video --------------------------------------------------------------------
+
+def test_video_is_recognised_including_its_playlists(addon):
+    for kind in ("video/mp4", "application/vnd.apple.mpegurl",
+                 "application/dash+xml"):
+        assert addon._is_video(_typed_flow(kind)), kind
+    assert not addon._is_video(_typed_flow("text/html"))
+    assert not addon._is_video(_typed_flow("image/png"))
+
+
+def test_an_account_with_picture_filtering_gets_no_open_web_video(addon):
+    # A video is pictures at thirty a second, and nothing here can look
+    # inside one in time.
+    filt = addon.KosherFilter.__new__(addon.KosherFilter)
+    filt.policy = _stub_policy(media="immodest")
+    filt.categories = _stub_categories()
+    flow = _typed_flow("video/mp4")
+    filt._filter_video(flow, 1001)
+    assert flow.response.headers["x-kosheros"] == "video-blocked"
+
+
+def test_video_is_left_alone_when_pictures_are(addon):
+    filt = addon.KosherFilter.__new__(addon.KosherFilter)
+    filt.policy = _stub_policy(media="none")
+    filt.categories = _stub_categories()
+    flow = _typed_flow("video/mp4")
+    before = flow.response
+    filt._filter_video(flow, 1001)
+    assert flow.response is before
+
+
+def test_video_from_a_blocked_category_goes_even_at_the_mildest_level(addon):
+    filt = addon.KosherFilter.__new__(addon.KosherFilter)
+    filt.policy = _stub_policy(media="nsfw", blocked=["adult"])
+    filt.categories = type("C", (), {
+        "blocked_categories_of": staticmethod(lambda host, blocked: {"adult"}),
+    })()
+    flow = _typed_flow("video/mp4")
+    filt._filter_video(flow, 1001)
+    assert flow.response.headers["x-kosheros"] == "video-blocked"
+
+
+def _typed_flow(content_type):
+    return type("F", (), {
+        "request": type("R", (), {"pretty_host": "example.com",
+                                  "pretty_url": "https://example.com/v.mp4"})(),
+        "response": _Resp(b"\x00" * 100, {"content-type": content_type}),
+    })()

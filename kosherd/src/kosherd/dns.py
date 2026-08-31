@@ -11,10 +11,11 @@ destination.
 
 from __future__ import annotations
 
-from .policy import SAFESEARCH_MODES, Policy
+from .policy import INSPECTED_MODES, SAFESEARCH_MODES, Policy
 
 WHITELIST_CONF = "/etc/kosher/dnsmasq.d/whitelist.conf"
 SAFESEARCH_CONF = "/etc/kosher/dnsmasq.d/safesearch.conf"
+CATEGORY_BLOCK_CONF = "/etc/kosher/dnsmasq.d/categories.conf"
 
 # Search engines publish hostnames that always answer with safe search on.
 # Pointing the normal hostname at them is how safe search is enforced for
@@ -88,4 +89,38 @@ def render_safesearch(policy: Policy) -> str:
     for target, names in SAFESEARCH_CNAMES.items():
         for name in names:
             lines.append(f"cname={name},{target}")
+    return "\n".join(lines) + "\n"
+
+
+def render_category_blocks(policy: Policy, bundle) -> str:
+    """dnsmasq entries blocking categorised domains at the DNS layer.
+
+    Filtered users are handled precisely in the proxy, which knows who is
+    asking. Users whose traffic is NOT read (dnsfilter, whitelist) can only
+    be served by the resolver, and one resolver cannot answer differently
+    per user — so this blocks the UNION of what those users block. That is
+    a deliberate over-block: with mixed profiles the stricter one wins for
+    everybody on this resolver, which is the safe direction to err.
+    """
+    wanted: set[str] = set()
+    for user in policy.effective_users():
+        if user.mode in INSPECTED_MODES:
+            continue  # the proxy does this one precisely
+        wanted |= set(user.blocked_categories)
+
+    lines = [
+        f"# Rendered by kosherd from policy revision {policy.revision}. DO NOT EDIT.",
+    ]
+    if not wanted:
+        lines.append("# No uninspected user blocks a category.")
+        return "\n".join(lines) + "\n"
+
+    lines.append(f"# Blocking {', '.join(sorted(wanted))} for users the proxy "
+                 "does not see.")
+    for domain in sorted(d for d, cats in bundle.domains.items()
+                         if wanted & set(cats)):
+        # 0.0.0.0 rather than NXDOMAIN: a browser shows a connection error
+        # instead of retrying elsewhere.
+        lines.append(f"address=/{domain}/0.0.0.0")
+        lines.append(f"address=/{domain}/::")
     return "\n".join(lines) + "\n"

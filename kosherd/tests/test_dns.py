@@ -64,3 +64,48 @@ def test_no_safesearch_when_nobody_needs_it():
     out = dns.render_safesearch(policy_with("unfiltered", "none"))
     assert "cname=" not in out
     assert "No user needs safe search" in out
+
+
+# -- category blocking at the DNS layer ---------------------------------------
+
+def a_bundle():
+    from kosherd.categories import parse
+
+    return parse({"domains": {"adult": ["bad.com"], "social": ["chat.com"],
+                              "video": ["watch.com"]}})
+
+
+def test_uninspected_users_get_their_categories_blocked_in_dns():
+    from kosherd.policy import UserPolicy
+
+    policy = Policy(users=[UserPolicy(uid=1001, username="k", mode="dnsfilter",
+                                      blocked_categories=["adult"])])
+    out = dns.render_category_blocks(policy, a_bundle())
+    assert "address=/bad.com/0.0.0.0" in out
+    assert "chat.com" not in out
+
+
+def test_filtered_users_are_left_to_the_proxy():
+    # The proxy knows who is asking; DNS does not, so doing it here would
+    # over-block everyone on the machine.
+    from kosherd.policy import UserPolicy
+
+    policy = Policy(users=[UserPolicy(uid=1001, username="k", mode="filtered",
+                                      blocked_categories=["adult"])])
+    out = dns.render_category_blocks(policy, a_bundle())
+    assert "address=" not in out
+
+
+def test_mixed_uninspected_profiles_block_the_union():
+    from kosherd.policy import UserPolicy
+
+    policy = Policy(users=[
+        UserPolicy(uid=1001, username="a", mode="dnsfilter",
+                   blocked_categories=["adult"]),
+        UserPolicy(uid=1002, username="b", mode="dnsfilter",
+                   blocked_categories=["social"]),
+    ])
+    out = dns.render_category_blocks(policy, a_bundle())
+    assert "address=/bad.com/0.0.0.0" in out
+    assert "address=/chat.com/0.0.0.0" in out
+    assert "watch.com" not in out

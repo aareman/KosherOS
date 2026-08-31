@@ -82,6 +82,7 @@ class UserPolicy:
     apps: list[str] = field(default_factory=list)
     can_install_apps: bool = True
     rules: list[dict] = field(default_factory=list)
+    blocked_categories: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict:
         d: dict = {"uid": self.uid, "username": self.username, "mode": self.mode}
@@ -91,6 +92,8 @@ class UserPolicy:
             d["whitelist"] = self.whitelist
         if self.rules:
             d["rules"] = self.rules
+        if self.blocked_categories:
+            d["blocked_categories"] = self.blocked_categories
         if self.apps:
             d["apps"] = self.apps
         if not self.can_install_apps:
@@ -108,6 +111,7 @@ class GuestPolicy:
     mode: str = "whitelist"
     whitelist: list[str] = field(default_factory=list)
     rules: list[dict] = field(default_factory=list)
+    blocked_categories: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict:
         d: dict = {"enabled": self.enabled}
@@ -119,6 +123,8 @@ class GuestPolicy:
             d["whitelist"] = self.whitelist
         if self.rules:
             d["rules"] = self.rules
+        if self.blocked_categories:
+            d["blocked_categories"] = self.blocked_categories
         return d
 
 
@@ -143,6 +149,7 @@ class Policy:
                 uid=self.guest.uid, username=GUEST_USERNAME,
                 mode=self.guest.mode, whitelist=list(self.guest.whitelist),
                 rules=list(self.guest.rules),
+                blocked_categories=list(self.guest.blocked_categories),
             ))
         return users
 
@@ -178,6 +185,7 @@ class Policy:
                     apps=list(u.get("apps", [])),
                     can_install_apps=u.get("can_install_apps", True),
                     rules=list(u.get("rules", [])),
+                    blocked_categories=list(u.get("blocked_categories", [])),
                 )
                 for u in doc["users"]
             ],
@@ -189,6 +197,7 @@ class Policy:
                 mode=guest_doc.get("mode", "whitelist"),
                 whitelist=list(guest_doc.get("whitelist", [])),
                 rules=list(guest_doc.get("rules", [])),
+                blocked_categories=list(guest_doc.get("blocked_categories", [])),
             ),
         )
 

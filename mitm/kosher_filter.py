@@ -26,6 +26,7 @@ from mitmproxy import http
 import sys
 
 try:
+    from kosherd import categories as categories_mod
     from kosherd.urlrules import BLOCK, decide, parse_rules
 except ImportError:  # pragma: no cover - only when interpreters differ
     # mitmproxy may run under a different interpreter than the one kosherd
@@ -35,6 +36,7 @@ except ImportError:  # pragma: no cover - only when interpreters differ
     import glob
 
     sys.path.extend(sorted(glob.glob("/usr/lib/python3.*/site-packages")))
+    from kosherd import categories as categories_mod
     from kosherd.urlrules import BLOCK, decide, parse_rules
 
 RULES_PATH = Path("/var/lib/kosher-mitm/rules.json")
@@ -55,7 +57,7 @@ BLOCK_PAGE = """<!doctype html>
 </style></head>
 <body><div class="card">
   <h1>This page is blocked</h1>
-  <p>KosherOS blocked <code>{url}</code>.</p>
+  <p>KosherOS blocked <code>{url}</code>{because}.</p>
   <p>If you need access to this page, ask the administrator of this computer.</p>
 </div></body></html>
 """
@@ -88,10 +90,15 @@ class PolicyCache:
         self.path = path
         self._mtime = 0.0
         self._rules: dict[int, list] = {}
+        self._blocked: dict[int, list] = {}
 
     def rules_for(self, uid: int | None):
         self._refresh()
         return self._rules.get(uid, []) if uid is not None else []
+
+    def blocked_categories_for(self, uid: int | None) -> list:
+        self._refresh()
+        return self._blocked.get(uid, []) if uid is not None else []
 
     def _refresh(self) -> None:
         try:
@@ -107,14 +114,21 @@ class PolicyCache:
             return
 
         rules: dict[int, list] = {}
+        blocked: dict[int, list] = {}
         for uid_text, raw in doc.items():
             try:
-                rules[int(uid_text)] = parse_rules(raw)
-            except Exception as e:  # noqa: BLE001 - one bad rule must not break all
-                log.error("bad rules for uid %s: %s", uid_text, e)
+                uid = int(uid_text)
+                # Older files were {uid: [rules]}; current ones carry
+                # categories too.
+                entry = raw if isinstance(raw, dict) else {"rules": raw}
+                rules[uid] = parse_rules(entry.get("rules", []))
+                blocked[uid] = list(entry.get("blocked_categories", []))
+            except Exception as e:  # noqa: BLE001 - one bad entry must not break all
+                log.error("bad entry for uid %s: %s", uid_text, e)
         self._rules = rules
+        self._blocked = blocked
         self._mtime = mtime
-        log.info("loaded URL rules for %d users", len(rules))
+        log.info("loaded rules for %d users", len(rules))
 
 
 # Safe search, enforced on the request itself. DNS already points these
@@ -151,6 +165,7 @@ class KosherFilter:
     def __init__(self):
         self.uids = UidLookup()
         self.policy = PolicyCache()
+        self.categories = categories_mod.load()
 
     def request(self, flow: http.HTTPFlow) -> None:
         # Everything reaching this proxy belongs to a filtered user: only
@@ -160,18 +175,31 @@ class KosherFilter:
         client_port = flow.client_conn.peername[1] if flow.client_conn.peername else None
         uid = self.uids.uid_for_port(client_port) if client_port else None
         rules = self.policy.rules_for(uid)
-        if not rules:
-            return
 
         url = flow.request.pretty_url
         action, pattern = decide(rules, url)
         if action == BLOCK:
             log.info("blocked uid=%s %s (rule: %s)", uid, url, pattern)
-            flow.response = http.Response.make(
-                403,
-                BLOCK_PAGE.format(url=_escape(url)).encode(),
-                {"Content-Type": "text/html; charset=utf-8"},
-            )
+            self._block(flow, url, "")
+            return
+
+        # An explicit allow rule beats the category lists, so an admin can
+        # permit one site from a category they otherwise block.
+        if pattern is None:
+            hit = self.categories.blocked_categories_of(
+                flow.request.pretty_host or "",
+                self.policy.blocked_categories_for(uid))
+            if hit:
+                names = ", ".join(sorted(hit))
+                log.info("blocked uid=%s %s (category: %s)", uid, url, names)
+                self._block(flow, url, f" because it is {names}")
+
+    def _block(self, flow: http.HTTPFlow, url: str, because: str) -> None:
+        flow.response = http.Response.make(
+            403,
+            BLOCK_PAGE.format(url=_escape(url), because=_escape(because)).encode(),
+            {"Content-Type": "text/html; charset=utf-8"},
+        )
 
 
 def _escape(text: str) -> str:

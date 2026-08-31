@@ -15,14 +15,16 @@ import subprocess
 import tempfile
 from pathlib import Path
 
+from . import categories as categories_mod
 from . import dns, mitmca, nft
-from .policy import UNFILTERED_MODES, Policy
+from .policy import INSPECTED_MODES, SAFESEARCH_MODES, UNFILTERED_MODES, Policy
 
 log = logging.getLogger(__name__)
 
 NFT_RULESET_PATH = Path("/etc/kosher/nft/kosher.nft")
 DNSMASQ_DROPIN_PATH = Path(dns.WHITELIST_CONF)
 SAFESEARCH_PATH = Path(dns.SAFESEARCH_CONF)
+CATEGORY_BLOCK_PATH = Path(dns.CATEGORY_BLOCK_CONF)
 DNS_SERVICE = "kosher-dns.service"
 # Only runs while somebody is unfiltered (see nft.OPEN_DNS_PORT).
 OPEN_DNS_SERVICE = "kosher-dns-open.service"
@@ -54,18 +56,23 @@ def mitm_uid() -> int | None:
 
 
 def write_mitm_rules(policy: Policy) -> None:
-    """Render just the URL rules for the unprivileged proxy to read.
+    """Render what the unprivileged proxy needs: per-uid rules and categories.
 
-    The proxy never sees the policy itself — only uid -> rules, group
-    readable by kosher-mitm.
+    The proxy never sees the policy itself — only what it must enforce,
+    group readable by kosher-mitm.
     """
-    rules = {
-        str(user.uid): user.rules
-        for user in policy.effective_users()
-        if user.mode == "filtered" and user.rules
-    }
+    per_user = {}
+    for user in policy.effective_users():
+        if user.mode not in INSPECTED_MODES:
+            continue
+        if not user.rules and not user.blocked_categories:
+            continue
+        per_user[str(user.uid)] = {
+            "rules": user.rules,
+            "blocked_categories": user.blocked_categories,
+        }
     MITM_DIR.mkdir(parents=True, exist_ok=True)
-    _write_atomic(MITM_RULES_PATH, json.dumps(rules, indent=2) + "\n", mode=0o644)
+    _write_atomic(MITM_RULES_PATH, json.dumps(per_user, indent=2) + "\n", mode=0o644)
 
 
 def _write_atomic(path: Path, content: str, mode: int = 0o644) -> None:
@@ -127,6 +134,8 @@ def apply_policy(policy: Policy) -> None:
 
     _write_atomic(DNSMASQ_DROPIN_PATH, dns.render(policy))
     _write_atomic(SAFESEARCH_PATH, dns.render_safesearch(policy))
+    _write_atomic(CATEGORY_BLOCK_PATH,
+                  dns.render_category_blocks(policy, categories_mod.load()))
 
     # The plain resolver exists only for unfiltered users; running it when
     # nobody is unfiltered would just be an unfiltered resolver sitting on

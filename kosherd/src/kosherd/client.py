@@ -64,6 +64,14 @@ class DaemonClient:
         self._call("Profiles", "SetUrlRules", "(iss)",
                    uid, json.dumps(rules), guardian_password)
 
+    def set_blocked_categories(self, uid: int, categories: list[str],
+                               guardian_password: str = "") -> None:
+        self._call("Profiles", "SetBlockedCategories", "(iass)",
+                   uid, categories, guardian_password)
+
+    def list_categories(self) -> dict:
+        return json.loads(self._call("Profiles", "ListCategories")[0])
+
     def create_user(self, username: str, full_name: str, mode: str) -> int:
         return self._call("Profiles", "CreateUser", "(sss)", username, full_name, mode)[0]
 

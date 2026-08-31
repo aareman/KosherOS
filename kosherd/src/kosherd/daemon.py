@@ -48,6 +48,14 @@ INTROSPECTION_XML = """
       <arg direction="in" type="as" name="domains"/>
       <arg direction="in" type="s" name="guardian_password"/>
     </method>
+    <method name="SetBlockedCategories">
+      <arg direction="in" type="i" name="uid"/>
+      <arg direction="in" type="as" name="categories"/>
+      <arg direction="in" type="s" name="guardian_password"/>
+    </method>
+    <method name="ListCategories">
+      <arg direction="out" type="s" name="categories_json"/>
+    </method>
     <method name="SetUrlRules">
       <arg direction="in" type="i" name="uid"/>
       <arg direction="in" type="s" name="rules_json"/>
@@ -325,6 +333,29 @@ class Daemon:
         if user is None:
             raise PolicyError(f"uid {uid} is not managed")
         user.whitelist = sorted(set(domains))
+        self._save_and_apply()
+        return None
+
+    def impl_ListCategories(self):
+        from . import categories as categories_mod
+
+        bundle = categories_mod.load()
+        return GLib.Variant("(s)", (json.dumps({
+            "version": bundle.version,
+            "source": bundle.source,
+            "domains": len(bundle),
+            "categories": [
+                {"name": name,
+                 "label": categories_mod.CATEGORY_LABELS.get(name, name)}
+                for name in sorted(bundle.categories)
+            ],
+        }),))
+
+    def impl_SetBlockedCategories(self, uid: int, cats: list[str], _guardian_pw: str):
+        user = self.policy.user(uid)
+        if user is None:
+            raise PolicyError(f"uid {uid} is not managed")
+        user.blocked_categories = sorted(set(cats))
         self._save_and_apply()
         return None
 

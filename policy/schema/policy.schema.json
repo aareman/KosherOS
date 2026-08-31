@@ -96,6 +96,14 @@
             "$ref": "#/$defs/rule"
           },
           "default": []
+        },
+        "blocked_categories": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "description": "Category names this user may not reach (see kosherd.categories). Enforced precisely in the proxy for filtered users; for dnsfilter users the resolver blocks the union of categories across all such users, because one resolver cannot answer differently per user."
         }
       }
     }
@@ -187,6 +195,14 @@
           "type": "boolean",
           "default": true,
           "description": "May this user install apps from the approved catalog through the KosherOS app store? Everything installable is pre-approved by the admin, so this is on by default, including for supervised users."
+        },
+        "blocked_categories": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "description": "Category names this user may not reach (see kosherd.categories). Enforced precisely in the proxy for filtered users; for dnsfilter users the resolver blocks the union of categories across all such users, because one resolver cannot answer differently per user."
         }
       }
     }

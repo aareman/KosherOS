@@ -50,6 +50,8 @@ def env(tmp_path, monkeypatch):
     monkeypatch.setattr(apply_mod, "NFT_RULESET_PATH", tmp_path / "nft" / "kosher.nft")
     monkeypatch.setattr(apply_mod, "DNSMASQ_DROPIN_PATH", tmp_path / "dnsmasq" / "wl.conf")
     monkeypatch.setattr(apply_mod, "SAFESEARCH_PATH", tmp_path / "dnsmasq" / "safesearch.conf")
+    monkeypatch.setattr(apply_mod, "CATEGORY_BLOCK_PATH",
+                        tmp_path / "dnsmasq" / "categories.conf")
     monkeypatch.setattr(apply_mod, "MITM_DIR", tmp_path / "mitm")
     monkeypatch.setattr(apply_mod, "MITM_RULES_PATH", tmp_path / "mitm" / "rules.json")
     monkeypatch.setattr(apply_mod, "dnsmasq_uid", lambda: 989)
@@ -166,7 +168,8 @@ def test_only_inspected_users_rules_reach_the_proxy(tmp_path, monkeypatch):
         UserPolicy(uid=1003, username="norules", mode="filtered"),
     ])
     write_mitm_rules(policy)
-    assert rules_written(tmp_path) == {"1001": block}
+    assert rules_written(tmp_path) == {
+        "1001": {"rules": block, "blocked_categories": []}}
 
 
 def test_guest_rules_reach_the_proxy(tmp_path, monkeypatch):
@@ -212,3 +215,15 @@ def test_repeated_applies_keep_restarting_the_resolver(env):
     for _ in range(10):
         apply_policy(policy_with("whitelist"))
     assert len(env.matching("restart", "kosher-dns.service")) == 10
+
+
+def test_categories_alone_are_enough_to_reach_the_proxy(tmp_path, monkeypatch):
+    # A user with no URL rules but a blocked category still needs an entry,
+    # or the proxy would let their traffic through untouched.
+    monkeypatch.setattr(apply_mod, "MITM_DIR", tmp_path / "mitm")
+    monkeypatch.setattr(apply_mod, "MITM_RULES_PATH", tmp_path / "mitm" / "rules.json")
+    policy = Policy(users=[UserPolicy(uid=1001, username="k", mode="filtered",
+                                      blocked_categories=["adult"])])
+    write_mitm_rules(policy)
+    assert rules_written(tmp_path) == {
+        "1001": {"rules": [], "blocked_categories": ["adult"]}}

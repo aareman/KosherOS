@@ -95,3 +95,30 @@ def test_policy_cache_tolerates_bad_rules(addon, tmp_path):
 
 def test_policy_cache_tolerates_missing_file(addon, tmp_path):
     assert addon.PolicyCache(tmp_path / "nope.json").rules_for(1001) == []
+
+
+# -- categories ---------------------------------------------------------------
+
+def test_cache_reads_rules_and_categories(addon, tmp_path):
+    path = _rules_file(tmp_path, {
+        "1001": {"rules": [{"action": "block", "pattern": "x.com"}],
+                 "blocked_categories": ["adult", "gambling"]},
+    })
+    cache = addon.PolicyCache(path)
+    assert len(cache.rules_for(1001)) == 1
+    assert cache.blocked_categories_for(1001) == ["adult", "gambling"]
+
+
+def test_cache_still_reads_the_older_rules_only_shape(addon, tmp_path):
+    # A device that syncs a policy written by an older kosherd must not be
+    # left with no rules at all.
+    path = _rules_file(tmp_path, {"1001": [{"action": "block", "pattern": "x.com"}]})
+    cache = addon.PolicyCache(path)
+    assert len(cache.rules_for(1001)) == 1
+    assert cache.blocked_categories_for(1001) == []
+
+
+def test_categories_are_empty_for_unknown_users(addon, tmp_path):
+    cache = addon.PolicyCache(_rules_file(tmp_path, {}))
+    assert cache.blocked_categories_for(4242) == []
+    assert cache.blocked_categories_for(None) == []

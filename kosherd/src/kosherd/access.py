@@ -53,6 +53,8 @@ ACTIONS = {
     "SyncNow": ACTION_READ_CONFIG,
     "PortalStatus": ACTION_READ_CONFIG,
     "SetUrlRules": ACTION_MANAGE_FILTER,
+    "SetBlockedCategories": ACTION_MANAGE_FILTER,
+    "ListCategories": ACTION_READ_CONFIG,
     "SetGuestConfig": ACTION_MANAGE_FILTER,
     "CreateUser": ACTION_MANAGE_USERS,
     "AdoptUser": ACTION_MANAGE_USERS,

@@ -115,6 +115,40 @@ def cmd_rules(args) -> int:
     return 0
 
 
+def cmd_categories(args) -> int:
+    c = _client()
+    if args.action == "available":
+        info = c.list_categories()
+        print(f"{info['domains']} domains, list version {info['version']}"
+              + (f" ({info['source']})" if info["source"] else ""))
+        for cat in info["categories"]:
+            print(f"  {cat['name']:<10} {cat['label']}")
+        return 0
+
+    user = next((u for u in c.get_policy()["users"] if u["uid"] == args.uid), None)
+    if user is None:
+        print(f"uid {args.uid} is not managed", file=sys.stderr)
+        return 1
+    blocked = list(user.get("blocked_categories", []))
+
+    if args.action == "list":
+        print(f"{user['username']} ({user['mode']}) blocks: "
+              + (", ".join(blocked) if blocked else "nothing"))
+        if blocked and user["mode"] == "unfiltered":
+            print("  note: an unfiltered account enforces nothing", file=sys.stderr)
+        return 0
+    if args.action == "block":
+        blocked = sorted(set(blocked) | set(args.categories))
+    elif args.action == "allow":
+        blocked = [c for c in blocked if c not in args.categories]
+    elif args.action == "clear":
+        blocked = []
+    c.set_blocked_categories(args.uid, blocked, _guardian_pw(args))
+    print(f"{user['username']} now blocks: "
+          + (", ".join(blocked) if blocked else "nothing"))
+    return 0
+
+
 def cmd_portal(args) -> int:
     c = _client()
     if args.action == "status":
@@ -328,6 +362,13 @@ def main(argv: list[str] | None = None) -> int:
                    help="URL pattern, or the rule number for 'remove'")
     s.add_argument("--guardian-password")
     s.set_defaults(func=cmd_rules)
+
+    s = sub.add_parser("categories", help="content categories to block for a user")
+    s.add_argument("uid", type=int, nargs="?", default=0)
+    s.add_argument("action", choices=["list", "block", "allow", "clear", "available"])
+    s.add_argument("categories", nargs="*", default=[])
+    s.add_argument("--guardian-password")
+    s.set_defaults(func=cmd_categories)
 
     s = sub.add_parser("portal", help="enrol with, or check, a remote portal")
     s.add_argument("action", choices=["status", "enrol", "unenrol"])

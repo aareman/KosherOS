@@ -60,6 +60,7 @@ def test_a_user_created_from_a_profile_is_recognised_as_that_profile():
     user = UserPolicy(uid=1001, username="t", mode=profile.mode,
                       blocked_categories=list(profile.blocked_categories),
                       media_level=profile.media_level,
+                      language_filter=profile.language_filter,
                       youtube=dict(profile.youtube),
                       can_install_apps=profile.can_install_apps)
     assert matching(user) == "teen"
@@ -72,7 +73,22 @@ def test_a_customised_user_reports_no_profile():
     user = UserPolicy(uid=1001, username="t", mode=profile.mode,
                       blocked_categories=["adult"],  # narrowed by hand
                       media_level=profile.media_level,
+                      language_filter=profile.language_filter,
                       youtube=dict(profile.youtube))
+    assert matching(user) is None
+
+
+def test_a_profile_is_recognised_from_the_dict_form_too():
+    # The admin app and the portal hold users as plain dicts, not objects.
+    profile = get("adult")
+    user = {"uid": 1001, "username": "a", "mode": profile.mode,
+            "blocked_categories": list(profile.blocked_categories),
+            "media_level": profile.media_level,
+            "language_filter": profile.language_filter,
+            "youtube": dict(profile.youtube),
+            "can_install_apps": profile.can_install_apps}
+    assert matching(user) == "adult"
+    user["media_level"] = "none"
     assert matching(user) is None
 
 
@@ -88,3 +104,30 @@ def test_describe_is_serialisable_for_the_ui():
 def test_unknown_profile_is_an_error():
     with pytest.raises(KeyError):
         get("nonexistent")
+
+
+# -- what a new account starts out as -----------------------------------------
+
+def test_a_new_account_can_be_created_straight_from_a_profile():
+    # Creating an account with a bare filter mode and nothing else means
+    # eight more settings to find, which is how accounts end up half
+    # configured. The daemon accepts a profile key wherever it accepts a
+    # mode.
+    from kosherd.daemon import Daemon
+
+    user = Daemon._new_user(1001, "child1", "child")
+    profile = get("child")
+    assert user.mode == profile.mode
+    assert user.media_level == profile.media_level
+    assert user.language_filter == profile.language_filter
+    assert sorted(user.blocked_categories) == sorted(profile.blocked_categories)
+    assert user.can_install_apps == profile.can_install_apps
+    assert matching(user) == "child"
+
+
+def test_a_bare_filter_mode_still_works():
+    from kosherd.daemon import Daemon
+
+    user = Daemon._new_user(1001, "someone", "dnsfilter")
+    assert user.mode == "dnsfilter"
+    assert user.media_level == "none"

@@ -69,6 +69,21 @@ class DaemonClient:
         self._call("Profiles", "SetBlockedCategories", "(iass)",
                    uid, categories, guardian_password)
 
+    def set_media_level(self, uid: int, level: str,
+                        guardian_password: str = "") -> None:
+        self._call("Profiles", "SetMediaLevel", "(iss)", uid, level,
+                   guardian_password)
+
+    def set_language_filter(self, uid: int, setting: str,
+                            guardian_password: str = "") -> None:
+        self._call("Profiles", "SetLanguageFilter", "(iss)", uid, setting,
+                   guardian_password)
+
+    def set_youtube(self, uid: int, settings: dict,
+                    guardian_password: str = "") -> None:
+        self._call("Profiles", "SetYouTube", "(iss)", uid,
+                   json.dumps(settings), guardian_password)
+
     def apply_profile(self, uid: int, profile: str,
                       guardian_password: str = "") -> None:
         self._call("Profiles", "ApplyProfile", "(iss)", uid, profile,

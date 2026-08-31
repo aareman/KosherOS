@@ -15,8 +15,9 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 from gi.repository import Adw, Gio, GLib, Gtk  # noqa: E402
 
+from kosherd import profiles as profiles_mod  # noqa: E402
 from kosherd.client import DaemonClient  # noqa: E402
-from kosherd.policy import MODES  # noqa: E402
+from kosherd.policy import MEDIA_LEVELS, MODES, YOUTUBE_CATEGORIES  # noqa: E402
 
 APP_ID = "org.kosherlinux.Admin"
 
@@ -38,6 +39,43 @@ MODE_HINTS = {
                 "decrypted on this computer.",
     "unfiltered": "No filtering of any kind for this account.",
 }
+
+
+# Pictures and video, in the words a parent would use. The order matches
+# MEDIA_LEVELS, from "leave everything" to "hide everything".
+MEDIA_LABELS = {
+    "none": "Show all pictures",
+    "nsfw": "Hide explicit pictures",
+    "suggestive": "Hide explicit and suggestive pictures",
+    "immodest": "Hide immodest pictures too",
+    "all": "Hide all pictures from the web",
+}
+MEDIA_HINTS = {
+    "none": "No filtering of pictures or video.",
+    "nsfw": "Hides pictures on pages that read as explicit.",
+    "suggestive": "Also hides pictures on pages that read as suggestive.",
+    "immodest": "Also hides pictures on pages about immodest dress. The "
+                "strictest setting that still leaves ordinary sites usable.",
+    "all": "No pictures from the web at all. Nothing here depends on a "
+           "judgement call, which is why it is the only setting that is "
+           "right every time.",
+}
+
+LANGUAGE_LABELS = {
+    "off": "Leave bad language alone",
+    "substitute": "Replace bad language with a milder word",
+    "block": "Block pages with bad language",
+}
+LANGUAGE_ORDER = ("off", "substitute", "block")
+
+YOUTUBE_RESTRICT_LABELS = {
+    "none": "Off",
+    "moderate": "Moderate",
+    "strict": "Strict",
+}
+YOUTUBE_RESTRICT_ORDER = ("none", "moderate", "strict")
+
+PROFILE_CUSTOM = "Custom"
 
 
 def _run_async(work, on_done, on_error) -> None:
@@ -449,6 +487,136 @@ class CategoryDialog(Adw.Dialog):
             self.chosen.discard(name)
 
 
+class YouTubeDialog(Adw.Dialog):
+    """What this person may watch on YouTube.
+
+    Restricted Mode on its own is far too coarse for a family that wants
+    shiurim but not entertainment — it is one switch for the whole site.
+    Categories and an approved-channel list are what make it usable: block
+    Entertainment and Gaming and keep Education, or name the four channels
+    that are allowed and nothing else.
+    """
+
+    def __init__(self, win: Window, user: dict, on_save):
+        super().__init__(title=f"YouTube — {user['username']}",
+                         content_width=520, content_height=640)
+        self.win = win
+        settings = dict(user.get("youtube") or {})
+        self.blocked = set(settings.get("blocked_categories", []))
+        self.channels = list(settings.get("allowed_channels", []))
+        self.restrict = settings.get("restrict", "moderate")
+
+        header = Adw.HeaderBar()
+        save = Gtk.Button(label="Save")
+        save.add_css_class("suggested-action")
+        save.connect("clicked", lambda _b: (on_save(self._settings()), self.close()))
+        header.pack_end(save)
+
+        page = Adw.PreferencesPage()
+
+        general = Adw.PreferencesGroup(
+            title="Restricted Mode",
+            description="YouTube's own filter, applied to every request. It "
+                        "is coarse on its own, which is what the settings "
+                        "below are for.")
+        restrict_row = Adw.ComboRow(
+            title="Restricted Mode",
+            model=Gtk.StringList.new(
+                [YOUTUBE_RESTRICT_LABELS[r] for r in YOUTUBE_RESTRICT_ORDER]))
+        restrict_row.set_selected(YOUTUBE_RESTRICT_ORDER.index(self.restrict))
+        restrict_row.connect("notify::selected", self._on_restrict)
+        general.add(restrict_row)
+        page.add(general)
+
+        channels_group = Adw.PreferencesGroup(
+            title="Approved channels",
+            description="If this list has anything in it, only these "
+                        "channels may be watched and every category setting "
+                        "below stops mattering.")
+        add = Gtk.Button(icon_name="list-add-symbolic", valign=Gtk.Align.CENTER)
+        add.connect("clicked", lambda _b: self._add_channel())
+        channels_group.set_header_suffix(add)
+        self.channel_list = Gtk.ListBox(selection_mode=Gtk.SelectionMode.NONE)
+        self.channel_list.add_css_class("boxed-list")
+        channels_group.add(self.channel_list)
+        page.add(channels_group)
+        self._rebuild_channels()
+
+        categories = Adw.PreferencesGroup(
+            title="Blocked kinds of video",
+            description="Turn one on to block that kind of video for this "
+                        "person. YouTube labels every video with one of "
+                        "these.")
+        for code, label in sorted(YOUTUBE_CATEGORIES.items(),
+                                  key=lambda kv: kv[1]):
+            row = Adw.SwitchRow(title=label, active=code in self.blocked)
+            row.connect("notify::active", self._toggle_category, code)
+            categories.add(row)
+        page.add(categories)
+
+        scroller = Gtk.ScrolledWindow(vexpand=True)
+        scroller.set_child(page)
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        box.append(header)
+        box.append(scroller)
+        self.set_child(box)
+
+    def _settings(self) -> dict:
+        settings = {"restrict": self.restrict}
+        if self.blocked:
+            settings["blocked_categories"] = sorted(self.blocked)
+        if self.channels:
+            settings["allowed_channels"] = self.channels
+        return settings
+
+    def _on_restrict(self, combo, _param) -> None:
+        self.restrict = YOUTUBE_RESTRICT_ORDER[combo.get_selected()]
+
+    def _toggle_category(self, row, _param, code: str) -> None:
+        if row.get_active():
+            self.blocked.add(code)
+        else:
+            self.blocked.discard(code)
+
+    def _add_channel(self) -> None:
+        dialog = Adw.AlertDialog(
+            heading="Approve a channel",
+            body="Paste the channel handle (@example) or its ID (UC…). It is "
+                 "in the address of any of the channel's videos.")
+        entry = Gtk.Entry(placeholder_text="@example")
+        dialog.set_extra_child(entry)
+        dialog.add_response("cancel", "Cancel")
+        dialog.add_response("add", "Add")
+        dialog.set_response_appearance("add", Adw.ResponseAppearance.SUGGESTED)
+
+        def on_response(_d, response):
+            value = entry.get_text().strip()
+            if response == "add" and value and value not in self.channels:
+                self.channels.append(value)
+                self._rebuild_channels()
+
+        dialog.connect("response", on_response)
+        dialog.present(self)
+
+    def _rebuild_channels(self) -> None:
+        while (child := self.channel_list.get_first_child()) is not None:
+            self.channel_list.remove(child)
+        if not self.channels:
+            self.channel_list.append(Adw.ActionRow(
+                title="Every channel is allowed",
+                subtitle="Only the settings below apply."))
+            return
+        for name in self.channels:
+            row = Adw.ActionRow(title=name)
+            remove = Gtk.Button(icon_name="user-trash-symbolic",
+                                valign=Gtk.Align.CENTER)
+            remove.add_css_class("flat")
+            remove.connect("clicked", lambda _b, n=name: (
+                self.channels.remove(n), self._rebuild_channels()))
+            row.add_suffix(remove)
+            self.channel_list.append(row)
+
+
 class UserAppsDialog(Adw.Dialog):
     """Apps on this computer, from one user's point of view.
 
@@ -638,10 +806,38 @@ class ProfilesPage(Adw.PreferencesPage):
 
     def _user_row(self, user: dict) -> Adw.ExpanderRow:
         row = Adw.ExpanderRow(title=user["username"])
-        badges = [MODE_LABELS[user["mode"]]]
+        current = profiles_mod.matching(user)
+        badges = [profiles_mod.get(current).label if current
+                  else MODE_LABELS[user["mode"]]]
         if user.get("admin"):
             badges.append("admin")
         row.set_subtitle(" · ".join(badges))
+
+        # One choice that sets everything below it. Most people should
+        # never have to open the rest of this row.
+        keys = [p.key for p in profiles_mod.PROFILES]
+        profile_row = Adw.ComboRow(
+            title="Set up as",
+            model=Gtk.StringList.new(
+                [p.label for p in profiles_mod.PROFILES] + [PROFILE_CUSTOM]))
+        profile_row.set_selected(keys.index(current) if current else len(keys))
+        profile_row.set_subtitle(
+            profiles_mod.get(current).description if current
+            else "These settings do not match any of the ready-made ones.")
+
+        def on_profile(combo, _p):
+            index = combo.get_selected()
+            if index >= len(keys):
+                return  # "Custom" is a readout, not a thing you can pick
+            key = keys[index]
+            if key == current:
+                return
+            self.win.with_guardian(lambda pw: self.win.call(
+                lambda: self.win.client.apply_profile(user["uid"], key, pw),
+                done_msg=f"{user['username']} → {profiles_mod.get(key).label}"))
+
+        profile_row.connect("notify::selected", on_profile)
+        row.add_row(profile_row)
 
         mode_row = Adw.ComboRow(title="Filter mode",
                                 model=Gtk.StringList.new([MODE_LABELS[m] for m in MODES]))
@@ -709,6 +905,84 @@ class ProfilesPage(Adw.PreferencesPage):
             cats_row.set_subtitle("An unfiltered account blocks nothing")
         row.add_row(cats_row)
 
+        media_row = Adw.ComboRow(
+            title="Pictures and video",
+            model=Gtk.StringList.new([MEDIA_LABELS[m] for m in MEDIA_LEVELS]))
+        level = user.get("media_level", "none")
+        media_row.set_selected(MEDIA_LEVELS.index(level)
+                               if level in MEDIA_LEVELS else 0)
+        media_row.set_subtitle(MEDIA_HINTS.get(level, ""))
+
+        def on_media(combo, _p):
+            new_level = MEDIA_LEVELS[combo.get_selected()]
+            if new_level == user.get("media_level", "none"):
+                return
+            self.win.with_guardian(lambda pw: self.win.call(
+                lambda: self.win.client.set_media_level(user["uid"], new_level, pw),
+                done_msg=f"Pictures: {MEDIA_LABELS[new_level].lower()}"))
+
+        media_row.connect("notify::selected", on_media)
+        if user["mode"] != "filtered":
+            media_row.set_sensitive(False)
+            media_row.set_subtitle(
+                "Pictures can only be filtered in “Filtered internet” mode, "
+                "which is the only mode that can see them.")
+        row.add_row(media_row)
+
+        language_row = Adw.ComboRow(
+            title="Bad language",
+            model=Gtk.StringList.new([LANGUAGE_LABELS[m] for m in LANGUAGE_ORDER]))
+        setting = user.get("language_filter", "off")
+        language_row.set_selected(LANGUAGE_ORDER.index(setting)
+                                  if setting in LANGUAGE_ORDER else 0)
+        language_row.set_subtitle(
+            "Replacing reads better than blocking: a page that reads "
+            "normally minus the language beats one that refuses to load.")
+
+        def on_language(combo, _p):
+            new_setting = LANGUAGE_ORDER[combo.get_selected()]
+            if new_setting == user.get("language_filter", "off"):
+                return
+            self.win.with_guardian(lambda pw: self.win.call(
+                lambda: self.win.client.set_language_filter(
+                    user["uid"], new_setting, pw),
+                done_msg=LANGUAGE_LABELS[new_setting]))
+
+        language_row.connect("notify::selected", on_language)
+        if user["mode"] != "filtered":
+            language_row.set_sensitive(False)
+            language_row.set_subtitle(
+                "Only used in “Filtered internet” mode, which is the only "
+                "mode that can read the page.")
+        row.add_row(language_row)
+
+        youtube = user.get("youtube") or {}
+        blocked_kinds = youtube.get("blocked_categories", [])
+        allowed_channels = youtube.get("allowed_channels", [])
+        if allowed_channels:
+            yt_summary = f"{len(allowed_channels)} approved channel(s) only"
+        elif blocked_kinds:
+            yt_summary = f"{len(blocked_kinds)} kind(s) of video blocked"
+        else:
+            yt_summary = ("Restricted Mode: "
+                          + YOUTUBE_RESTRICT_LABELS.get(
+                              youtube.get("restrict", "moderate"), "Moderate"))
+        yt_row = Adw.ActionRow(title="YouTube", subtitle=yt_summary,
+                               activatable=True)
+        yt_row.add_suffix(Gtk.Image(icon_name="go-next-symbolic"))
+        yt_row.connect("activated", lambda _r: YouTubeDialog(
+            self.win, user,
+            lambda settings: self.win.with_guardian(lambda pw: self.win.call(
+                lambda: self.win.client.set_youtube(user["uid"], settings, pw),
+                done_msg=f"YouTube settings saved for {user['username']}"))
+            ).present(self.win))
+        if user["mode"] != "filtered":
+            yt_row.set_sensitive(False)
+            yt_row.set_subtitle(
+                "Only used in “Filtered internet” mode; the rest is enforced "
+                "at the connection, which cannot see which video is playing.")
+        row.add_row(yt_row)
+
         apps_row = Adw.ActionRow(
             title="Installed apps",
             subtitle="See what is installed and uninstall or hide apps",
@@ -761,9 +1035,17 @@ class ProfilesPage(Adw.PreferencesPage):
             group.add(name)
             group.add(full)
 
-        mode = Adw.ComboRow(title="Filter mode",
-                            model=Gtk.StringList.new([MODE_LABELS[m] for m in MODES]))
-        mode.set_selected(MODES.index("whitelist"))
+        # A profile, not a bare filter mode: an account created with a mode
+        # and nothing else has to be configured eight more times, which is
+        # how accounts end up half set up.
+        keys = [p.key for p in profiles_mod.PROFILES]
+        mode = Adw.ComboRow(
+            title="Set up as",
+            model=Gtk.StringList.new([p.label for p in profiles_mod.PROFILES]))
+        mode.set_selected(keys.index(profiles_mod.DEFAULT_PROFILE))
+        mode.set_subtitle(profiles_mod.get(profiles_mod.DEFAULT_PROFILE).description)
+        mode.connect("notify::selected", lambda c, _p: mode.set_subtitle(
+            profiles_mod.get(keys[c.get_selected()]).description))
         group.add(mode)
         box.append(group)
         dialog.set_extra_child(box)
@@ -774,7 +1056,7 @@ class ProfilesPage(Adw.PreferencesPage):
         def on_response(_d, response):
             if response != "ok":
                 return
-            m = MODES[mode.get_selected()]
+            m = keys[mode.get_selected()]
             if adopt_mode:
                 username = candidates[name_row.get_selected()]
                 self.win.call(lambda: self.win.client.adopt_user(username, m),

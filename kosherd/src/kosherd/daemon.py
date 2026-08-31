@@ -53,6 +53,21 @@ INTROSPECTION_XML = """
       <arg direction="in" type="as" name="categories"/>
       <arg direction="in" type="s" name="guardian_password"/>
     </method>
+    <method name="SetMediaLevel">
+      <arg direction="in" type="i" name="uid"/>
+      <arg direction="in" type="s" name="level"/>
+      <arg direction="in" type="s" name="guardian_password"/>
+    </method>
+    <method name="SetLanguageFilter">
+      <arg direction="in" type="i" name="uid"/>
+      <arg direction="in" type="s" name="setting"/>
+      <arg direction="in" type="s" name="guardian_password"/>
+    </method>
+    <method name="SetYouTube">
+      <arg direction="in" type="i" name="uid"/>
+      <arg direction="in" type="s" name="settings_json"/>
+      <arg direction="in" type="s" name="guardian_password"/>
+    </method>
     <method name="ApplyProfile">
       <arg direction="in" type="i" name="uid"/>
       <arg direction="in" type="s" name="profile"/>
@@ -357,6 +372,49 @@ class Daemon:
         self._save_and_apply()
         return None
 
+    def _managed(self, uid: int):
+        user = self.policy.user(uid)
+        if user is None:
+            raise PolicyError(f"uid {uid} is not managed")
+        return user
+
+    def impl_SetMediaLevel(self, uid: int, level: str, _guardian_pw: str):
+        from .policy import MEDIA_LEVELS
+
+        if level not in MEDIA_LEVELS:
+            raise PolicyError(f"unknown media level {level!r}")
+        self._managed(uid).media_level = level
+        self._save_and_apply()
+        return None
+
+    def impl_SetLanguageFilter(self, uid: int, setting: str, _guardian_pw: str):
+        from .language import MODES as LANGUAGE_MODES
+
+        if setting not in LANGUAGE_MODES:
+            raise PolicyError(f"unknown language setting {setting!r}")
+        self._managed(uid).language_filter = setting
+        self._save_and_apply()
+        return None
+
+    def impl_SetYouTube(self, uid: int, settings_json: str, _guardian_pw: str):
+        from .policy import YOUTUBE_CATEGORIES
+
+        try:
+            settings = json.loads(settings_json or "{}")
+        except ValueError as e:
+            raise PolicyError(f"not valid JSON: {e}") from None
+        if not isinstance(settings, dict):
+            raise PolicyError("YouTube settings must be an object")
+        restrict = settings.get("restrict", "moderate")
+        if restrict not in ("none", "moderate", "strict"):
+            raise PolicyError(f"unknown restricted mode {restrict!r}")
+        unknown = set(settings.get("blocked_categories", [])) - set(YOUTUBE_CATEGORIES)
+        if unknown:
+            raise PolicyError(f"unknown YouTube categories: {sorted(unknown)}")
+        self._managed(uid).youtube = settings
+        self._save_and_apply()
+        return None
+
     def impl_ListProfiles(self):
         from . import profiles
 
@@ -424,11 +482,36 @@ class Daemon:
         self._save_and_apply()
         return None
 
+    @staticmethod
+    def _new_user(uid: int, username: str, mode: str) -> UserPolicy:
+        """A new account's starting settings.
+
+        `mode` may name a ready-made profile instead of a bare filter mode,
+        which is what the admin app sends: creating an account and then
+        setting eight things one at a time is how accounts end up half
+        configured.
+        """
+        from . import profiles as profiles_mod
+
+        if mode in profiles_mod.BY_KEY:
+            profile = profiles_mod.get(mode)
+            return UserPolicy(
+                uid=uid, username=username, mode=profile.mode,
+                blocked_categories=list(profile.blocked_categories),
+                media_level=profile.media_level,
+                language_filter=profile.language_filter,
+                youtube=dict(profile.youtube),
+                can_install_apps=profile.can_install_apps)
+        return UserPolicy(uid=uid, username=username, mode=mode,
+                          blocked_categories=list(_default_categories(mode)))
+
     def impl_CreateUser(self, username: str, full_name: str, mode: str):
         import pwd
 
-        if mode not in MODES:
-            raise PolicyError(f"unknown mode {mode!r}")
+        from . import profiles as profiles_mod
+
+        if mode not in MODES and mode not in profiles_mod.BY_KEY:
+            raise PolicyError(f"unknown mode or profile {mode!r}")
         try:
             existing_uid = pwd.getpwnam(username).pw_uid
         except KeyError:
@@ -440,9 +523,7 @@ class Daemon:
                 f"'{username}' already exists — use Adopt Existing User to manage it"
             )
         uid = self._accounts_create_user(username, full_name)
-        self.policy.users.append(UserPolicy(
-            uid=uid, username=username, mode=mode,
-            blocked_categories=list(_default_categories(mode))))
+        self.policy.users.append(self._new_user(uid, username, mode))
         self._save_and_apply()
         return GLib.Variant("(i)", (uid,))
 
@@ -485,8 +566,10 @@ class Daemon:
         """Bring an EXISTING system user under filter management."""
         import pwd
 
-        if mode not in MODES:
-            raise PolicyError(f"unknown mode {mode!r}")
+        from . import profiles as profiles_mod
+
+        if mode not in MODES and mode not in profiles_mod.BY_KEY:
+            raise PolicyError(f"unknown mode or profile {mode!r}")
         try:
             uid = pwd.getpwnam(username).pw_uid
         except KeyError:
@@ -495,9 +578,7 @@ class Daemon:
             raise PolicyError("cannot manage system accounts")
         if self.policy.user(uid) is not None:
             raise PolicyError(f"{username} is already managed")
-        self.policy.users.append(UserPolicy(
-            uid=uid, username=username, mode=mode,
-            blocked_categories=list(_default_categories(mode))))
+        self.policy.users.append(self._new_user(uid, username, mode))
         self._save_and_apply()
         return GLib.Variant("(i)", (uid,))
 

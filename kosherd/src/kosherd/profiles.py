@@ -138,6 +138,13 @@ def describe() -> list[dict]:
     ]
 
 
+def _field(user, name, default=None):
+    """Read a setting from a UserPolicy or from the dict form of one."""
+    if isinstance(user, dict):
+        return user.get(name, default)
+    return getattr(user, name, default)
+
+
 def matching(user) -> str | None:
     """The profile a user's settings correspond to, if any.
 
@@ -145,10 +152,12 @@ def matching(user) -> str | None:
     still telling the truth when someone has customised beyond a profile.
     """
     for profile in PROFILES:
-        if (user.mode == profile.mode
-                and sorted(user.blocked_categories) == sorted(profile.blocked_categories)
-                and user.media_level == profile.media_level
-                and dict(user.youtube) == dict(profile.youtube)
-                and user.can_install_apps == profile.can_install_apps):
+        if (_field(user, "mode") == profile.mode
+                and sorted(_field(user, "blocked_categories", []) or [])
+                    == sorted(profile.blocked_categories)
+                and _field(user, "media_level", "none") == profile.media_level
+                and _field(user, "language_filter", "off") == profile.language_filter
+                and dict(_field(user, "youtube", {}) or {}) == dict(profile.youtube)
+                and _field(user, "can_install_apps", True) == profile.can_install_apps):
             return profile.key
     return None

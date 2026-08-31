@@ -128,6 +128,69 @@ def cmd_profile(args) -> int:
     return 0
 
 
+def cmd_media(args) -> int:
+    c = _client()
+    c.set_media_level(args.uid, args.level, _guardian_pw(args))
+    print(f"uid {args.uid}: pictures -> {args.level}")
+    return 0
+
+
+def cmd_language(args) -> int:
+    c = _client()
+    c.set_language_filter(args.uid, args.setting, _guardian_pw(args))
+    print(f"uid {args.uid}: bad language -> {args.setting}")
+    return 0
+
+
+def cmd_youtube(args) -> int:
+    from .policy import YOUTUBE_CATEGORIES
+
+    c = _client()
+    if args.action == "categories":
+        for code, label in sorted(YOUTUBE_CATEGORIES.items(),
+                                  key=lambda kv: kv[1]):
+            print(f"  {code:>3}  {label}")
+        return 0
+
+    user = next((u for u in c.get_policy()["users"] if u["uid"] == args.uid), None)
+    if user is None:
+        print(f"uid {args.uid} is not managed", file=sys.stderr)
+        return 1
+    settings = dict(user.get("youtube") or {})
+    blocked = set(settings.get("blocked_categories", []))
+    channels = list(settings.get("allowed_channels", []))
+
+    if args.action == "show":
+        print(f"{user['username']}: Restricted Mode "
+              f"{settings.get('restrict', 'moderate')}")
+        print("  approved channels: "
+              + (", ".join(channels) if channels else "every channel"))
+        print("  blocked kinds: "
+              + (", ".join(f"{c} ({YOUTUBE_CATEGORIES.get(c, '?')})"
+                           for c in sorted(blocked)) if blocked else "none"))
+        if user["mode"] != "filtered":
+            print("  note: YouTube limits only apply in filtered mode",
+                  file=sys.stderr)
+        return 0
+    if args.action == "restrict":
+        settings["restrict"] = args.value
+    elif args.action == "block":
+        blocked |= set(args.value.split(","))
+        settings["blocked_categories"] = sorted(blocked)
+    elif args.action == "unblock":
+        blocked -= set(args.value.split(","))
+        settings["blocked_categories"] = sorted(blocked)
+    elif args.action == "allow-channel":
+        if args.value not in channels:
+            channels.append(args.value)
+        settings["allowed_channels"] = channels
+    elif args.action == "remove-channel":
+        settings["allowed_channels"] = [c for c in channels if c != args.value]
+    c.set_youtube(args.uid, settings, _guardian_pw(args))
+    print(f"YouTube settings saved for {user['username']}")
+    return 0
+
+
 def cmd_categories(args) -> int:
     c = _client()
     if args.action == "available":
@@ -382,6 +445,27 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("profile", nargs="?", default="")
     s.add_argument("--guardian-password")
     s.set_defaults(func=cmd_profile)
+
+    s = sub.add_parser("media", help="how much of the web's imagery to hide")
+    s.add_argument("uid", type=int)
+    s.add_argument("level", choices=list(policy_mod.MEDIA_LEVELS))
+    s.add_argument("--guardian-password")
+    s.set_defaults(func=cmd_media)
+
+    s = sub.add_parser("language", help="what to do about bad language")
+    s.add_argument("uid", type=int)
+    s.add_argument("setting", choices=["off", "substitute", "block"])
+    s.add_argument("--guardian-password")
+    s.set_defaults(func=cmd_language)
+
+    s = sub.add_parser("youtube", help="YouTube limits for one user")
+    s.add_argument("action", choices=["show", "categories", "restrict", "block",
+                                      "unblock", "allow-channel",
+                                      "remove-channel"])
+    s.add_argument("uid", type=int, nargs="?", default=0)
+    s.add_argument("value", nargs="?", default="")
+    s.add_argument("--guardian-password")
+    s.set_defaults(func=cmd_youtube)
 
     s = sub.add_parser("categories", help="content categories to block for a user")
     s.add_argument("uid", type=int, nargs="?", default=0)

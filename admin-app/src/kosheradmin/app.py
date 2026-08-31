@@ -23,13 +23,12 @@ APP_ID = "org.kosherlinux.Admin"
 MODE_LABELS = {
     "none": "No internet",
     "whitelist": "Whitelist only",
-    "dnsfilter": "Filtered internet",
-    "inspect": "Filtered internet + page rules",
+    "filtered": "Filtered internet",
 }
 
 MODE_HINTS = {
-    "inspect": "Reads web addresses to apply page rules. This decrypts this "
-               "user's web traffic on this computer.",
+    "filtered": "Family DNS plus page rules. Reads web addresses on this "
+                "computer, which means this user's HTTPS is decrypted here.",
 }
 
 
@@ -621,9 +620,9 @@ class ProfilesPage(Adw.PreferencesPage):
             lambda new: self.win.with_guardian(lambda pw: self.win.call(
                 lambda: self.win.client.set_url_rules(user["uid"], new, pw),
                 done_msg=f"Page rules saved for {user['username']}"))).present(self.win))
-        if user["mode"] != "inspect":
+        if user["mode"] != "filtered":
             rules_row.set_sensitive(False)
-            rules_row.set_subtitle("Only used in “Filtered internet + page rules” mode")
+            rules_row.set_subtitle("Only used in “Filtered internet” mode")
         row.add_row(rules_row)
 
         apps_row = Adw.ActionRow(

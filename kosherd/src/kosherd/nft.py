@@ -27,9 +27,7 @@ TABLE = "inet kosher"
 MODE_CHAINS = {
     "none": "mode_none",
     "whitelist": "mode_whitelist",
-    "dnsfilter": "mode_dnsfilter",
-    "inspect": "mode_dnsfilter",  # same egress policy; the difference is the
-                                  # web redirect into mitmproxy (dns_redirect)
+    "filtered": "mode_filtered",
 }
 
 # mitmproxy listens here; inspected users' web traffic is redirected to it.
@@ -85,10 +83,10 @@ def render(policy: Policy, *, dns_uid: int, mitm_uid: int | None = None,
     )
     vmap_rule = f"        meta skuid vmap {{ {vmap_entries} }}\n" if vmap_entries else ""
 
-    # Inspect mode: send this user's web traffic into the local mitmproxy,
-    # which decrypts it and applies URL rules. Everything else about the
-    # mode matches dnsfilter.
-    inspected = sorted(u.uid for u in policy.effective_users() if u.mode == "inspect")
+    # Filtered mode: send this user's web traffic into the local mitmproxy,
+    # which decrypts it so URL rules can be applied.
+    inspected = sorted(u.uid for u in policy.effective_users()
+                       if u.mode == "filtered")
     if inspected and mitm_uid is not None:
         uids = ", ".join(str(u) for u in inspected)
         web_redirect = (
@@ -177,7 +175,7 @@ table {TABLE} {{
         reject
     }}
 
-    chain mode_dnsfilter {{
+    chain mode_filtered {{
         jump evasion_block
         accept
     }}

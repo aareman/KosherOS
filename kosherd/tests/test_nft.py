@@ -18,8 +18,8 @@ def rendered(policy=None) -> str:
 
 def test_every_user_dispatched_to_its_mode_chain():
     out = rendered()
-    assert "1000 : jump mode_dnsfilter" in out
-    assert "1001 : jump mode_dnsfilter" in out
+    assert "1000 : jump mode_filtered" in out
+    assert "1001 : jump mode_filtered" in out
     assert "1002 : jump mode_whitelist" in out
     assert "1003 : jump mode_none" in out
 
@@ -95,22 +95,24 @@ def test_ruleset_passes_nft_check(tmp_path):
 
 def test_inspect_mode_redirects_web_to_mitmproxy():
     pol = Policy.from_dict(json.loads(EXAMPLE.read_text()))
-    pol.users[0].mode = "inspect"
+    pol.users[0].mode = "filtered"
     out = nft.render(pol, dns_uid=989, mitm_uid=988)
-    inspected = sorted(u.uid for u in pol.effective_users() if u.mode == "inspect")
+    inspected = sorted(u.uid for u in pol.effective_users() if u.mode == "filtered")
     uids = ", ".join(str(u) for u in inspected)
     assert f"meta skuid {{ {uids} }} tcp dport {{ 80, 443 }} redirect to :8080" in out
-    # inspected users still get the dnsfilter egress policy and evasion block
+    # inspected users still get the filtered egress policy and evasion block
     for uid in inspected:
-        assert f"{uid} : jump mode_dnsfilter" in out
+        assert f"{uid} : jump mode_filtered" in out
     # the proxy's own traffic must not be redirected back into itself
     assert "meta skuid { 0, 989, 988 } return" in out
 
 
-def test_no_mitm_redirect_without_inspected_users():
+def test_no_mitm_redirect_without_filtered_users():
+    """Nobody filtered means no traffic is decrypted at all."""
     pol = Policy.from_dict(json.loads(EXAMPLE.read_text()))
     for user in pol.users:
-        if user.mode == "inspect":
-            user.mode = "dnsfilter"
+        if user.mode == "filtered":
+            user.mode = "whitelist"
+    pol.guest.mode = "whitelist"
     out = nft.render(pol, dns_uid=989, mitm_uid=988)
     assert "redirect to :8080" not in out

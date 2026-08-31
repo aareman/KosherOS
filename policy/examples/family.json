@@ -6,18 +6,18 @@
     {
       "uid": 1000,
       "username": "abba",
-      "mode": "dnsfilter",
+      "mode": "filtered",
       "admin": true
     },
     {
       "uid": 1001,
       "username": "ima",
-      "mode": "dnsfilter"
+      "mode": "filtered"
     },
     {
       "uid": 1004,
       "username": "teen",
-      "mode": "inspect",
+      "mode": "filtered",
       "rules": [
         {
           "action": "allow",

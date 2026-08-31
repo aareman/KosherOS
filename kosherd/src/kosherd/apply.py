@@ -59,7 +59,7 @@ def write_mitm_rules(policy: Policy) -> None:
     rules = {
         str(user.uid): user.rules
         for user in policy.effective_users()
-        if user.mode == "inspect" and user.rules
+        if user.mode == "filtered" and user.rules
     }
     MITM_DIR.mkdir(parents=True, exist_ok=True)
     _write_atomic(MITM_RULES_PATH, json.dumps(rules, indent=2) + "\n", mode=0o644)
@@ -111,7 +111,7 @@ def apply_policy(policy: Policy) -> None:
         raise ApplyError(f"nft load failed: {res.stderr}")
 
     write_mitm_rules(policy)
-    inspected = any(u.mode == "inspect" for u in policy.effective_users())
+    inspected = any(u.mode == "filtered" for u in policy.effective_users())
     if inspected:
         # Inspection needs the machine to trust the proxy's CA, or every
         # HTTPS page would warn. Generated once, on first use.

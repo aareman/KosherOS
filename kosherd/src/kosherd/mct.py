@@ -21,6 +21,9 @@ from .policy import Policy, UserPolicy
 
 log = logging.getLogger(__name__)
 
+# Programs only an administrator should see in the app grid.
+ADMIN_ONLY_PROGRAMS = ("/usr/bin/kosher-admin",)
+
 
 @dataclass
 class FilterSpec:
@@ -35,6 +38,7 @@ class FilterSpec:
     allow_user_installation: bool
     allow_system_installation: bool
     blocklist: list[str] = field(default_factory=list)
+    blocked_paths: list[str] = field(default_factory=list)
 
 
 def filter_spec(user: UserPolicy, installed: list[tuple[str, str]]) -> FilterSpec:
@@ -50,7 +54,11 @@ def filter_spec(user: UserPolicy, installed: list[tuple[str, str]]) -> FilterSpe
         # installed that is not on it", using EXACT refs.
         blocklist = [full_ref for app_id, full_ref in installed
                      if app_id not in user.apps]
-    return FilterSpec(user.uid, False, False, blocklist)
+    # Hide the admin app from people who cannot use it: left in the app grid
+    # it invites someone to open it and meet a password prompt they can never
+    # satisfy, which reads as broken rather than "not for you".
+    return FilterSpec(user.uid, False, False, blocklist,
+                      list(ADMIN_ONLY_PROGRAMS))
 
 
 def specs_for(policy: Policy, installed: list[tuple[str, str]]) -> list[FilterSpec]:
@@ -90,6 +98,17 @@ def apply_malcontent(policy: Policy) -> None:
         builder.set_allow_system_installation(spec.allow_system_installation)
         for ref in spec.blocklist:
             builder.blocklist_flatpak_ref(ref)
+        for path in spec.blocked_paths:
+            # malcontent renamed these (blacklist -> blocklist); accept
+            # either so the image is not pinned to one library version.
+            for name in ("blocklist_path", "blacklist_path"):
+                method = getattr(builder, name, None)
+                if method is not None:
+                    method(path)
+                    break
+            else:
+                log.warning("malcontent cannot block paths; %s stays visible",
+                            path)
         try:
             manager.set_app_filter(
                 spec.uid, builder.end(),

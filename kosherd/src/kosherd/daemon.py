@@ -603,7 +603,7 @@ class Daemon:
         subprocess.run(["usermod", "-aG", "kosher-admin", username], check=False)
 
         self.policy.users.append(UserPolicy(
-            uid=uid, username=username, mode="dnsfilter", admin=True))
+            uid=uid, username=username, mode="filtered", admin=True))
         self._save_and_apply()
         log.info("first admin created: %s (uid %d)", username, uid)
         return GLib.Variant("(i)", (uid,))

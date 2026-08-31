@@ -4,26 +4,41 @@
   "title": "Kosher Linux device policy",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema_version", "revision", "source", "users", "guardian"],
+  "required": [
+    "schema_version",
+    "revision",
+    "source",
+    "users",
+    "guardian"
+  ],
   "properties": {
-    "schema_version": { "const": 1 },
+    "schema_version": {
+      "const": 1
+    },
     "revision": {
       "type": "integer",
       "minimum": 0,
       "description": "Monotonically increasing; bumped on every write. Lets the portal sync agent detect and merge concurrent local changes."
     },
     "source": {
-      "enum": ["local", "portal"],
+      "enum": [
+        "local",
+        "portal"
+      ],
       "description": "Who last wrote this policy."
     },
     "users": {
       "type": "array",
-      "items": { "$ref": "#/$defs/user" }
+      "items": {
+        "$ref": "#/$defs/user"
+      }
     },
     "guardian": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["enabled"],
+      "required": [
+        "enabled"
+      ],
       "properties": {
         "enabled": {
           "type": "boolean",
@@ -33,21 +48,53 @@
     },
     "system_whitelist": {
       "type": "array",
-      "items": { "$ref": "#/$defs/domain" },
+      "items": {
+        "$ref": "#/$defs/domain"
+      },
       "description": "Domains reachable in whitelist mode for every user (OS update host, flatpak remote, connectivity check, portal). Merged with built-in defaults.",
       "default": []
     },
     "guest": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["enabled"],
+      "required": [
+        "enabled"
+      ],
       "description": "The guest session: a passwordless kosher-guest account whose home is wiped after every sign-out (GDM PostSession hook).",
       "properties": {
-        "enabled": { "type": "boolean" },
-        "uid": { "type": ["integer", "null"], "minimum": 1000, "description": "Set by kosherd when the guest account is created." },
-        "mode": { "enum": ["none", "whitelist", "dnsfilter", "inspect"], "default": "whitelist" },
-        "whitelist": { "type": "array", "items": { "$ref": "#/$defs/domain" }, "default": [] },
-        "rules": { "type": "array", "items": { "$ref": "#/$defs/rule" }, "default": [] }
+        "enabled": {
+          "type": "boolean"
+        },
+        "uid": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1000,
+          "description": "Set by kosherd when the guest account is created."
+        },
+        "mode": {
+          "enum": [
+            "none",
+            "whitelist",
+            "filtered"
+          ],
+          "default": "whitelist"
+        },
+        "whitelist": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/domain"
+          },
+          "default": []
+        },
+        "rules": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/rule"
+          },
+          "default": []
+        }
       }
     }
   },
@@ -55,9 +102,17 @@
     "rule": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["action", "pattern"],
+      "required": [
+        "action",
+        "pattern"
+      ],
       "properties": {
-        "action": { "enum": ["allow", "block"] },
+        "action": {
+          "enum": [
+            "allow",
+            "block"
+          ]
+        },
         "pattern": {
           "type": "string",
           "minLength": 1,
@@ -73,17 +128,33 @@
     "user": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["uid", "username", "mode"],
+      "required": [
+        "uid",
+        "username",
+        "mode"
+      ],
       "properties": {
-        "uid": { "type": "integer", "minimum": 1000 },
-        "username": { "type": "string", "pattern": "^[a-z_][a-z0-9_-]*$" },
+        "uid": {
+          "type": "integer",
+          "minimum": 1000
+        },
+        "username": {
+          "type": "string",
+          "pattern": "^[a-z_][a-z0-9_-]*$"
+        },
         "mode": {
-          "enum": ["none", "whitelist", "dnsfilter", "inspect"],
-          "description": "none = no internet; whitelist = only whitelisted domains; dnsfilter = open web behind Cloudflare family DNS; inspect = dnsfilter plus URL-level rules, which requires decrypting HTTPS locally"
+          "enum": [
+            "none",
+            "whitelist",
+            "filtered"
+          ],
+          "description": "none = no internet; whitelist = only whitelisted domains; filtered = family DNS plus URL rules (which requires decrypting HTTPS locally). Older policies using dnsfilter/inspect are migrated to filtered on load."
         },
         "rules": {
           "type": "array",
-          "items": { "$ref": "#/$defs/rule" },
+          "items": {
+            "$ref": "#/$defs/rule"
+          },
           "default": [],
           "description": "URL allow/block rules, first match wins. Only enforced in inspect mode (paths are encrypted otherwise)."
         },
@@ -94,13 +165,17 @@
         },
         "whitelist": {
           "type": "array",
-          "items": { "$ref": "#/$defs/domain" },
+          "items": {
+            "$ref": "#/$defs/domain"
+          },
           "default": [],
           "description": "Only meaningful in whitelist mode."
         },
         "apps": {
           "type": "array",
-          "items": { "type": "string" },
+          "items": {
+            "type": "string"
+          },
           "default": [],
           "description": "Flatpak refs this user may run (enforced via malcontent). Empty = all installed apps."
         },

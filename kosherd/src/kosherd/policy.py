@@ -20,10 +20,25 @@ import jsonschema
 POLICY_PATH = Path("/var/lib/kosher/policy.json")
 SCHEMA_PATH = Path("/usr/share/kosher/policy.schema.json")
 
-MODES = ("none", "whitelist", "dnsfilter", "inspect")
+MODES = ("none", "whitelist", "filtered")
 
-# Modes whose traffic is decrypted and filtered by URL (see mitm/).
-INSPECTED_MODES = ("inspect",)
+# "Filtered" always inspects: page rules are the point of it, and a URL
+# cannot be read without terminating TLS locally. Two near-identical filtered
+# modes only asked the admin a question they had no basis to answer.
+INSPECTED_MODES = ("filtered",)
+
+# What earlier policies called these modes.
+LEGACY_MODES = {"dnsfilter": "filtered", "inspect": "filtered"}
+
+
+def migrate(doc: dict) -> dict:
+    """Bring an older policy document up to the current shape."""
+    for user in doc.get("users", []):
+        user["mode"] = LEGACY_MODES.get(user.get("mode"), user.get("mode"))
+    guest = doc.get("guest")
+    if isinstance(guest, dict) and "mode" in guest:
+        guest["mode"] = LEGACY_MODES.get(guest["mode"], guest["mode"])
+    return doc
 
 # Reachable in whitelist mode for every user, so the OS itself keeps working:
 # update registry, flatpak remote, GNOME connectivity check, NTP.
@@ -134,6 +149,7 @@ class Policy:
 
     @classmethod
     def from_dict(cls, doc: dict) -> "Policy":
+        doc = migrate(doc)
         validate(doc)
         guest_doc = doc.get("guest", {"enabled": False})
         return cls(

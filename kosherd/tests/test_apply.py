@@ -69,14 +69,14 @@ def policy_with(*modes: str) -> Policy:
 # -- the firewall ------------------------------------------------------------
 
 def test_ruleset_is_checked_before_it_is_loaded(env):
-    apply_policy(policy_with("dnsfilter"))
+    apply_policy(policy_with("filtered"))
     assert env.index_of("nft", "--check") < env.index_of("nft", "-f", "kosher.nft")
 
 
 def test_a_bad_ruleset_never_replaces_the_working_one(env, tmp_path, monkeypatch):
     monkeypatch.setattr(apply_mod.subprocess, "run", FakeRun(fail=["--check"]))
     with pytest.raises(ApplyError, match="failed nft --check"):
-        apply_policy(policy_with("dnsfilter"))
+        apply_policy(policy_with("filtered"))
     # Nothing written, nothing loaded: the machine keeps its current rules.
     assert not (tmp_path / "nft" / "kosher.nft").exists()
 
@@ -84,11 +84,11 @@ def test_a_bad_ruleset_never_replaces_the_working_one(env, tmp_path, monkeypatch
 def test_a_failed_load_is_reported(env, monkeypatch):
     monkeypatch.setattr(apply_mod.subprocess, "run", FakeRun(fail=["nft -f"]))
     with pytest.raises(ApplyError, match="nft load failed"):
-        apply_policy(policy_with("dnsfilter"))
+        apply_policy(policy_with("filtered"))
 
 
 def test_ruleset_is_written_root_only(env, tmp_path):
-    apply_policy(policy_with("dnsfilter"))
+    apply_policy(policy_with("filtered"))
     path = tmp_path / "nft" / "kosher.nft"
     assert path.exists() and (path.stat().st_mode & 0o777) == 0o600
 
@@ -120,21 +120,21 @@ def test_dns_failure_does_not_undo_the_firewall(env, monkeypatch, tmp_path):
 # -- the inspection proxy ----------------------------------------------------
 
 def test_proxy_runs_only_while_someone_is_inspected(env):
-    apply_policy(policy_with("inspect", "dnsfilter"))
+    apply_policy(policy_with("filtered", "whitelist"))
     assert env.matching("restart", "kosher-mitm.service")
     assert not env.matching("stop", "kosher-mitm.service")
 
 
-def test_proxy_is_stopped_when_nobody_is_inspected(env):
-    apply_policy(policy_with("dnsfilter", "whitelist", "none"))
+def test_proxy_is_stopped_when_nobody_is_filtered(env):
+    apply_policy(policy_with("whitelist", "none"))
     assert env.matching("stop", "kosher-mitm.service")
     assert not env.matching("restart", "kosher-mitm.service")
 
 
-def test_the_ca_is_prepared_only_for_inspect_mode(env):
-    apply_policy(policy_with("dnsfilter"))
+def test_the_ca_is_prepared_only_for_filtered_mode(env):
+    apply_policy(policy_with("whitelist", "none"))
     assert env.ca_calls == []
-    apply_policy(policy_with("inspect"))
+    apply_policy(policy_with("filtered"))
     assert env.ca_calls == [1]
 
 
@@ -143,7 +143,7 @@ def test_a_ca_failure_still_leaves_the_firewall_applied(env, monkeypatch, tmp_pa
         raise RuntimeError("no certificate tooling")
 
     monkeypatch.setattr(apply_mod.mitmca, "ensure_ca", explode)
-    apply_policy(policy_with("inspect"))
+    apply_policy(policy_with("filtered"))
     assert (tmp_path / "nft" / "kosher.nft").exists()
 
 
@@ -158,13 +158,13 @@ def test_only_inspected_users_rules_reach_the_proxy(tmp_path, monkeypatch):
     monkeypatch.setattr(apply_mod, "MITM_RULES_PATH", tmp_path / "mitm" / "rules.json")
     block = [{"action": "block", "pattern": "x.com"}]
     policy = Policy(users=[
-        UserPolicy(uid=1001, username="inspected", mode="inspect", rules=block),
-        UserPolicy(uid=1002, username="filtered", mode="dnsfilter", rules=block),
-        UserPolicy(uid=1003, username="norules", mode="inspect"),
+        UserPolicy(uid=1001, username="filtered", mode="filtered", rules=block),
+        # Rules on a whitelist user are unenforceable: without interception
+        # there is no URL to match, so they must not reach the proxy.
+        UserPolicy(uid=1002, username="listed", mode="whitelist", rules=block),
+        UserPolicy(uid=1003, username="norules", mode="filtered"),
     ])
     write_mitm_rules(policy)
-    # A user not in inspect mode has no enforceable rules, and a user with
-    # none contributes no entry.
     assert rules_written(tmp_path) == {"1001": block}
 
 
@@ -174,7 +174,7 @@ def test_guest_rules_reach_the_proxy(tmp_path, monkeypatch):
     policy = Policy()
     policy.guest.enabled = True
     policy.guest.uid = 1010
-    policy.guest.mode = "inspect"
+    policy.guest.mode = "filtered"
     policy.guest.rules = [{"action": "block", "pattern": "*"}]
     write_mitm_rules(policy)
     assert "1010" in rules_written(tmp_path)
@@ -195,13 +195,13 @@ def test_restarts_clear_a_previous_failure_first(env):
     # of admin edits tripped systemd's start rate limit and left the
     # resolver dead — the machine then had no DNS at all until someone ran
     # `systemctl reset-failed` by hand.
-    apply_policy(policy_with("inspect"))
+    apply_policy(policy_with("filtered"))
     for service in ("kosher-dns.service", "kosher-mitm.service"):
         assert env.index_of("reset-failed", service) < env.index_of("restart", service)
 
 
 def test_stopping_the_proxy_needs_no_reset(env):
-    apply_policy(policy_with("dnsfilter"))
+    apply_policy(policy_with("whitelist"))
     assert env.matching("stop", "kosher-mitm.service")
     assert not env.matching("reset-failed", "kosher-mitm.service")
 

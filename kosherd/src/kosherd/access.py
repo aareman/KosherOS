@@ -63,6 +63,8 @@ ACTIONS = {
     "SetYouTube": ACTION_MANAGE_FILTER,
     "ListProfiles": ACTION_READ_CONFIG,
     "FilterStatus": ACTION_READ_CONFIG,
+    "GetListEdits": ACTION_READ_CONFIG,
+    "EditList": ACTION_MANAGE_FILTER,
     "ListCategories": ACTION_READ_CONFIG,
     "SetGuestConfig": ACTION_MANAGE_FILTER,
     "CreateUser": ACTION_MANAGE_USERS,
@@ -92,7 +94,7 @@ ACTIONS = {
 
 # Methods that can weaken the filter: guardian password required when enabled.
 GUARDIAN_GATED = frozenset({
-    "SetFilterMode", "SetWhitelist", "SetUrlRules", "SetBlockedCategories", "ApplyProfile", "ApproveRequest",
+    "SetFilterMode", "SetWhitelist", "SetUrlRules", "SetBlockedCategories", "ApplyProfile", "ApproveRequest", "EditList",
     "SetMediaLevel",
     "SetLanguageFilter", "SetYouTube",
     "SetGuestConfig", "DisableGuardian", "Enrol", "Unenrol",

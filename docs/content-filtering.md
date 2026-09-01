@@ -216,3 +216,32 @@ but lists, world readable, with no secrets in it. There is a test
 asserting no list is ever looked for under the private state directory
 again, and `just check-services` proves the proxy — running as its own
 unprivileged user — actually picks an override up.
+
+### An edit is a delta, not a copy
+
+The lists ship complete on purpose. What a family will actually do is
+disagree with a handful of entries: a word they want cleaned that is not
+listed, a term that keeps blocking something innocent.
+
+If that edit were a copy of the whole list, the family would silently stop
+receiving every later improvement to it, and nobody would notice for a
+year. So an override is `{"add": ..., "remove": [...]}`, applied on top of
+whatever ships — add one word today and next year's shipped additions
+still arrive. A complete replacement is still honoured, because the portal
+may legitimately want to send one.
+
+Three lists are editable this way: the bad-language list, the blocked
+search terms, and the words pages are judged by. The shop rules and the
+five-million-row category database are not, because neither is a thing to
+hand somebody a text box for.
+
+`EditList` caps an edit at a hundred entries, and the refusal says why:
+the answer to needing more is not "try again with fewer", it is that the
+shipped list is not finished and should be fixed for everybody. `GetListEdits`
+reports how many entries ship alongside how many the family has changed,
+because "119 ship with KosherOS, you have added two" is the sentence that
+stops somebody trying to build the list themselves.
+
+From the command line: `kosherctl words show words`,
+`kosherctl words add words blast --replacement bother`,
+`kosherctl words remove searches "bikini atoll"`.

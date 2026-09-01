@@ -69,6 +69,15 @@ class DaemonClient:
         self._call("Profiles", "SetBlockedCategories", "(iass)",
                    uid, categories, guardian_password)
 
+    def get_list_edits(self, list_name: str) -> dict:
+        return json.loads(self._call("Profiles", "GetListEdits", "(s)",
+                                     list_name)[0])
+
+    def edit_list(self, list_name: str, add, remove: list[str],
+                  guardian_password: str = "") -> None:
+        self._call("Profiles", "EditList", "(ssass)", list_name,
+                   json.dumps(add), remove, guardian_password)
+
     def filter_status(self) -> dict:
         return json.loads(self._call("Profiles", "FilterStatus")[0])
 

@@ -29,7 +29,7 @@ import re
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from . import lists
+from . import lists as lists_mod
 from . import categories as categories_mod
 from . import content
 from . import pagescan
@@ -41,7 +41,7 @@ from .urlrules import BLOCK, decide, parse_rules
 # and never reads the policy itself.
 SEARCH_POLICY_PATH = Path("/var/lib/kosher-search/policy.json")
 
-SEARCH_BLOCKLIST_PATHS = lists.paths("search-blocklist.json")
+SEARCH_BLOCKLIST_PATHS = lists_mod.paths("search-blocklist.json")
 
 # A user we know nothing about is filtered as if they had no internet at
 # all, the same fail-closed rule the firewall uses for unknown UIDs.
@@ -372,19 +372,29 @@ class ResultFilter:
                                     verdicts.get(_host_of(url_of(r)))) is None]
 
 
+def _apply_blocklist_delta(shipped: dict, add, remove) -> dict:
+    terms = list(shipped.get("terms", []))
+    terms += [t for t in (add or []) if t not in terms]
+    dropped = {t.lower() for t in remove}
+    return {"terms": [t for t in terms if t.lower() not in dropped]}
+
+
 def load_blocklist(*paths: Path):
     """Explicit search terms that are blocked outright, in every filtered mode.
 
     Separate from the profanity list: swearing in a page gets substituted,
     but a search for explicit material should not run at all.
     """
-    for path in (paths or SEARCH_BLOCKLIST_PATHS):
-        try:
-            doc = json.loads(Path(path).read_text())
-        except (OSError, ValueError):
-            continue
-        return language.Wordlist({term: "" for term in doc.get("terms", [])})
-    return language.Wordlist()
+    if paths:
+        for path in paths:
+            try:
+                doc = json.loads(Path(path).read_text())
+            except (OSError, ValueError):
+                continue
+            return language.Wordlist({term: "" for term in doc.get("terms", [])})
+        return language.Wordlist()
+    doc = lists_mod.resolve("search-blocklist.json", _apply_blocklist_delta)
+    return language.Wordlist({term: "" for term in doc.get("terms", [])})
 
 
 def render_policy(policy) -> str:

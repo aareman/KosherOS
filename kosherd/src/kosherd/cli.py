@@ -72,6 +72,68 @@ def cmd_lists(args) -> int:
     return 0
 
 
+# What each editable list is called to a person, and what an entry means.
+EDITABLE = {
+    "words": ("wordlist.json", "bad language, cleaned up on the page"),
+    "searches": ("search-blocklist.json", "searches that will not run"),
+    "content": ("content-terms.json", "words a page is judged by"),
+}
+
+
+def cmd_words(args) -> int:
+    """Add or remove a handful of entries from one of the shipped lists."""
+    if args.list_name not in EDITABLE:
+        print(f"choose one of: {', '.join(EDITABLE)}", file=sys.stderr)
+        return 1
+    name, what = EDITABLE[args.list_name]
+    c = _client()
+    edits = c.get_list_edits(name)
+
+    if args.action == "show":
+        print(f"{args.list_name}: {what}")
+        print(f"  {edits['shipped']} entries ship with KosherOS")
+        added = edits["add"]
+        if added:
+            print(f"  added here: {json.dumps(added)}")
+        if edits["remove"]:
+            print(f"  removed here: {', '.join(edits['remove'])}")
+        if not added and not edits["remove"]:
+            print("  no local changes")
+        return 0
+
+    add, remove = edits["add"], list(edits["remove"])
+    if args.action == "add":
+        if name == "wordlist.json":
+            if not args.replacement:
+                print("a word needs what to replace it with, e.g.\n"
+                      "  kosherctl words add words blast --replacement bother",
+                      file=sys.stderr)
+                return 1
+            add = {**add, args.term: args.replacement}
+        elif name == "search-blocklist.json":
+            add = sorted({*(add or []), args.term}) if isinstance(add, list) \
+                else sorted({args.term})
+        else:
+            level = args.level or "immodest"
+            weight = str(args.weight or 12)
+            add = dict(add)
+            add.setdefault(level, {}).setdefault(weight, [])
+            if args.term not in add[level][weight]:
+                add[level][weight].append(args.term)
+        remove = [t for t in remove if t != args.term]
+    elif args.action == "remove":
+        if args.term not in remove:
+            remove.append(args.term)
+        if isinstance(add, dict) and name == "wordlist.json":
+            add = {k: v for k, v in add.items() if k != args.term}
+        elif isinstance(add, list):
+            add = [t for t in add if t != args.term]
+
+    c.edit_list(name, add, remove, _guardian_pw(args))
+    print(f"{args.list_name}: saved")
+    return 0
+
+
 def cmd_get_policy(args) -> int:
     print(json.dumps(_client().get_policy(), indent=2))
     return 0
@@ -496,6 +558,17 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("profile", nargs="?", default="")
     s.add_argument("--guardian-password")
     s.set_defaults(func=cmd_profile)
+
+    s = sub.add_parser("words", help="add or remove a few entries from a list")
+    s.add_argument("action", choices=["show", "add", "remove"])
+    s.add_argument("list_name", choices=list(EDITABLE))
+    s.add_argument("term", nargs="?", default="")
+    s.add_argument("--replacement", help="what to substitute (words list)")
+    s.add_argument("--level", choices=["immodest", "suggestive", "nsfw"],
+                   help="how bad it is (content list)")
+    s.add_argument("--weight", type=int, help="how much evidence it is worth")
+    s.add_argument("--guardian-password")
+    s.set_defaults(func=cmd_words)
 
     s = sub.add_parser("lists", help="what the filter is actually holding")
     s.set_defaults(func=cmd_lists)

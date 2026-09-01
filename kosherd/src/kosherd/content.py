@@ -137,33 +137,60 @@ class Scorer:
         return Verdict(level, points, hits)
 
 
+def _apply_delta(shipped: dict, add, remove) -> dict:
+    """Merge a family's added terms in, and take their removals out.
+
+    `add` is the same shape as the file: {level: {weight: [term, ...]}}.
+    `remove` is a flat list of terms, dropped wherever they appear, so a
+    family taking a word out does not have to know which level it was on.
+    """
+    merged = {level: {weight: list(words) for weight, words in by_weight.items()}
+              for level, by_weight in shipped.get("terms", {}).items()}
+    for level, by_weight in (add or {}).items():
+        target = merged.setdefault(level, {})
+        for weight, words in by_weight.items():
+            target.setdefault(weight, [])
+            target[weight] += [w for w in words if w not in target[weight]]
+    dropped = {t.lower() for t in remove}
+    if dropped:
+        merged = {level: {weight: [w for w in words if w.lower() not in dropped]
+                          for weight, words in by_weight.items()}
+                  for level, by_weight in merged.items()}
+    return {"terms": merged}
+
+
+def _scorer_from(doc: dict) -> Scorer:
+    terms: dict[str, tuple[str, int]] = {}
+    for level, by_weight in doc.get("terms", {}).items():
+        if level not in SEVERITY or level == CLEAN:
+            continue
+        for weight, words in by_weight.items():
+            try:
+                value = int(weight)
+            except (TypeError, ValueError):
+                continue
+            for word in words:
+                word = word.lower()
+                # A term listed twice keeps its strongest reading.
+                if word in terms and SEVERITY[terms[word][0]] >= SEVERITY[level]:
+                    continue
+                terms[word] = (level, value)
+    return Scorer(terms)
+
+
 def load(*paths: Path) -> Scorer:
-    """Load the shipped terms; an admin or portal copy wins.
+    """The terms in force: what ships, plus a family's edits on top.
 
     File shape: {"terms": {"<level>": {"<weight>": [term, ...]}}}
     """
-    for path in (paths or TERMS_PATHS):
-        try:
-            doc = json.loads(Path(path).read_text())
-        except (OSError, ValueError):
-            continue
-        terms: dict[str, tuple[str, int]] = {}
-        for level, by_weight in doc.get("terms", {}).items():
-            if level not in SEVERITY or level == CLEAN:
+    if paths:
+        for path in paths:
+            try:
+                return _scorer_from(json.loads(Path(path).read_text()))
+            except (OSError, ValueError):
                 continue
-            for weight, words in by_weight.items():
-                try:
-                    value = int(weight)
-                except (TypeError, ValueError):
-                    continue
-                for word in words:
-                    word = word.lower()
-                    # A term listed twice keeps its strongest reading.
-                    if word in terms and SEVERITY[terms[word][0]] >= SEVERITY[level]:
-                        continue
-                    terms[word] = (level, value)
-        return Scorer(terms)
-    return Scorer()
+        return Scorer()
+    return _scorer_from(lists.resolve("content-terms.json", _apply_delta))
 
 
 # Everything between < and >, plus script and style bodies: scoring those

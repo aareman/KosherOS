@@ -53,6 +53,16 @@ INTROSPECTION_XML = """
       <arg direction="in" type="as" name="categories"/>
       <arg direction="in" type="s" name="guardian_password"/>
     </method>
+    <method name="GetListEdits">
+      <arg direction="in" type="s" name="list_name"/>
+      <arg direction="out" type="s" name="edits_json"/>
+    </method>
+    <method name="EditList">
+      <arg direction="in" type="s" name="list_name"/>
+      <arg direction="in" type="s" name="add_json"/>
+      <arg direction="in" type="as" name="remove"/>
+      <arg direction="in" type="s" name="guardian_password"/>
+    </method>
     <method name="FilterStatus">
       <arg direction="out" type="s" name="status_json"/>
     </method>
@@ -253,6 +263,46 @@ ERROR_NAME = "org.kosherlinux.Daemon1.Error"
 
 
 
+def _edit_size(add) -> int:
+    """How many entries a family's additions hold, in any list's shape.
+
+    Flat for the word list ({word: replacement}) and the search terms
+    ([term, ...]); nested for the content terms ({level: {weight: [...]}}).
+    """
+    if isinstance(add, list):
+        return len(add)
+    if not isinstance(add, dict):
+        return 0
+    total = 0
+    for value in add.values():
+        if isinstance(value, dict):        # a level, holding weights
+            total += sum(len(words) if isinstance(words, list) else 1
+                         for words in value.values())
+        elif isinstance(value, list):
+            total += len(value)
+        else:
+            total += 1
+    return total
+
+
+def _list_size(doc) -> int:
+    """How many entries a list document holds, whatever its shape."""
+    if isinstance(doc, list):
+        return len(doc)
+    if not isinstance(doc, dict):
+        return 0
+    if isinstance(doc.get("replacements"), dict):
+        return len(doc["replacements"])
+    terms = doc.get("terms")
+    if isinstance(terms, list):
+        return len(terms)
+    if isinstance(terms, dict):
+        return sum(len(words) for by_weight in terms.values()
+                   for words in by_weight.values())
+    return sum(len(v) if isinstance(v, (list, dict)) else 1
+               for v in doc.values())
+
+
 def _url_pattern(url: str) -> str:
     """An allow rule for one page rather than a whole site."""
     from urllib.parse import urlsplit
@@ -394,6 +444,58 @@ class Daemon:
             raise PolicyError(f"uid {uid} is not managed")
         user.whitelist = sorted(set(domains))
         self._save_and_apply()
+        return None
+
+    # Which lists a family may edit, and how many entries an edit may hold.
+    # "They can add or remove, but a handful tops" is the design: a cap
+    # this low is not a limitation, it is the statement that a family who
+    # needs to add fifty words has been given a list that is not finished.
+    EDITABLE_LISTS = ("wordlist.json", "search-blocklist.json",
+                      "content-terms.json")
+    MAX_EDITS = 100
+
+    def impl_GetListEdits(self, list_name: str):
+        from . import lists
+
+        if list_name not in self.EDITABLE_LISTS:
+            raise PolicyError(f"{list_name} cannot be edited here")
+        shipped, override = lists.read(list_name)
+        edits = override if lists.is_delta(override) else {}
+        return GLib.Variant("(s)", (json.dumps({
+            "add": edits.get("add") or {},
+            "remove": edits.get("remove") or [],
+            "shipped": _list_size(shipped),
+        }),))
+
+    def impl_EditList(self, list_name: str, add_json: str, remove: list,
+                      _guardian_pw: str):
+        """Record a family's additions and removals for one list.
+
+        Stored as a delta on top of whatever ships, so a family that adds
+        one word keeps receiving every later improvement to the list. A
+        copy of the whole list would freeze them at today's version and
+        nobody would notice for a year.
+        """
+        from . import lists
+
+        if list_name not in self.EDITABLE_LISTS:
+            raise PolicyError(f"{list_name} cannot be edited here")
+        try:
+            add = json.loads(add_json or "{}")
+        except ValueError as e:
+            raise PolicyError(f"not valid JSON: {e}") from None
+        if not isinstance(add, (dict, list)):
+            raise PolicyError("additions must be an object or a list")
+        if _edit_size(add) > self.MAX_EDITS or len(remove) > self.MAX_EDITS:
+            raise PolicyError(
+                f"at most {self.MAX_EDITS} entries may be added or removed; "
+                "a list that needs more than that is not finished, and "
+                "should be fixed for everybody rather than here")
+        lists.save_delta(list_name, add=add, remove=list(remove))
+        # The proxy and the search service reload on their own, but the
+        # resolver's category blocks are rendered from the policy.
+        self._save_and_apply()
+        log.info("edited %s: +%s -%s", list_name, len(add), len(remove))
         return None
 
     def impl_FilterStatus(self):

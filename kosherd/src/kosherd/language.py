@@ -133,15 +133,28 @@ class Wordlist:
         return bool(self._pattern and text and self._pattern.search(text))
 
 
+def _apply_delta(shipped: dict, add, remove) -> dict:
+    words = dict(shipped.get("replacements", {}))
+    words.update(add or {})
+    for word in remove:
+        words.pop(word.lower(), None)
+        words.pop(word, None)
+    return {"replacements": words}
+
+
 def load(*paths: Path) -> Wordlist:
-    """Load the first available word list; an admin copy beats the shipped one."""
-    for path in (paths or WORDLIST_PATHS):
-        try:
-            doc = json.loads(Path(path).read_text())
-        except (OSError, ValueError):
-            continue
-        return Wordlist(doc.get("replacements", {}))
-    return Wordlist()
+    """The word list in force: what ships, plus a family's edits on top."""
+    if paths:
+        # An explicit path is a test or a one-off, not the live lookup.
+        for path in paths:
+            try:
+                doc = json.loads(Path(path).read_text())
+            except (OSError, ValueError):
+                continue
+            return Wordlist(doc.get("replacements", {}))
+        return Wordlist()
+    doc = lists.resolve("wordlist.json", _apply_delta)
+    return Wordlist(doc.get("replacements", {}))
 
 
 # Everything between a tag's < and >, plus the contents of script and style,

@@ -77,6 +77,11 @@ YOUTUBE_RESTRICT_ORDER = ("none", "moderate", "strict")
 
 PROFILE_CUSTOM = "Custom"
 
+MODE_NOTHING_APPLIES = {
+    "none": "This account has no internet access, so nothing here applies.",
+    "unfiltered": "An unfiltered account enforces nothing.",
+}
+
 # The lists a family may add to or take from, in their words. Everything
 # here is machine-wide, not per account: a word is either bad language in
 # this house or it is not.
@@ -1323,11 +1328,19 @@ class ProfilesPage(Adw.PreferencesPage):
                 done_msg=f"Pictures: {MEDIA_LABELS[new_level].lower()}"))
 
         media_row.connect("notify::selected", on_media)
-        if user["mode"] != "filtered":
+        # NOT greyed out outside filtered mode. It used to be, with a
+        # subtitle saying pictures can only be filtered there — which
+        # stopped being true: this setting also decides whether image
+        # search results are shown at all, in every mode. Disabling a
+        # control that still acts is worse than a wordy subtitle.
+        if user["mode"] in ("none", "unfiltered"):
             media_row.set_sensitive(False)
+            media_row.set_subtitle(MODE_NOTHING_APPLIES[user["mode"]])
+        elif user["mode"] != "filtered":
             media_row.set_subtitle(
-                "Pictures can only be filtered in “Filtered internet” mode, "
-                "which is the only mode that can see them.")
+                "Pictures on pages are not checked in this mode — only "
+                "“Filtered internet” can see them. This still decides "
+                "whether image search results are shown.")
         row.add_row(media_row)
 
         language_row = Adw.ComboRow(
@@ -1350,11 +1363,14 @@ class ProfilesPage(Adw.PreferencesPage):
                 done_msg=LANGUAGE_LABELS[new_setting]))
 
         language_row.connect("notify::selected", on_language)
-        if user["mode"] != "filtered":
+        if user["mode"] in ("none", "unfiltered"):
             language_row.set_sensitive(False)
+            language_row.set_subtitle(MODE_NOTHING_APPLIES[user["mode"]])
+        elif user["mode"] != "filtered":
             language_row.set_subtitle(
-                "Only used in “Filtered internet” mode, which is the only "
-                "mode that can read the page.")
+                "Pages are not rewritten in this mode — only “Filtered "
+                "internet” can read them. This still blocks searches "
+                "containing bad language.")
         row.add_row(language_row)
 
         youtube = user.get("youtube") or {}
@@ -1378,10 +1394,13 @@ class ProfilesPage(Adw.PreferencesPage):
                 done_msg=f"YouTube settings saved for {user['username']}"))
             ).present(self.win))
         if user["mode"] != "filtered":
+            # Genuinely inert here, unlike the two above: nothing outside
+            # the proxy can see which video is playing.
             yt_row.set_sensitive(False)
             yt_row.set_subtitle(
-                "Only used in “Filtered internet” mode; the rest is enforced "
-                "at the connection, which cannot see which video is playing.")
+                "Only used in “Filtered internet” mode; every other mode is "
+                "enforced at the connection, which cannot see which video "
+                "is playing.")
         row.add_row(yt_row)
 
         apps_row = Adw.ActionRow(

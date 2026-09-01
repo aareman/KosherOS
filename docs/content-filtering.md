@@ -354,3 +354,32 @@ because a title mentioning an approved channel is not that channel's
 video. Nothing is pruned for accounts that are not limited to a channel
 list; playback filtering already covers those, and rewriting a feed
 nobody needed rewritten is all risk and no benefit.
+
+## Which settings act in which mode
+
+Twice the interesting bug has been a setting that quietly did nothing for
+some kind of account. So it is a matrix test rather than a habit of
+checking: for every mode, a user is given every setting a non-default
+value, the real enforcement artefacts are rendered, and each setting must
+either turn up in one of them or be named as deliberately inert *with the
+reason*. A new setting that reaches nothing fails the suite.
+
+Two things fell out of writing it.
+
+**The search service was given settings it could not act on.** Its policy
+file carried rules, whitelists and categories for unfiltered accounts —
+harmless in itself, and exactly the sort of file somebody later reads as
+evidence that those settings are applied. It now carries only what the
+account's mode can use; an unfiltered or no-internet account is one word.
+
+**Two controls were greyed out although they still act.** "Pictures and
+video" and "Bad language" were disabled outside filtered mode, with
+subtitles saying pictures can only be filtered there. That stopped being
+true: the media level also decides whether image search results are shown
+at all, and the language setting also blocks searches containing bad
+language. Both are editable again in every mode that enforces anything,
+with subtitles that say exactly which half applies. Disabling a control
+that still acts is worse than a wordy subtitle.
+
+YouTube stays greyed out everywhere but filtered mode, and that one is
+genuine: nothing outside the proxy can see which video is playing.

@@ -344,3 +344,64 @@ def test_the_guest_can_be_set_up_from_a_profile():
 
     assert profiles.get("child").key in {p.key for p in profiles.PROFILES}
     assert hasattr(Daemon, "impl_SetGuestConfig")
+
+
+# -- a control is greyed out only where the setting truly does nothing --------
+
+def _rows(widget, found=None):
+    found = [] if found is None else found
+    child = widget.get_first_child()
+    while child is not None:
+        if isinstance(child, (Adw.ActionRow, Adw.ComboRow, Adw.SwitchRow)):
+            found.append(child)
+        _rows(child, found)
+        child = child.get_next_sibling()
+    return found
+
+
+def _row_named(page, title):
+    for row in _rows(page):
+        if row.get_title() == title:
+            return row
+    raise AssertionError(f"no row titled {title!r}")
+
+
+@pytest.mark.parametrize("mode", ["whitelist", "dnsfilter"])
+def test_pictures_and_language_stay_editable_where_they_still_act(mode):
+    # Both settings decide something in search even in modes that never
+    # read a page: whether image results are shown, and whether a search
+    # containing bad language runs. Disabling a control that still acts is
+    # worse than a wordy subtitle.
+    win, page = a_page([a_user(mode=mode)])
+    assert _row_named(page, "Pictures and video").get_sensitive(), mode
+    assert _row_named(page, "Bad language").get_sensitive(), mode
+
+
+@pytest.mark.parametrize("mode", ["none", "unfiltered"])
+def test_they_are_greyed_out_where_nothing_applies(mode):
+    win, page = a_page([a_user(mode=mode)])
+    assert not _row_named(page, "Pictures and video").get_sensitive(), mode
+    assert not _row_named(page, "Bad language").get_sensitive(), mode
+
+
+@pytest.mark.parametrize("mode", ["none", "whitelist", "dnsfilter", "unfiltered"])
+def test_youtube_is_greyed_out_wherever_it_genuinely_cannot_act(mode):
+    # Unlike the two above, nothing outside the proxy can see which video
+    # is playing.
+    win, page = a_page([a_user(mode=mode)])
+    assert not _row_named(page, "YouTube").get_sensitive(), mode
+
+
+def test_everything_is_editable_in_filtered_mode():
+    win, page = a_page([a_user(mode="filtered")])
+    for title in ("Pictures and video", "Bad language", "YouTube",
+                  "Page rules", "Blocked content"):
+        assert _row_named(page, title).get_sensitive(), title
+
+
+def test_a_greyed_out_row_says_why():
+    win, page = a_page([a_user(mode="unfiltered")])
+    for title in ("Pictures and video", "Bad language"):
+        row = _row_named(page, title)
+        assert row.get_subtitle(), title
+        assert "enforces nothing" in row.get_subtitle(), title

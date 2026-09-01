@@ -419,17 +419,29 @@ def render_policy(policy) -> str:
     """Render what the search service needs, per uid, as JSON.
 
     Everything the service is given, it needs; it is given nothing else —
-    no passwords, no app lists, no other users' settings beyond what it
-    must filter with.
+    no passwords, no app lists, and no setting this account's mode cannot
+    act on. That last part is not tidiness: a file that carries settings
+    nobody applies is a file somebody later reads as evidence that they
+    are applied.
     """
     per_user = {}
     for user in policy.effective_users():
-        per_user[str(user.uid)] = {
-            "mode": user.mode,
-            "whitelist": list(user.whitelist),
-            "blocked_categories": list(user.blocked_categories),
-            "rules": user.rules,
-            "media_level": user.media_level,
-            "language_filter": getattr(user, "language_filter", "off"),
-        }
+        entry = {"mode": user.mode}
+        if user.mode == "none":
+            # Nothing is shown to this account at all; nothing else about
+            # it is the search service's business.
+            per_user[str(user.uid)] = entry
+            continue
+        if user.mode == "unfiltered":
+            per_user[str(user.uid)] = entry
+            continue
+        if user.mode == "whitelist":
+            entry["whitelist"] = list(user.whitelist)
+        entry["blocked_categories"] = list(user.blocked_categories)
+        entry["media_level"] = user.media_level
+        entry["language_filter"] = getattr(user, "language_filter", "off")
+        if user.mode == "filtered":
+            # Only filtered mode has page-level rules to compare against.
+            entry["rules"] = user.rules
+        per_user[str(user.uid)] = entry
     return json.dumps(per_user, indent=2) + "\n"

@@ -284,9 +284,27 @@ def test_render_policy_gives_the_service_only_what_it_filters_with():
     assert set(doc) == {"1001", "1002"}
     assert doc["1001"]["whitelist"] == ["chinuch.org"]
     assert doc["1002"]["media_level"] == "immodest"
-    for entry in doc.values():
-        assert set(entry) == {"mode", "whitelist", "blocked_categories",
-                              "rules", "media_level", "language_filter"}
+    # And nothing this account's mode cannot act on. A file carrying
+    # settings nobody applies is a file somebody later reads as evidence
+    # that they are applied.
+    assert set(doc["1001"]) == {"mode", "whitelist", "blocked_categories",
+                                "media_level", "language_filter"}
+    assert set(doc["1002"]) == {"mode", "blocked_categories", "media_level",
+                                "language_filter", "rules"}
+
+
+def test_an_account_that_filters_nothing_is_described_in_one_word():
+    policy = Policy(revision=1, users=[
+        UserPolicy(uid=1003, username="c", mode="unfiltered",
+                   whitelist=["x.example"], blocked_categories=["adult"],
+                   media_level="all", rules=[{"action": "block",
+                                              "pattern": "y"}]),
+        UserPolicy(uid=1004, username="d", mode="none",
+                   whitelist=["x.example"], media_level="all"),
+    ])
+    doc = json.loads(search.render_policy(policy))
+    assert doc["1003"] == {"mode": "unfiltered"}
+    assert doc["1004"] == {"mode": "none"}
 
 
 def test_the_policy_file_is_reread_when_it_changes(tmp_path):

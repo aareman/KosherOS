@@ -45,6 +45,23 @@ benchmark CPUS="": build
         -v "$PWD/scripts/benchmark.py:/benchmark.py:z" \
         {{image}} python3 /benchmark.py
 
+# Does a filtered account's traffic actually end up in the proxy, and does
+# nobody else's? One nat rule, and everything downstream depends on it.
+check-redirect: build
+    #!/usr/bin/env bash
+    set -uo pipefail
+    trap 'podman rm -f kosher-origin2 >/dev/null 2>&1; \
+          podman network rm -f kosher-rdtest >/dev/null 2>&1' EXIT
+    podman network create kosher-rdtest >/dev/null 2>&1 || true
+    podman run -d --rm --name kosher-origin2 --network kosher-rdtest \
+        {{image}} python3 -m http.server 80 --bind 0.0.0.0 >/dev/null
+    target=$(podman inspect kosher-origin2 --format json \
+        | python3 -c 'import json,sys; print(json.load(sys.stdin)[0]["NetworkSettings"]["Networks"]["kosher-rdtest"]["IPAddress"])')
+    podman run --rm --privileged --network kosher-rdtest \
+        -e KOSHER_TEST_TARGET="$target" \
+        -v "$PWD/scripts/redirect-check.sh:/redirect-check.sh:z" \
+        {{image}} bash /redirect-check.sh
+
 # Ask the real resolver real questions. Unit tests prove the right lines
 # are written into dnsmasq's config; only this proves dnsmasq then answers
 # the way those lines claim.

@@ -511,7 +511,39 @@ def cmd_validate(args) -> int:
 
 
 def cmd_render_nft(args) -> int:
-    print(nft.render(_load_local_policy(args.policy), dns_uid=args.dns_uid), end="")
+    """Render the ruleset exactly as the daemon would apply it.
+
+    It used to pass only dns_uid, so it silently left out the redirect
+    into the filtering proxy, the guard on the search back end and the
+    plain resolver for unfiltered accounts — a different ruleset from the
+    one actually enforced, printed by the command documented as the fast
+    loop for enforcement changes.
+    """
+    from . import apply as apply_mod
+
+    def uid_of(name: str) -> int | None:
+        import pwd
+
+        try:
+            return pwd.getpwnam(name).pw_uid
+        except KeyError:
+            return None
+
+    mitm_uid = uid_of("kosher-mitm")
+    search_uid = uid_of("kosher-search")
+    for name, found in (("kosher-mitm", mitm_uid), ("kosher-search", search_uid)):
+        if found is None:
+            # Say so rather than quietly omitting the rules that depend on
+            # it: a missing line is the hardest kind of difference to see.
+            print(f"# NOTE: no {name} user on this machine, so the rules "
+                  f"that need it are missing from what follows.")
+    try:
+        dns_uid = args.dns_uid if args.dns_uid else apply_mod.dnsmasq_uid()
+    except apply_mod.ApplyError:
+        dns_uid = 0
+        print("# NOTE: no dnsmasq user on this machine; using 0.")
+    print(nft.render(_load_local_policy(args.policy), dns_uid=dns_uid,
+                     mitm_uid=mitm_uid, search_uid=search_uid), end="")
     return 0
 
 
@@ -672,7 +704,9 @@ def main(argv: list[str] | None = None) -> int:
 
     s = sub.add_parser("render-nft", help="[offline] render the nftables ruleset for a policy file")
     s.add_argument("policy")
-    s.add_argument("--dns-uid", type=int, default=989)
+    s.add_argument("--dns-uid", type=int, default=0,
+                   help="override the dnsmasq uid; by default "
+                        "the one on this machine is used")
     s.set_defaults(func=cmd_render_nft)
 
     s = sub.add_parser("render-dnsmasq", help="[offline] render the dnsmasq drop-in for a policy file")

@@ -42,6 +42,13 @@ CREATE TABLE IF NOT EXISTS portal_key (
     id          INTEGER PRIMARY KEY CHECK (id = 1),
     private_key TEXT NOT NULL
 );
+-- One row per setting the portal holds for every device rather than for
+-- one. So far: the filter list bundle, which is upstream's business and
+-- not any family's.
+CREATE TABLE IF NOT EXISTS settings (
+    key         TEXT PRIMARY KEY,
+    value       TEXT NOT NULL
+);
 """
 
 
@@ -99,11 +106,15 @@ class Store:
             format=serialization.PublicFormat.Raw)
         return base64.b64encode(raw).decode()
 
+    def _sign_payload(self, document: dict) -> str:
+        """The signature over exactly the bytes a device will reconstruct."""
+        payload = json.dumps(document, sort_keys=True,
+                             separators=(",", ":")).encode()
+        return base64.b64encode(self.private_key().sign(payload)).decode()
+
     def sign(self, policy: dict) -> dict:
         """Wrap a policy in the signed envelope devices verify."""
-        payload = json.dumps(policy, sort_keys=True, separators=(",", ":")).encode()
-        signature = self.private_key().sign(payload)
-        return {"policy": policy, "signature": base64.b64encode(signature).decode()}
+        return {"policy": policy, "signature": self._sign_payload(policy)}
 
     # -- enrolment ---------------------------------------------------------
 
@@ -165,6 +176,46 @@ class Store:
                 "ORDER BY name").fetchall()
         return [Device(r["device_id"], r["name"], r["revision"], r["last_seen"],
                        json.loads(r["policy"]) if r["policy"] else None) for r in rows]
+
+    # -- filter lists -----------------------------------------------------
+    #
+    # One bundle for every device, not per device: a word list is not a
+    # family's business, it is upstream's. What a family changes is their
+    # own delta, which lives on the device and is never sent here.
+
+    def set_lists(self, documents: dict) -> dict:
+        """Publish a new set of filter lists, signed, with the next version."""
+        version = self.lists_version() + 1
+        bundle = {"version": version, "lists": documents}
+        with closing(self._connect()) as db:
+            db.execute(
+                "INSERT INTO settings (key, value) VALUES ('lists', ?) "
+                "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                (json.dumps(bundle),))
+            db.commit()
+        return bundle
+
+    def lists_version(self) -> int:
+        bundle = self.get_lists()
+        return int(bundle.get("version", 0)) if bundle else 0
+
+    def get_lists(self) -> dict | None:
+        with closing(self._connect()) as db:
+            row = db.execute(
+                "SELECT value FROM settings WHERE key = 'lists'").fetchone()
+        if not row:
+            return None
+        try:
+            return json.loads(row[0])
+        except ValueError:
+            return None
+
+    def signed_lists(self) -> dict | None:
+        bundle = self.get_lists()
+        if bundle is None:
+            return None
+        return {"lists": bundle,
+                "signature": self._sign_payload(bundle)}
 
     def set_policy(self, device_id: str, policy: dict) -> dict:
         """Store a new policy for a device, bumping its revision."""

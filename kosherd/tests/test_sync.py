@@ -121,3 +121,65 @@ def test_enrolment_missing_field(tmp_path):
     path.write_text(json.dumps({"portal_url": "x"}))
     with pytest.raises(SyncError, match="missing"):
         Enrolment.load(path)
+
+
+# -- list bundles over the same signed channel --------------------------------
+
+def list_envelope(private, bundle: dict) -> dict:
+    signature = private.sign(canonical_payload(bundle))
+    return {"lists": bundle, "signature": base64.b64encode(signature).decode()}
+
+
+def test_a_list_bundle_verifies_like_a_policy(portal_key):
+    # Same key, same envelope, same replay rule. A list is a filtering
+    # decision as surely as a policy is.
+    bundle = {"version": 3, "lists": {"wordlist.json": {"replacements": {}}}}
+    verified = verify_envelope(list_envelope(portal_key, bundle),
+                               pubkey_b64(portal_key), current_revision=2,
+                               field="lists", counter="version")
+    assert verified["version"] == 3
+
+
+def test_a_replayed_list_bundle_is_refused(portal_key):
+    # Rolling a family back to last year's word list is an attack.
+    bundle = {"version": 3, "lists": {}}
+    with pytest.raises(SyncError):
+        verify_envelope(list_envelope(portal_key, bundle),
+                        pubkey_b64(portal_key), current_revision=3,
+                        field="lists", counter="version")
+
+
+def test_a_list_bundle_signed_by_the_wrong_key_is_refused(portal_key):
+    other = Ed25519PrivateKey.generate()
+    bundle = {"version": 1, "lists": {}}
+    with pytest.raises(SyncError):
+        verify_envelope(list_envelope(portal_key, bundle),
+                        pubkey_b64(other), current_revision=0,
+                        field="lists", counter="version")
+
+
+def test_a_bundle_with_no_version_is_refused(portal_key):
+    bundle = {"lists": {}}
+    with pytest.raises(SyncError):
+        verify_envelope(list_envelope(portal_key, bundle),
+                        pubkey_b64(portal_key), current_revision=0,
+                        field="lists", counter="version")
+
+
+def test_an_older_portal_without_a_list_endpoint_is_not_an_error(monkeypatch):
+    # A portal that predates lists must keep working, not start failing
+    # every sync with an error nobody can act on.
+    import urllib.error
+    import urllib.request
+
+    from kosherd.sync import PortalClient
+
+    def not_found(request, timeout=None):
+        raise urllib.error.HTTPError(request.full_url, 404, "Not Found",
+                                     {}, None)
+
+    monkeypatch.setattr(urllib.request, "urlopen", not_found)
+    client = PortalClient(Enrolment(portal_url="https://portal.example",
+                                    device_id="d", device_token="t",
+                                    portal_public_key="x"))
+    assert client.fetch_lists(0) is None

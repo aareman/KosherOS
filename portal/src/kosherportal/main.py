@@ -74,6 +74,12 @@ class PolicyRequest(BaseModel):
     policy: dict
 
 
+class ListsRequest(BaseModel):
+    """A complete set of filter lists, published to every enrolled device."""
+
+    lists: dict
+
+
 # -- device endpoints ---------------------------------------------------------
 
 @app.post("/api/v1/enrol", response_model=EnrolResponse)
@@ -98,6 +104,28 @@ def get_policy(device_id: str = Depends(require_device)) -> dict:
 
 
 # -- admin endpoints ----------------------------------------------------------
+
+@app.get("/api/v1/devices/{device_id}/lists")
+def get_lists(device_id: str = Depends(require_device)) -> dict:
+    """The signed filter lists, for any enrolled device.
+
+    Same bundle for everyone: a word list is upstream's business, not a
+    family's. What a family changes stays on their own machine and is
+    never sent here — the portal has no reason to know it and no business
+    holding it.
+    """
+    store.touch(device_id, _now())
+    bundle = store.signed_lists()
+    if bundle is None:
+        raise HTTPException(204, "no filter lists published yet")
+    return bundle
+
+
+@app.put("/api/v1/admin/lists", dependencies=[Depends(require_admin)])
+def set_lists(request: ListsRequest) -> dict:
+    bundle = store.set_lists(request.lists)
+    return {"version": bundle["version"], "lists": sorted(request.lists)}
+
 
 @app.post("/api/v1/admin/devices", dependencies=[Depends(require_admin)])
 def create_device(request: NewDeviceRequest) -> dict:

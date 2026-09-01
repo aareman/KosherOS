@@ -79,17 +79,24 @@ def canonical_payload(policy_doc: dict) -> bytes:
     return json.dumps(policy_doc, sort_keys=True, separators=(",", ":")).encode()
 
 
-def verify_envelope(envelope: dict, public_key_b64: str, *, current_revision: int) -> dict:
-    """Check a signed policy document and return the policy inside it.
+def verify_envelope(envelope: dict, public_key_b64: str, *,
+                    current_revision: int, field: str = "policy",
+                    counter: str = "revision") -> dict:
+    """Check a signed document and return the payload inside it.
 
     Raises SyncError unless the signature matches the pinned key and the
-    revision moves forward (so an old document cannot be replayed).
-    """
-    for field in ("policy", "signature"):
-        if field not in envelope:
-            raise SyncError(f"envelope is missing '{field}'")
+    counter moves forward (so an old document cannot be replayed).
 
-    policy_doc = envelope["policy"]
+    The same envelope carries policy and list updates. Lists are signed by
+    the same key and replay-protected the same way, because a list is a
+    filtering decision as surely as a policy is: rolling a family back to
+    last year's word list is an attack, not a downgrade.
+    """
+    for required in (field, "signature"):
+        if required not in envelope:
+            raise SyncError(f"envelope is missing '{required}'")
+
+    policy_doc = envelope[field]
     try:
         signature = base64.b64decode(envelope["signature"], validate=True)
         key = Ed25519PublicKey.from_public_bytes(
@@ -102,12 +109,12 @@ def verify_envelope(envelope: dict, public_key_b64: str, *, current_revision: in
     except InvalidSignature:
         raise SyncError("signature does not match the enrolled portal key") from None
 
-    revision = policy_doc.get("revision")
+    revision = policy_doc.get(counter)
     if not isinstance(revision, int):
-        raise SyncError("policy has no revision")
+        raise SyncError(f"document has no {counter}")
     if revision <= current_revision:
         raise SyncError(
-            f"policy revision {revision} is not newer than {current_revision}")
+            f"{counter} {revision} is not newer than {current_revision}")
     return policy_doc
 
 
@@ -125,13 +132,26 @@ class PortalClient:
         self.enrolment = enrolment
         self.timeout = timeout
 
+    def fetch_lists(self, current_version: int) -> dict | None:
+        """A verified newer set of filter lists, or None if nothing is new.
+
+        Separate from the policy because they change for different reasons
+        and on different clocks: a policy changes when a parent changes
+        their mind, a list changes when the web does.
+        """
+        return self._fetch("lists", "lists", "version", current_version)
+
     def fetch_policy(self, current_revision: int) -> dict | None:
         """Return a verified newer policy, or None when there is nothing new."""
+        return self._fetch("policy", "policy", "revision", current_revision)
+
+    def _fetch(self, endpoint: str, field: str, counter: str,
+               current: int) -> dict | None:
         import urllib.error
         import urllib.request
 
         url = (f"{self.enrolment.portal_url.rstrip('/')}"
-               f"/api/v1/devices/{self.enrolment.device_id}/policy")
+               f"/api/v1/devices/{self.enrolment.device_id}/{endpoint}")
         request = urllib.request.Request(
             url, headers={"X-Device-Token": self.enrolment.device_token})
         try:
@@ -140,7 +160,9 @@ class PortalClient:
                     return None
                 envelope = json.loads(response.read())
         except urllib.error.HTTPError as e:
-            if e.code == 204:
+            if e.code in (204, 404):
+                # 404 too: an older portal has no list endpoint, and that
+                # is a portal to keep working with, not an error to raise.
                 return None
             raise SyncError(f"portal returned HTTP {e.code}") from e
         except urllib.error.URLError as e:
@@ -150,7 +172,8 @@ class PortalClient:
 
         try:
             return verify_envelope(envelope, self.enrolment.portal_public_key,
-                                   current_revision=current_revision)
+                                   current_revision=current, field=field,
+                                   counter=counter)
         except SyncError as e:
             if "not newer" in str(e):
                 return None  # already applied; not an error

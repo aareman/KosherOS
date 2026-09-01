@@ -217,6 +217,37 @@ asserting no list is ever looked for under the private state directory
 again, and `just check-services` proves the proxy — running as its own
 unprivileged user — actually picks an override up.
 
+### Three layers
+
+    shipped   what came with the image
+    portal    a signed update, so a list improves without an OS rebuild
+    edits     this family's handful of additions and removals
+
+A filter that can only improve when the operating system is rebuilt is a
+filter that goes stale, so the portal can publish a list bundle. It is
+signed with the same Ed25519 key as the policy and replay-protected the
+same way, because rolling a family back to last year's word list is an
+attack rather than a downgrade — there is a test for exactly that.
+
+The bundle is the same for every enrolled device. A word list is
+upstream's business, not a family's, and what a family changes stays on
+their own machine: the portal has no reason to know it and no business
+holding it.
+
+The portal layer *replaces* the shipped copy, and the family's delta is
+applied on top of whichever base is in force. So a portal update brings
+every new entry and still keeps a parent's edits — tested directly, by
+adding a word, removing another, then shipping an update and checking all
+three outcomes survive.
+
+Only four filenames are accepted, by name. A portal that could choose the
+filename could write something that is not a list into a directory the
+filter reads.
+
+A portal that predates all this returns 404, which is treated as "nothing
+new" rather than an error: an older portal should keep working, not start
+failing every sync with something nobody can act on.
+
 ### An edit is a delta, not a copy
 
 The lists ship complete on purpose. What a family will actually do is

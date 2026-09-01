@@ -138,3 +138,105 @@ def test_polling_records_last_seen(client):
                headers={"X-Device-Token": device["device_token"]})
     devices = client.get("/api/v1/admin/devices", headers=admin_headers()).json()["devices"]
     assert devices[0]["last_seen"] is not None
+
+
+# -- filter lists -------------------------------------------------------------
+
+def test_lists_are_published_to_every_device(client):
+    # One bundle for everyone: a word list is upstream's business, not a
+    # family's, and the portal has no reason to hold what a family changed.
+    body = {"lists": {"wordlist.json": {"replacements": {"blast": "bother"}}}}
+    published = client.put("/api/v1/admin/lists", json=body,
+                           headers=admin_headers())
+    assert published.status_code == 200
+    assert published.json()["version"] == 1
+
+    for _ in range(2):
+        device = enrol_a_device(client)
+        got = client.get(f"/api/v1/devices/{device['device_id']}/lists",
+                         headers={"X-Device-Token": device["device_token"]})
+        assert got.status_code == 200
+        assert got.json()["lists"]["lists"]["wordlist.json"] == \
+            body["lists"]["wordlist.json"]
+
+
+def test_the_list_version_moves_forward_on_every_publish(client):
+    # It is what the device compares against, so a bundle that did not
+    # advance is a bundle a device will refuse as a replay.
+    seen = []
+    for i in range(3):
+        response = client.put(
+            "/api/v1/admin/lists",
+            json={"lists": {"wordlist.json": {"replacements": {f"w{i}": "x"}}}},
+            headers=admin_headers())
+        seen.append(response.json()["version"])
+    assert seen == [1, 2, 3]
+
+
+def test_lists_are_signed_with_the_portal_key(client):
+    from kosherd.sync import verify_envelope
+
+    client.put("/api/v1/admin/lists",
+               json={"lists": {"wordlist.json": {"replacements": {"a": "b"}}}},
+               headers=admin_headers())
+    key = client.get("/api/v1/admin/public-key",
+                     headers=admin_headers()).json()["portal_public_key"]
+    device = enrol_a_device(client)
+    envelope = client.get(f"/api/v1/devices/{device['device_id']}/lists",
+                          headers={"X-Device-Token": device["device_token"]}).json()
+
+    verified = verify_envelope(envelope, key, current_revision=0,
+                               field="lists", counter="version")
+    assert verified["lists"]["wordlist.json"] == {"replacements": {"a": "b"}}
+
+
+def test_a_replayed_list_bundle_is_refused(client):
+    # Rolling a family back to last year's word list is an attack, not a
+    # downgrade, so the same replay rule applies as for the policy.
+    from kosherd.sync import SyncError, verify_envelope
+
+    client.put("/api/v1/admin/lists",
+               json={"lists": {"wordlist.json": {"replacements": {"a": "b"}}}},
+               headers=admin_headers())
+    key = client.get("/api/v1/admin/public-key",
+                     headers=admin_headers()).json()["portal_public_key"]
+    device = enrol_a_device(client)
+    envelope = client.get(f"/api/v1/devices/{device['device_id']}/lists",
+                          headers={"X-Device-Token": device["device_token"]}).json()
+
+    with pytest.raises(SyncError):
+        verify_envelope(envelope, key, current_revision=1,
+                        field="lists", counter="version")
+
+
+def test_a_tampered_list_bundle_is_refused(client):
+    from kosherd.sync import SyncError, verify_envelope
+
+    client.put("/api/v1/admin/lists",
+               json={"lists": {"wordlist.json": {"replacements": {"a": "b"}}}},
+               headers=admin_headers())
+    key = client.get("/api/v1/admin/public-key",
+                     headers=admin_headers()).json()["portal_public_key"]
+    device = enrol_a_device(client)
+    envelope = client.get(f"/api/v1/devices/{device['device_id']}/lists",
+                          headers={"X-Device-Token": device["device_token"]}).json()
+    envelope["lists"]["lists"]["wordlist.json"] = {"replacements": {}}
+
+    with pytest.raises(SyncError):
+        verify_envelope(envelope, key, current_revision=0,
+                        field="lists", counter="version")
+
+
+def test_a_device_with_no_token_gets_no_lists(client):
+    client.put("/api/v1/admin/lists",
+               json={"lists": {"wordlist.json": {"replacements": {"a": "b"}}}},
+               headers=admin_headers())
+    device = enrol_a_device(client)
+    assert client.get(f"/api/v1/devices/{device['device_id']}/lists").status_code == 401
+
+
+def test_no_lists_published_yet_is_not_an_error(client):
+    device = enrol_a_device(client)
+    response = client.get(f"/api/v1/devices/{device['device_id']}/lists",
+                          headers={"X-Device-Token": device["device_token"]})
+    assert response.status_code == 204

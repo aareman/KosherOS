@@ -200,3 +200,72 @@ def test_the_shipped_count_is_reported_so_the_scale_is_visible(monkeypatch, ship
     daemon = _daemon(monkeypatch)
     read = json.loads(daemon.impl_GetListEdits("search-blocklist.json").unpack()[0])
     assert read["shipped"] == 3
+
+
+# -- a signed update from the portal ------------------------------------------
+
+def test_a_portal_list_replaces_the_shipped_one(shipped, monkeypatch):
+    ship, over = shipped
+    monkeypatch.setattr(lists, "PORTAL_DIR", over / "portal")
+    monkeypatch.setattr(lists, "PORTAL_VERSION_PATH",
+                        over / "portal" / "version.json")
+    (ship / "wordlist.json").write_text(
+        json.dumps({"replacements": {"blast": "bother"}}))
+    lists.install_portal_lists(
+        {"wordlist.json": {"replacements": {"blast": "bother",
+                                            "drat": "dear"}}}, version=7)
+    assert len(language.load()) == 2
+    assert lists.portal_version() == 7
+
+
+def test_a_portal_update_does_not_discard_a_family_edit(shipped, monkeypatch):
+    # The whole reason the family's delta is a separate layer: a filter
+    # that improves upstream must not quietly undo what a parent decided.
+    ship, over = shipped
+    monkeypatch.setattr(lists, "PORTAL_DIR", over / "portal")
+    monkeypatch.setattr(lists, "PORTAL_VERSION_PATH",
+                        over / "portal" / "version.json")
+    (ship / "wordlist.json").write_text(
+        json.dumps({"replacements": {"blast": "bother"}}))
+    lists.save_delta("wordlist.json", add={"phooey": "goodness"},
+                     remove=["blast"])
+    lists.install_portal_lists(
+        {"wordlist.json": {"replacements": {"blast": "bother",
+                                            "drat": "dear"}}}, version=2)
+    words = language.load()
+    assert "phooey" in words.replacements   # the family's addition
+    assert "drat" in words.replacements     # the portal's improvement
+    assert "blast" not in words.replacements  # the family's removal
+
+
+def test_the_portal_cannot_write_a_file_that_is_not_a_list(shipped, monkeypatch):
+    # A portal that could choose the filename could replace something in a
+    # directory the filter reads that is not a list at all.
+    ship, over = shipped
+    portal = over / "portal"
+    monkeypatch.setattr(lists, "PORTAL_DIR", portal)
+    monkeypatch.setattr(lists, "PORTAL_VERSION_PATH", portal / "version.json")
+    written = lists.install_portal_lists({
+        "wordlist.json": {"replacements": {"a": "b"}},
+        "../../policy.json": {"users": []},
+        "categories.sqlite": {"nope": True},
+    }, version=1)
+    assert written == ["wordlist.json"]
+    assert not (over.parent / "policy.json").exists()
+    assert sorted(p.name for p in portal.iterdir()) == ["version.json",
+                                                        "wordlist.json"]
+
+
+def test_a_portal_list_that_is_not_an_object_is_ignored(shipped, monkeypatch):
+    ship, over = shipped
+    monkeypatch.setattr(lists, "PORTAL_DIR", over / "portal")
+    monkeypatch.setattr(lists, "PORTAL_VERSION_PATH",
+                        over / "portal" / "version.json")
+    assert lists.install_portal_lists({"wordlist.json": "not a document"},
+                                      version=1) == []
+
+
+def test_no_portal_update_yet_is_version_zero(shipped, monkeypatch):
+    _, over = shipped
+    monkeypatch.setattr(lists, "PORTAL_VERSION_PATH", over / "nope.json")
+    assert lists.portal_version() == 0

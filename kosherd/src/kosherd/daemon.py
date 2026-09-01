@@ -518,8 +518,11 @@ class Daemon:
 
         from . import mitmca, selfcheck
 
+        from . import lists as lists_mod
+
         found = selfcheck.datasets()
         status["lists"] = found
+        status["lists_version"] = lists_mod.portal_version()
         status["problems"] = selfcheck.problems(found)
 
         for service in ("kosher-mitm.service", "kosher-dns.service",
@@ -1078,15 +1081,33 @@ class Daemon:
         }),))
 
     def sync_now(self) -> bool:
-        """Pull a signed policy from the portal. True if one was applied."""
-        from . import sync
+        """Pull signed updates from the portal. True if anything was applied."""
+        from . import lists, sync
 
         enrolment = sync.Enrolment.load()
         if enrolment is None:
             raise PolicyError("this device is not enrolled with a portal")
-        doc = sync.PortalClient(enrolment).fetch_policy(self.policy.revision)
+        client = sync.PortalClient(enrolment)
+
+        # Lists first, and separately: they change when the web changes,
+        # not when a parent changes their mind, and a failure to reach one
+        # must not stop the other from arriving.
+        changed = False
+        try:
+            bundle = client.fetch_lists(lists.portal_version())
+        except sync.SyncError as e:
+            log.warning("could not fetch filter lists: %s", e)
+        else:
+            if bundle is not None:
+                written = lists.install_portal_lists(
+                    bundle.get("lists") or {}, bundle.get("version", 0))
+                log.info("installed portal lists v%s: %s",
+                         bundle.get("version"), ", ".join(written) or "none")
+                changed = bool(written)
+
+        doc = client.fetch_policy(self.policy.revision)
         if doc is None:
-            return False
+            return changed
         incoming = Policy.from_dict(doc)
         incoming.source = "portal"
         self.policy = incoming

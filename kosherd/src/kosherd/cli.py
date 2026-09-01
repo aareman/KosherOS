@@ -64,7 +64,10 @@ def cmd_status(args) -> int:
 
 def cmd_lists(args) -> int:
     """What the filter is actually holding, as opposed to what it ships."""
-    for entry in _client().filter_status().get("lists", []):
+    status = _client().filter_status()
+    portal = status.get("lists_version", 0)
+    print(f"portal list updates: {'v' + str(portal) if portal else 'none yet'}")
+    for entry in status.get("lists", []):
         mark = " " if entry["ok"] else "!"
         source = entry["source"] or "not found"
         print(f" {mark} {entry['name']:<18} {entry['entries']:>9,} entries"

@@ -12,10 +12,12 @@ from pathlib import Path
 from kosherd import categories, content, language, lists, search, siterules
 
 
-def test_an_override_is_looked_for_before_the_shipped_copy():
+def test_the_three_layers_are_looked_for_in_the_right_order():
+    # This family's edits, then a signed portal update, then what shipped.
     found = lists.paths("wordlist.json")
-    assert found[0] == lists.OVERRIDE_DIR / "wordlist.json"
-    assert found[1] == lists.SHIPPED_DIR / "wordlist.json"
+    assert found == (lists.OVERRIDE_DIR / "wordlist.json",
+                     lists.PORTAL_DIR / "wordlist.json",
+                     lists.SHIPPED_DIR / "wordlist.json")
 
 
 def test_every_list_uses_the_readable_override_directory():
@@ -28,7 +30,8 @@ def test_every_list_uses_the_readable_override_directory():
         ("search blocklist", search.SEARCH_BLOCKLIST_PATHS),
     ]:
         assert paths[0].parent == lists.OVERRIDE_DIR, name
-        assert paths[1].parent == lists.SHIPPED_DIR, name
+        assert paths[1].parent == lists.PORTAL_DIR, name
+        assert paths[2].parent == lists.SHIPPED_DIR, name
 
 
 def test_no_list_override_lives_under_the_private_state_directory():

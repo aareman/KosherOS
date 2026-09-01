@@ -11,6 +11,10 @@ Type=simple
 User=kosher-search
 Group=kosher-search
 Environment=SEARXNG_SETTINGS_PATH=/usr/share/kosher/searxng/settings.yml
+# Run from the cloned source tree: SearXNG is not installable
+# as a wheel (see the Containerfile).
+Environment=PYTHONPATH=/usr/share/kosher/searxng-src
+WorkingDirectory=/usr/share/kosher/searxng-src
 Environment=SEARXNG_BIND_ADDRESS=127.0.0.1
 Environment=SEARXNG_PORT=8889
 EnvironmentFile=/var/lib/kosher-search/secret.env

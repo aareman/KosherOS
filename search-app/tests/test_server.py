@@ -190,28 +190,109 @@ def test_opensearch_lets_the_browser_add_the_engine(get):
     assert "{searchTerms}" in body
 
 
-def test_safe_search_is_forced_on_every_backend_call(get):
-    backend = server_mod.Backend("http://127.0.0.1:1")
+def test_safe_search_is_forced_on_every_backend_call(monkeypatch):
+    # The one request the engines actually see. A user who reaches the
+    # front end must not be able to turn this off.
     captured = {}
 
     class Fake:
-        def __enter__(self_):
-            return self_
+        headers = {}
 
-        def __exit__(self_, *a):
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
             return False
 
-        def read(self_):
+        def read(self):
             return b"{}"
 
     def fake_urlopen(request, timeout=None):
         captured["url"] = request.full_url
         return Fake()
 
-    server_mod.urllib.request.urlopen = fake_urlopen
-    try:
-        backend.search("torah", "general", 1)
-    finally:
-        import importlib
-        importlib.reload(server_mod)
+    # monkeypatch, so the real urlopen is restored even if this fails —
+    # an earlier version patched it by hand and leaked into every test
+    # that came after.
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+    server_mod.Backend("http://127.0.0.1:1").search("torah", "general", 1)
     assert "safesearch=2" in captured["url"]
+
+
+# -- asking from the search page ----------------------------------------------
+
+def post(user, path, body, results=None, spool=None):
+    from kosherd import accessreq
+
+    httpd = start(user, results)
+    if spool is not None:
+        accessreq.SPOOL_DIR = spool
+    port = httpd.server_address[1]
+    try:
+        request = urllib.request.Request(
+            f"http://127.0.0.1:{port}{path}", data=body.encode(),
+            headers={"Content-Type": "application/x-www-form-urlencoded"})
+        try:
+            with urllib.request.urlopen(request, timeout=5) as response:
+                return response.status, response.read().decode()
+        except urllib.error.HTTPError as e:
+            return e.code, e.read().decode()
+    finally:
+        httpd.shutdown()
+        httpd.server_close()
+
+
+def test_a_whitelist_user_can_ask_for_a_site(tmp_path):
+    from kosherd import accessreq
+
+    status, body = post({"mode": "whitelist", "whitelist": []},
+                        server_mod.REQUEST_PATH,
+                        "url=https%3A%2F%2Fchinuch.org%2F&note=for+school",
+                        spool=tmp_path)
+    assert status == 200
+    assert "Your request was sent" in body
+    waiting = accessreq.pending(spool=tmp_path)
+    assert len(waiting) == 1
+    assert waiting[0]["url"] == "https://chinuch.org/"
+    assert waiting[0]["note"] == "for school"
+
+
+def test_a_whitelist_user_with_nothing_allowed_is_given_the_form(get):
+    # This is the only place those users can ask for anything: their blocks
+    # happen at the firewall, so there is no block page to put a button on.
+    status, body = get({"mode": "whitelist", "whitelist": []}, "/")
+    assert f'action="{server_mod.REQUEST_PATH}"' in body
+
+
+def test_sites_that_matched_but_are_not_approved_can_be_asked_for(get):
+    # Without this, whitelist mode can only shrink.
+    results = [
+        {"url": "https://chinuch.org/a", "title": "Lessons", "content": ""},
+        {"url": "https://torahanytime.com/b", "title": "Shiurim", "content": ""},
+    ]
+    status, body = get({"mode": "whitelist", "whitelist": ["chinuch.org"]},
+                       "/search?q=torah", results)
+    assert "Other sites matched" in body
+    assert "torahanytime.com" in body
+    # The host, and never the hidden result's own words.
+    assert "Shiurim" not in body
+
+
+def test_a_hidden_site_that_is_also_objectionable_is_not_offered(get):
+    results = [{"url": "https://pornhub.com/x", "title": "", "content": ""}]
+    status, body = get({"mode": "whitelist", "whitelist": ["chinuch.org"],
+                        "blocked_categories": ["adult"]},
+                       "/search?q=torah", results)
+    assert "pornhub" not in body
+
+
+def test_a_filtered_user_is_not_offered_sites_to_ask_for(get):
+    # They can already open them; the block page is where they would ask.
+    results = [{"url": "https://example.com/a", "title": "x", "content": ""}]
+    status, body = get({"mode": "filtered"}, "/search?q=x", results)
+    assert "Other sites matched" not in body
+
+
+def test_a_post_to_anything_else_is_a_404(get):
+    status, body = post({"mode": "filtered"}, "/nope", "url=x")
+    assert status == 404

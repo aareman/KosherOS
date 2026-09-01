@@ -26,6 +26,7 @@ import urllib.parse
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
+from kosherd import accessreq
 from kosherd import search as search_mod
 from kosherd.uidmap import UidLookup
 
@@ -38,6 +39,13 @@ RESULTS_PER_PAGE = 20
 # SearXNG's own categories, in the order they are offered.
 TABS = (("general", "Web"), ("images", "Images"), ("news", "News"),
         ("videos", "Videos"))
+
+# A whitelist account's blocks happen at the firewall, so there is no page
+# to put a button on — this is the only place those users can ask for
+# anything. Same reserved path as the proxy's block page, for one habit
+# rather than two.
+REQUEST_PATH = "/request"
+MAX_FORM_BYTES = 8192
 
 STYLE = """
 :root { color-scheme: light dark;
@@ -77,6 +85,14 @@ main { padding:1.25rem; }
   border:1px solid var(--line); background:var(--card); text-decoration:none;
   color:var(--fg); font-size:.9rem; }
 .pager { display:flex; gap:.75rem; margin-top:2rem; }
+.ask { margin-top:1rem; display:flex; gap:.5rem; flex-wrap:wrap; }
+.ask input[type=text] { flex:1; min-width:12rem; padding:.55rem .7rem;
+  border-radius:.5rem; border:1px solid var(--line); background:var(--bg);
+  color:var(--fg); }
+.ask button { padding:.55rem 1rem; }
+.result form { display:inline; }
+.result .askbtn { background:none; border:0; color:var(--muted); padding:0;
+  font-size:.82rem; cursor:pointer; text-decoration:underline; }
 h1 { font-size:1.15rem; margin:0 0 .75rem; }
 footer { color:var(--muted); font-size:.8rem; text-align:center; padding:2rem 1rem; }
 """
@@ -189,6 +205,39 @@ class Handler(BaseHTTPRequestHandler):
 
     # -- routes ---------------------------------------------------------------
 
+    def do_POST(self):  # noqa: N802 - BaseHTTPRequestHandler's spelling
+        parts = urllib.parse.urlsplit(self.path)
+        if parts.path != REQUEST_PATH:
+            return self._page('<div class="note">Nothing here.</div>', status=404)
+        try:
+            length = min(int(self.headers.get("Content-Length") or 0),
+                         MAX_FORM_BYTES)
+        except ValueError:
+            length = 0
+        form = urllib.parse.parse_qs(self.rfile.read(length).decode(
+            "utf-8", "replace"))
+        url = (form.get("url") or [""])[0]
+        note = (form.get("note") or [""])[0]
+        uid = self._uid()
+        try:
+            if uid is None:
+                raise accessreq.RequestError("this computer could not tell "
+                                             "who is asking")
+            accessreq.submit(uid, url, note)
+        except accessreq.RequestError as e:
+            body = ('<div class="note"><strong>Could not ask.</strong>'
+                    f"<p>{esc(e)}</p></div>")
+        except Exception:  # noqa: BLE001 - a failed ask is not a crash
+            log.exception("could not record an access request")
+            body = ('<div class="note"><strong>Could not ask.</strong>'
+                    "<p>Please try again.</p></div>")
+        else:
+            body = ('<div class="note"><strong>Your request was sent.</strong>'
+                    f"<p>The administrator of this computer will see "
+                    f"<code>{esc(url)}</code>. Nothing has changed yet.</p>"
+                    "</div>")
+        return self._page(body, title="Asked — KosherOS Search")
+
     def do_GET(self):  # noqa: N802 - BaseHTTPRequestHandler's spelling
         parts = urllib.parse.urlsplit(self.path)
         params = urllib.parse.parse_qs(parts.query)
@@ -234,11 +283,22 @@ class Handler(BaseHTTPRequestHandler):
 
         results = payload.get("results", [])
         kept = self.result_filter.filter_results(uid, results)
-        return self._page(self._results(uid, query, category, page, results, kept),
+        return self._page(self._results(uid, query, category, page,
+                                        results, kept),
                           query=query, category=category,
                           title=f"{query} — KosherOS Search")
 
     # -- rendering ------------------------------------------------------------
+
+    @staticmethod
+    def _ask_form(url: str = "", label: str = "Ask for this") -> str:
+        """A form posting to this service's own origin — same-origin, so no
+        mixed-content refusal and no scheme to get wrong."""
+        return (f'<form class="ask" method="post" action="{REQUEST_PATH}">'
+                f'<input type="hidden" name="url" value="{esc(url)}">'
+                '<input type="text" name="note" maxlength="200" '
+                'placeholder="Why do you need it? (optional)">'
+                f"<button type=\"submit\">{esc(label)}</button></form>")
 
     def _welcome(self, uid) -> str:
         user = self.result_filter.policy.for_uid(uid)
@@ -251,8 +311,8 @@ class Handler(BaseHTTPRequestHandler):
         sites = sorted(user.get("whitelist", []))
         if not sites:
             return ('<div class="note"><strong>No sites are allowed yet.</strong>'
-                    "<p>Ask the administrator of this computer to add some.</p>"
-                    "</div>")
+                    "<p>Ask the administrator of this computer to add one:</p>"
+                    + self._ask_form(label="Ask") + "</div>")
         chips = "".join(f'<li><a href="https://{esc(s)}/">{esc(s)}</a></li>'
                         for s in sites)
         return ('<div class="note"><strong>Sites you can visit</strong>'
@@ -266,7 +326,8 @@ class Handler(BaseHTTPRequestHandler):
                      "this account.</p>")
             return ('<div class="note"><strong>No results to show.</strong>'
                     f"{extra}<p>Try different words, or ask the administrator "
-                    "of this computer.</p></div>")
+                    "of this computer for a site:</p>"
+                    + self._ask_form(label="Ask") + "</div>")
 
         blocks = []
         hidden = len(results) - len(kept)
@@ -290,7 +351,31 @@ class Handler(BaseHTTPRequestHandler):
             pager.append(self._page_link(query, category, page + 1, "Next"))
         if pager:
             blocks.append('<div class="pager">' + "".join(pager) + "</div>")
+        blocks.append(self._askable(uid, results))
         return "".join(blocks)
+
+    def _askable(self, uid, results) -> str:
+        """Sites a whitelist user could ask to have added.
+
+        Without this, whitelist mode can only shrink: the account cannot
+        see what it is missing, so it cannot ask for it, so the whitelist
+        never grows past what an admin thought of in advance. Only the
+        host is shown — never a title or a snippet from a hidden result.
+        """
+        hosts = self.result_filter.askable_hosts(uid, results)
+        if not hosts:
+            return ""
+        rows = "".join(
+            '<form class="ask" method="post" action="' + REQUEST_PATH + '">'
+            f'<input type="hidden" name="url" value="https://{esc(h)}/">'
+            f"<span style=\"flex:1\">{esc(h)}</span>"
+            '<button type="submit">Ask for this site</button></form>'
+            for h in hosts)
+        return ('<div class="note" style="margin-top:2rem">'
+                "<strong>Other sites matched</strong>"
+                "<p>These are not on this account's list yet. You can ask "
+                "the administrator of this computer to add one.</p>"
+                f"{rows}</div>")
 
     @staticmethod
     def _page_link(query, category, page, label) -> str:

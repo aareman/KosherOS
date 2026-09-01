@@ -49,6 +49,10 @@ SEARCH_BLOCKLIST_PATHS = (
 # all, the same fail-closed rule the firewall uses for unknown UIDs.
 UNKNOWN = {"mode": "none"}
 
+# Why a result was hidden from a whitelist account: nobody has approved
+# the site yet, as opposed to anything being wrong with it.
+NOT_WHITELISTED = "not on the whitelist"
+
 # A query that is plainly asking for help with the problem, rather than for
 # the material, is let through — see content.HELP_CONTEXT. Letting it
 # through cannot expose anything, because the RESULTS are filtered either
@@ -212,21 +216,25 @@ class ResultFilter:
         if mode == "whitelist":
             # The point of searching in whitelist mode: show the sites this
             # account can actually open, and nothing else.
-            allowed = user.get("whitelist", [])
-            if not any(_under(host, d) for d in allowed):
-                return "not on the whitelist"
-        else:
-            blocked = user.get("blocked_categories", [])
-            if blocked and self.bundle.blocked_categories_of(host, blocked):
-                return "blocked category"
-            # A result that leads into a department the proxy would block
-            # is a result that leads to a block page.
-            if siterules_mod.GATING_CATEGORY in blocked:
-                why = self.sites.reason(url)
-                if why:
-                    return why
+            if not self._whitelisted(user, host):
+                return NOT_WHITELISTED
+            return self._other_reason(user, url, host, text, is_media)
+        return self._other_reason(user, url, host, text, is_media)
 
-        if mode == "filtered":
+    def _other_reason(self, user: dict, url: str, host: str, text: str,
+                      is_media: bool) -> str | None:
+        """Everything except the whitelist: categories, rules, content."""
+        blocked = user.get("blocked_categories", [])
+        if blocked and self.bundle.blocked_categories_of(host, blocked):
+            return "blocked category"
+        # A result that leads into a department the proxy would block is a
+        # result that leads to a block page.
+        if siterules_mod.GATING_CATEGORY in blocked:
+            why = self.sites.reason(url)
+            if why:
+                return why
+
+        if user.get("mode") == "filtered":
             rules = user.get("rules", [])
             if rules:
                 try:
@@ -254,6 +262,46 @@ class ResultFilter:
             if self.scorer.score(text).at_least(tolerance):
                 return "the result reads as inappropriate"
         return None
+
+    @staticmethod
+    def _whitelisted(user: dict, host: str) -> bool:
+        return any(_under(host, d) for d in user.get("whitelist", []))
+
+    def askable_hosts(self, uid: int | None, results: list, *,
+                      url_of=lambda r: r.get("url", ""),
+                      text_of=lambda r: " ".join(
+                          str(r.get(k, "")) for k in ("title", "content")),
+                      limit: int = 8) -> list[str]:
+        """Sites a whitelist user could reasonably ask to have added.
+
+        Without this, whitelist mode can only shrink: the account cannot
+        see what it is missing, so it cannot ask for it, so the whitelist
+        never grows past whatever an admin thought of in advance. Only
+        hosts whose ONLY problem is that nobody has approved them yet —
+        anything the content or category checks object to is not offered,
+        and no title or snippet from a dropped result is shown either way.
+        """
+        user = self.policy.for_uid(uid)
+        if user.get("mode") != "whitelist":
+            return []
+        # Judged as a filtered account would judge them, so a site that is
+        # unapproved AND objectionable is not put in front of a child as a
+        # thing to ask for.
+        as_filtered = {**user, "mode": "dnsfilter",
+                       "blocked_categories": user.get("blocked_categories")
+                       or list(categories_mod.DEFAULT_BLOCKED)}
+        hosts: list[str] = []
+        for result in results:
+            url = url_of(result)
+            host = _host_of(url)
+            if not host or host in hosts or self._whitelisted(user, host):
+                continue
+            if self._other_reason(as_filtered, url, host,
+                                  text_of(result), False) is None:
+                hosts.append(host)
+            if len(hosts) >= limit:
+                break
+        return hosts
 
     def unknown_host(self, url: str) -> bool:
         """True if the category database has nothing to say about this host.

@@ -152,13 +152,22 @@ RUN python3 -m pip install --prefix=/usr nudenet onnxruntime pillow \
 # that keeps up with it. Everything version-specific stays behind its JSON
 # API, which is stable, so an upgrade cannot reach our filtering.
 #
-# From git, not PyPI: the name "searxng" on PyPI belongs to an unrelated
-# project, and upstream publishes no wheel. TODO(stage 2): pin a commit
-# rather than tracking master, so an image rebuild is reproducible.
+# From git, and from a source tree rather than a wheel. The name "searxng"
+# on PyPI belongs to an unrelated project, and `pip install` of the repo
+# fails outright: its setup.py imports searx/__init__.py, which imports
+# msgspec before anything is installed. Upstream's own instructions are to
+# clone and install requirements.txt, which is what this does; the unit
+# runs it with PYTHONPATH pointing at the tree.
+# TODO(stage 2): pin a commit rather than tracking master, so an image
+# rebuild is reproducible.
 ARG SEARXNG_REF=master
 RUN dnf -y install git-core && dnf clean all \
+    && git clone --depth 1 --branch "${SEARXNG_REF}" \
+        https://github.com/searxng/searxng /usr/share/kosher/searxng-src \
     && python3 -m pip install --prefix=/usr \
-        "git+https://github.com/searxng/searxng@${SEARXNG_REF}" \
+        -r /usr/share/kosher/searxng-src/requirements.txt \
+    && rm -rf /usr/share/kosher/searxng-src/.git \
+    && python3 -c "import sys; sys.path.insert(0, '/usr/share/kosher/searxng-src'); import searx" \
     || echo "WARNING: SearXNG did not install; search will be unavailable"
 RUN python3 -m pip install --prefix=/usr --no-deps \
         /tmp/kosherd/ /tmp/admin-app/ /tmp/store-app/ /tmp/setup-app/ \

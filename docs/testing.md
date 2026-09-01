@@ -178,3 +178,30 @@ mangled address from `just`'s own `{{ }}` escaping.
 DNS takeover, the transparent redirect to the proxy, the login path and
 the first-boot wizard. Those need a booted machine — `just vm`, which
 needs sudo.
+
+## `just check-dns`
+
+Asks the real resolver real questions, with a second dnsmasq as the
+upstream so nothing depends on the internet or on what a domain happens to
+resolve to today.
+
+Unit tests prove the right lines are written into dnsmasq's config. Only
+this proves dnsmasq then *answers* the way those lines claim — and the
+first run found that it did not.
+
+**Safe search was broken, and broken in the worst direction.** dnsmasq's
+`cname=` only accepts a target it already knows: from a hosts file, from
+DHCP, or from a `host-record`. It does not chase the target upstream. So
+`cname=www.google.com,forcesafesearch.google.com` returned a CNAME and no
+address — Google did not resolve at all for any filtered account. Not
+"safe search was not forced": Google was broken, silently, for exactly the
+users the filter exists to protect. The renderer now emits a `host-record`
+for every target first, and a unit test fails if a target ever lacks one.
+
+The other checks: a blocked domain answers 0.0.0.0 while an ordinary one
+is untouched, resolving a whitelisted name fills the firewall's `wl4` set
+and resolving anything else does not, and the plain resolver for
+unfiltered accounts answers without applying any of it.
+
+Same precondition as the firewall check: it refuses to judge anything
+until the resolver has answered at all.

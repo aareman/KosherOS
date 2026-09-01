@@ -11,6 +11,8 @@ destination.
 
 from __future__ import annotations
 
+import logging
+
 from .policy import INSPECTED_MODES, SAFESEARCH_MODES, Policy
 
 WHITELIST_CONF = "/etc/kosher/dnsmasq.d/whitelist.conf"
@@ -21,6 +23,28 @@ CATEGORY_BLOCK_CONF = "/etc/kosher/dnsmasq.d/categories.conf"
 # Pointing the normal hostname at them is how safe search is enforced for
 # users whose traffic we do NOT read (dnsfilter mode); verified against a
 # live resolver — dnsmasq follows a cname to an external target.
+# The addresses the safe-search hostnames resolve to.
+#
+# These have to be here, and that is a dnsmasq constraint rather than a
+# choice: `cname=` only accepts a target dnsmasq ALREADY knows — from a
+# hosts file, from DHCP, or from a host-record. It does not chase the
+# target upstream. Without these lines dnsmasq answered www.google.com
+# with a CNAME and no address, so safe search did not force safe search,
+# it broke Google outright for every filtered account.
+#
+# Published by the providers and stable for years, but they are data
+# rather than code precisely so a portal list update can correct one
+# without an OS rebuild.
+SAFESEARCH_ADDRESSES = {
+    "forcesafesearch.google.com": "216.239.38.120",
+    "strict.bing.com": "204.79.197.220",
+    "safe.duckduckgo.com": "40.114.177.156",
+    "restrictmoderate.youtube.com": "216.239.38.119",
+    "restrict.youtube.com": "216.239.38.120",
+}
+
+log = logging.getLogger(__name__)
+
 SAFESEARCH_CNAMES = {
     "forcesafesearch.google.com": [
         "google.com", "www.google.com",
@@ -86,7 +110,18 @@ def render_safesearch(policy: Policy) -> str:
         lines.append("# No user needs safe search.")
         return "\n".join(lines) + "\n"
     lines.append("# Safe search is forced for every user of this resolver.")
+    lines.append("# host-record first: dnsmasq will not resolve a cname "
+                 "target it does not already know.")
+    for target, address in SAFESEARCH_ADDRESSES.items():
+        if target in SAFESEARCH_CNAMES:
+            lines.append(f"host-record={target},{address}")
+    lines.append("")
     for target, names in SAFESEARCH_CNAMES.items():
+        if target not in SAFESEARCH_ADDRESSES:
+            # A target with no address would answer a CNAME and nothing
+            # else, which does not force safe search — it breaks the site.
+            log.error("no address for safe-search target %s; skipping", target)
+            continue
         for name in names:
             lines.append(f"cname={name},{target}")
     return "\n".join(lines) + "\n"

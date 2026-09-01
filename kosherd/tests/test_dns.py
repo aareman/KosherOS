@@ -109,3 +109,57 @@ def test_mixed_uninspected_profiles_block_the_union():
     assert "address=/bad.com/0.0.0.0" in out
     assert "address=/chat.com/0.0.0.0" in out
     assert "watch.com" not in out
+
+
+# -- the CNAME target has to be one dnsmasq already knows ---------------------
+
+def test_every_safe_search_target_has_an_address():
+    """dnsmasq will not chase a cname target upstream.
+
+    `cname=` only accepts a target dnsmasq already knows — from a hosts
+    file, from DHCP, or from a host-record. Without a host-record it
+    answered www.google.com with a CNAME and no address, so safe search
+    did not force safe search: it broke Google outright for every filtered
+    account. Verified against a real dnsmasq in `just check-dns`.
+    """
+    from kosherd.dns import SAFESEARCH_ADDRESSES, SAFESEARCH_CNAMES
+
+    missing = set(SAFESEARCH_CNAMES) - set(SAFESEARCH_ADDRESSES)
+    assert not missing, (
+        f"{sorted(missing)} would answer a CNAME and nothing else, which "
+        "breaks the site rather than making it safe")
+
+
+def test_the_host_records_come_before_the_cnames():
+    from kosherd.policy import Policy, UserPolicy
+
+    out = dns.render_safesearch(Policy(revision=1, users=[
+        UserPolicy(uid=1001, username="a", mode="dnsfilter")]))
+    assert out.index("host-record=") < out.index("cname=")
+
+
+def test_each_target_gets_exactly_one_host_record():
+    from kosherd.dns import SAFESEARCH_CNAMES
+    from kosherd.policy import Policy, UserPolicy
+
+    out = dns.render_safesearch(Policy(revision=1, users=[
+        UserPolicy(uid=1001, username="a", mode="dnsfilter")]))
+    for target in SAFESEARCH_CNAMES:
+        assert out.count(f"host-record={target},") == 1, target
+
+
+def test_the_addresses_are_addresses():
+    import ipaddress
+
+    from kosherd.dns import SAFESEARCH_ADDRESSES
+
+    for target, address in SAFESEARCH_ADDRESSES.items():
+        ipaddress.ip_address(address)  # raises if it is not one
+
+
+def test_nothing_is_rendered_when_no_account_needs_safe_search():
+    from kosherd.policy import Policy, UserPolicy
+
+    out = dns.render_safesearch(Policy(revision=1, users=[
+        UserPolicy(uid=1001, username="a", mode="unfiltered")]))
+    assert "cname=" not in out and "host-record=" not in out

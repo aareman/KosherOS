@@ -45,6 +45,14 @@ benchmark CPUS="": build
         -v "$PWD/scripts/benchmark.py:/benchmark.py:z" \
         {{image}} python3 /benchmark.py
 
+# Ask the real resolver real questions. Unit tests prove the right lines
+# are written into dnsmasq's config; only this proves dnsmasq then answers
+# the way those lines claim.
+check-dns: build
+    podman run --rm --privileged \
+        -v "$PWD/scripts/dns-check.sh:/dns-check.sh:z" \
+        {{image}} bash /dns-check.sh
+
 # Load the real ruleset in a private network namespace and try to get past
 # it. Everything else tests the ruleset as text; this tests whether it
 # stops anyone, which is the only claim that matters.

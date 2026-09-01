@@ -79,12 +79,14 @@ locked down when the user has sudo.
    catalogue manifest (`portal/`) — remote-support channel and web UI still
    to come
 7. ✅ Filtered mode: local TLS interception (mitmproxy) with URL **path-level** allow/block rules
-8. **Real content filtering** — category lists (10.5M domains), enforced safe
-   search, per-user profiles, and page-content scoring in the proxy. This is
-   the gap between "blocks porn domains" and a filter a family actually
-   trusts; see [docs/content-filtering.md](docs/content-filtering.md).
-   Still open: the image classifier, and a request-and-approve path from the
-   block page
+8. ✅ **Real content filtering** — category lists, per-user profiles,
+   page-content scoring, shop department rules, an image detector with
+   region covering, YouTube limits enforced in the app rather than on the
+   page, and a request-and-approve path from the block page. See
+   [docs/content-filtering.md](docs/content-filtering.md) and
+   [docs/media-filtering.md](docs/media-filtering.md). Still open: a tzniut
+   classifier, so the `immodest` picture level is honestly weaker than the
+   two above it
 9. ✅ **Filtered search** — a local SearXNG behind a KosherOS front end that
    filters results with the same policy as the traffic, so a filtered user
    never clicks into a block page and a whitelist user can finally *see*
@@ -93,3 +95,8 @@ locked down when the user has sudo.
    boot-into-the-desktop-and-click-Install experience yet. `just usb-image`
    (raw image on a USB stick) and `just vm` are the current ways to try it
 11. **Anaconda installer branding** — waiting on the real artwork
+12. **A VM boot since the filtering work landed.** Everything since is
+    verified by unit tests, `just check-services` against the built image
+    and `systemd-analyze verify`. The firewall, the transparent redirect,
+    DNS takeover and the login path have not been re-checked on a booted
+    machine — `just vm` needs sudo, so it is a person's job

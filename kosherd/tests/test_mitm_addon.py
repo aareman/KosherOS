@@ -351,3 +351,70 @@ def _typed_flow(content_type):
                                   "pretty_url": "https://example.com/v.mp4"})(),
         "response": _Resp(b"\x00" * 100, {"content-type": content_type}),
     })()
+
+
+# -- shop departments ---------------------------------------------------------
+
+def test_the_proxy_blocks_a_department_before_fetching_the_page(addon):
+    from kosherd import siterules
+    from pathlib import Path
+
+    rules = siterules.load(
+        Path(__file__).parents[2] / "os-image/files/usr/share/kosher/site-rules.json")
+    filt = addon.KosherFilter.__new__(addon.KosherFilter)
+    filt.uids = type("U", (), {"uid_for_port": staticmethod(lambda p: 1001)})()
+    filt.policy = _request_policy(blocked=["immodest"])
+    filt.categories = _stub_categories()
+    filt.siterules = rules
+
+    blocked = _request_flow("https://www.amazon.com/s?k=x&i=fashion-womens")
+    filt.request(blocked)
+    assert blocked.response is not None
+    assert blocked.response.status_code == 403
+
+    allowed = _request_flow("https://www.amazon.com/s?k=laptop")
+    filt.request(allowed)
+    assert allowed.response is None
+
+
+def test_a_department_is_only_blocked_for_accounts_that_asked(addon):
+    from kosherd import siterules
+    from pathlib import Path
+
+    rules = siterules.load(
+        Path(__file__).parents[2] / "os-image/files/usr/share/kosher/site-rules.json")
+    filt = addon.KosherFilter.__new__(addon.KosherFilter)
+    filt.uids = type("U", (), {"uid_for_port": staticmethod(lambda p: 1001)})()
+    filt.policy = _request_policy(blocked=["gambling"])
+    filt.categories = _stub_categories()
+    filt.siterules = rules
+
+    flow = _request_flow("https://www.amazon.com/s?k=x&i=fashion-womens")
+    filt.request(flow)
+    assert flow.response is None
+
+
+def _request_policy(blocked=()):
+    return type("P", (), {
+        "rules_for": staticmethod(lambda uid: []),
+        "blocked_categories_for": staticmethod(lambda uid: list(blocked)),
+        "youtube_for": staticmethod(lambda uid: {}),
+    })()
+
+
+def _request_flow(url):
+    from urllib.parse import urlsplit
+
+    parts = urlsplit(url)
+    return type("F", (), {
+        "request": type("R", (), {
+            "pretty_host": parts.hostname,
+            "pretty_url": url,
+            "path": parts.path + (f"?{parts.query}" if parts.query else ""),
+            "query": {},
+            "headers": {},
+        })(),
+        "response": None,
+        "client_conn": type("C", (), {"peername": ("127.0.0.1", 40000)})(),
+        "metadata": {},
+    })()

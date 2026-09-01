@@ -188,8 +188,24 @@ that carry no such labels. The same applies to most large sites worth
 worrying about — they are databases with categories, and the categories are
 in the markup.
 
-This is worth building before any model: it is a few days of work per major
-site, it is auditable, and it handles the case actually being asked about.
+**Built**, in `kosherd/siterules.py` and
+`/usr/share/kosher/site-rules.json`. Rules describe a *part* of a site the
+family uses — Amazon is not a site a family blocks, a department on it is —
+and they fire only for accounts that block the `immodest` category, the
+same setting that blocks lingerie retailers outright. They are matched on
+the REQUEST, before a byte of the page is fetched, and in search results
+too, so a result cannot lead somewhere a click would be blocked.
+
+The reason names the term and the host ("the fashion-womens department of
+amazon.com"), because an admin has to be able to disagree with a specific
+word rather than with a probability.
+
+Two rules keep it from becoming an outage. A site with its own rules is
+*not* also judged by the generic list, so tuning one shop cannot silently
+widen another. And the generic list only fires on shop-shaped addresses
+(`/shop/`, `/collections/`, `/category/`), because an article whose title
+contains the word is not a department — the page scorer is the backstop
+for those.
 
 ### The vision model, when it is genuinely needed
 

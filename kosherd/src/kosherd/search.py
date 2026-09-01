@@ -32,6 +32,7 @@ from urllib.parse import urlsplit
 from . import categories as categories_mod
 from . import content
 from . import pagescan
+from . import siterules as siterules_mod
 from . import language
 from .urlrules import BLOCK, decide, parse_rules
 
@@ -121,13 +122,15 @@ class ResultFilter:
     """Decides whether one search result may be shown to one user."""
 
     def __init__(self, policy: SearchPolicy | None = None, bundle=None,
-                 wordlist=None, blocklist=None, scorer=None, scanner=None):
+                 wordlist=None, blocklist=None, scorer=None, scanner=None,
+                 sites=None):
         self.policy = policy or SearchPolicy()
         self._bundle = bundle
         self._wordlist = wordlist
         self._blocklist = blocklist
         self._scorer = scorer
         self._scanner = scanner
+        self._sites = sites
 
     # Loaded lazily: a 190 MB category database should not be opened by a
     # unit test, nor twice by the search worker processes.
@@ -154,6 +157,12 @@ class ResultFilter:
         if self._scorer is None:
             self._scorer = content.load()
         return self._scorer
+
+    @property
+    def sites(self):
+        if self._sites is None:
+            self._sites = siterules_mod.load()
+        return self._sites
 
     @property
     def scanner(self):
@@ -210,6 +219,12 @@ class ResultFilter:
             blocked = user.get("blocked_categories", [])
             if blocked and self.bundle.blocked_categories_of(host, blocked):
                 return "blocked category"
+            # A result that leads into a department the proxy would block
+            # is a result that leads to a block page.
+            if siterules_mod.GATING_CATEGORY in blocked:
+                why = self.sites.reason(url)
+                if why:
+                    return why
 
         if mode == "filtered":
             rules = user.get("rules", [])

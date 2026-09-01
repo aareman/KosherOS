@@ -32,6 +32,7 @@ try:
     from kosherd import content as content_mod
     from kosherd import imageedit as imageedit_mod
     from kosherd import language as language_mod
+    from kosherd import siterules as siterules_mod
     from kosherd import vision as vision_mod
     from kosherd.uidmap import UidLookup
     from kosherd.urlrules import BLOCK, decide, parse_rules
@@ -47,6 +48,7 @@ except ImportError:  # pragma: no cover - only when interpreters differ
     from kosherd import content as content_mod
     from kosherd import imageedit as imageedit_mod
     from kosherd import language as language_mod
+    from kosherd import siterules as siterules_mod
     from kosherd import vision as vision_mod
     from kosherd.uidmap import UidLookup
     from kosherd.urlrules import BLOCK, decide, parse_rules
@@ -304,6 +306,7 @@ class KosherFilter:
         self.scorer = content_mod.load()
         self.wordlist = language_mod.load()
         self.vision = vision_mod.ImageFilter()
+        self.siterules = siterules_mod.load()
 
     def request(self, flow: http.HTTPFlow) -> None:
         # Everything reaching this proxy belongs to a filtered user: only
@@ -341,13 +344,23 @@ class KosherFilter:
         # An explicit allow rule beats the category lists, so an admin can
         # permit one site from a category they otherwise block.
         if pattern is None:
+            blocked = self.policy.blocked_categories_for(uid)
             hit = self.categories.blocked_categories_of(
-                flow.request.pretty_host or "",
-                self.policy.blocked_categories_for(uid))
+                flow.request.pretty_host or "", blocked)
             if hit:
                 names = ", ".join(sorted(hit))
                 log.info("blocked uid=%s %s (category: %s)", uid, url, names)
                 self._block(flow, url, f" because it is {names}")
+                return
+
+            # A department on a shop the family uses. Read from the
+            # address, so it costs microseconds and happens before the
+            # page is fetched.
+            if siterules_mod.GATING_CATEGORY in blocked:
+                why = self.siterules.reason(url)
+                if why:
+                    log.info("blocked uid=%s %s (%s)", uid, url, why)
+                    self._block(flow, url, f" because it is {why}")
 
 
 

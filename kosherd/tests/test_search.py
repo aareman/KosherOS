@@ -13,6 +13,7 @@ import pytest
 from kosherd import content, language, search
 from kosherd.policy import Policy, UserPolicy
 
+ROOT = Path(__file__).parents[2]
 TERMS = Path(__file__).parents[2] / "os-image/files/usr/share/kosher/content-terms.json"
 BLOCKLIST = Path(__file__).parents[2] / "os-image/files/usr/share/kosher/search-blocklist.json"
 WORDLIST = Path(__file__).parents[2] / "os-image/files/usr/share/kosher/wordlist.json"
@@ -299,3 +300,27 @@ def test_the_policy_file_is_reread_when_it_changes(tmp_path):
 def test_a_missing_policy_file_means_nobody_may_search():
     policy = search.SearchPolicy(Path("/nonexistent/policy.json"))
     assert policy.for_uid(1001) == search.UNKNOWN
+
+
+# -- shop departments ---------------------------------------------------------
+
+def test_a_result_leading_into_a_blocked_department_is_dropped():
+    # A result that leads where a click would be blocked is a result that
+    # leads to a block page, which is the thing this whole feature exists
+    # to prevent.
+    from kosherd import siterules
+    sites = siterules.load(
+        ROOT / "os-image/files/usr/share/kosher/site-rules.json")
+    f = make_filter({1001: {"mode": "dnsfilter",
+                            "blocked_categories": ["immodest"]}}, sites=sites)
+    assert not f.allows(1001, "https://www.amazon.com/s?k=x&i=fashion-womens")
+    assert f.allows(1001, "https://www.amazon.com/s?k=laptop")
+
+
+def test_departments_are_only_filtered_for_accounts_that_asked():
+    from kosherd import siterules
+    sites = siterules.load(
+        ROOT / "os-image/files/usr/share/kosher/site-rules.json")
+    f = make_filter({1001: {"mode": "dnsfilter",
+                            "blocked_categories": ["gambling"]}}, sites=sites)
+    assert f.allows(1001, "https://www.amazon.com/s?k=x&i=fashion-womens")

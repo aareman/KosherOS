@@ -1,0 +1,194 @@
+{
+  "version": 1,
+  "comment": "Departments on large shops, read from the address rather than looked at. Applies only to accounts that block the 'immodest' category \u2014 the same setting that blocks lingerie retailers outright \u2014 because these are sites a family uses, with parts they do not want. A site listed here is fully described by its own rules; the 'anywhere' list is for shops nobody has written rules for yet. Terms match whole path or query segments, so 'bras' does not match 'brasserie'. An administrator may add or remove a handful; nobody should have to build this. The 'anywhere' list only fires on shop-shaped paths (/shop/, /collections/, /category/ and the like), because an article whose title happens to contain the word is not a department \u2014 the page scorer is the backstop for those.",
+  "sites": [
+    {
+      "hosts": [
+        "amazon.com",
+        "amazon.co.uk",
+        "amazon.ca",
+        "amazon.de",
+        "amazon.fr",
+        "amazon.co.jp",
+        "amazon.com.au",
+        "amazon.in",
+        "amazon.es",
+        "amazon.it",
+        "amazon.nl",
+        "amazon.se"
+      ],
+      "query": {
+        "i": [
+          "fashion-womens",
+          "fashion-girls",
+          "luggage-womens"
+        ],
+        "rh": [
+          "n:1040660",
+          "n:1044442"
+        ]
+      },
+      "terms": [
+        "lingerie",
+        "intimates",
+        "intimate-apparel",
+        "bras",
+        "bra",
+        "panties",
+        "underwear",
+        "shapewear",
+        "sleepwear",
+        "nightwear",
+        "hosiery",
+        "swimsuits",
+        "swimwear",
+        "bikinis",
+        "bikini",
+        "womens-swimsuits",
+        "one-piece-swimsuits",
+        "cover-ups",
+        "womens-lingerie",
+        "womens-intimates",
+        "adult-toys",
+        "sexual-wellness"
+      ]
+    },
+    {
+      "hosts": [
+        "walmart.com",
+        "target.com",
+        "kohls.com",
+        "macys.com",
+        "nordstrom.com",
+        "jcpenney.com",
+        "dillards.com",
+        "bloomingdales.com",
+        "saksfifthavenue.com"
+      ],
+      "terms": [
+        "lingerie",
+        "intimates",
+        "intimate-apparel",
+        "bras",
+        "panties",
+        "underwear",
+        "shapewear",
+        "sleepwear",
+        "loungewear",
+        "hosiery",
+        "swimwear",
+        "swimsuits",
+        "bikinis",
+        "juniors-swim",
+        "womens-swim",
+        "sexual-wellness"
+      ]
+    },
+    {
+      "hosts": [
+        "ebay.com",
+        "ebay.co.uk",
+        "etsy.com",
+        "aliexpress.com",
+        "aliexpress.us",
+        "temu.com",
+        "shein.com",
+        "wish.com",
+        "alibaba.com"
+      ],
+      "terms": [
+        "lingerie",
+        "intimates",
+        "bras",
+        "panties",
+        "thongs",
+        "underwear",
+        "shapewear",
+        "sleepwear",
+        "nightwear",
+        "hosiery",
+        "stockings",
+        "swimwear",
+        "swimsuits",
+        "bikinis",
+        "bikini",
+        "adult",
+        "sexy",
+        "erotic",
+        "adult-toys"
+      ]
+    },
+    {
+      "hosts": [
+        "asos.com",
+        "hm.com",
+        "zara.com",
+        "oldnavy.com",
+        "gap.com",
+        "bananarepublic.com",
+        "uniqlo.com",
+        "next.co.uk",
+        "boohoo.com",
+        "prettylittlething.com",
+        "forever21.com",
+        "urbanoutfitters.com",
+        "abercrombie.com",
+        "hollisterco.com",
+        "aeropostale.com",
+        "ae.com"
+      ],
+      "terms": [
+        "lingerie",
+        "intimates",
+        "bras",
+        "bralettes",
+        "panties",
+        "knickers",
+        "underwear",
+        "shapewear",
+        "sleepwear",
+        "nightwear",
+        "loungewear",
+        "hosiery",
+        "tights",
+        "swimwear",
+        "swimsuits",
+        "bikinis",
+        "bikini",
+        "beachwear",
+        "bodysuits",
+        "crop-tops",
+        "mini-skirts",
+        "bodycon"
+      ]
+    },
+    {
+      "hosts": [
+        "pinterest.com",
+        "pinterest.co.uk"
+      ],
+      "terms": [
+        "lingerie",
+        "bikini",
+        "swimsuit",
+        "boudoir",
+        "bralette",
+        "sexy",
+        "hot-girls",
+        "outfit-inspo-summer"
+      ]
+    }
+  ],
+  "anywhere": [
+    "lingerie",
+    "intimate-apparel",
+    "bikinis",
+    "swimsuits",
+    "boudoir",
+    "adult-toys",
+    "sexual-wellness",
+    "escort",
+    "escorts",
+    "strip-club"
+  ]
+}

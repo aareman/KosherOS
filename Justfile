@@ -45,6 +45,10 @@ benchmark CPUS="": build
         -v "$PWD/scripts/benchmark.py:/benchmark.py:z" \
         {{image}} python3 /benchmark.py
 
+# Every live check, in the order they build on each other. The unit tests
+# say the right thing is written; these say the machine then does it.
+check-all: check-firewall check-dns check-redirect check-services
+
 # Does a filtered account's traffic actually end up in the proxy, and does
 # nobody else's? One nat rule, and everything downstream depends on it.
 check-redirect: build
@@ -53,7 +57,7 @@ check-redirect: build
     trap 'podman rm -f kosher-origin2 >/dev/null 2>&1; \
           podman network rm -f kosher-rdtest >/dev/null 2>&1' EXIT
     podman network create kosher-rdtest >/dev/null 2>&1 || true
-    podman run -d --rm --name kosher-origin2 --network kosher-rdtest \
+    podman run -d --rm --replace --name kosher-origin2 --network kosher-rdtest \
         {{image}} python3 -m http.server 80 --bind 0.0.0.0 >/dev/null
     target=$(podman inspect kosher-origin2 --format json \
         | python3 -c 'import json,sys; print(json.load(sys.stdin)[0]["NetworkSettings"]["Networks"]["kosher-rdtest"]["IPAddress"])')
@@ -79,7 +83,7 @@ check-firewall: build
     trap 'podman rm -f kosher-origin >/dev/null 2>&1; \
           podman network rm -f kosher-fwtest >/dev/null 2>&1' EXIT
     podman network create kosher-fwtest >/dev/null 2>&1 || true
-    podman run -d --rm --name kosher-origin --network kosher-fwtest \
+    podman run -d --rm --replace --name kosher-origin --network kosher-fwtest \
         {{image}} python3 -m http.server 80 --bind 0.0.0.0 >/dev/null
     # No Go template here: just has its own interpolation syntax and
     # mangled it, producing an address with a stray brace that looked

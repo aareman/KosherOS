@@ -205,3 +205,27 @@ unfiltered accounts answers without applying any of it.
 
 Same precondition as the firewall check: it refuses to judge anything
 until the resolver has answered at all.
+
+## `just check-redirect`
+
+The middle step the other checks left out. `check-firewall` proves the
+ruleset stops people; `check-services` proves the addon filters what it is
+given. Neither proves that nftables actually diverts a filtered account's
+connections into the proxy, and nobody else's — one nat rule that
+everything downstream depends on.
+
+Five checks: a filtered account gets our block page (which proves the
+whole chain — redirected, intercepted, rules applied), an uninspected
+account reaches the origin untouched, and the proxy's own upstream request
+is exempt, without which it would be redirected back into itself.
+
+Writing it found that `kosherctl render-nft` printed a ruleset with no
+redirect in it at all — see the commit; the command passed only `dns_uid`,
+so every rule depending on the proxy and search users was silently absent
+from the output of the command documented as the fast loop for enforcement
+changes.
+
+## `just check-all`
+
+Runs the firewall, DNS, redirect and service checks in the order they
+build on each other.

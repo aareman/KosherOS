@@ -95,8 +95,9 @@ locked down when the user has sudo.
    boot-into-the-desktop-and-click-Install experience yet. `just usb-image`
    (raw image on a USB stick) and `just vm` are the current ways to try it
 11. **Anaconda installer branding** — waiting on the real artwork
-12. **A VM boot since the filtering work landed.** The firewall itself is
-    now exercised for real by `just check-firewall` — the ruleset loaded,
-    traffic tried against it from five accounts. Still needing a booted
-    machine: DNS takeover, the transparent redirect, the login path and
-    the first-boot wizard. `just vm` needs sudo, so it is a person's job
+12. **A VM boot since the filtering work landed.** Enforcement is now
+    exercised for real by `just check-all` — the firewall stopping
+    accounts, the resolver answering, traffic diverted into the proxy, the
+    services running. Still needing a booted machine: the login path, the
+    first-boot wizard, and how all of it behaves under GNOME. `just vm`
+    needs sudo, so it is a person's job

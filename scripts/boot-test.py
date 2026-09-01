@@ -162,6 +162,25 @@ def run(disk: Path) -> int:
         results.check("the wizard did not exhaust its attempts",
                       not console.saw(r"giving up on the graphical wizard"))
 
+        # A getty on the same console reads the same keystrokes. When this
+        # happened, the wizard printed every question and saw none of the
+        # answers — the password went to a login prompt — and it surfaced
+        # only as "the administrator account is created" failing, which
+        # points nowhere near the cause.
+        getty_at = console.position_of(r"Started .*serial-getty|Started .*getty@tty1")
+        results.check(
+            "no getty took the console from the wizard",
+            getty_at < 0 or (wizard_at >= 0 and getty_at > wizard_at
+                             and not console.saw(r"login: timed out")),
+            f"wizard at {wizard_at}, getty at {getty_at}")
+
+        # The machine should introduce itself by name. /etc/hostname is
+        # bind-mounted during a container build, so writing it in a RUN
+        # silently produced an empty file and every prompt said "fedora".
+        results.check("the machine calls itself kosheros",
+                      not console.saw(r"fedora login:"),
+                      console.tail())
+
         if console.expect(r"Username:", 180):
             results.check("setup asks for an administrator", True)
             console.send(ADMIN_USER)

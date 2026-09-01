@@ -57,9 +57,15 @@ RUN . /usr/lib/os-release \
         -e '/^VARIANT=/d' -e '/^VARIANT_ID=/d' \
         /usr/lib/os-release \
     && printf 'VARIANT="KosherOS"\nVARIANT_ID=kosheros\n' >> /usr/lib/os-release \
-    # Otherwise the machine calls itself "fedora" at every login prompt and
-    # on the network. The installer or the owner can still change it.
-    && echo kosheros > /etc/hostname
+    # DEFAULT_HOSTNAME is the fallback systemd uses when /etc/hostname is
+    # absent or empty, and Fedora sets it to "fedora". The hostname file
+    # itself is shipped by COPY, not written here: podman bind-mounts
+    # /etc/hostname over the build container, so `echo > /etc/hostname` in
+    # a RUN writes to a temporary file and the image keeps an empty one.
+    # That is exactly what happened, and the machine introduced itself as
+    # "fedora login:" at every prompt.
+    && sed -i '/^DEFAULT_HOSTNAME=/d' /usr/lib/os-release \
+    && echo 'DEFAULT_HOSTNAME=kosheros' >> /usr/lib/os-release
 
 # --- Branding: boot splash, login screen, wallpaper, GRUB --------------------
 COPY branding/ /usr/share/kosher/branding/
@@ -205,6 +211,21 @@ RUN python3 -m pip install --prefix=/usr --no-deps \
     # Portal sync is inert until the device enrols (the unit and timer
     # both carry ConditionPathExists on the enrolment file).
     && systemctl enable kosher-sync.timer
+
+# The identity has to survive the build, not just be written during it.
+#
+# Note what is NOT checked here: /etc/hostname. The container engine
+# bind-mounts that file over the build container, so a RUN can neither
+# write it (which is how it ended up empty and the machine called itself
+# "fedora") nor read what COPY put in the layer. Checking it here would
+# fail on a correct image. It is asserted against the build context by
+# the test suite instead, and DEFAULT_HOSTNAME below is the belt to its
+# braces: systemd falls back to it whenever /etc/hostname is missing or
+# empty, which is exactly the case that bit us.
+RUN grep -q '^DEFAULT_HOSTNAME=kosheros' /usr/lib/os-release \
+    && grep -q '^NAME="KosherOS"' /usr/lib/os-release \
+    && grep -q '^VARIANT_ID=kosheros' /usr/lib/os-release \
+    && echo "identity ok"
 
 # bootc images must pass a container lint.
 RUN bootc container lint

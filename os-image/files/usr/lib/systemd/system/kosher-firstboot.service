@@ -11,6 +11,15 @@ After=kosherd.service systemd-user-sessions.service
 # "job plymouth-quit-wait". Conflicts= cancels that wait instead, and the
 # session script tells Plymouth to quit before it needs the console.
 Conflicts=plymouth-quit-wait.service
+# The wizard and a getty cannot share a console. Without this,
+# serial-getty@ttyS0 came up alongside the wizard, both read the same
+# device, and the password being typed into the wizard landed at a login
+# prompt instead — the wizard printed its questions and never saw an
+# answer. Ordering alone is not enough: a getty instance is pulled in by
+# getty.target and is not ordered after other units that precede the
+# target, so each console getty has to be named.
+Before=getty.target getty@tty1.service serial-getty@ttyS0.service serial-getty@hvc0.service
+Conflicts=getty@tty1.service serial-getty@ttyS0.service serial-getty@hvc0.service
 Requires=kosherd.service
 ConditionPathExists=!/var/lib/kosher/setup-complete
 
@@ -37,6 +46,10 @@ StandardOutput=journal+console
 StandardError=journal+console
 TTYReset=yes
 TTYVHangup=yes
+# Give the console back. Conflicts= stops the getty and nothing restarts
+# it on its own, which would leave a serial or headless machine with no
+# way to log in after setup finished.
+ExecStopPost=-/usr/bin/systemctl --no-block start getty.target
 
 [Install]
 WantedBy=graphical.target

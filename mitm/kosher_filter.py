@@ -287,17 +287,52 @@ class YouTube:
     shiurim but not entertainment, which is why the other two exist.
     """
 
-    WATCH_PATHS = ("/watch", "/shorts", "/embed")
+    WATCH_PATHS = ("/watch", "/shorts", "/embed", "/live", "/v/")
+
+    # YouTube is a single-page app. After the first load, every video is
+    # fetched as JSON from these and no watch page is ever parsed again —
+    # so a filter that only reads the HTML checks the first video a child
+    # opens and nothing they click afterwards. This is where the real
+    # enforcement has to happen.
+    PLAYER_PATHS = ("/youtubei/v1/player", "/youtubei/v1/reel/reel_item_watch")
+
+    HOSTS = ("youtube.com", "youtube-nocookie.com", "youtubekids.com")
 
     @staticmethod
     def applies(host: str) -> bool:
-        host = (host or "").lower()
-        return "youtube.com" in host or "youtube-nocookie.com" in host
+        host = (host or "").lower().strip(".")
+        # Suffix match, not "in": youtube.com.attacker.example is not
+        # YouTube, and treating it as such would apply the wrong rules to
+        # somebody else's site.
+        return any(host == h or host.endswith("." + h) for h in YouTube.HOSTS)
+
+    @staticmethod
+    def is_player_api(path: str) -> bool:
+        path = (path or "").split("?", 1)[0]
+        return any(path.startswith(p) for p in YouTube.PLAYER_PATHS)
 
     @staticmethod
     def restrict_header(settings: dict) -> str | None:
         level = (settings or {}).get("restrict", "moderate")
         return {"moderate": "Moderate", "strict": "Strict"}.get(level)
+
+    # What the app shows when a video genuinely cannot be played. Reusing
+    # YouTube's own shape means the page renders a normal message instead
+    # of spinning forever or showing a broken player.
+    @staticmethod
+    def unplayable(reason: str) -> dict:
+        return {
+            "playabilityStatus": {
+                "status": "ERROR",
+                "reason": reason,
+                "errorScreen": {"playerErrorMessageRenderer": {
+                    "reason": {"simpleText": reason},
+                    "subreason": {"simpleText":
+                                  "Ask the administrator of this computer."},
+                }},
+            },
+            "videoDetails": {},
+        }
 
     @staticmethod
     def category_of(body: str) -> str | None:
@@ -667,7 +702,11 @@ class KosherFilter:
         blocked = settings.get("blocked_categories") or []
         if not allowed and not blocked:
             return
+
         path = flow.request.path or ""
+        if YouTube.is_player_api(path):
+            self._filter_youtube_player(flow, allowed, blocked)
+            return
         if not any(path.startswith(p) for p in YouTube.WATCH_PATHS):
             return
 
@@ -675,19 +714,46 @@ class KosherFilter:
         if "text/html" not in content_type:
             return
         body = flow.response.get_text(strict=False) or ""
+        why = self._youtube_verdict(body, allowed, blocked)
+        if why:
+            self._block(flow, flow.request.pretty_url, why)
 
+    @staticmethod
+    def _youtube_verdict(body: str, allowed: list, blocked: list) -> str | None:
+        """Why this video may not be watched, or None."""
         if allowed:
             channel_id, handle = YouTube.channel_of(body)
             if not ({channel_id, handle} & set(allowed)):
-                self._block(flow, flow.request.pretty_url,
-                            " because only approved channels are allowed")
-                return
-
+                return " because only approved channels are allowed"
         if blocked:
             category = YouTube.category_of(body)
             if category and category in blocked:
-                self._block(flow, flow.request.pretty_url,
-                            f" because that kind of video is turned off")
+                return " because that kind of video is turned off"
+        return None
+
+    def _filter_youtube_player(self, flow: http.HTTPFlow, allowed: list,
+                               blocked: list) -> None:
+        """The JSON the app fetches for every video after the first.
+
+        Answered with YouTube's own "cannot be played" shape rather than a
+        block page, because this response is consumed by the player, not
+        shown to a person: a 403 here spins forever, and an HTML page in
+        place of JSON is a broken app.
+        """
+        body = flow.response.get_text(strict=False) or ""
+        if not body:
+            return
+        why = self._youtube_verdict(body, allowed, blocked)
+        if not why:
+            return
+        reason = ("Only approved channels can be watched on this computer"
+                  if "approved channels" in why
+                  else "That kind of video is turned off on this computer")
+        log.info("blocked a YouTube video (%s)", why.strip())
+        flow.response.text = json.dumps(YouTube.unplayable(reason))
+        flow.response.headers["content-type"] = "application/json"
+        flow.response.headers["x-kosheros"] = "youtube-blocked"
+        flow.response.headers.pop("content-length", None)
 
     def _block(self, flow: http.HTTPFlow, url: str, because: str) -> None:
         flow.response = http.Response.make(

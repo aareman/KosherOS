@@ -273,9 +273,23 @@ def test_hiding_everything_never_consults_the_model(addon):
 
 
 class _Resp:
+    """Enough of mitmproxy's Response for the addon to read and rewrite."""
+
     def __init__(self, content, headers):
         self.content = content
         self.headers = headers
+
+    def get_text(self, strict=False):
+        body = self.content
+        return body.decode("utf-8", "replace") if isinstance(body, bytes) else body
+
+    @property
+    def text(self):
+        return self.get_text()
+
+    @text.setter
+    def text(self, value):
+        self.content = value.encode()
 
 
 def _image_flow():
@@ -588,7 +602,7 @@ def test_a_results_page_is_judged_even_when_pictures_are_not_filtered(addon):
     filt = _shop_filter(addon)
     flow = _suggestion_flow("https://www.amazon.com/s?k=x", b"")
     flow.response.headers["content-type"] = "text/html"
-    flow.response.get_text = lambda strict=False: (
+    flow.response.content = (
         "<html><body>Lingerie sale: bras, panties, thongs, bralettes, "
         "corsets and intimate apparel. Sexy babydoll and negligee sets."
         "</body></html>")
@@ -632,7 +646,7 @@ def test_a_shops_navigation_is_removed_rather_than_held_against_it(addon):
            "<li><a href=\"/b/socks\">Socks &amp; Hosiery</a></li>"
            "</ul><p>Results for socks: cotton crew socks, wool socks."
            "</p></body></html>")
-    flow.response.get_text = lambda strict=False: nav
+    flow.response.content = nav.encode()
     filt._filter_page(flow, 1001)
 
     assert getattr(flow.response, "status_code", 200) != 403
@@ -657,7 +671,7 @@ def test_a_page_too_large_to_rewrite_falls_back_to_a_looser_floor(addon):
     huge = ("<html><body><ul><li>Lingerie</li><li>Bras</li><li>Panties</li>"
             "<li>Swimwear</li></ul>" + filler
             + "x" * elementfilter.MAX_PAGE + "</body></html>")
-    flow.response.get_text = lambda strict=False: huge
+    flow.response.content = huge.encode()
     filt._filter_page(flow, 1001)
     assert getattr(flow.response, "status_code", 200) != 403
 
@@ -667,8 +681,121 @@ def test_a_page_on_a_site_with_no_rules_is_still_judged_strictly(addon):
     filt = _shop_filter(addon)
     flow = _suggestion_flow("https://smallshop.example/page", b"")
     flow.response.headers["content-type"] = "text/html"
-    flow.response.get_text = lambda strict=False: (
+    flow.response.content = (
         "<html><body>Bikini and swimsuit collection. Tankini, monokini and "
         "beachwear for summer. Swimsuit edition photos.</body></html>")
     filt._filter_page(flow, 1001)
     assert flow.response.status_code == 403
+
+
+# -- YouTube after the first page ---------------------------------------------
+
+def test_youtube_hosts_are_matched_by_suffix_not_substring(addon):
+    for host in ("www.youtube.com", "m.youtube.com", "music.youtube.com",
+                 "www.youtube-nocookie.com", "youtubekids.com"):
+        assert addon.YouTube.applies(host), host
+    for host in ("youtube.com.attacker.example", "notyoutube.com",
+                 "chinuch.org", "myyoutube.com"):
+        assert not addon.YouTube.applies(host), host
+
+
+def test_the_player_api_is_recognised(addon):
+    # YouTube is a single-page app: after the first load every video comes
+    # from here, and a filter that only reads watch pages checks the first
+    # video a child opens and nothing they click afterwards.
+    assert addon.YouTube.is_player_api("/youtubei/v1/player")
+    assert addon.YouTube.is_player_api("/youtubei/v1/player?key=abc")
+    assert addon.YouTube.is_player_api("/youtubei/v1/reel/reel_item_watch")
+    assert not addon.YouTube.is_player_api("/youtubei/v1/search")
+    assert not addon.YouTube.is_player_api("/watch")
+
+
+def test_shorts_and_embeds_and_live_are_watch_paths(addon):
+    for path in ("/watch", "/shorts", "/embed", "/live", "/v/"):
+        assert path in addon.YouTube.WATCH_PATHS, path
+
+
+def _player_flow(addon, body):
+    return type("F", (), {
+        "request": type("R", (), {
+            "pretty_host": "www.youtube.com",
+            "pretty_url": "https://www.youtube.com/youtubei/v1/player",
+            "path": "/youtubei/v1/player",
+            "method": "POST", "query": {}, "headers": {},
+        })(),
+        "response": _Resp(body, {"content-type": "application/json",
+                                 "content-length": str(len(body))}),
+        "metadata": {"kosher_uid": 1001},
+    })()
+
+
+def _yt_filter(addon, youtube):
+    filt = addon.KosherFilter.__new__(addon.KosherFilter)
+    filt.policy = type("P", (), {
+        "youtube_for": staticmethod(lambda uid: youtube),
+        "media_level_for": staticmethod(lambda uid: "none"),
+        "language_filter_for": staticmethod(lambda uid: "off"),
+        "blocked_categories_for": staticmethod(lambda uid: []),
+    })()
+    return filt
+
+
+def test_a_blocked_category_is_stopped_in_the_player_api(addon):
+    import json
+
+    filt = _yt_filter(addon, {"blocked_categories": ["24"]})
+    body = json.dumps({"videoDetails": {"channelId": "UC1"},
+                       "microformat": {"category": "24"}})
+    flow = _player_flow(addon, body)
+    filt._filter_youtube(flow, 1001)
+    answer = json.loads(flow.response.text)
+    assert answer["playabilityStatus"]["status"] == "ERROR"
+    assert "turned off" in answer["playabilityStatus"]["reason"]
+
+
+def test_an_unapproved_channel_is_stopped_in_the_player_api(addon):
+    import json
+
+    filt = _yt_filter(addon, {"allowed_channels": ["@torah"]})
+    flow = _player_flow(addon, json.dumps(
+        {"videoDetails": {"channelId": "UCsomethingelse"}}))
+    filt._filter_youtube(flow, 1001)
+    assert json.loads(flow.response.text)["playabilityStatus"]["status"] == "ERROR"
+
+
+def test_an_approved_channel_plays(addon):
+    import json
+
+    filt = _yt_filter(addon, {"allowed_channels": ["@torahchannel"]})
+    body = json.dumps({"videoDetails": {"channelId": "UC1"},
+                       "canonicalBaseUrl": "/@torahchannel"})
+    flow = _player_flow(addon, body)
+    filt._filter_youtube(flow, 1001)
+    assert flow.response.content == body.encode() or flow.response.text == body
+
+
+def test_the_answer_is_json_the_player_understands(addon):
+    # A 403 here spins forever and an HTML block page is a broken app;
+    # this response is consumed by the player, not read by a person.
+    import json
+
+    filt = _yt_filter(addon, {"blocked_categories": ["24"]})
+    flow = _player_flow(addon, json.dumps({"microformat": {"category": "24"}}))
+    filt._filter_youtube(flow, 1001)
+    assert flow.response.headers["content-type"] == "application/json"
+    assert flow.response.headers["x-kosheros"] == "youtube-blocked"
+    # The body changed, so a stale length would be a lie the browser enforces.
+    assert "content-length" not in flow.response.headers
+    answer = json.loads(flow.response.text)
+    assert "errorScreen" in answer["playabilityStatus"]
+    assert answer["videoDetails"] == {}
+
+
+def test_an_account_with_no_youtube_limits_is_left_alone(addon):
+    import json
+
+    filt = _yt_filter(addon, {"restrict": "strict"})
+    body = json.dumps({"microformat": {"category": "24"}})
+    flow = _player_flow(addon, body)
+    filt._filter_youtube(flow, 1001)
+    assert flow.response.text == body

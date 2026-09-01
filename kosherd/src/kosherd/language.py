@@ -16,12 +16,12 @@ from __future__ import annotations
 
 import json
 import re
+from . import lists
 from pathlib import Path
 
-WORDLIST_PATHS = (
-    Path("/var/lib/kosher/wordlist.json"),   # admin- or portal-supplied
-    Path("/usr/share/kosher/wordlist.json"),  # shipped default
-)
+# Admin- or portal-supplied first, then the shipped default. See lists.py
+# for why the override does not live under /var/lib/kosher.
+WORDLIST_PATHS = lists.paths("wordlist.json")
 
 OFF = "off"
 SUBSTITUTE = "substitute"

@@ -414,6 +414,12 @@ class Daemon:
             # judges. Neither is a fault; say so rather than guess.
             status["pictures"] = "unknown"
 
+        from . import mitmca, selfcheck
+
+        found = selfcheck.datasets()
+        status["lists"] = found
+        status["problems"] = selfcheck.problems(found)
+
         for service in ("kosher-mitm.service", "kosher-dns.service",
                         "kosher-search.service", "kosher-searxng.service"):
             result = subprocess.run(["systemctl", "is-active", service],
@@ -428,6 +434,17 @@ class Daemon:
                 u.mode not in ("unfiltered", "none")
                 for u in self.policy.effective_users()),
         }
+        # Only when somebody is actually inspected: a certificate nobody
+        # needs is not a fault, and a warning that does not matter teaches
+        # people to ignore warnings.
+        if any(u.mode in INSPECTED_MODES for u in self.policy.effective_users()):
+            ok, why = mitmca.installed()
+            status["inspection_ca"] = "ok" if ok else "broken"
+            if why:
+                status["problems"].append(why)
+        else:
+            status["inspection_ca"] = "not needed"
+
         status["degraded"] = [
             name for name, must_run in needed.items()
             if must_run and status["services"].get(name) != "active"

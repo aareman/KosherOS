@@ -40,6 +40,30 @@ class CAError(Exception):
     pass
 
 
+def installed() -> tuple[bool, str | None]:
+    """Is inspection's certificate authority in place and trusted?
+
+    Worth its own answer because the failure is both severe and confusing:
+    without it, every HTTPS page a filtered account opens shows a
+    certificate warning. The person sees a broken internet and a scary
+    security error, and nothing connects that to the filter — so this gets
+    reported in words rather than left in the journal.
+    """
+    if not CA_PEM.exists():
+        return False, "the inspection certificate has not been generated"
+    if not ANCHOR.exists():
+        return False, ("the inspection certificate is not in this computer's "
+                       "trust store, so secure sites will show a warning")
+    try:
+        if ANCHOR.read_bytes() != CA_PEM.read_bytes():
+            return False, ("the trusted copy of the inspection certificate "
+                           "does not match the one in use, so secure sites "
+                           "will show a warning")
+    except OSError as e:
+        return False, f"the inspection certificate could not be read ({e})"
+    return True, None
+
+
 def ensure_ca() -> None:
     """Generate the CA if missing, then make the system trust it."""
     if not CA_PEM.exists():

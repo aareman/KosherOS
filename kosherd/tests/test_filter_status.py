@@ -143,3 +143,68 @@ def test_an_unwritable_status_path_is_not_a_crash(tmp_path):
     f = _filter(tmp_path, ms=1)
     f.verdict(b"x" * 10_000)
     f.write_status(tmp_path / "no" / "such" / "dir" / "s.json")
+
+
+# -- the inspection certificate -----------------------------------------------
+
+def test_a_missing_inspection_certificate_is_reported(monkeypatch, tmp_path):
+    # The failure is severe and confusing: without the CA, every HTTPS page
+    # a filtered account opens shows a certificate warning, and nothing
+    # connects that to the filter.
+    from kosherd import mitmca
+
+    monkeypatch.setattr(mitmca, "CA_PEM", tmp_path / "nope.pem")
+    monkeypatch.setattr(mitmca, "ANCHOR", tmp_path / "nope.crt")
+    users = [UserPolicy(uid=1001, username="a", mode="filtered")]
+    status = _daemon(users, _all("active\n"), monkeypatch)
+    assert status["inspection_ca"] == "broken"
+    assert any("certificate" in p for p in status["problems"])
+
+
+def test_a_certificate_that_is_not_trusted_is_reported(monkeypatch, tmp_path):
+    from kosherd import mitmca
+
+    ca = tmp_path / "ca.pem"
+    ca.write_bytes(b"cert")
+    monkeypatch.setattr(mitmca, "CA_PEM", ca)
+    monkeypatch.setattr(mitmca, "ANCHOR", tmp_path / "nope.crt")
+    ok, why = mitmca.installed()
+    assert not ok and "trust store" in why
+
+
+def test_a_stale_trusted_copy_is_reported(monkeypatch, tmp_path):
+    # Regenerating the CA without refreshing the anchor gives exactly the
+    # same symptom as having none, and is harder to spot.
+    from kosherd import mitmca
+
+    ca = tmp_path / "ca.pem"
+    anchor = tmp_path / "anchor.crt"
+    ca.write_bytes(b"new")
+    anchor.write_bytes(b"old")
+    monkeypatch.setattr(mitmca, "CA_PEM", ca)
+    monkeypatch.setattr(mitmca, "ANCHOR", anchor)
+    ok, why = mitmca.installed()
+    assert not ok and "does not match" in why
+
+
+def test_a_healthy_certificate_says_nothing(monkeypatch, tmp_path):
+    from kosherd import mitmca
+
+    ca = tmp_path / "ca.pem"
+    anchor = tmp_path / "anchor.crt"
+    ca.write_bytes(b"same")
+    anchor.write_bytes(b"same")
+    monkeypatch.setattr(mitmca, "CA_PEM", ca)
+    monkeypatch.setattr(mitmca, "ANCHOR", anchor)
+    users = [UserPolicy(uid=1001, username="a", mode="filtered")]
+    status = _daemon(users, _all("active\n"), monkeypatch)
+    assert status["inspection_ca"] == "ok"
+    # The list checks report separately; this is about the certificate.
+    assert not any("certificate" in p for p in status["problems"])
+
+
+def test_the_certificate_is_not_checked_when_nobody_is_inspected(monkeypatch):
+    users = [UserPolicy(uid=1001, username="a", mode="dnsfilter")]
+    status = _daemon(users, _all("active\n"), monkeypatch)
+    assert status["inspection_ca"] == "not needed"
+    assert not any("certificate" in p for p in status["problems"])

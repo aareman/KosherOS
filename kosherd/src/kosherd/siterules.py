@@ -22,13 +22,11 @@ from __future__ import annotations
 
 import json
 import re
+from . import lists
 from pathlib import Path
 from urllib.parse import parse_qsl, unquote_plus, urlsplit
 
-RULES_PATHS = (
-    Path("/var/lib/kosher/site-rules.json"),    # admin- or portal-supplied
-    Path("/usr/share/kosher/site-rules.json"),  # shipped default
-)
+RULES_PATHS = lists.paths("site-rules.json")
 
 # The category that turns these on. A family blocking lingerie retailers
 # means the lingerie department too.

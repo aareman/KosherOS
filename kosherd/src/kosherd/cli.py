@@ -51,12 +51,24 @@ def cmd_status(args) -> int:
               file=sys.stderr)
     for service in status.get("degraded", []):
         print(f"  ! {service} should be running and is not", file=sys.stderr)
+    for problem in status.get("problems", []):
+        print(f"  ! {problem}", file=sys.stderr)
 
     guest = pol.get("guest", {"enabled": False})
     if guest["enabled"]:
         print(f"  guest: enabled, mode {guest.get('mode', 'whitelist')}")
     else:
         print("  guest: disabled")
+    return 0
+
+
+def cmd_lists(args) -> int:
+    """What the filter is actually holding, as opposed to what it ships."""
+    for entry in _client().filter_status().get("lists", []):
+        mark = " " if entry["ok"] else "!"
+        source = entry["source"] or "not found"
+        print(f" {mark} {entry['name']:<18} {entry['entries']:>9,} entries"
+              f"   {source}")
     return 0
 
 
@@ -484,6 +496,9 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("profile", nargs="?", default="")
     s.add_argument("--guardian-password")
     s.set_defaults(func=cmd_profile)
+
+    s = sub.add_parser("lists", help="what the filter is actually holding")
+    s.set_defaults(func=cmd_lists)
 
     s = sub.add_parser("requests", help="pages users have asked for")
     s.add_argument("action", choices=["list", "allow", "dismiss"])

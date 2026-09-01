@@ -21,12 +21,13 @@ import json
 import logging
 import sqlite3
 from dataclasses import dataclass, field
+from . import lists
 from pathlib import Path
 
 log = logging.getLogger(__name__)
 
 BUNDLE_DIR = Path("/usr/share/kosher/categories")
-LOCAL_BUNDLE_DIR = Path("/var/lib/kosher/categories")
+LOCAL_BUNDLE_DIR = lists.OVERRIDE_DIR / "categories"
 
 # What each category means, for the admin UI. The wording matters: an admin
 # is choosing on behalf of a family, so the label has to say what will

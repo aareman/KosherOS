@@ -31,12 +31,10 @@ import json
 import math
 import re
 from dataclasses import dataclass
+from . import lists
 from pathlib import Path
 
-TERMS_PATHS = (
-    Path("/var/lib/kosher/content-terms.json"),
-    Path("/usr/share/kosher/content-terms.json"),
-)
+TERMS_PATHS = lists.paths("content-terms.json")
 
 # Severity ladder, matching the media levels a parent chooses from.
 CLEAN = "clean"

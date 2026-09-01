@@ -29,6 +29,7 @@ import re
 from pathlib import Path
 from urllib.parse import urlsplit
 
+from . import lists
 from . import categories as categories_mod
 from . import content
 from . import pagescan
@@ -40,10 +41,7 @@ from .urlrules import BLOCK, decide, parse_rules
 # and never reads the policy itself.
 SEARCH_POLICY_PATH = Path("/var/lib/kosher-search/policy.json")
 
-SEARCH_BLOCKLIST_PATHS = (
-    Path("/var/lib/kosher/search-blocklist.json"),
-    Path("/usr/share/kosher/search-blocklist.json"),
-)
+SEARCH_BLOCKLIST_PATHS = lists.paths("search-blocklist.json")
 
 # A user we know nothing about is filtered as if they had no internet at
 # all, the same fail-closed rule the firewall uses for unknown UIDs.

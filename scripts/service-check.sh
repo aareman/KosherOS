@@ -56,6 +56,25 @@ if [ "${OFFLINE:-0}" != "1" ]; then
         || { say "a live search returns results" "FAILED (none)"; fail=1; }
 fi
 
+want "every filter list loaded" "none" \
+    "$(python3 -c "
+from kosherd import selfcheck
+print('; '.join(selfcheck.problems()) or 'none')")"
+python3 -c "
+from kosherd import selfcheck
+for e in selfcheck.datasets():
+    print(f\"    {e['label']:<34} {e['entries']:>9,}\")"
+
+# An admin override has to be readable by the unprivileged services, or
+# the documented behaviour silently does not happen — which is what used
+# to be true when overrides lived under the 0700 state directory.
+install -d -m 0755 /var/lib/kosher-lists
+echo '{"replacements": {"onlyword": "x"}}' > /var/lib/kosher-lists/wordlist.json
+want "an admin override is used by the proxy" "1" \
+    "$(setpriv --reuid=kosher-mitm --regid=kosher-mitm --clear-groups \
+        python3 -c "from kosherd import language; print(len(language.load()))" 2>/dev/null)"
+rm -f /var/lib/kosher-lists/wordlist.json
+
 # --- the proxy addon ---------------------------------------------------------
 echo "proxy:"
 install -d -m 0750 /var/lib/kosher-mitm

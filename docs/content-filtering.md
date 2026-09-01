@@ -166,3 +166,53 @@ placed *ahead* of the existing rules, because one added after whatever
 blocked the page would never be reached. The admin chooses "just this page"
 or "all of this site"; a whitelist account is only offered the site, since
 that is all its enforcement can express.
+
+## Saying when the filter is not filtering
+
+Every list loader here fails open and quiet. Miss the category database and
+the bundle is empty; miss the content terms and the scorer matches nothing;
+miss the word list and the profanity filter is off. That behaviour is right
+— a missing file must not take the machine down — and the silence is the
+part that is wrong, because the account still says "Filtered internet"
+while nothing it covers is filtered.
+
+`kosherd/selfcheck.py` counts what actually loaded and reports anything
+empty or truncated in words a person can act on. A truncated list is the
+worse case of the two, because it looks like it is working.
+
+`FilterStatus` gathers that with three other facts about the machine right
+now, as opposed to what is configured:
+
+* which services should be running and are not — only the ones this
+  household's modes actually need, because a warning that does not matter
+  teaches people to ignore warnings;
+* whether pictures are being checked, or hidden because the machine cannot
+  keep up, or hidden because no model is installed;
+* whether the inspection certificate is generated, in the trust store, and
+  the same in both places.
+
+That last one is worth the space. Without a trusted CA, every HTTPS page a
+filtered account opens shows a certificate warning — the person sees a
+broken internet and a scary security error, and nothing connects that to
+the filter. A stale anchor (the CA regenerated without refreshing the
+trusted copy) gives the identical symptom and is harder to spot, so it is
+checked by comparing the two files rather than by their existence.
+
+All of it appears at the top of the admin app under "Needs your attention",
+and in `kosherctl status`; `kosherctl lists` prints what each list holds
+and where it came from.
+
+## Where an admin override goes
+
+Lists ship complete and can be replaced or extended by an admin or the
+portal. That override used to be written under `/var/lib/kosher`, which is
+mode 0700 because it holds the policy — so the filtering proxy and the
+search service, both unprivileged, could not read a single one of them.
+They fell back to the shipped copy and said nothing, which meant the
+documented behaviour simply did not happen.
+
+Overrides live in `/var/lib/kosher-lists` instead: a directory of nothing
+but lists, world readable, with no secrets in it. There is a test
+asserting no list is ever looked for under the private state directory
+again, and `just check-services` proves the proxy — running as its own
+unprivileged user — actually picks an override up.

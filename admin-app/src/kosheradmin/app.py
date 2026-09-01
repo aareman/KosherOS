@@ -817,6 +817,11 @@ class ProfilesPage(Adw.PreferencesPage):
                 "Part of the filter is not running",
                 f"{service} should be running on this computer and is not. "
                 "Until it is, what it enforces is not being enforced."))
+        for problem in status.get("problems", []):
+            # A list that did not load leaves the account still saying
+            # "Filtered internet" while nothing it covers is filtered.
+            rows.append(("A filter list is missing or damaged",
+                         problem[0].upper() + problem[1:] + "."))
         if not rows:
             return None
 

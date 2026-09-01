@@ -309,3 +309,48 @@ stops somebody trying to build the list themselves.
 From the command line: `kosherctl words show words`,
 `kosherctl words add words blast --replacement bother`,
 `kosherctl words remove searches "bikini atoll"`.
+
+## YouTube
+
+Restricted Mode is one switch for the whole site, which is useless for a
+family that wants shiurim but not entertainment. So there are three
+levers, and the important part is *where* they are applied.
+
+**Per category.** YouTube labels every video with one of fifteen
+categories, and a parent can turn any of them off — block Entertainment
+and Gaming, keep Education.
+
+**Per channel.** An approved-channel list, which when it has anything in
+it is the whole allowance: only those channels play.
+
+**Restricted Mode**, sent as a header on every request, as a floor under
+both.
+
+### It has to be enforced in the app, not on the page
+
+YouTube is a single-page application. The first load is HTML; after that,
+every video is fetched as JSON from `/youtubei/v1/player` and no watch page
+is ever parsed again. A filter that reads only the HTML therefore checks
+the first video a child opens and nothing they click afterwards — which is
+almost all of them.
+
+So the rules are applied to the player API, and the block is returned in
+YouTube's own "cannot be played" shape rather than as a block page. That
+response is consumed by the player, not read by a person: a 403 spins
+forever, and an HTML page where JSON was expected is a broken app.
+
+### The feeds, for approved-channel accounts only
+
+An account limited to a few channels would otherwise get a home page full
+of videos that all fail to play, which teaches a child that the computer
+is broken rather than that somebody chose this. So the feed responses are
+pruned to the channels that will actually play.
+
+Deliberately conservative: an entry is dropped only if it both looks like
+a video renderer **and** names a channel, so anything with an unfamiliar
+shape survives untouched. The channel is matched by shape — the id, the
+handle, or the byline text — not by searching the response for a name,
+because a title mentioning an approved channel is not that channel's
+video. Nothing is pruned for accounts that are not limited to a channel
+list; playback filtering already covers those, and rewriting a feed
+nobody needed rewritten is all risk and no benefit.

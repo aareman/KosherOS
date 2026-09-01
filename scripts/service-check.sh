@@ -146,6 +146,45 @@ want "the proxy publishes a picture status" "yes" \
 say "  reported state" \
     "$(python3 -c "import json;print(json.load(open('/var/lib/kosher-mitm/status.json'))['pictures'])" 2>/dev/null || echo '(none)')"
 
+# YouTube is a single-page app: after the first load every video comes
+# from the player API, so that is where the rules have to hold. Point the
+# hostname at our own origin so the addon sees a real YouTube host on a
+# real connection rather than a stubbed flow.
+echo "127.0.0.1 www.youtube.com" >> /etc/hosts
+cat > /var/lib/kosher-mitm/rules.json <<EOF
+{"$(id -u)": {"rules": [], "blocked_categories": [], "media_level": "none",
+   "language_filter": "off",
+   "youtube": {"restrict": "strict", "blocked_categories": ["24"]}}}
+EOF
+sleep 2   # the proxy re-reads its rules when their mtime changes
+
+python3 - > /tmp/yt.log 2>&1 <<'PY' &
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+import json
+BODY = json.dumps({"videoDetails": {"channelId": "UCsomething"},
+                   "microformat": {"category": "24"},
+                   "streamingData": {"formats": []}}).encode()
+class H(BaseHTTPRequestHandler):
+    protocol_version = "HTTP/1.1"
+    def log_message(self, *a): pass
+    def do_POST(self):
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(BODY)))
+        self.end_headers()
+        self.wfile.write(BODY)
+ThreadingHTTPServer(("127.0.0.1", 80), H).serve_forever()
+PY
+sleep 2
+want "a blocked video kind is stopped in the app" "ERROR" \
+    "$(curl "${P[@]}" -s -X POST -d '{}' \
+        http://www.youtube.com/youtubei/v1/player \
+        | python3 -c "import json,sys; print(json.load(sys.stdin).get('playabilityStatus',{}).get('status','none'))" 2>/dev/null || echo failed)"
+want "the block is json, not a block page" "application/json" \
+    "$(curl "${P[@]}" -s -o /dev/null -D - -X POST -d '{}' \
+        http://www.youtube.com/youtubei/v1/player \
+        | grep -i '^content-type' | tr -d '\r' | cut -d' ' -f2)"
+
 if grep -qiE "traceback|kosher_filter.*error" /tmp/mitm.log; then
     echo "  the addon logged an error:"; grep -iE "traceback|error" /tmp/mitm.log | head -5
     fail=1

@@ -799,3 +799,105 @@ def test_an_account_with_no_youtube_limits_is_left_alone(addon):
     flow = _player_flow(addon, body)
     filt._filter_youtube(flow, 1001)
     assert flow.response.text == body
+
+
+# -- the feeds a child looks at -----------------------------------------------
+
+def _renderer(channel_title, browse_id=None, handle=None, title="A video"):
+    run = {"text": channel_title}
+    endpoint = {}
+    if browse_id:
+        endpoint["browseId"] = browse_id
+    if handle:
+        endpoint["canonicalBaseUrl"] = f"/{handle}"
+    if endpoint:
+        run["navigationEndpoint"] = {"browseEndpoint": endpoint}
+    return {"videoRenderer": {"videoId": "x", "title": {"runs": [{"text": title}]},
+                              "ownerText": {"runs": [run]}}}
+
+
+def test_a_feed_keeps_only_approved_channels(addon):
+    feed = {"contents": [_renderer("Torah Channel", handle="@torah"),
+                         _renderer("Something Else", handle="@other"),
+                         _renderer("Torah Channel", handle="@torah")]}
+    pruned = addon.YouTube.prune_feed(feed, {"@torah"})
+    assert len(pruned["contents"]) == 2
+
+
+def test_a_channel_may_be_named_by_id_or_handle_or_title(addon):
+    feed = {"contents": [_renderer("Torah Channel", browse_id="UC123")]}
+    for allowed in ({"UC123"}, {"@torah"}, {"Torah Channel"}):
+        item = _renderer("Torah Channel", browse_id="UC123", handle="@torah")
+        assert addon.YouTube.prune_feed({"contents": [item]}, allowed)["contents"]
+    # ...and something that names none of them goes.
+    assert addon.YouTube.prune_feed(feed, {"@torah"})["contents"] == []
+
+
+def test_a_title_mentioning_an_approved_channel_is_not_that_channel(addon):
+    # Matched by shape, not by searching the text.
+    item = _renderer("Some Other Channel", handle="@other",
+                     title="A reply to Torah Channel")
+    assert addon.YouTube.prune_feed({"contents": [item]},
+                                    {"Torah Channel"})["contents"] == []
+
+
+def test_anything_that_does_not_name_a_channel_is_left_alone(addon):
+    # A filter that guesses at an app's internals breaks it, so an
+    # unfamiliar shape survives untouched.
+    feed = {"header": {"someRenderer": {"title": "Home"}},
+            "contents": [{"messageRenderer": {"text": "Nothing here"}},
+                         {"continuationItemRenderer": {"token": "abc"}}]}
+    assert addon.YouTube.prune_feed(feed, {"@torah"}) == feed
+
+
+def test_pruning_is_bounded_on_deeply_nested_json(addon):
+    node = {"contents": []}
+    for _ in range(200):
+        node = {"contents": [node]}
+    addon.YouTube.prune_feed(node, {"@torah"})  # must return, not recurse away
+
+
+def test_the_feed_is_only_pruned_for_approved_channel_accounts(addon):
+    import json
+
+    body = json.dumps({"contents": [_renderer("Anything", handle="@any")]})
+    for youtube in ({"blocked_categories": ["24"]}, {"restrict": "strict"}):
+        filt = _yt_filter(addon, youtube)
+        flow = _feed_flow(body)
+        filt._filter_youtube(flow, 1001)
+        assert flow.response.text == body, youtube
+
+
+def test_a_pruned_feed_drops_its_stale_length(addon):
+    import json
+
+    filt = _yt_filter(addon, {"allowed_channels": ["@torah"]})
+    body = json.dumps({"contents": [_renderer("Other", handle="@other")]})
+    flow = _feed_flow(body)
+    filt._filter_youtube(flow, 1001)
+    assert flow.response.headers["x-kosheros"] == "youtube-feed-filtered"
+    assert "content-length" not in flow.response.headers
+    assert json.loads(flow.response.text)["contents"] == []
+
+
+def test_a_feed_that_is_not_json_is_left_alone(addon):
+    filt = _yt_filter(addon, {"allowed_channels": ["@torah"]})
+    flow = _feed_flow("<html>not json</html>")
+    filt._filter_youtube(flow, 1001)
+    assert flow.response.text == "<html>not json</html>"
+
+
+def _feed_flow(body):
+    if isinstance(body, str):
+        body = body.encode()
+    return type("F", (), {
+        "request": type("R", (), {
+            "pretty_host": "www.youtube.com",
+            "pretty_url": "https://www.youtube.com/youtubei/v1/browse",
+            "path": "/youtubei/v1/browse",
+            "method": "POST", "query": {}, "headers": {},
+        })(),
+        "response": _Resp(body, {"content-type": "application/json",
+                                 "content-length": str(len(body))}),
+        "metadata": {"kosher_uid": 1001},
+    })()

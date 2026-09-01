@@ -296,6 +296,19 @@ class YouTube:
     # enforcement has to happen.
     PLAYER_PATHS = ("/youtubei/v1/player", "/youtubei/v1/reel/reel_item_watch")
 
+    # The feeds: the home page, search results, the sidebar of suggestions.
+    # Only pruned for an account limited to approved channels, and only
+    # then because the alternative is a wall of videos that all fail to
+    # play — which teaches a child that the computer is broken rather than
+    # that the choice was made deliberately.
+    FEED_PATHS = ("/youtubei/v1/browse", "/youtubei/v1/search",
+                  "/youtubei/v1/next", "/youtubei/v1/guide")
+
+    # Where a renderer names the channel it belongs to. Matched by shape
+    # rather than by searching the text: a title that happens to mention
+    # an approved channel is not that channel's video.
+    CHANNEL_KEYS = ("ownerText", "longBylineText", "shortBylineText")
+
     HOSTS = ("youtube.com", "youtube-nocookie.com", "youtubekids.com")
 
     @staticmethod
@@ -310,6 +323,65 @@ class YouTube:
     def is_player_api(path: str) -> bool:
         path = (path or "").split("?", 1)[0]
         return any(path.startswith(p) for p in YouTube.PLAYER_PATHS)
+
+    @staticmethod
+    def is_feed_api(path: str) -> bool:
+        path = (path or "").split("?", 1)[0]
+        return any(path.startswith(p) for p in YouTube.FEED_PATHS)
+
+    @staticmethod
+    def renderer_channel(item: dict) -> set:
+        """Every way this item names its channel: id, handle and title."""
+        found = set()
+        for key in YouTube.CHANNEL_KEYS:
+            runs = (item.get(key) or {}).get("runs") or []
+            for run in runs:
+                if isinstance(run, dict):
+                    text = run.get("text")
+                    if text:
+                        found.add(text)
+                    endpoint = ((run.get("navigationEndpoint") or {})
+                                .get("browseEndpoint") or {})
+                    if endpoint.get("browseId"):
+                        found.add(endpoint["browseId"])
+                    url = endpoint.get("canonicalBaseUrl") or ""
+                    if url.startswith("/@"):
+                        found.add(url[1:])
+        if item.get("channelId"):
+            found.add(item["channelId"])
+        return found
+
+    @staticmethod
+    def prune_feed(node, allowed: set, depth: int = 0):
+        """Drop videos from a feed that this account could not play anyway.
+
+        Conservative on purpose: only entries that BOTH look like a video
+        renderer AND name a channel are considered, so anything whose shape
+        is unfamiliar is left exactly as it was. A filter that guesses at
+        an app's internals breaks it.
+        """
+        if depth > 24:
+            return node
+        if isinstance(node, list):
+            kept = []
+            for item in node:
+                if isinstance(item, dict):
+                    dropped = False
+                    for value in item.values():
+                        if not isinstance(value, dict):
+                            continue
+                        named = YouTube.renderer_channel(value)
+                        if named and not (named & allowed):
+                            dropped = True
+                            break
+                    if dropped:
+                        continue
+                kept.append(YouTube.prune_feed(item, allowed, depth + 1))
+            return kept
+        if isinstance(node, dict):
+            return {k: YouTube.prune_feed(v, allowed, depth + 1)
+                    for k, v in node.items()}
+        return node
 
     @staticmethod
     def restrict_header(settings: dict) -> str | None:
@@ -707,6 +779,9 @@ class KosherFilter:
         if YouTube.is_player_api(path):
             self._filter_youtube_player(flow, allowed, blocked)
             return
+        if allowed and YouTube.is_feed_api(path):
+            self._filter_youtube_feed(flow, set(allowed))
+            return
         if not any(path.startswith(p) for p in YouTube.WATCH_PATHS):
             return
 
@@ -730,6 +805,27 @@ class KosherFilter:
             if category and category in blocked:
                 return " because that kind of video is turned off"
         return None
+
+    def _filter_youtube_feed(self, flow: http.HTTPFlow, allowed: set) -> None:
+        """Take videos out of the feeds that this account cannot play.
+
+        Playback is already blocked; this is about what a child SEES. A
+        home page full of videos that all fail teaches them the computer
+        is broken rather than that somebody chose this.
+        """
+        body = flow.response.get_text(strict=False) or ""
+        if not body or len(body) > suggest_mod.MAX_BYTES * 8:
+            return
+        try:
+            document = json.loads(body)
+        except ValueError:
+            return
+        pruned = YouTube.prune_feed(document, allowed)
+        if pruned == document:
+            return
+        flow.response.text = json.dumps(pruned, separators=(",", ":"))
+        flow.response.headers["x-kosheros"] = "youtube-feed-filtered"
+        flow.response.headers.pop("content-length", None)
 
     def _filter_youtube_player(self, flow: http.HTTPFlow, allowed: list,
                                blocked: list) -> None:

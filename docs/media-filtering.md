@@ -222,6 +222,37 @@ a response's shape. A suggestion is a few words rather than a page, so the
 term list answers there and not the content scorer, which needs more
 evidence than one word can carry.
 
+### Removing the item beats judging the page
+
+A shop names its whole catalogue in the navigation of every page. Scoring
+that gives two bad answers and no good one: judge it strictly and Amazon
+is blocked outright, judge it loosely and the sidebar stays on screen.
+
+So on a covered site the offending items are removed first, and what is
+left is judged normally. `kosherd/elementfilter.py` walks the document
+with the standard library's `html.parser`, drops the `<a>`, `<li>` or
+`<option>` elements whose text or address matches the site's department
+vocabulary, and leaves everything else **byte-identical** — entities,
+comments, script bodies, attribute quoting and all. That last part is the
+constraint the whole design serves: a filter that rewrites markup it does
+not understand breaks sites in ways nobody can debug. On any parse trouble
+the original page is returned untouched.
+
+A site can override both halves in its rules — `strip_tags` and
+`strip_terms` — so a layout the defaults do not reach is a rules-file edit
+rather than a release.
+
+**What makes it affordable:** reparsing a megabyte of HTML costs about a
+fifth of a second on the machine this has to run on. A plain substring
+scan runs first and skips the parse entirely unless one of the words is
+present, which takes a 0.6 MB clean page from 83 ms to 2 ms. Pages above
+2 MB are not rewritten at all.
+
+**When a page is too large or fails to parse**, nothing was removed, so
+the catalogue vocabulary is still in the text and the scorer's floor drops
+to *suggestive* for that page — otherwise a page about socks would be
+convicted by a sidebar nobody could take out.
+
 ### Three rules keep this from becoming an outage
 
 A site with its own rules is *not* also judged by the generic list, so
@@ -229,14 +260,11 @@ tuning one shop cannot silently widen another. The generic list only fires
 on shop-shaped addresses (`/shop/`, `/collections/`, `/category/`),
 because an article whose title contains the word is not a department.
 
-And on a shop with its own rules the page scorer's floor stops at
-*suggestive* rather than *immodest*. Those sites carry their whole
-department list in the navigation of every page: an Amazon search for
-socks names lingerie, bras, panties and swimwear in the sidebar and scores
-immodest on that alone. Blocking it would be an outage, not a filter. The
-precise rules — department addresses, the search box, autocomplete — are
-what handle immodest on those sites; the scorer is the backstop for worse,
-and stays strict everywhere no precise rule exists.
+And the vocabulary is checked against what people actually need. "Socks &
+Hosiery" is where you buy socks, so `hosiery` is not a term — the tights
+department says `tights` or `stockings`, and those are. Every term that
+removes something a family needs is an outage with extra steps, and the
+test suite asserts the sock department survives.
 
 ### The vision model, when it is genuinely needed
 

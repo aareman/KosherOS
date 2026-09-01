@@ -611,20 +611,50 @@ def _suggestion_flow(url, body):
     })()
 
 
-def test_a_shops_navigation_does_not_block_its_ordinary_pages(addon):
-    # An Amazon search for socks names lingerie, bras, panties and
-    # swimwear in the sidebar of every page. Blocking that is an outage,
-    # not a filter — the precise rules handle immodest on these sites.
+def test_a_shops_navigation_is_removed_rather_than_held_against_it(addon):
+    # An Amazon search for socks lists Lingerie, Bras, Panties and
+    # Swimwear in the sidebar of every page. Scoring that gives two bad
+    # answers and no good one: strictly and Amazon is blocked outright,
+    # loosely and the sidebar stays on screen. So the items go instead.
     filt = _shop_filter(addon)
     flow = _suggestion_flow("https://www.amazon.com/s?k=socks", b"")
     flow.response.headers["content-type"] = "text/html"
-    flow.response.get_text = lambda strict=False: (
-        "<html><body>Amazon.com: socks. Department: Clothing, Shoes & "
-        "Jewelry. Women: Dresses, Tops, Sweaters, Coats, Shoes, Jewelry, "
-        "Handbags, Lingerie Sleepwear & Loungewear, Bras, Panties, "
-        "Shapewear, Swimwear, Socks & Hosiery. Men: Shirts, Pants, "
-        "Underwear. Results for socks: cotton crew socks, wool socks."
-        "</body></html>")
+    nav = ("<html><body><ul id=\"depts\">"
+           "<li><a href=\"/b/clothing\">Clothing, Shoes &amp; Jewelry</a></li>"
+           "<li><a href=\"/b/womens-lingerie\">Lingerie, Sleepwear &amp; "
+           "Loungewear</a></li>"
+           "<li><a href=\"/b/bras\">Bras</a></li>"
+           "<li><a href=\"/b/panties\">Panties</a></li>"
+           "<li><a href=\"/b/swim\">Swimwear</a></li>"
+           "<li><a href=\"/b/socks\">Socks &amp; Hosiery</a></li>"
+           "</ul><p>Results for socks: cotton crew socks, wool socks."
+           "</p></body></html>")
+    flow.response.get_text = lambda strict=False: nav
+    filt._filter_page(flow, 1001)
+
+    assert getattr(flow.response, "status_code", 200) != 403
+    served = flow.response.text
+    for gone in ("Lingerie", "Bras", "Panties", "Swimwear"):
+        assert gone not in served, gone
+    # And the rest of the page is untouched, including its entities.
+    assert "Socks &amp; Hosiery" in served
+    assert "Clothing, Shoes &amp; Jewelry" in served
+    assert "cotton crew socks" in served
+
+
+def test_a_page_too_large_to_rewrite_falls_back_to_a_looser_floor(addon):
+    # Nothing could be removed, so the catalogue vocabulary is still in
+    # the text and would convict a page about socks.
+    from kosherd import elementfilter
+
+    filt = _shop_filter(addon)
+    flow = _suggestion_flow("https://www.amazon.com/s?k=socks", b"")
+    flow.response.headers["content-type"] = "text/html"
+    filler = "<p>cotton crew socks</p>" * 100
+    huge = ("<html><body><ul><li>Lingerie</li><li>Bras</li><li>Panties</li>"
+            "<li>Swimwear</li></ul>" + filler
+            + "x" * elementfilter.MAX_PAGE + "</body></html>")
+    flow.response.get_text = lambda strict=False: huge
     filt._filter_page(flow, 1001)
     assert getattr(flow.response, "status_code", 200) != 403
 

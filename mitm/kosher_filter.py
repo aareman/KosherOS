@@ -30,6 +30,7 @@ import sys
 try:
     from kosherd import categories as categories_mod
     from kosherd import content as content_mod
+    from kosherd import elementfilter as elementfilter_mod
     from kosherd import imageedit as imageedit_mod
     from kosherd import language as language_mod
     from kosherd import accessreq as accessreq_mod
@@ -49,6 +50,7 @@ except ImportError:  # pragma: no cover - only when interpreters differ
     sys.path.extend(sorted(glob.glob("/usr/lib/python3.*/site-packages")))
     from kosherd import categories as categories_mod
     from kosherd import content as content_mod
+    from kosherd import elementfilter as elementfilter_mod
     from kosherd import imageedit as imageedit_mod
     from kosherd import language as language_mod
     from kosherd import accessreq as accessreq_mod
@@ -480,7 +482,32 @@ class KosherFilter:
         # a lie the browser would enforce.
         flow.response.headers.pop("content-length", None)
 
-    def _content_tolerance(self, uid: int, host: str = "") -> str:
+    def _strip_shop_navigation(self, flow, host: str, body: str):
+        """Take the offending items out of a covered page.
+
+        A shop names its whole catalogue in the navigation of every page.
+        Scoring that gives two bad answers and no good one: strictly, and
+        Amazon is blocked outright; loosely, and the sidebar stays on
+        screen. Removing the items is neither — the words are gone and
+        what is left is a page about socks, which can then be judged as
+        strictly as anything else.
+        """
+        spec = self.siterules.strip_spec(host)
+        if spec is None:
+            return body, False
+        tags, is_blocked, quick = spec
+        stripped, removed = elementfilter_mod.strip(
+            body, is_blocked, tags=tags, quick_reject=quick)
+        if removed:
+            log.info("removed %d navigation item(s) from %s", removed, host)
+            flow.response.text = stripped
+            flow.response.headers["x-kosheros"] = f"items-removed={removed}"
+        # True means the page was small enough to rewrite, so what is left
+        # can be judged strictly — not that anything was actually removed.
+        return stripped, len(body) <= elementfilter_mod.MAX_PAGE
+
+    def _content_tolerance(self, uid: int, host: str = "",
+                           stripped: bool = False) -> str:
         """How much a page may say before it is blocked for this user.
 
         Driven by the media level, but never weaker than what the blocked
@@ -499,7 +526,10 @@ class KosherFilter:
         tolerance = CONTENT_TOLERANCE.get(level, content_mod.NSFW)
         if siterules_mod.GATING_CATEGORY in self.policy.blocked_categories_for(uid):
             floor = content_mod.IMMODEST
-            if host and self.siterules.covers(host):
+            if host and self.siterules.covers(host) and not stripped:
+                # The navigation could not be removed (too large a page, a
+                # parse that failed), so its catalogue vocabulary is still
+                # in the text and would convict a page about socks.
                 floor = content_mod.SUGGESTIVE
             if content_mod.SEVERITY[tolerance] > content_mod.SEVERITY[floor]:
                 tolerance = floor
@@ -525,6 +555,10 @@ class KosherFilter:
         body = flow.response.get_text(strict=False) or ""
         if not body:
             return
+        stripped = False
+        if immodest_blocked:
+            body, stripped = self._strip_shop_navigation(
+                flow, flow.request.pretty_host or "", body)
         text = content_mod.visible_text(body[:MAX_SCORED_BYTES])
 
         if language_filter != "off" and self.wordlist.contains_any(text):
@@ -541,7 +575,8 @@ class KosherFilter:
 
         if level == "none" and not immodest_blocked:
             return
-        tolerance = self._content_tolerance(uid, flow.request.pretty_host or "")
+        tolerance = self._content_tolerance(
+            uid, flow.request.pretty_host or "", stripped)
         verdict = self.scorer.score(text)
         if verdict.at_least(tolerance):
             log.info("blocked uid=%s %s (content: %s, %d points, %s)",

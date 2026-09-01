@@ -39,7 +39,6 @@
         "shapewear",
         "sleepwear",
         "nightwear",
-        "hosiery",
         "swimsuits",
         "swimwear",
         "bikinis",
@@ -50,7 +49,8 @@
         "womens-lingerie",
         "womens-intimates",
         "adult-toys",
-        "sexual-wellness"
+        "sexual-wellness",
+        "tights"
       ],
       "search_params": [
         "k",
@@ -90,13 +90,13 @@
         "shapewear",
         "sleepwear",
         "loungewear",
-        "hosiery",
         "swimwear",
         "swimsuits",
         "bikinis",
         "juniors-swim",
         "womens-swim",
-        "sexual-wellness"
+        "sexual-wellness",
+        "tights"
       ],
       "search_params": [
         "q",
@@ -131,7 +131,6 @@
         "shapewear",
         "sleepwear",
         "nightwear",
-        "hosiery",
         "stockings",
         "swimwear",
         "swimsuits",
@@ -191,7 +190,6 @@
         "sleepwear",
         "nightwear",
         "loungewear",
-        "hosiery",
         "tights",
         "swimwear",
         "swimsuits",
@@ -228,7 +226,8 @@
         "bralette",
         "sexy",
         "hot-girls",
-        "outfit-inspo-summer"
+        "outfit-inspo-summer",
+        "tights"
       ]
     }
   ],

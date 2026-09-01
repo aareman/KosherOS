@@ -34,6 +34,11 @@ RULES_PATHS = (
 # means the lingerie department too.
 GATING_CATEGORY = "immodest"
 
+# Elements worth removing from a covered page: a navigation item, a list
+# entry, a dropdown choice. Anything larger is a section of the page and
+# removing it would break the layout rather than clean it.
+DEFAULT_STRIP_TAGS = ("a", "li", "option")
+
 # The query parameter a shop's search box uses, when its rules do not say.
 DEFAULT_SEARCH_PARAMS = ("q", "k", "query", "search", "keyword", "term")
 # What an autocomplete endpoint's path looks like, when its rules do not say.
@@ -65,6 +70,12 @@ class SiteRules:
         pooled = {t for site in self.sites for t in site.get("terms", [])}
         pooled |= set(anywhere or [])
         self._search_terms = _compile(sorted(pooled))
+        # A plain substring scan, used only to decide whether a page is
+        # worth reparsing at all. Reparsing a megabyte of HTML costs a
+        # fifth of a second on the machine this runs on, and almost no
+        # page contains any of these words.
+        self._quick = re.compile("|".join(
+            re.escape(t.lower()) for t in sorted(pooled) if t)) if pooled else None
 
     def __len__(self) -> int:
         return len(self.sites)
@@ -115,6 +126,30 @@ class SiteRules:
     def covers(self, host: str) -> bool:
         """Does this host have rules of its own?"""
         return self._site_for((host or "").lower().strip(".")) is not None
+
+    def strip_spec(self, host: str):
+        """How to strip a covered page: (tags, is_blocked, quick_reject).
+
+        None when this host has no rules. A site may override the tags and
+        the vocabulary — `strip_tags` and `strip_terms` in its rules — for
+        a layout the defaults do not reach; without them it uses its own
+        department terms, which is what the sidebar is made of.
+        """
+        site = self._site_for((host or "").lower().strip("."))
+        if site is None:
+            return None
+        tags = tuple(site.get("strip_tags") or DEFAULT_STRIP_TAGS)
+        terms = site.get("strip_terms") or site.get("terms") or []
+        pattern = _compile(terms)
+        if pattern is None:
+            return None
+        quick = re.compile("|".join(
+            re.escape(t.lower()) for t in sorted(terms) if t))
+
+        def is_blocked(text: str) -> bool:
+            return bool(pattern.search(text.lower()))
+
+        return tags, is_blocked, quick
 
     def search_text(self, url: str) -> str | None:
         """What was typed into this site's own search box, if anything.

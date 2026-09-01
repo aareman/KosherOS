@@ -86,5 +86,48 @@ def test_no_rules_file_means_no_rules():
         "https://www.amazon.com/b/womens-lingerie") is None
 
 
+def test_a_department_people_actually_need_survives(rules):
+    # "Socks & Hosiery" is where you buy socks. A term that removes the
+    # sock department is an outage, not a filter.
+    assert rules.reason("https://www.amazon.com/b/socks-hosiery") is None
+    assert rules.reason("https://www.walmart.com/browse/socks-hosiery/1") is None
+    # The tights department still says so.
+    assert rules.reason("https://www.amazon.com/b/womens-tights") is not None
+
+
 def test_subdomains_count(rules):
     assert rules.reason("https://smile.amazon.com/b/womens-lingerie") is not None
+
+
+# -- custom element rules -----------------------------------------------------
+
+def test_a_site_can_override_what_is_stripped_and_from_where():
+    # The point of making these data rather than code: a layout the
+    # defaults do not reach is a rules-file edit, not a release.
+    rules = siterules.SiteRules(sites=[{
+        "hosts": ["shop.example"],
+        "terms": ["lingerie"],
+        "strip_tags": ["div", "a"],
+        "strip_terms": ["swim club", "lingerie"],
+    }])
+    tags, is_blocked, quick = rules.strip_spec("shop.example")
+    assert tags == ("div", "a")
+    assert is_blocked("Join the Swim Club")
+    assert is_blocked("lingerie")
+    assert not is_blocked("socks")
+    assert quick.search("come to the swim club")
+
+
+def test_a_site_without_overrides_strips_its_own_department_terms():
+    rules = siterules.SiteRules(sites=[{
+        "hosts": ["shop.example"], "terms": ["lingerie", "swimwear"]}])
+    tags, is_blocked, _quick = rules.strip_spec("shop.example")
+    assert tags == siterules.DEFAULT_STRIP_TAGS
+    assert is_blocked("Swimwear") and not is_blocked("Shoes")
+
+
+def test_a_host_with_no_rules_has_nothing_to_strip():
+    rules = siterules.SiteRules(sites=[{"hosts": ["shop.example"],
+                                        "terms": ["lingerie"]}])
+    assert rules.strip_spec("chinuch.org") is None
+    assert rules.covers("shop.example") and not rules.covers("chinuch.org")

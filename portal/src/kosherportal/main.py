@@ -75,9 +75,16 @@ class PolicyRequest(BaseModel):
 
 
 class ListsRequest(BaseModel):
-    """A complete set of filter lists, published to every enrolled device."""
+    """A complete set of filter lists, published to every enrolled device.
+
+    `catalog` is a manifest, not a payload: the category database is
+    190 MB, so the bundle carries a URL and a hash and the device fetches
+    the file itself. The signature covers the hash, which is what lets the
+    download come from anywhere.
+    """
 
     lists: dict
+    catalog: dict | None = None
 
 
 # -- device endpoints ---------------------------------------------------------
@@ -123,8 +130,14 @@ def get_lists(device_id: str = Depends(require_device)) -> dict:
 
 @app.put("/api/v1/admin/lists", dependencies=[Depends(require_admin)])
 def set_lists(request: ListsRequest) -> dict:
-    bundle = store.set_lists(request.lists)
-    return {"version": bundle["version"], "lists": sorted(request.lists)}
+    if request.catalog is not None:
+        missing = {"version", "url", "sha256"} - set(request.catalog)
+        if missing:
+            raise HTTPException(
+                400, f"the catalogue manifest is missing {sorted(missing)}")
+    bundle = store.set_lists(request.lists, request.catalog)
+    return {"version": bundle["version"], "lists": sorted(request.lists),
+            "catalog": bundle.get("catalog")}
 
 
 @app.post("/api/v1/admin/devices", dependencies=[Depends(require_admin)])

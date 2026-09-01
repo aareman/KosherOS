@@ -240,3 +240,50 @@ def test_no_lists_published_yet_is_not_an_error(client):
     response = client.get(f"/api/v1/devices/{device['device_id']}/lists",
                           headers={"X-Device-Token": device["device_token"]})
     assert response.status_code == 204
+
+
+def test_a_catalogue_manifest_rides_with_the_lists(client):
+    # 190 MB of database cannot go in a JSON document, so the bundle
+    # carries a URL and a hash and the device fetches the file. The
+    # signature over the hash is what lets the download come from a CDN.
+    manifest = {"version": 12, "url": "https://cdn.example/categories.sqlite",
+                "sha256": "a" * 64, "size": 190_000_000}
+    published = client.put("/api/v1/admin/lists",
+                           json={"lists": {}, "catalog": manifest},
+                           headers=admin_headers())
+    assert published.status_code == 200
+
+    device = enrol_a_device(client)
+    envelope = client.get(f"/api/v1/devices/{device['device_id']}/lists",
+                          headers={"X-Device-Token": device["device_token"]}).json()
+    assert envelope["lists"]["catalog"] == manifest
+
+
+def test_a_catalogue_manifest_without_a_hash_is_refused(client):
+    # Publishing a URL with no hash would give devices something to
+    # download and no way to know what it is.
+    for manifest in ({"version": 1, "url": "https://cdn.example/c"},
+                     {"version": 1, "sha256": "a" * 64},
+                     {"url": "https://cdn.example/c", "sha256": "a" * 64}):
+        response = client.put("/api/v1/admin/lists",
+                              json={"lists": {}, "catalog": manifest},
+                              headers=admin_headers())
+        assert response.status_code == 400, manifest
+
+
+def test_the_catalogue_manifest_is_covered_by_the_signature(client):
+    from kosherd.sync import SyncError, verify_envelope
+
+    manifest = {"version": 3, "url": "https://cdn.example/c",
+                "sha256": "b" * 64}
+    client.put("/api/v1/admin/lists", json={"lists": {}, "catalog": manifest},
+               headers=admin_headers())
+    key = client.get("/api/v1/admin/public-key",
+                     headers=admin_headers()).json()["portal_public_key"]
+    device = enrol_a_device(client)
+    envelope = client.get(f"/api/v1/devices/{device['device_id']}/lists",
+                          headers={"X-Device-Token": device["device_token"]}).json()
+    envelope["lists"]["catalog"]["url"] = "https://attacker.example/c"
+    with pytest.raises(SyncError):
+        verify_envelope(envelope, key, current_revision=0,
+                        field="lists", counter="version")

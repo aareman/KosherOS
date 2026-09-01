@@ -69,7 +69,9 @@ in a normal terminal.
 3. ✅ Admin app (GTK4) + KosherOS Store: approved-app allowlist over upstream Flathub, installs performed by kosherd with live progress
 4. ✅ Branding: KosherOS identity, boot splash, login screen, wallpaper — see [docs/branding.md](docs/branding.md); real logo artwork still to come
 5. ✅ Installable ISO (`just iso`) + first-boot wizard (admin account, guardian, boot password, firmware checklist)
-6. ✅ Portal: signed policy sync (`portal/`) — remote-support channel and web UI still to come
+6. ✅ Portal: signed policy sync, signed filter-list updates and a signed
+   catalogue manifest (`portal/`) — remote-support channel and web UI still
+   to come
 7. ✅ Filtered mode: local TLS interception (mitmproxy) with URL **path-level** allow/block rules
 8. **Real content filtering** — category lists (10.5M domains), enforced safe
    search, per-user profiles, and page-content scoring in the proxy. This is

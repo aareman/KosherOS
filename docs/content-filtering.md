@@ -248,6 +248,24 @@ A portal that predates all this returns 404, which is treated as "nothing
 new" rather than an error: an older portal should keep working, not start
 failing every sync with something nobody can act on.
 
+### The category database is a manifest, not a payload
+
+Five million domains is 190 MB, which cannot ride inside a signed JSON
+document. So the bundle carries a **manifest** — a version, a URL, a size
+and a SHA-256 — and the device fetches the file itself.
+
+The signature covers the hash, which is the whole point: the download
+needs no trust of its own. It can come from a CDN, a mirror, plain HTTP,
+and a byte out of place is caught on arrival. The hash is computed as the
+bytes stream in, so a mismatch costs one wasted download and never a
+wasted disk.
+
+Then the file has to prove it is a catalogue before it is installed: it is
+opened, queried, and refused if it holds fewer than a hundred thousand
+domains. A truncated database that loads anyway is the worst outcome
+available, because it looks exactly like a working one. The old catalogue
+stays in place through any failure, and there is a test for that.
+
 ### An edit is a delta, not a copy
 
 The lists ship complete on purpose. What a family will actually do is

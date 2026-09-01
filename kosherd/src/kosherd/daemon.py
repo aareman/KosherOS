@@ -523,6 +523,9 @@ class Daemon:
         found = selfcheck.datasets()
         status["lists"] = found
         status["lists_version"] = lists_mod.portal_version()
+        from . import catalogsync
+
+        status["catalog_version"] = catalogsync.installed_version()
         status["problems"] = selfcheck.problems(found)
 
         for service in ("kosher-mitm.service", "kosher-dns.service",
@@ -1104,6 +1107,22 @@ class Daemon:
                 log.info("installed portal lists v%s: %s",
                          bundle.get("version"), ", ".join(written) or "none")
                 changed = bool(written)
+                # The catalogue rides in the same signed document but not
+                # in its body: 190 MB of database is a URL and a hash, and
+                # the signature over the hash is what makes the download
+                # need no trust of its own.
+                manifest = bundle.get("catalog")
+                if manifest:
+                    from . import catalogsync
+
+                    try:
+                        count = catalogsync.update(manifest)
+                    except catalogsync.CatalogError as e:
+                        log.error("catalogue update refused: %s", e)
+                    else:
+                        if count:
+                            log.info("catalogue now holds %d domains", count)
+                            changed = True
 
         doc = client.fetch_policy(self.policy.revision)
         if doc is None:

@@ -183,10 +183,12 @@ class Store:
     # family's business, it is upstream's. What a family changes is their
     # own delta, which lives on the device and is never sent here.
 
-    def set_lists(self, documents: dict) -> dict:
+    def set_lists(self, documents: dict, catalog: dict | None = None) -> dict:
         """Publish a new set of filter lists, signed, with the next version."""
         version = self.lists_version() + 1
         bundle = {"version": version, "lists": documents}
+        if catalog is not None:
+            bundle["catalog"] = catalog
         with closing(self._connect()) as db:
             db.execute(
                 "INSERT INTO settings (key, value) VALUES ('lists', ?) "

@@ -206,6 +206,16 @@ def cmd_rules(args) -> int:
     return 0
 
 
+def cmd_admin(args) -> int:
+    """Make an account an administrator, or stop it being one."""
+    _client().set_user_admin(args.uid, args.action == "grant",
+                             _guardian_pw(args))
+    print(f"uid {args.uid} is "
+          + ("now an administrator" if args.action == "grant"
+             else "no longer an administrator"))
+    return 0
+
+
 def cmd_profile(args) -> int:
     c = _client()
     if args.action == "list":
@@ -554,6 +564,12 @@ def main(argv: list[str] | None = None) -> int:
                    help="URL pattern, or the rule number for 'remove'")
     s.add_argument("--guardian-password")
     s.set_defaults(func=cmd_rules)
+
+    s = sub.add_parser("admin", help="grant or revoke administrator rights")
+    s.add_argument("action", choices=["grant", "revoke"])
+    s.add_argument("uid", type=int)
+    s.add_argument("--guardian-password")
+    s.set_defaults(func=cmd_admin)
 
     s = sub.add_parser("profile", help="apply a ready-made profile to a user")
     s.add_argument("action", choices=["list", "set"])

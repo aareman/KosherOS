@@ -1412,6 +1412,44 @@ class ProfilesPage(Adw.PreferencesPage):
             self.win, user, self.win.reload).present(self.win))
         row.add_row(apps_row)
 
+        # Hotel and airport Wi-Fi. Without this a filtered laptop cannot
+        # reach the sign-in page, so it cannot get online at all — and the
+        # only fix was a terminal, which is not a fix.
+        captive = Adw.ActionRow(
+            title="Allow Wi-Fi sign-in",
+            subtitle="Opens this account's connection for 10 minutes so a "
+                     "hotel or airport sign-in page can load. Filtering "
+                     "resumes on its own.",
+            subtitle_lines=3, activatable=True)
+        captive.add_suffix(Gtk.Image(icon_name="network-wireless-symbolic"))
+        captive.connect("activated", lambda _r: self.win.call(
+            lambda: self.win.client.set_captive_mode(user["uid"], 10),
+            done_msg=f"{user['username']} can sign in to Wi-Fi for 10 minutes"))
+        if user["mode"] == "unfiltered":
+            captive.set_sensitive(False)
+            captive.set_subtitle("An unfiltered account needs no window.")
+        row.add_row(captive)
+
+        is_admin = Adw.SwitchRow(
+            title="Administrator",
+            subtitle="Can change every setting here, including for other "
+                     "people. There was no way to grant this before, so a "
+                     "second parent could never be made one.",
+            subtitle_lines=3, active=bool(user.get("admin")))
+
+        def on_admin(switch, _param):
+            wanted = switch.get_active()
+            if wanted == bool(user.get("admin")):
+                return
+            self.win.with_guardian(lambda pw: self.win.call(
+                lambda: self.win.client.set_user_admin(user["uid"], wanted, pw),
+                done_msg=(f"{user['username']} is "
+                          + ("now an administrator" if wanted
+                             else "no longer an administrator"))))
+
+        is_admin.connect("notify::active", on_admin)
+        row.add_row(is_admin)
+
         installs = Adw.SwitchRow(title="Can install approved apps",
                                  subtitle="Only apps on the approved list, from the KosherOS Store",
                                  active=user.get("can_install_apps", True))
@@ -1420,7 +1458,31 @@ class ProfilesPage(Adw.PreferencesPage):
                 lambda: self.win.client.set_user_can_install(user["uid"], s.get_active()),
                 done_msg=f"App installs {'enabled' if s.get_active() else 'disabled'} for {user['username']}")))
         row.add_row(installs)
+
+        remove = Adw.ButtonRow(title="Remove This Account…")
+        remove.add_css_class("destructive-action")
+        remove.connect("activated", lambda *_: self._confirm_remove(user))
+        row.add_row(remove)
         return row
+
+    def _confirm_remove(self, user: dict) -> None:
+        dialog = Adw.AlertDialog(
+            heading=f"Remove {user['username']}?",
+            body="Their account and everything in their home folder is "
+                 "deleted. This cannot be undone.")
+        dialog.add_response("cancel", "Cancel")
+        dialog.add_response("remove", "Remove")
+        dialog.set_response_appearance("remove",
+                                       Adw.ResponseAppearance.DESTRUCTIVE)
+
+        def on_response(_d, response):
+            if response == "remove":
+                self.win.call(
+                    lambda: self.win.client.remove_user(user["uid"]),
+                    done_msg=f"Removed {user['username']}")
+
+        dialog.connect("response", on_response)
+        dialog.present(self.win)
 
     def _unmanaged_users(self) -> list[str]:
         import pwd

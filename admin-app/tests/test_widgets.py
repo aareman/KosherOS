@@ -57,10 +57,16 @@ class FakeClient:
         return self._overrides.get("requests", [])
 
 
-class FakeWindow:
-    """Enough of Window for a dialog to be built and driven."""
+class FakeWindow(Gtk.Window):
+    """Enough of Window for a dialog to be built, driven and presented.
+
+    A real Gtk.Window, not a stand-in: dialogs are presented into their
+    parent, and a stub cannot be a parent. Making it real also means the
+    present() paths get exercised rather than skipped.
+    """
 
     def __init__(self, client=None):
+        super().__init__()
         self.client = client or FakeClient()
         self.toasts = []
         self.policy = {"revision": 1, "users": [], "guardian": {"enabled": False},
@@ -405,3 +411,69 @@ def test_a_greyed_out_row_says_why():
         row = _row_named(page, title)
         assert row.get_subtitle(), title
         assert "enforces nothing" in row.get_subtitle(), title
+
+
+# -- things that had a daemon method and no way to reach it -------------------
+
+def test_a_second_parent_can_be_made_an_administrator_from_the_app():
+    promoted = {}
+
+    class Recording(FakeClient):
+        def set_user_admin(self, uid, admin, pw):
+            promoted.update(uid=uid, admin=admin)
+
+    win = FakeWindow(Recording())
+    win.policy = {"revision": 1, "users": [a_user(mode="unfiltered")],
+                  "guardian": {"enabled": False}, "guest": {"enabled": False}}
+    page = admin.ProfilesPage(win)
+    page.refresh()
+    drain()
+    row = _row_named(page, "Administrator")
+    assert not row.get_active()
+    row.set_active(True)
+    drain()
+    assert promoted == {"uid": 1001, "admin": True}
+
+
+def test_wifi_sign_in_opens_a_window_for_the_account():
+    # Without this a filtered laptop cannot reach a hotel sign-in page, so
+    # it cannot get online at all, and the only fix was a terminal.
+    opened = {}
+
+    class Recording(FakeClient):
+        def set_captive_mode(self, uid, minutes):
+            opened.update(uid=uid, minutes=minutes)
+
+    win = FakeWindow(Recording())
+    win.policy = {"revision": 1, "users": [a_user(mode="whitelist")],
+                  "guardian": {"enabled": False}, "guest": {"enabled": False}}
+    page = admin.ProfilesPage(win)
+    page.refresh()
+    drain()
+    _row_named(page, "Allow Wi-Fi sign-in").emit("activated")
+    drain()
+    assert opened == {"uid": 1001, "minutes": 10}
+
+
+def test_an_unfiltered_account_is_not_offered_a_wifi_window():
+    win, page = a_page([a_user(mode="unfiltered")])
+    assert not _row_named(page, "Allow Wi-Fi sign-in").get_sensitive()
+
+
+def test_removing_an_account_asks_first():
+    removed = []
+
+    class Recording(FakeClient):
+        def remove_user(self, uid):
+            removed.append(uid)
+
+    win = FakeWindow(Recording())
+    win.policy = {"revision": 1, "users": [a_user()],
+                  "guardian": {"enabled": False}, "guest": {"enabled": False}}
+    page = admin.ProfilesPage(win)
+    page.refresh()
+    drain()
+    page._confirm_remove(a_user())
+    drain()
+    # Presenting the dialog must not delete anything on its own.
+    assert removed == []

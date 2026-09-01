@@ -107,6 +107,11 @@ class DaemonClient:
         self._call("Profiles", "SetYouTube", "(iss)", uid,
                    json.dumps(settings), guardian_password)
 
+    def set_user_admin(self, uid: int, admin: bool,
+                       guardian_password: str = "") -> None:
+        self._call("Profiles", "SetUserAdmin", "(ibs)", uid, admin,
+                   guardian_password)
+
     def apply_profile(self, uid: int, profile: str,
                       guardian_password: str = "") -> None:
         self._call("Profiles", "ApplyProfile", "(iss)", uid, profile,

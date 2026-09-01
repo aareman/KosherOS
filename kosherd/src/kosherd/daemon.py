@@ -92,6 +92,11 @@ INTROSPECTION_XML = """
       <arg direction="in" type="s" name="settings_json"/>
       <arg direction="in" type="s" name="guardian_password"/>
     </method>
+    <method name="SetUserAdmin">
+      <arg direction="in" type="i" name="uid"/>
+      <arg direction="in" type="b" name="admin"/>
+      <arg direction="in" type="s" name="guardian_password"/>
+    </method>
     <method name="ApplyProfile">
       <arg direction="in" type="i" name="uid"/>
       <arg direction="in" type="s" name="profile"/>
@@ -841,10 +846,47 @@ class Daemon:
         self._save_and_apply()
         return GLib.Variant("(i)", (uid,))
 
+    def impl_SetUserAdmin(self, uid: int, admin: bool, _guardian_pw: str):
+        """Make an account an administrator, or stop it being one.
+
+        There was no way to do this at all: the first admin is created
+        during setup and a second parent could never be made one
+        afterwards, which is a strange thing for a product whose whole
+        model is two parents sharing control.
+
+        Guardian-gated, because promoting somebody is a filter change with
+        an extra step — an administrator can change every other setting.
+        """
+        user = self._managed(uid)
+        if not admin and user.admin:
+            others = [u for u in self.policy.users if u.admin and u.uid != uid]
+            if not others:
+                # Nobody left who could undo it, including this. The
+                # machine would need reinstalling.
+                raise PolicyError(
+                    "this is the only administrator; make somebody else an "
+                    "administrator first")
+        user.admin = bool(admin)
+        action = "-aG" if admin else "-rG"
+        result = subprocess.run(["usermod", action, "kosher-admin",
+                                 user.username], capture_output=True, text=True)
+        if result.returncode != 0:
+            raise PolicyError(
+                f"could not change group membership: {result.stderr.strip()}")
+        self._save_and_apply()
+        log.info("%s is %san administrator", user.username,
+                 "" if admin else "no longer ")
+        return None
+
     def impl_RemoveUser(self, uid: int):
         user = self.policy.user(uid)
         if user is None:
             raise PolicyError(f"uid {uid} is not managed")
+        if user.admin and not [u for u in self.policy.users
+                               if u.admin and u.uid != uid]:
+            raise PolicyError(
+                "this is the only administrator; the computer would have "
+                "nobody who could change anything")
         self._accounts_delete_user(uid)
         self.policy.users.remove(user)
         self._save_and_apply()

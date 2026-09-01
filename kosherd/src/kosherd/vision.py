@@ -91,6 +91,19 @@ MIN_CONFIDENCE = 0.25
 MIN_IMAGE_BYTES = 6000
 # Inference must not stall the page.
 DETECT_TIMEOUT = 2.0
+
+# Measured: the detector takes tens of milliseconds on a developer's
+# machine and 200-600 ms per image on two cores, which is the machine this
+# product is for. At that rate a news page with thirty photographs is
+# fifteen seconds of waiting for a half-checked page — worse, for the
+# person using it, than the setting that needs no model at all.
+#
+# So the machine is measured rather than assumed. Above this median, the
+# filter stops trying to judge pictures and hides them instead: instant,
+# never wrong, and honest about what the computer can do. It is a rolling
+# window, so a machine that was briefly busy recovers on its own.
+SLOW_DETECT_MS = 400
+SLOW_WINDOW = 8
 CACHE_TTL = 30 * 24 * 3600  # the same picture is the same picture
 
 
@@ -308,12 +321,42 @@ class ImageFilter:
     """
 
     def __init__(self, detector=None, cache: VerdictCache | None = None,
-                 timeout: float = DETECT_TIMEOUT, workers: int = 2):
+                 timeout: float = DETECT_TIMEOUT, workers: int = 2,
+                 slow_ms: float = SLOW_DETECT_MS):
         self.detector = detector if detector is not None else NudeNetDetector()
         self.cache = cache if cache is not None else VerdictCache()
         self.timeout = timeout
         self._pool = None
         self._workers = workers
+        self._slow_ms = slow_ms
+        self._recent: list[float] = []
+        self._said_slow = False
+
+    @property
+    def degraded(self) -> bool:
+        """True when this machine cannot judge pictures fast enough.
+
+        The caller hides pictures instead of showing unchecked ones. Worth
+        surfacing to an admin: "this computer is too slow to check
+        pictures, so it hides them" is a thing a person can act on, and
+        "the web is slow today" is not.
+        """
+        if len(self._recent) < SLOW_WINDOW:
+            return False
+        ordered = sorted(self._recent)
+        median = ordered[len(ordered) // 2]
+        return median > self._slow_ms
+
+    def _record(self, elapsed_ms: float) -> None:
+        self._recent.append(elapsed_ms)
+        del self._recent[:-SLOW_WINDOW]
+        if self.degraded and not self._said_slow:
+            self._said_slow = True
+            log.warning(
+                "picture checks take %.0f ms on this machine; hiding "
+                "pictures instead of checking them", elapsed_ms)
+        elif not self.degraded:
+            self._said_slow = False
 
     @property
     def available(self) -> bool:
@@ -338,13 +381,20 @@ class ImageFilter:
         sha = digest(image_bytes)
         cached = self.cache.get(sha)
         if cached is not None:
+            # Always served: a verdict already reached costs nothing and
+            # is just as accurate on a slow machine as on a fast one.
             return cached
+        if self.degraded:
+            return None
+        started = time.monotonic()
         future = self._executor().submit(self.detector.detect, image_bytes)
         try:
             detections = future.result(timeout=self.timeout)
         except Exception:  # noqa: BLE001 - includes the timeout
             future.cancel()
+            self._record(self.timeout * 1000)
             return None
+        self._record((time.monotonic() - started) * 1000)
         if detections is None:
             return None
         verdict = judge(detections)

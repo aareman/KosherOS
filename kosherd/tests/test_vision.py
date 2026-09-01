@@ -207,3 +207,61 @@ def test_covering_nothing_is_not_an_edit(photo):
 def test_an_unreadable_picture_reports_failure_rather_than_returning_it():
     # Returning the original would be the one failure mode that matters.
     assert imageedit.cover(b"not an image at all", [(0, 0, 10, 10)]) is None
+
+
+# -- keeping up with the machine ----------------------------------------------
+
+def _slow_filter(tmp_path, ms, slow_ms=400):
+    import time as _t
+
+    class Slow:
+        available = True
+
+        def detect(self, data):
+            _t.sleep(ms / 1000)
+            return []
+
+    return vision.ImageFilter(detector=Slow(),
+                              cache=vision.VerdictCache(tmp_path / "i.sqlite"),
+                              slow_ms=slow_ms)
+
+
+def test_a_machine_that_keeps_up_keeps_checking(tmp_path):
+    f = _slow_filter(tmp_path, ms=5)
+    for i in range(vision.SLOW_WINDOW + 4):
+        assert f.verdict(b"x" * 10_000 + bytes([i % 251])) is not None
+    assert not f.degraded
+
+
+def test_a_machine_that_cannot_keep_up_stops_trying(tmp_path):
+    # Measured on two cores: 200-600 ms per image. A news page with thirty
+    # photographs is then fifteen seconds of waiting for a half-checked
+    # page — worse for the person than the setting that needs no model.
+    f = _slow_filter(tmp_path, ms=60, slow_ms=20)
+    for i in range(vision.SLOW_WINDOW):
+        f.verdict(b"x" * 10_000 + bytes([i % 251]))
+    assert f.degraded
+    # And from then on it answers immediately with "could not judge",
+    # which the caller turns into a hidden picture.
+    import time as _t
+    started = _t.monotonic()
+    assert f.verdict(b"y" * 10_000) is None
+    assert _t.monotonic() - started < 0.02
+
+
+def test_a_verdict_already_reached_is_still_served_when_degraded(tmp_path):
+    # It costs nothing and is exactly as accurate on a slow machine.
+    f = _slow_filter(tmp_path, ms=60, slow_ms=20)
+    blob = b"z" * 10_000
+    first = f.verdict(blob)
+    for i in range(vision.SLOW_WINDOW):
+        f.verdict(b"x" * 10_000 + bytes([i % 251]))
+    assert f.degraded
+    assert f.verdict(blob) == first
+
+
+def test_one_slow_picture_does_not_condemn_the_machine(tmp_path):
+    f = _slow_filter(tmp_path, ms=1, slow_ms=20)
+    for i in range(vision.SLOW_WINDOW):
+        f.verdict(b"x" * 10_000 + bytes([i % 251]))
+    assert not f.degraded

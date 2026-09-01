@@ -119,45 +119,61 @@ service to breach. The cost of that choice is that the accuracy ceiling is
 whatever a CPU-only laptop can do — often an old one — so every layer has
 to be designed for that machine rather than a developer's.
 
+### Measured, on the machine that matters
+
+`just benchmark` runs these inside the built image; `just benchmark 2`
+runs them on two cores, which is the machine this product is for. The
+numbers below are the two-core ones, because "it is fast on the
+developer's laptop" is not the claim being made.
+
+| operation | per call |
+|---|---|
+| category lookup | 0.004 ms |
+| `siterules.reason` on a URL | under 0.01 ms |
+| element strip, page has none of the words | 0.4 ms |
+| content score, 28 KB page | 6.7 ms |
+| profanity scan, 28 KB page | 7.3 ms |
+| element strip with a match, 31 KB page | 6.3 ms |
+| image verdict, cache hit | 0.2 ms |
+| **detection, 800×600** | **440 ms** |
+| resident memory, everything loaded | 150 MB |
+
+Two things came out of measuring rather than estimating.
+
+**The profanity scan was ten times more expensive than it needed to be.**
+It used one *named* capture group per word, so the engine tracked 145 sets
+of group boundaries through every character of every page: 40 ms on a
+28 KB page against 4 ms for the identical pattern without them, paid
+whether or not anything matched. The word that hit is now recovered
+afterwards by testing the few characters that matched, which costs
+something only when there is something to cost. There is a test asserting
+the page-scanning pattern keeps exactly one group.
+
+**Detection is 200–600 ms per image on two cores**, and no amount of
+thread tuning moves it (constraining `OMP_NUM_THREADS` made it worse). At
+that rate a news page with thirty photographs is fifteen seconds of
+waiting — for a *half-checked* page, since many would hit the timeout and
+be hidden anyway. That is worse for the person than the setting that needs
+no model at all.
+
+So the machine is measured instead of assumed. `ImageFilter` keeps a
+rolling median of its own detection time, and above 400 ms it stops trying
+and hides pictures instead: instant, never wrong, and honest about what
+the computer can do. Verdicts already in the cache are still served, since
+they cost nothing and are just as accurate on a slow machine. The window
+rolls, so a machine that was briefly busy recovers on its own.
+
 ### Cheapest thing that can decide, first
 
 Each stage only runs if the one before it could not settle the question:
 
-| stage | cost per image | settles |
-|---|---|---|
-| category of the page's domain | none (already known) | most of the bad web |
-| shopping department / page metadata | microseconds | most of the shopping case |
-| size threshold | none | icons, spacers, tracking pixels |
-| on-disk cache hit by content hash | ~1 ms | everything seen before |
-| small NSFW classifier, quantised | 5–20 ms | the clear cases |
-| detector (NudeNet-class) | 50–200 ms | only the borderline ones |
-
-The last row is the one that hurts on weak hardware, which is exactly why
-it runs last and rarely. A two-stage gate — skip the detector when the fast
-model is confident the image is safe — is the difference between a usable
-page and an unusable one.
-
-### A time budget, and what happens when it runs out
-
-Every page gets a budget. When an image cannot be judged inside it, the
-answer is **hide the image**, not "let it through while we think". A slow
-machine then degrades into a stricter filter rather than a broken browser
-or a silent hole. The placeholder says the image was not checked, so the
-person can ask for it rather than wonder.
-
-### Profiles, chosen by measuring the machine
-
-At setup the machine times a classification and picks a profile:
-
-- **thorough** — detector on borderline images, full resolution;
-- **balanced** — quantised classifier, detector only on strong signals;
-- **light** — classifier only, smaller input, wider cache reuse;
-- **images off** — for hardware that cannot keep up at all, `media_level`
-  falls back to `all`, which needs no model and is never wrong.
-
-That last profile matters: on a machine too slow to classify, hiding images
-outright is *better* filtering than a classifier that times out, and it is
-honest about what the computer can do.
+| stage | settles |
+|---|---|
+| category of the page's domain | most of the bad web, for free |
+| department rules on the address | the shopping case, for free |
+| size threshold | icons, spacers, tracking pixels |
+| on-disk cache by content hash | everything seen before |
+| the detector | only what is left |
 
 ### Caching
 

@@ -27,6 +27,16 @@ test-cov:
 # Integration suites INSIDE the dev VM: services, enforcement, apps, guest,
 # inspect mode, persistence. Pass suite prefixes to narrow (just test-vm
 # kosher-fedora 50). Creates test users and changes filter modes — dev VMs only.
+# Measure what the filter costs, inside the built image. Local-first on a
+# weak machine is the constraint everything here is designed against, so
+# the numbers in the docs should be measured rather than estimated.
+# CPUS=2 measures what a weak machine sees, which is the machine that
+# matters: "it is fast on the developer's laptop" is not the claim.
+benchmark CPUS="": build
+    podman run --rm {{ if CPUS == "" { "" } else { "--cpus " + CPUS } }} \
+        -v "$PWD/scripts/benchmark.py:/benchmark.py:z" \
+        {{image}} python3 /benchmark.py
+
 # Start the filtering services inside the built image and drive them.
 # Everything that has shipped broken in these two was invisible to a unit
 # test and obvious the moment something was started for real.

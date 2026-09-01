@@ -70,20 +70,36 @@ class Wordlist:
             return None
         # Longest first, so "bullshit" wins over "shit".
         words = sorted(self.replacements, key=len, reverse=True)
-        alternation = "|".join(f"(?P<w{i}>{word_pattern(w)})"
-                               for i, w in enumerate(words))
         self._order = words
+        # ONE group, not one per word. A named group per word made the
+        # engine track 145 sets of boundaries through every character of
+        # every page, which measured 40 ms on a 28 KB page against 4 ms
+        # for the identical pattern without them — a tenfold cost for
+        # information that is cheap to recover afterwards (see
+        # _matched_word), and it was paid on every page whether or not
+        # anything matched.
+        self._each = [(w, re.compile(rf"{word_pattern(w)}\Z", re.IGNORECASE))
+                      for w in words]
+        alternation = "|".join(word_pattern(w) for w in words)
         # Not \b: the disguised forms end in punctuation, which would put a
         # boundary in the wrong place. Require a non-letter either side.
-        return re.compile(rf"(?<![A-Za-z0-9])(?:{alternation})(?![A-Za-z0-9])",
+        return re.compile(rf"(?<![A-Za-z0-9])({alternation})(?![A-Za-z0-9])",
                           re.IGNORECASE)
 
     def __len__(self) -> int:
         return len(self.replacements)
 
     def _matched_word(self, match: re.Match) -> str | None:
-        for i, word in enumerate(self._order):
-            if match.group(f"w{i}") is not None:
+        """Which listed word this hit was.
+
+        Worked out after the fact by testing the matched text — a few
+        characters — against each word. That costs something only when
+        there IS a match, which is rare, instead of costing something on
+        every character of every page.
+        """
+        found = match.group(1)
+        for word, pattern in self._each:
+            if pattern.match(found):
                 return word
         return None
 

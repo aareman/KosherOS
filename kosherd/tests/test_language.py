@@ -1,8 +1,12 @@
 """Cleaning up language without corrupting the page."""
 
 import json
+from pathlib import Path
 
 from kosherd.language import Wordlist, load, word_pattern
+
+WORDLIST = (Path(__file__).parents[2]
+            / "os-image/files/usr/share/kosher/wordlist.json")
 
 
 def wl() -> Wordlist:
@@ -142,3 +146,36 @@ def test_block_mode_sees_only_visible_text():
 def test_an_empty_list_leaves_html_identical():
     html = "<p>fuck</p>"
     assert clean_html(html, Wordlist()) == (html, 0)
+
+
+def test_matching_a_page_does_not_cost_more_than_it_has_to():
+    """A guard on the shape of the pattern, not on the clock.
+
+    The matcher used one NAMED capture group per word, which made the
+    engine track 145 sets of group boundaries through every character of
+    every page: 40 ms on a 28 KB page against 4 ms for the identical
+    pattern without them, paid whether or not anything matched. The word
+    that hit is recovered afterwards instead, which costs something only
+    when there is a hit.
+    """
+    wordlist = load(WORDLIST)
+    assert len(wordlist) > 100, "needs the real list to be meaningful"
+    assert wordlist._pattern.groups == 1, (
+        f"{wordlist._pattern.groups} capture groups in the page-scanning "
+        "pattern; it must stay at one")
+
+
+def test_the_word_that_matched_is_still_identified(tmp_path):
+    # Which is what the named groups were for, so it has to keep working
+    # for every word and every disguise.
+    wordlist = load(WORDLIST)
+    for word in list(wordlist.replacements)[:20]:
+        cleaned, count = wordlist.clean(f"you {word} thing")
+        assert count == 1, word
+        assert wordlist.replacements[word] in cleaned, word
+
+
+def test_the_longest_word_still_wins():
+    # "bullshit" must not be cleaned as "bull" + "shit".
+    wordlist = Wordlist({"shit": "shoot", "bullshit": "nonsense"})
+    assert wordlist.clean("that is bullshit")[0] == "that is nonsense"

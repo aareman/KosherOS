@@ -62,6 +62,12 @@ just test-vm       # six suites against a running VM
 `just vm`, `just iso`, and the podman-in-root steps need sudo, so run those
 in a normal terminal.
 
+Not on the roadmap but assessed: the filter is separable from the OS —
+3,106 lines of it have no OS-specific code at all. See
+[docs/standalone.md](docs/standalone.md) for what a distro-agnostic
+package would take, and for a straight answer about what can and cannot be
+locked down when the user has sudo.
+
 ## Roadmap
 
 1. ✅ Filter core: kosherd, per-user nftables enforcement, dnsmasq whitelist sets, kosherctl

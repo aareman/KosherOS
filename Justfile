@@ -45,6 +45,27 @@ benchmark CPUS="": build
         -v "$PWD/scripts/benchmark.py:/benchmark.py:z" \
         {{image}} python3 /benchmark.py
 
+# Load the real ruleset in a private network namespace and try to get past
+# it. Everything else tests the ruleset as text; this tests whether it
+# stops anyone, which is the only claim that matters.
+check-firewall: build
+    #!/usr/bin/env bash
+    set -uo pipefail
+    trap 'podman rm -f kosher-origin >/dev/null 2>&1; \
+          podman network rm -f kosher-fwtest >/dev/null 2>&1' EXIT
+    podman network create kosher-fwtest >/dev/null 2>&1 || true
+    podman run -d --rm --name kosher-origin --network kosher-fwtest \
+        {{image}} python3 -m http.server 80 --bind 0.0.0.0 >/dev/null
+    # No Go template here: just has its own interpolation syntax and
+    # mangled it, producing an address with a stray brace that looked
+    # exactly like the firewall blocking everything.
+    target=$(podman inspect kosher-origin --format json \
+        | python3 -c 'import json,sys; print(json.load(sys.stdin)[0]["NetworkSettings"]["Networks"]["kosher-fwtest"]["IPAddress"])')
+    podman run --rm --privileged --network kosher-fwtest \
+        -e KOSHER_TEST_TARGET="$target" \
+        -v "$PWD/scripts/firewall-check.sh:/firewall-check.sh:z" \
+        {{image}} bash /firewall-check.sh
+
 # Start the filtering services inside the built image and drive them.
 # Everything that has shipped broken in these two was invisible to a unit
 # test and obvious the moment something was started for real.

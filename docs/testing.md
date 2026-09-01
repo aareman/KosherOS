@@ -139,3 +139,42 @@ have skipped themselves into uselessness.
 They skip rather than fail where GTK genuinely is not available; the point
 is to catch the bug on a developer's machine, not to make the suite
 unrunnable elsewhere.
+
+## `just check-firewall`
+
+Loads the real nftables ruleset and tries to get past it.
+
+Everything else tests the ruleset as *text*: `nft --check` says it parses,
+and unit tests say the right lines are in it. Neither says a filtered user
+cannot reach the internet, which is the only claim that matters. This was
+the least exercised part of the system and it is the security boundary.
+
+Twelve checks, against a second container on a shared podman network so
+traffic genuinely leaves over `eth0`: the five modes behave as they say,
+a whitelisted address becomes reachable and unreachable again as the set
+changes, a captive-portal window opens and closes, an account nobody
+configured gets nothing (the fail-closed rule), and root is never
+filtered.
+
+### Two harnesses that lied before this one worked
+
+**A dummy interface with a local address.** Every check passed. Linux
+routes packets to *any* local address through `lo`, and the output chain
+accepts `oif "lo"` outright — so nothing was ever tested, and the result
+looked like a clean pass.
+
+**A peer network namespace.** Every check failed. `ip netns exec` cannot
+remount `/sys` in a rootless container, so the far end never came up, and
+the result looked like the filter blocking everything.
+
+Both were believable. So the script now refuses to judge anything until it
+has confirmed it can reach the origin *before* any rules are loaded: a
+test that cannot tell "blocked" from "broken" reports the same thing
+either way. That precondition immediately earned itself by catching a
+mangled address from `just`'s own `{{ }}` escaping.
+
+### What this still does not cover
+
+DNS takeover, the transparent redirect to the proxy, the login path and
+the first-boot wizard. Those need a booted machine — `just vm`, which
+needs sudo.

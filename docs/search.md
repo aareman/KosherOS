@@ -125,3 +125,36 @@ shipped one. Both are checked against ordinary text in the test suite:
 chicken breast recipes, breast cancer information, biology lessons,
 Sussex, Middlesex and a page arguing *for* modest dress all come back
 clean.
+
+## Verified against a running stack
+
+The unit tests exercise the decision engine with a stubbed back end. That
+is not enough for this part of the system, and three faults proved it —
+each one shipped, and none of them was reachable from a unit test:
+
+* **SearXNG was not installed at all.** `pip install` of its repository
+  fails outright: its `setup.py` imports `searx/__init__.py`, which
+  imports `msgspec` before anything is installed. The build swallowed that
+  into a warning. It is now cloned and its `requirements.txt` installed,
+  which is upstream's own instruction, and the unit runs it from the tree.
+* **Our `settings.yml` was invalid.** `preferences.lock` carried
+  `safe_search`, which is not a lockable preference (the name is
+  `safesearch`, already on the list). SearXNG validates this and refuses
+  to start — correctly, and it is how this was found.
+* **Three "disabled" engines did not exist.** Naming an engine SearXNG
+  does not ship does not disable anything; it *defines* a new one with no
+  `engine:` field, which fails to load and logs an error at every startup.
+
+The last two are now build-time checks: the image build loads our
+`settings.yml` against the SearXNG it just installed and fails if either
+disagrees, so a bad setting cannot ship again.
+
+The whole stack is exercised against a live back end — SearXNG started
+exactly as its unit starts it, a real search through the front end, 27
+results in and 27 rendered, an explicit query still refused, and an
+"ask for this page" landing in the spool.
+
+One log line remains and is upstream's: SearXNG loads the `torch` onion
+engine's module before it checks whether the engine is disabled, so it
+logs a registration failure at startup for an engine that has no Tor proxy
+to reach and that we disable anyway.

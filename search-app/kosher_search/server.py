@@ -152,7 +152,14 @@ class Backend:
             # reaches the front end must not be able to turn it off.
             "safesearch": 2,
         })
-        request = urllib.request.Request(f"{self.base}/search?{params}")
+        # SearXNG's bot detection logs an error on every request with no
+        # forwarded-for header. There is genuinely no proxy in front of
+        # it — we are the only client, on loopback — so state that rather
+        # than leave a spurious error in the journal on every search.
+        request = urllib.request.Request(f"{self.base}/search?{params}", headers={
+            "X-Forwarded-For": "127.0.0.1",
+            "X-Real-IP": "127.0.0.1",
+        })
         with urllib.request.urlopen(request, timeout=self.timeout) as response:
             return json.loads(response.read())
 

@@ -1,0 +1,20 @@
+# Bot detection for an instance with exactly one client.
+#
+# SearXNG logs a missing-file warning and an "X-Forwarded-For nor
+# X-Real-IP header is set" error at startup without this. Both are noise
+# here — the only thing that ever connects is kosher-search on loopback,
+# and the firewall rejects anyone else — but noise in the journal is how
+# a real fault gets missed later.
+[botdetection]
+# No proxy in front of us, so trust the socket and no headers.
+trusted_proxies = []
+ipv4_prefix = 32
+ipv6_prefix = 128
+
+[botdetection.ip_limit]
+# The token dance exists to tell a browser from a script. Our client is a
+# script, on purpose.
+link_token = false
+
+[botdetection.ip_lists]
+pass_ip = ["127.0.0.1", "::1"]

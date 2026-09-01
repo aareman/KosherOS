@@ -22,6 +22,9 @@ server:
   bind_address: "127.0.0.1"
   port: 8889
   limiter: false          # only one local client ever connects
+  # SearXNG probes for this even with the limiter off; shipping it keeps
+  # a spurious warning and error out of the journal (see limiter.toml).
+  limiter_settings_path: "/usr/share/kosher/searxng/limiter.toml"
   public_instance: false
   image_proxy: false      # see below
   method: "GET"
@@ -52,7 +55,6 @@ preferences:
     - language
     - image_proxy
     - method
-    - safe_search
 
 outgoing:
   request_timeout: 4.0
@@ -70,15 +72,24 @@ outgoing:
 engines:
   # Engines that exist to index material this machine filters have no
   # business being queried at all: they are a second front door.
+  #
+  # Every name here must be one SearXNG actually ships. Naming an engine
+  # it does not know does not disable anything — it DEFINES a new engine
+  # with no `engine:` field, which fails to load and logs an error at
+  # every startup. reddit, tumblr and torznab were in this list and are
+  # not engines SearXNG has.
   - name: piratebay
     disabled: true
   - name: 1337x
     disabled: true
   - name: nyaa
     disabled: true
-  - name: torznab
-    disabled: true
   - name: btdigg
+    disabled: true
+  # An onion search engine. It fails to load anyway without a Tor proxy,
+  # but the reason to name it is that reaching the filter's blind spot is
+  # exactly what it is for.
+  - name: torch
     disabled: true
   - name: kickass
     disabled: true
@@ -93,8 +104,4 @@ engines:
   - name: 9gag
     disabled: true
   - name: imgur
-    disabled: true
-  - name: reddit
-    disabled: true
-  - name: tumblr
     disabled: true

@@ -204,3 +204,13 @@ def test_dismissing_changes_nothing_but_clears_the_queue(tmp_path, monkeypatch):
     daemon.impl_DismissRequest(request_id)
     assert user.rules == []
     assert accessreq.pending(spool=tmp_path) == []
+
+
+def test_a_missing_spool_gives_words_rather_than_a_traceback(tmp_path):
+    # The spool is created by tmpfiles.d at boot. If it is not there, the
+    # person asking must see something they can act on — asking is the one
+    # thing that must not feel broken.
+    with pytest.raises(accessreq.RequestError) as caught:
+        accessreq.submit(1001, "https://example.com/",
+                         spool=tmp_path / "does-not-exist")
+    assert "could not record" in str(caught.value)

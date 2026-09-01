@@ -79,11 +79,19 @@ def submit(uid: int, url: str, note: str = "", *,
     }
     path = spool / f"{request_id}.json"
     tmp = spool / f".{request_id}.tmp"
-    # Written then renamed: a reader must never see half a request.
-    with open(tmp, "w") as handle:
-        json.dump(document, handle)
-    os.chmod(tmp, 0o644)
-    os.rename(tmp, path)
+    try:
+        # Written then renamed: a reader must never see half a request.
+        with open(tmp, "w") as handle:
+            json.dump(document, handle)
+        os.chmod(tmp, 0o644)
+        os.rename(tmp, path)
+    except OSError as e:
+        # The spool is created by tmpfiles.d at boot. If it is not there,
+        # say so in words the person can act on rather than showing them a
+        # traceback — asking is the one thing that must not feel broken.
+        log.error("cannot write to the request spool %s: %s", spool, e)
+        raise RequestError(
+            "this computer could not record the request") from None
     return request_id
 
 

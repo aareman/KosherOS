@@ -102,7 +102,11 @@ class Scorer:
         # Longest first so "sex video" scores as the phrase, not as "sex".
         ordered = sorted(self.terms, key=len, reverse=True)
         alts = "|".join(re.escape(t).replace(r"\ ", r"\s+") for t in ordered)
-        return re.compile(rf"(?<![\w-])({alts})(?![\w-])", re.IGNORECASE)
+        # An optional plural on the end: a list written in the singular
+        # otherwise misses "crop tops" and "mini skirts", which is how a
+        # page of them scored twenty points and passed.
+        return re.compile(rf"(?<![\w-])({alts})(?:e?s)?(?![\w-])",
+                          re.IGNORECASE)
 
     def score(self, text: str, *, allow_help_context: bool = True) -> Verdict:
         if not self._regex or not text:

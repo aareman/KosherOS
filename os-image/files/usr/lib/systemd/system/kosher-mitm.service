@@ -1,6 +1,6 @@
 [Unit]
 Description=KosherOS URL filter (mitmproxy, inspect mode)
-After=kosher-firewall.service kosher-dns.service network.target
+After=kosher-firewall.service kosher-dns.service network.target systemd-tmpfiles-setup.service
 Wants=kosher-dns.service
 # Restarted on every policy change; see kosher-dns.service.
 StartLimitIntervalSec=0
@@ -35,7 +35,7 @@ ReadWritePaths=/var/lib/kosher-mitm
 # Drop-only: the service may create an "ask for this page"
 # request here, and the directory's own 0730 mode stops it
 # reading anyone else's.
-ReadWritePaths=/var/lib/kosher-requests
+ReadWritePaths=-/var/lib/kosher-requests
 PrivateTmp=yes
 NoNewPrivileges=yes
 

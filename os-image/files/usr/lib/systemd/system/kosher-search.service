@@ -1,6 +1,6 @@
 [Unit]
 Description=KosherOS search (the filtered page users see)
-After=kosher-searxng.service
+After=kosher-searxng.service systemd-tmpfiles-setup.service
 Wants=kosher-searxng.service
 StartLimitIntervalSec=0
 
@@ -20,7 +20,7 @@ ReadWritePaths=/var/lib/kosher-search
 # Drop-only: the service may create an "ask for this page"
 # request here, and the directory's own 0730 mode stops it
 # reading anyone else's.
-ReadWritePaths=/var/lib/kosher-requests
+ReadWritePaths=-/var/lib/kosher-requests
 PrivateTmp=yes
 NoNewPrivileges=yes
 ProtectHome=yes

@@ -218,7 +218,9 @@ def _compile(terms: list[str]) -> re.Pattern | None:
     # as /womens-lingerie/ and ?dept=lingerie, not as free text.
     alts = "|".join(re.escape(t.lower()).replace(r"\ ", r"[\s\-_+]") for t in
                     sorted(terms, key=len, reverse=True))
-    return re.compile(rf"(?<![a-z0-9])({alts})(?![a-z0-9])")
+    # An optional plural: a department is "bras" on one shop and "bra" on
+    # the next, and the list should not have to carry both spellings.
+    return re.compile(rf"(?<![a-z0-9])({alts})(?:e?s)?(?![a-z0-9])")
 
 
 def load(*paths: Path) -> SiteRules:

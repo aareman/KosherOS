@@ -31,6 +31,7 @@ needs no judgement ("hide every picture") rather than to no filtering.
 from __future__ import annotations
 
 import hashlib
+import json
 import logging
 import sqlite3
 import threading
@@ -41,6 +42,15 @@ from pathlib import Path
 log = logging.getLogger(__name__)
 
 CACHE_PATH = Path("/var/lib/kosher-mitm/images.sqlite")
+# What the proxy tells the rest of the system about picture checking. The
+# proxy is the only thing that knows whether the machine can keep up, and
+# an admin who sees blank pictures deserves to be told why rather than
+# left to guess that the filter is broken.
+STATUS_PATH = Path("/var/lib/kosher-mitm/status.json")
+
+CHECKING = "checking"
+TOO_SLOW = "too_slow"
+NO_MODEL = "no_model"
 
 # Same ladder as the text scorer and the media levels a parent chooses.
 CLEAN = "clean"
@@ -331,6 +341,42 @@ class ImageFilter:
         self._slow_ms = slow_ms
         self._recent: list[float] = []
         self._said_slow = False
+        self._published = None
+
+    def status(self) -> dict:
+        """What to tell an admin about picture checking on this machine."""
+        if not self.available:
+            state = NO_MODEL
+        elif self.degraded:
+            state = TOO_SLOW
+        else:
+            state = CHECKING
+        median = None
+        if self._recent:
+            ordered = sorted(self._recent)
+            median = round(ordered[len(ordered) // 2])
+        return {"pictures": state, "detect_ms": median,
+                "samples": len(self._recent)}
+
+    def write_status(self, path: Path = None) -> None:
+        """Publish the status, but only when it has changed.
+
+        Written by the proxy, read by kosherd. A file rather than a bus
+        call because the proxy is unprivileged and already talks to the
+        rest of the system this way.
+        """
+        status = self.status()
+        if status["pictures"] == self._published:
+            return
+        self._published = status["pictures"]
+        target = Path(path) if path is not None else STATUS_PATH
+        try:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            tmp = target.with_suffix(".tmp")
+            tmp.write_text(json.dumps(status) + "\n")
+            tmp.replace(target)
+        except OSError:
+            log.debug("could not publish picture status", exc_info=True)
 
     @property
     def degraded(self) -> bool:

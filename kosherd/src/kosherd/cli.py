@@ -38,6 +38,20 @@ def cmd_status(args) -> int:
     for u in pol["users"]:
         extra = f" whitelist={len(u.get('whitelist', []))} domains" if u["mode"] == "whitelist" else ""
         print(f"  {u['username']} (uid {u['uid']}): {u['mode']}{extra}")
+    try:
+        status = _client().filter_status()
+    except Exception:  # noqa: BLE001 - status must not break the listing
+        status = {}
+    if status.get("pictures") == "too_slow":
+        print(f"  ! pictures are hidden, not checked: "
+              f"{status.get('detect_ms')} ms each on this computer",
+              file=sys.stderr)
+    elif status.get("pictures") == "no_model":
+        print("  ! pictures are hidden, not checked: no model installed",
+              file=sys.stderr)
+    for service in status.get("degraded", []):
+        print(f"  ! {service} should be running and is not", file=sys.stderr)
+
     guest = pol.get("guest", {"enabled": False})
     if guest["enabled"]:
         print(f"  guest: enabled, mode {guest.get('mode', 'whitelist')}")

@@ -120,6 +120,13 @@ want "an unreadable picture is hidden" "image-hidden" \
     "$(curl "${P[@]}" -o /dev/null -D - http://127.0.0.1:9099/pic \
         | grep -oiE 'image-hidden|image-covered' | head -1)"
 
+# The proxy publishes whether it can keep up; an admin who sees blank
+# pictures should be told why rather than left to guess.
+want "the proxy publishes a picture status" "yes" \
+    "$([ -s /var/lib/kosher-mitm/status.json ] && echo yes || echo no)"
+say "  reported state" \
+    "$(python3 -c "import json;print(json.load(open('/var/lib/kosher-mitm/status.json'))['pictures'])" 2>/dev/null || echo '(none)')"
+
 if grep -qiE "traceback|kosher_filter.*error" /tmp/mitm.log; then
     echo "  the addon logged an error:"; grep -iE "traceback|error" /tmp/mitm.log | head -5
     fail=1

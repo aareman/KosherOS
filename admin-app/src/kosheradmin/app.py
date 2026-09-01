@@ -77,6 +77,22 @@ YOUTUBE_RESTRICT_ORDER = ("none", "moderate", "strict")
 
 PROFILE_CUSTOM = "Custom"
 
+# What to say when picture checking is not doing what the settings claim.
+# Silence would be the worst option: a family that sees blank pictures and
+# no explanation concludes the filter is broken and turns it off.
+PICTURE_STATE = {
+    "too_slow": (
+        "This computer is hiding pictures instead of checking them",
+        "Checking each picture takes about {ms} ms here, which would make "
+        "pages slow to load and still leave many unchecked. Hiding them is "
+        "faster and never wrong. Set “Pictures and video” to “Show all "
+        "pictures” if you would rather have them."),
+    "no_model": (
+        "Pictures are being hidden, not checked",
+        "The picture model is not installed on this computer, so any "
+        "account set to filter pictures hides them instead."),
+}
+
 
 def _run_async(work, on_done, on_error) -> None:
     """Run `work()` off the main loop; deliver result/exception on it."""
@@ -746,6 +762,7 @@ class ProfilesPage(Adw.PreferencesPage):
             actions.add(row)
         self.actions_group = actions
         self.requests_group = None
+        self.status_group = None
 
     def refresh(self) -> None:
         if self.users_group is not None:
@@ -755,11 +772,17 @@ class ProfilesPage(Adw.PreferencesPage):
             if self.requests_group is not None:
                 self.remove(self.requests_group)
                 self.requests_group = None
+            if self.status_group is not None:
+                self.remove(self.status_group)
+                self.status_group = None
         # Above everything else, because it is the only thing on this page
         # that somebody is waiting on.
         self.requests_group = self._build_requests_group()
         if self.requests_group is not None:
             self.add(self.requests_group)
+        self.status_group = self._build_status_group()
+        if self.status_group is not None:
+            self.add(self.status_group)
         group = Adw.PreferencesGroup(title="Profiles")
         g = self.win.policy["guardian"]["enabled"]
         group.set_description(f"Guardian dual-control is {'ON' if g else 'off'}")
@@ -770,6 +793,39 @@ class ProfilesPage(Adw.PreferencesPage):
         self.guest_group = self._build_guest_group()
         self.add(self.guest_group)
         self.add(self.actions_group)
+
+    def _build_status_group(self):
+        """Say when the filter is not doing what the settings say it does.
+
+        A filter that has quietly stopped doing something is worse than one
+        that never did it, because the family is relying on it — and the
+        version of this that says nothing teaches people that blank
+        pictures mean the computer is broken.
+        """
+        try:
+            status = self.win.client.filter_status()
+        except Exception:  # noqa: BLE001 - never keep the page from loading
+            return None
+
+        rows = []
+        state = status.get("pictures")
+        if state in PICTURE_STATE:
+            title, body = PICTURE_STATE[state]
+            rows.append((title, body.format(ms=status.get("detect_ms") or "?")))
+        for service in status.get("degraded", []):
+            rows.append((
+                "Part of the filter is not running",
+                f"{service} should be running on this computer and is not. "
+                "Until it is, what it enforces is not being enforced."))
+        if not rows:
+            return None
+
+        group = Adw.PreferencesGroup(title="Needs your attention")
+        for title, body in rows:
+            row = Adw.ActionRow(title=title, subtitle=body, subtitle_lines=4)
+            row.add_prefix(Gtk.Image(icon_name="dialog-warning-symbolic"))
+            group.add(row)
+        return group
 
     def _build_requests_group(self):
         """Pages somebody has asked for, waiting on an answer.

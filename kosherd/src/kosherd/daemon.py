@@ -24,7 +24,7 @@ from . import BUS_NAME, OBJECT_PATH, access, apps, auth, policy as policy_mod
 from .apply import apply_policy
 from .apps import AppError
 from .guardian import Guardian, GuardianError
-from .policy import MODES, Policy, PolicyError, UserPolicy
+from .policy import INSPECTED_MODES, MODES, Policy, PolicyError, UserPolicy
 from .session import SessionStore
 
 log = logging.getLogger("kosherd")
@@ -52,6 +52,9 @@ INTROSPECTION_XML = """
       <arg direction="in" type="i" name="uid"/>
       <arg direction="in" type="as" name="categories"/>
       <arg direction="in" type="s" name="guardian_password"/>
+    </method>
+    <method name="FilterStatus">
+      <arg direction="out" type="s" name="status_json"/>
     </method>
     <method name="ListRequests">
       <arg direction="out" type="s" name="requests_json"/>
@@ -392,6 +395,44 @@ class Daemon:
         user.whitelist = sorted(set(domains))
         self._save_and_apply()
         return None
+
+    def impl_FilterStatus(self):
+        """What is actually being enforced right now, as opposed to configured.
+
+        A filter that has quietly stopped doing something is worse than one
+        that never did it, because the family is relying on it. Everything
+        here is a fact about this machine at this moment, not a setting.
+        """
+        from . import vision
+
+        status = {"pictures": vision.NO_MODEL, "detect_ms": None,
+                  "services": {}}
+        try:
+            status.update(json.loads(vision.STATUS_PATH.read_text()))
+        except (OSError, ValueError):
+            # Nothing has been judged yet, or nobody is in a mode that
+            # judges. Neither is a fault; say so rather than guess.
+            status["pictures"] = "unknown"
+
+        for service in ("kosher-mitm.service", "kosher-dns.service",
+                        "kosher-search.service", "kosher-searxng.service"):
+            result = subprocess.run(["systemctl", "is-active", service],
+                                    capture_output=True, text=True)
+            status["services"][service] = result.stdout.strip() or "unknown"
+
+        needed = {
+            "kosher-mitm.service": any(u.mode in INSPECTED_MODES
+                                       for u in self.policy.effective_users()),
+            "kosher-dns.service": True,
+            "kosher-search.service": any(
+                u.mode not in ("unfiltered", "none")
+                for u in self.policy.effective_users()),
+        }
+        status["degraded"] = [
+            name for name, must_run in needed.items()
+            if must_run and status["services"].get(name) != "active"
+        ]
+        return GLib.Variant("(s)", (json.dumps(status),))
 
     def impl_ListRequests(self):
         from . import accessreq

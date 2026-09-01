@@ -163,6 +163,18 @@ the computer can do. Verdicts already in the cache are still served, since
 they cost nothing and are just as accurate on a slow machine. The window
 rolls, so a machine that was briefly busy recovers on its own.
 
+**And it says so.** The proxy publishes its state — `checking`, `too_slow`
+or `no_model` — and kosherd reports it, with which services should be
+running and are not, through `FilterStatus`. The admin app puts that at
+the top of the page under "Needs your attention", and `kosherctl status`
+prints it.
+
+This matters more than it looks. A filter that has quietly stopped doing
+something is worse than one that never did it, because the family is
+relying on it. And the version of this feature that says nothing teaches
+people that blank pictures mean the computer is broken — which is how a
+filter ends up switched off.
+
 ### Cheapest thing that can decide, first
 
 Each stage only runs if the one before it could not settle the question:

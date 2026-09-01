@@ -304,7 +304,10 @@ def _stub_categories():
 
 
 def _stub_vision(verdict):
-    return type("V", (), {"verdict": staticmethod(lambda data: verdict)})()
+    return type("V", (), {
+        "verdict": staticmethod(lambda data: verdict),
+        "write_status": staticmethod(lambda *a, **k: None),
+    })()
 
 
 # -- video --------------------------------------------------------------------

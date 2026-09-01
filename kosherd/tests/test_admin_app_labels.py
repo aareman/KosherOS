@@ -61,3 +61,15 @@ def test_youtube_categories_are_worth_showing():
     # labels are what a parent reads in the dialog.
     assert "27" in YOUTUBE_CATEGORIES and YOUTUBE_CATEGORIES["27"] == "Education"
     assert all(code.isdigit() and label for code, label in YOUTUBE_CATEGORIES.items())
+
+
+def test_every_reportable_picture_state_has_something_to_say(constants):
+    # A filter that has quietly stopped doing something is worse than one
+    # that never did it. Adding a state and forgetting the words for it
+    # means the app says nothing at all.
+    from kosherd import vision
+
+    reportable = {vision.TOO_SLOW, vision.NO_MODEL}
+    assert set(constants["PICTURE_STATE"]) == reportable
+    for title, body in constants["PICTURE_STATE"].values():
+        assert title and body

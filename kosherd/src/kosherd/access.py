@@ -62,6 +62,7 @@ ACTIONS = {
     "SetLanguageFilter": ACTION_MANAGE_FILTER,
     "SetYouTube": ACTION_MANAGE_FILTER,
     "ListProfiles": ACTION_READ_CONFIG,
+    "FilterStatus": ACTION_READ_CONFIG,
     "ListCategories": ACTION_READ_CONFIG,
     "SetGuestConfig": ACTION_MANAGE_FILTER,
     "CreateUser": ACTION_MANAGE_USERS,

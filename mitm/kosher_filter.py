@@ -610,6 +610,8 @@ class KosherFilter:
             return
 
         verdict = self.vision.verdict(body)
+        # Cheap: it only writes when the answer has changed.
+        self.vision.write_status()
         if verdict is None:
             # Could not look — no model installed, or it took too long.
             # Hiding is the safe direction, and it is the honest one: an

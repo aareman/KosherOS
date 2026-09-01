@@ -242,10 +242,16 @@ class ResultFilter:
                 if action == BLOCK:
                     return f"blocked by the rule {pattern}"
 
-        if is_media and user.get("media_level", "none") != "none":
-            # Thumbnails are pictures chosen by a search engine from pages
-            # nobody has vetted. Until the classifier scores them, a user
-            # with any media filtering does not get an image search.
+        if is_media and self._thumbnails_unchecked(user):
+            # A thumbnail is a picture a search engine chose from a page
+            # nobody has vetted, so an account that filters pictures must
+            # not simply be handed a grid of them.
+            #
+            # In filtered mode it IS checked: image_proxy is off, so the
+            # thumbnail loads from its origin, through the proxy, and gets
+            # judged like any other picture. Withholding image search from
+            # those accounts would be refusing something the filter is
+            # already handling.
             return "images are filtered for this account"
 
         if text:
@@ -260,6 +266,18 @@ class ResultFilter:
             if self.scorer.score(text).at_least(tolerance):
                 return "the result reads as inappropriate"
         return None
+
+    @staticmethod
+    def _thumbnails_unchecked(user: dict) -> bool:
+        """Would this account's thumbnails reach it unexamined?
+
+        Only filtered mode reads the connection, so only there can a
+        picture be judged. Everywhere else the honest answer to "may I
+        show you a grid of pictures from pages nobody has vetted" is no.
+        """
+        if user.get("media_level", "none") == "none":
+            return False
+        return user.get("mode") != "filtered"
 
     @staticmethod
     def _whitelisted(user: dict, host: str) -> bool:

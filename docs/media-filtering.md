@@ -276,6 +276,15 @@ a response's shape. A suggestion is a few words rather than a page, so the
 term list answers there and not the content scorer, which needs more
 evidence than one word can carry.
 
+### Image search
+
+Search thumbnails were withheld outright from any account that filters
+pictures. That is now conditional on whether they can be checked: in
+filtered mode `image_proxy` is off, so each thumbnail loads from its
+origin through the proxy and is judged like any other picture. Only the
+modes that never read the connection still withhold them, because there
+they would arrive unexamined.
+
 ### Removing the item beats judging the page
 
 A shop names its whole catalogue in the navigation of every page. Scoring

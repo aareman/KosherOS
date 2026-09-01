@@ -108,9 +108,18 @@ thumbnails load from their origin, so a whitelist user simply does not get
 them and a filtered user gets them through the proxy like any other
 picture.
 
-Beyond that, accounts with any media filtering do not get image results at
-all for now. That is a placeholder, not a judgement: it holds until the
-image classifier can score a thumbnail.
+Beyond that, whether an account gets image results depends on whether
+anything will actually look at the thumbnails.
+
+In **filtered** mode they do. `image_proxy` is off, so a thumbnail loads
+from its origin, through the proxy, and is judged exactly like any other
+picture — withholding image search from those accounts would be refusing
+something the filter is already handling.
+
+In every other mode they do not, because no other mode reads the
+connection. A grid of pictures chosen by a search engine from pages nobody
+has vetted is not something to hand an account that asked for pictures to
+be filtered, and there is nowhere else to check them.
 
 ## Lists
 

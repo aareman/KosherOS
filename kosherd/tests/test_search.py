@@ -168,9 +168,14 @@ def test_the_media_level_decides_how_much_a_page_may_say():
     assert relaxed.allows(1002, "https://shop.example/", text=snippet)
 
 
-def test_image_results_are_withheld_from_users_with_media_filtering():
-    strict = make_filter({1001: {"mode": "filtered", "media_level": "suggestive"}})
-    relaxed = make_filter({1002: {"mode": "filtered", "media_level": "none"}})
+def test_image_results_are_withheld_from_users_nothing_can_check():
+    # Superseded the blanket rule: what matters is whether the thumbnail
+    # will be examined on its way in, not merely that the account filters
+    # pictures. See test_image_results_are_allowed_where_the_proxy_will_
+    # check_them.
+    strict = make_filter({1001: {"mode": "dnsfilter",
+                                 "media_level": "suggestive"}})
+    relaxed = make_filter({1002: {"mode": "dnsfilter", "media_level": "none"}})
     assert not strict.allows(1001, "https://chinuch.org/pic.jpg", is_media=True)
     assert relaxed.allows(1002, "https://chinuch.org/pic.jpg", is_media=True)
 
@@ -324,3 +329,34 @@ def test_departments_are_only_filtered_for_accounts_that_asked():
     f = make_filter({1001: {"mode": "dnsfilter",
                             "blocked_categories": ["gambling"]}}, sites=sites)
     assert f.allows(1001, "https://www.amazon.com/s?k=x&i=fashion-womens")
+
+
+# -- image results ------------------------------------------------------------
+
+def test_image_results_are_withheld_where_nothing_can_check_them():
+    # dnsfilter never reads the connection, so a thumbnail would arrive
+    # unexamined.
+    f = make_filter({1001: {"mode": "dnsfilter", "media_level": "immodest"}})
+    assert not f.allows(1001, "https://example.com/pic.jpg", is_media=True)
+
+
+def test_image_results_are_allowed_where_the_proxy_will_check_them():
+    # In filtered mode image_proxy is off, so the thumbnail loads from its
+    # origin through the proxy and is judged like any other picture.
+    # Withholding it here would refuse something the filter already handles.
+    f = make_filter({1001: {"mode": "filtered", "media_level": "immodest"}})
+    assert f.allows(1001, "https://example.com/pic.jpg", is_media=True)
+
+
+def test_an_account_that_filters_no_pictures_gets_image_results():
+    for mode in ("filtered", "dnsfilter"):
+        f = make_filter({1001: {"mode": mode, "media_level": "none"}})
+        assert f.allows(1001, "https://example.com/pic.jpg", is_media=True), mode
+
+
+def test_a_blocked_host_is_still_dropped_from_image_results():
+    # The relaxation is about thumbnails being checkable, not about
+    # category filtering going away.
+    f = make_filter({1001: {"mode": "filtered", "media_level": "immodest",
+                            "blocked_categories": ["adult"]}})
+    assert not f.allows(1001, "https://pornhub.com/pic.jpg", is_media=True)

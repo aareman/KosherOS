@@ -453,6 +453,10 @@ class KosherFilter:
         self.wordlist = language_mod.load()
         self.vision = vision_mod.ImageFilter()
         self.siterules = siterules_mod.load()
+        # What each page was judged to be, so the pictures ON it can be
+        # judged in that light. Small and bounded: a browser fetches a
+        # page's images within seconds of the page.
+        self.page_levels: dict[str, str] = {}
         self.blocklist = search_mod.load_blocklist()
 
     def request(self, flow: http.HTTPFlow) -> None:
@@ -685,12 +689,28 @@ class KosherFilter:
         tolerance = self._content_tolerance(
             uid, flow.request.pretty_host or "", stripped)
         verdict = self.scorer.score(text)
+        self._remember_page(flow.request.pretty_url, verdict.level)
         if verdict.at_least(tolerance):
             log.info("blocked uid=%s %s (content: %s, %d points, %s)",
                      uid, flow.request.pretty_url, verdict.level,
                      verdict.points, ", ".join(verdict.hits))
             self._block(flow, flow.request.pretty_url,
                         f" because the page reads as {verdict.level}")
+
+    MAX_REMEMBERED_PAGES = 64
+
+    def _remember_page(self, url: str, level: str) -> None:
+        if level == content_mod.CLEAN:
+            self.page_levels.pop(url, None)
+            return
+        self.page_levels[url] = level
+        while len(self.page_levels) > self.MAX_REMEMBERED_PAGES:
+            self.page_levels.pop(next(iter(self.page_levels)))
+
+    def _referring_page_level(self, flow: http.HTTPFlow) -> str:
+        """What the page this picture is on was judged to be."""
+        referer = flow.request.headers.get("referer") or ""
+        return self.page_levels.get(referer, "")
 
     def _filter_image(self, flow: http.HTTPFlow, uid: int) -> None:
         level = self.policy.media_level_for(uid)
@@ -727,6 +747,16 @@ class KosherFilter:
             self._blank_image(flow)
             return
         if not vision_mod.hides(level, verdict):
+            # The immodest level is the weak one: the detector has no
+            # label for a bare arm, so a clothed model in a lingerie
+            # catalogue comes back clean. The page's own words and the
+            # presence of a person together catch most of that.
+            if not vision_mod.in_context(verdict, self._referring_page_level(flow),
+                                         CONTENT_TOLERANCE.get(level, "nsfw")):
+                return
+            log.info("hid a picture on a page that reads as %s",
+                     self._referring_page_level(flow))
+            self._blank_image(flow)
             return
 
         # Cover only what was found, so the rest of the picture — and the

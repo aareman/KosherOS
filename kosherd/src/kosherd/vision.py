@@ -94,6 +94,12 @@ FEMALE_LABELS = frozenset({"FEMALE_FACE", "FEMALE_BREAST_COVERED",
                            "FEMALE_BREAST_EXPOSED", "FEMALE_GENITALIA_COVERED",
                            "FEMALE_GENITALIA_EXPOSED"})
 
+# Anything that says "there is a person in this picture". Reliable in a way
+# the immodesty judgement is not: the detector has no label for a bare arm,
+# but it is good at finding people.
+PERSON_LABELS = (NSFW_LABELS | SUGGESTIVE_LABELS | IMMODEST_LABELS
+                 | frozenset({"FEMALE_FACE", "MALE_FACE"}))
+
 # Below this the detector is guessing. Deliberately low: a missed explicit
 # region costs far more than a blurred elbow.
 MIN_CONFIDENCE = 0.25
@@ -128,6 +134,10 @@ class Detection:
 class ImageVerdict:
     level: str
     regions: tuple[tuple[int, int, int, int], ...] = ()
+    # Whether there is a person in the picture at all. Separate from the
+    # level because the detector is reliable about this and unreliable
+    # about immodesty, and the two are used differently.
+    has_person: bool = False
 
     def at_least(self, level: str) -> bool:
         return SEVERITY[self.level] >= SEVERITY[level]
@@ -149,11 +159,32 @@ def judge(detections) -> ImageVerdict:
     """A verdict, with the regions worth covering."""
     kept = [d for d in detections if d.score >= MIN_CONFIDENCE]
     level = level_of(kept)
+    people = tuple(d.box for d in kept if d.label in PERSON_LABELS)
     if level == CLEAN:
-        return ImageVerdict(CLEAN, ())
+        return ImageVerdict(CLEAN, (), bool(people))
     covered = NSFW_LABELS | SUGGESTIVE_LABELS | IMMODEST_LABELS
     regions = tuple(d.box for d in kept if d.label in covered)
-    return ImageVerdict(level, regions)
+    return ImageVerdict(level, regions, bool(people))
+
+
+def in_context(verdict: "ImageVerdict", page_level: str, tolerance: str) -> bool:
+    """Should this picture be hidden because of the page it is on?
+
+    The immodest level is the weak one: the detector has no label for a
+    bare arm or a bare leg, so a clothed model in a lingerie catalogue
+    comes back clean and the picture stays on screen next to the word
+    "lingerie". Two signals we already have fix most of that without a
+    model that does not exist — the page's own words, and whether there is
+    a person in the picture at all.
+
+    Neither alone would do. Hiding every picture on a page that scored
+    immodest would take out the shop's logo and its navigation icons;
+    hiding every picture containing a person would take out a news
+    photograph on a page about nothing in particular.
+    """
+    if not verdict.has_person or not page_level:
+        return False
+    return SEVERITY.get(page_level, 0) >= SEVERITY.get(tolerance, 99)
 
 
 def hides(media_level: str, verdict: ImageVerdict) -> bool:
@@ -175,7 +206,8 @@ CREATE TABLE IF NOT EXISTS images (
     sha     TEXT PRIMARY KEY,
     level   TEXT NOT NULL,
     regions TEXT NOT NULL,
-    seen    INTEGER NOT NULL
+    seen    INTEGER NOT NULL,
+    person  INTEGER NOT NULL DEFAULT 0
 );
 """
 
@@ -205,24 +237,25 @@ class VerdictCache:
         try:
             with self._lock:
                 row = self._conn().execute(
-                    "SELECT level, regions, seen FROM images WHERE sha = ?",
-                    (sha,)).fetchone()
+                    "SELECT level, regions, seen, person FROM images "
+                    "WHERE sha = ?", (sha,)).fetchone()
         except sqlite3.Error:
             return None
         if not row or time.time() - row[2] > self.ttl:
             return None
-        return ImageVerdict(row[0], _unpack(row[1]))
+        return ImageVerdict(row[0], _unpack(row[1]), bool(row[3]))
 
     def put(self, sha: str, verdict: ImageVerdict) -> None:
         try:
             with self._lock:
                 db = self._conn()
                 db.execute(
-                    "INSERT INTO images (sha, level, regions, seen) "
-                    "VALUES (?, ?, ?, ?) ON CONFLICT(sha) DO UPDATE SET "
+                    "INSERT INTO images (sha, level, regions, seen, person) "
+                    "VALUES (?, ?, ?, ?, ?) ON CONFLICT(sha) DO UPDATE SET "
                     "level=excluded.level, regions=excluded.regions, "
-                    "seen=excluded.seen",
-                    (sha, verdict.level, _pack(verdict.regions), int(time.time())))
+                    "seen=excluded.seen, person=excluded.person",
+                    (sha, verdict.level, _pack(verdict.regions),
+                     int(time.time()), int(verdict.has_person)))
                 db.commit()
         except sqlite3.Error:
             log.debug("could not cache an image verdict", exc_info=True)

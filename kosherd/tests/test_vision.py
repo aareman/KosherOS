@@ -265,3 +265,53 @@ def test_one_slow_picture_does_not_condemn_the_machine(tmp_path):
     for i in range(vision.SLOW_WINDOW):
         f.verdict(b"x" * 10_000 + bytes([i % 251]))
     assert not f.degraded
+
+
+# -- the picture judged by the page it is on ----------------------------------
+
+def test_a_person_on_an_immodest_page_is_hidden():
+    # The gap this closes: a clothed model in a lingerie catalogue has no
+    # exposure labels, so the detector calls the picture clean and it
+    # stays on screen next to the word "lingerie".
+    clothed_model = vision.ImageVerdict(CLEAN, (), has_person=True)
+    assert vision.in_context(clothed_model, page_level=IMMODEST,
+                             tolerance=IMMODEST)
+
+
+def test_a_logo_on_the_same_page_is_not():
+    # Hiding every picture on the page would take out the shop's own
+    # navigation, which is how a filter becomes an outage.
+    logo = vision.ImageVerdict(CLEAN, (), has_person=False)
+    assert not vision.in_context(logo, page_level=IMMODEST, tolerance=IMMODEST)
+
+
+def test_a_person_on_an_ordinary_page_is_not():
+    # Otherwise every news photograph goes, everywhere.
+    photo = vision.ImageVerdict(CLEAN, (), has_person=True)
+    assert not vision.in_context(photo, page_level="", tolerance=IMMODEST)
+    assert not vision.in_context(photo, page_level=CLEAN, tolerance=IMMODEST)
+
+
+def test_the_page_has_to_be_bad_enough_for_this_account():
+    photo = vision.ImageVerdict(CLEAN, (), has_person=True)
+    # An account that only hides explicit pictures is not asking for this.
+    assert not vision.in_context(photo, page_level=IMMODEST, tolerance=NSFW)
+    assert vision.in_context(photo, page_level=NSFW, tolerance=NSFW)
+
+
+def test_a_face_is_enough_to_count_as_a_person():
+    # The detector is reliable about finding people and unreliable about
+    # judging modesty, which is exactly why the two are used differently.
+    assert vision.judge([det("FEMALE_FACE")]).has_person
+    assert vision.judge([det("MALE_FACE")]).has_person
+    assert not vision.judge([]).has_person
+    # ...and a face alone is still not a finding on its own.
+    assert vision.judge([det("FEMALE_FACE")]).level == CLEAN
+
+
+def test_whether_there_was_a_person_survives_the_cache(tmp_path):
+    cache = vision.VerdictCache(tmp_path / "i.sqlite")
+    cache.put("abc", vision.ImageVerdict(CLEAN, (), has_person=True))
+    assert cache.get("abc").has_person is True
+    cache.put("def", vision.ImageVerdict(CLEAN, (), has_person=False))
+    assert cache.get("def").has_person is False

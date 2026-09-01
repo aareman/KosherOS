@@ -53,13 +53,39 @@ a corrupt image: the answer is to hide the picture, never to show it. The
 null detector returns *nothing* rather than "clean" specifically so that
 "looked and found nothing" cannot be confused with "could not look".
 
-The honest position on `immodest`: it is genuinely weaker than the two
-levels above it. The detector has no label for bare arms or bare legs, so
-this level catches what the model can see and no more. A family that wants
-tzniut enforced strictly should choose **hide all pictures**, which is the
-only setting that needs no judgement and is therefore the only one that is
-right every time. The sections below on a tzniut classifier are the plan
-for closing that gap; nothing in them has been built.
+### The immodest level, and the one honest way to strengthen it
+
+`immodest` is genuinely weaker than the two levels above it. The detector
+has no label for a bare arm or a bare leg, so a clothed model in a
+lingerie catalogue comes back **clean** and the picture stays on screen
+next to the word "lingerie".
+
+Rather than invent a signal, two that already exist are combined: what the
+page says, and whether there is a person in the picture at all. The
+detector is reliable about finding people and unreliable about judging
+modesty, which is exactly why those are used differently. So a picture is
+hidden when the page it came from scored at or beyond this account's
+tolerance **and** the picture contains a person.
+
+Neither half would do alone. Hiding every picture on a page that scored
+immodest takes out the shop's own logo and navigation icons; hiding every
+picture containing a person takes out a news photograph on a page about
+nothing in particular. Both cases are tested.
+
+The picture is matched to its page through the `Referer` header, against a
+bounded cache of recent page verdicts — a browser fetches a page's images
+within seconds of the page.
+
+This closes most of the catalogue case and none of the general one. A
+family that wants tzniut enforced strictly should still choose **hide all
+pictures**, which needs no judgement and is therefore the only setting
+that is right every time. The sections below on a tzniut classifier remain
+the plan for the rest; nothing in them has been built.
+
+A skin-tone heuristic would be the obvious next idea and is deliberately
+not used: skin detection works measurably better on some skin tones than
+others, and a filter that is stricter with some families than others
+because of that is not a filter this project should ship.
 
 ## Video
 

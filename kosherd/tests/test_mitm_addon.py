@@ -239,6 +239,7 @@ def test_the_proxy_hides_a_picture_it_could_not_judge(addon):
     filt = addon.KosherFilter.__new__(addon.KosherFilter)
     filt.policy = _stub_policy(media="immodest")
     filt.categories = _stub_categories()
+    filt.page_levels = {}
     filt.vision = _stub_vision(None)
     flow = _image_flow()
     filt._filter_image(flow, 1001)
@@ -251,6 +252,7 @@ def test_a_clean_picture_is_left_alone(addon):
     filt = addon.KosherFilter.__new__(addon.KosherFilter)
     filt.policy = _stub_policy(media="immodest")
     filt.categories = _stub_categories()
+    filt.page_levels = {}
     filt.vision = _stub_vision(vision.ImageVerdict(vision.CLEAN, ()))
     flow = _image_flow()
     original = flow.response.content
@@ -294,7 +296,8 @@ class _Resp:
 
 def _image_flow():
     return type("F", (), {
-        "request": type("R", (), {"pretty_host": "example.com"})(),
+        "request": type("R", (), {"pretty_host": "example.com",
+                                  "headers": {}})(),
         "response": _Resp(b"\x89PNG" + b"x" * 20_000,
                           {"content-type": "image/png"}),
     })()
@@ -536,6 +539,7 @@ def _shop_filter(addon, blocked=("immodest",)):
     filt.categories = _stub_categories()
     filt.siterules = siterules.load(
         root / "os-image/files/usr/share/kosher/site-rules.json")
+    filt.page_levels = {}
     filt.blocklist = search_mod.load_blocklist(
         root / "os-image/files/usr/share/kosher/search-blocklist.json")
     filt.scorer = content.load(
@@ -901,3 +905,70 @@ def _feed_flow(body):
                                  "content-length": str(len(body))}),
         "metadata": {"kosher_uid": 1001},
     })()
+
+
+def test_the_proxy_hides_a_person_on_a_page_that_reads_as_immodest(addon):
+    from kosherd import vision
+
+    filt = addon.KosherFilter.__new__(addon.KosherFilter)
+    filt.policy = _stub_policy(media="immodest")
+    filt.categories = _stub_categories()
+    filt.page_levels = {"https://shop.example/lingerie": vision.IMMODEST}
+    # A clothed model: no exposure labels, so the detector says clean.
+    filt.vision = _stub_vision(vision.ImageVerdict(vision.CLEAN, (),
+                                                   has_person=True))
+    flow = _image_flow()
+    flow.request.headers["referer"] = "https://shop.example/lingerie"
+    filt._filter_image(flow, 1001)
+    assert flow.response.content == addon.BLANK_PNG
+
+
+def test_the_shops_logo_on_the_same_page_survives(addon):
+    from kosherd import vision
+
+    filt = addon.KosherFilter.__new__(addon.KosherFilter)
+    filt.policy = _stub_policy(media="immodest")
+    filt.categories = _stub_categories()
+    filt.page_levels = {"https://shop.example/lingerie": vision.IMMODEST}
+    filt.vision = _stub_vision(vision.ImageVerdict(vision.CLEAN, (),
+                                                   has_person=False))
+    flow = _image_flow()
+    flow.request.headers["referer"] = "https://shop.example/lingerie"
+    original = flow.response.content
+    filt._filter_image(flow, 1001)
+    assert flow.response.content == original
+
+
+def test_a_page_the_proxy_never_judged_hides_nothing_extra(addon):
+    from kosherd import vision
+
+    filt = addon.KosherFilter.__new__(addon.KosherFilter)
+    filt.policy = _stub_policy(media="immodest")
+    filt.categories = _stub_categories()
+    filt.page_levels = {}
+    filt.vision = _stub_vision(vision.ImageVerdict(vision.CLEAN, (),
+                                                   has_person=True))
+    flow = _image_flow()
+    flow.request.headers["referer"] = "https://news.example/story"
+    original = flow.response.content
+    filt._filter_image(flow, 1001)
+    assert flow.response.content == original
+
+
+def test_remembered_pages_do_not_grow_without_bound(addon):
+    filt = addon.KosherFilter.__new__(addon.KosherFilter)
+    filt.page_levels = {}
+    from kosherd import vision
+
+    for i in range(filt.MAX_REMEMBERED_PAGES * 3):
+        filt._remember_page(f"https://example.com/{i}", vision.IMMODEST)
+    assert len(filt.page_levels) <= filt.MAX_REMEMBERED_PAGES
+
+
+def test_a_clean_page_is_not_remembered_at_all(addon):
+    from kosherd import content, vision
+
+    filt = addon.KosherFilter.__new__(addon.KosherFilter)
+    filt.page_levels = {"https://example.com/x": vision.IMMODEST}
+    filt._remember_page("https://example.com/x", content.CLEAN)
+    assert filt.page_levels == {}

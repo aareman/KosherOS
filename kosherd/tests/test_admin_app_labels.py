@@ -73,3 +73,25 @@ def test_every_reportable_picture_state_has_something_to_say(constants):
     assert set(constants["PICTURE_STATE"]) == reportable
     for title, body in constants["PICTURE_STATE"].values():
         assert title and body
+
+
+def test_the_app_offers_exactly_the_lists_the_daemon_will_edit(constants):
+    # A button for a list the daemon refuses is a dead end; a list the
+    # daemon accepts with no button is a feature nobody can reach.
+    from kosherd.daemon import Daemon
+
+    offered = {entry[0] for entry in constants["EDITABLE_LISTS"]}
+    assert offered == set(Daemon.EDITABLE_LISTS)
+
+
+def test_the_content_levels_offered_are_ones_the_scorer_knows(constants):
+    from kosherd import content
+
+    for key, label, weight in constants["CONTENT_LEVELS"]:
+        assert key in content.SEVERITY and key != content.CLEAN
+        assert label and isinstance(weight, int)
+    # Enough on its own to convict only at the explicit end, which is what
+    # the dialog tells the person.
+    by_key = {k: w for k, _l, w in constants["CONTENT_LEVELS"]}
+    assert by_key["nsfw"] >= content.THRESHOLD
+    assert by_key["immodest"] < content.THRESHOLD

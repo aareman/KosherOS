@@ -77,6 +77,30 @@ YOUTUBE_RESTRICT_ORDER = ("none", "moderate", "strict")
 
 PROFILE_CUSTOM = "Custom"
 
+# The lists a family may add to or take from, in their words. Everything
+# here is machine-wide, not per account: a word is either bad language in
+# this house or it is not.
+EDITABLE_LISTS = (
+    ("wordlist.json", "Bad language",
+     "Words replaced with a milder one on the page, for accounts set to "
+     "clean up bad language.", "word"),
+    ("search-blocklist.json", "Blocked searches",
+     "Searches that will not run at all, because the results page would "
+     "show the words even with every link removed.", "search"),
+    ("content-terms.json", "Words pages are judged by",
+     "Words that count as evidence when deciding whether a page is "
+     "inappropriate. No single one blocks a page on its own.", "term"),
+)
+
+# Where a term a family adds sits on the ladder, in plain words. Weights
+# are deliberately not exposed: "how bad is it" is a question a parent can
+# answer and "how many points is it worth" is not.
+CONTENT_LEVELS = (
+    ("immodest", "Immodest", 12),
+    ("suggestive", "Suggestive", 12),
+    ("nsfw", "Explicit", 25),
+)
+
 # What to say when picture checking is not doing what the settings claim.
 # Silence would be the worst option: a family that sees blank pictures and
 # no explanation concludes the filter is broken and turns it off.
@@ -503,6 +527,216 @@ class CategoryDialog(Adw.Dialog):
             self.chosen.discard(name)
 
 
+class ListEditDialog(Adw.Dialog):
+    """Add or remove a handful of entries from one of the shipped lists.
+
+    Only the family's OWN changes are listed. The shipped list has
+    thousands of entries and showing them would turn a two-minute job into
+    an afternoon — and, worse, would invite somebody to start curating it,
+    which is exactly the work this product exists to have already done.
+    So the count ships as a sentence: "119 come with KosherOS, you have
+    added two."
+    """
+
+    def __init__(self, win: Window, name: str, title: str, description: str,
+                 noun: str):
+        super().__init__(title=title, content_width=520, content_height=600)
+        self.win = win
+        self.name = name
+        self.noun = noun
+        self.add: dict | list = {}
+        self.remove: list[str] = []
+        self.shipped = 0
+
+        header = Adw.HeaderBar()
+        save = Gtk.Button(label="Save")
+        save.add_css_class("suggested-action")
+        save.connect("clicked", lambda _b: self._save())
+        header.pack_end(save)
+
+        self.summary = Adw.PreferencesGroup(description=description)
+        self.added_group = Adw.PreferencesGroup(title=f"Added here")
+        plus = Gtk.Button(icon_name="list-add-symbolic", valign=Gtk.Align.CENTER)
+        plus.connect("clicked", lambda _b: self._add_dialog())
+        self.added_group.set_header_suffix(plus)
+        self.added_list = Gtk.ListBox(selection_mode=Gtk.SelectionMode.NONE)
+        self.added_list.add_css_class("boxed-list")
+        self.added_group.add(self.added_list)
+
+        self.removed_group = Adw.PreferencesGroup(
+            title="Removed here",
+            description="Entries that ship with KosherOS but are switched "
+                        "off on this computer.")
+        minus = Gtk.Button(icon_name="list-add-symbolic",
+                           valign=Gtk.Align.CENTER)
+        minus.connect("clicked", lambda _b: self._remove_dialog())
+        self.removed_group.set_header_suffix(minus)
+        self.removed_list = Gtk.ListBox(selection_mode=Gtk.SelectionMode.NONE)
+        self.removed_list.add_css_class("boxed-list")
+        self.removed_group.add(self.removed_list)
+
+        page = Adw.PreferencesPage()
+        for group in (self.summary, self.added_group, self.removed_group):
+            page.add(group)
+        scroller = Gtk.ScrolledWindow(vexpand=True)
+        scroller.set_child(page)
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        box.append(header)
+        box.append(scroller)
+        self.set_child(box)
+        self._load()
+
+    # -- data -----------------------------------------------------------------
+
+    def _load(self) -> None:
+        def on_done(edits):
+            self.add = edits.get("add") or {}
+            self.remove = list(edits.get("remove") or [])
+            self.shipped = edits.get("shipped", 0)
+            self._rebuild()
+
+        _run_async(lambda: self.win.client.get_list_edits(self.name),
+                   on_done, lambda e: self.win.toast(_error_text(e)))
+
+    def _added_terms(self) -> list[str]:
+        """The family's additions, flattened for display."""
+        if isinstance(self.add, list):
+            return list(self.add)
+        if self.name == "content-terms.json":
+            return [term for by_weight in self.add.values()
+                    for words in by_weight.values() for term in words]
+        return list(self.add)
+
+    def _save(self) -> None:
+        self.win.with_guardian(lambda pw: self.win.call(
+            lambda: self.win.client.edit_list(self.name, self.add,
+                                              self.remove, pw),
+            done_msg="Saved"))
+        self.close()
+
+    # -- display --------------------------------------------------------------
+
+    def _rebuild(self) -> None:
+        added = self._added_terms()
+        # The sentence that stops somebody trying to build the list.
+        parts = [f"{self.shipped} come with KosherOS"]
+        if added:
+            parts.append(f"you added {len(added)}")
+        if self.remove:
+            parts.append(f"you removed {len(self.remove)}")
+        self.summary.set_title(" · ".join(parts))
+
+        _fill(self.added_list, added,
+              f"Nothing added. The shipped list covers the common cases.",
+              self._drop_added)
+        _fill(self.removed_list, self.remove,
+              "Nothing removed.", self._restore_removed)
+
+    def _drop_added(self, term: str) -> None:
+        if isinstance(self.add, list):
+            self.add = [t for t in self.add if t != term]
+        elif self.name == "content-terms.json":
+            self.add = {level: {weight: [t for t in words if t != term]
+                                for weight, words in by_weight.items()}
+                        for level, by_weight in self.add.items()}
+        else:
+            self.add = {k: v for k, v in self.add.items() if k != term}
+        self._rebuild()
+
+    def _restore_removed(self, term: str) -> None:
+        self.remove = [t for t in self.remove if t != term]
+        self._rebuild()
+
+    # -- adding ---------------------------------------------------------------
+
+    def _add_dialog(self) -> None:
+        dialog = Adw.AlertDialog(heading=f"Add a {self.noun}")
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        group = Adw.PreferencesGroup()
+        entry = Adw.EntryRow(title=self.noun.capitalize())
+        group.add(entry)
+
+        replacement = level = None
+        if self.name == "wordlist.json":
+            replacement = Adw.EntryRow(title="Replace it with")
+            group.add(replacement)
+        elif self.name == "content-terms.json":
+            level = Adw.ComboRow(
+                title="How bad is it",
+                model=Gtk.StringList.new([label for _k, label, _w in CONTENT_LEVELS]))
+            level.set_subtitle("No single word blocks a page on its own.")
+            group.add(level)
+        box.append(group)
+        dialog.set_extra_child(box)
+        dialog.add_response("cancel", "Cancel")
+        dialog.add_response("add", "Add")
+        dialog.set_response_appearance("add", Adw.ResponseAppearance.SUGGESTED)
+
+        def on_response(_d, response):
+            term = entry.get_text().strip().lower()
+            if response != "add" or not term:
+                return
+            if self.name == "wordlist.json":
+                milder = replacement.get_text().strip()
+                if not milder:
+                    self.win.toast("A word needs something to replace it with")
+                    return
+                self.add = {**(self.add or {}), term: milder}
+            elif self.name == "search-blocklist.json":
+                current = self.add if isinstance(self.add, list) else []
+                self.add = sorted({*current, term})
+            else:
+                key, _label, weight = CONTENT_LEVELS[level.get_selected()]
+                merged = {lvl: {w: list(words) for w, words in by.items()}
+                          for lvl, by in (self.add or {}).items()}
+                merged.setdefault(key, {}).setdefault(str(weight), [])
+                if term not in merged[key][str(weight)]:
+                    merged[key][str(weight)].append(term)
+                self.add = merged
+            self.remove = [t for t in self.remove if t != term]
+            self._rebuild()
+
+        dialog.connect("response", on_response)
+        dialog.present(self)
+
+    def _remove_dialog(self) -> None:
+        dialog = Adw.AlertDialog(
+            heading=f"Switch off a shipped {self.noun}",
+            body="Type it exactly as it appears. It stays in the shipped "
+                 "list; this computer simply stops using it.")
+        entry = Gtk.Entry(placeholder_text=self.noun)
+        dialog.set_extra_child(entry)
+        dialog.add_response("cancel", "Cancel")
+        dialog.add_response("remove", "Switch off")
+        dialog.set_response_appearance("remove",
+                                       Adw.ResponseAppearance.DESTRUCTIVE)
+
+        def on_response(_d, response):
+            term = entry.get_text().strip().lower()
+            if response == "remove" and term and term not in self.remove:
+                self.remove.append(term)
+                self._rebuild()
+
+        dialog.connect("response", on_response)
+        dialog.present(self)
+
+
+def _fill(listbox: Gtk.ListBox, terms, empty: str, on_undo) -> None:
+    while (child := listbox.get_first_child()) is not None:
+        listbox.remove(child)
+    if not terms:
+        listbox.append(Adw.ActionRow(title=empty))
+        return
+    for term in terms:
+        row = Adw.ActionRow(title=term)
+        undo = Gtk.Button(icon_name="edit-undo-symbolic",
+                          valign=Gtk.Align.CENTER, tooltip_text="Undo")
+        undo.add_css_class("flat")
+        undo.connect("clicked", lambda _b, t=term: on_undo(t))
+        row.add_suffix(undo)
+        listbox.append(row)
+
+
 class YouTubeDialog(Adw.Dialog):
     """What this person may watch on YouTube.
 
@@ -758,7 +992,16 @@ class ProfilesPage(Adw.PreferencesPage):
         create.connect("activated", lambda *_: self._user_dialog(adopt_mode=False))
         guardian = Adw.ButtonRow(title="Guardian Password…")
         guardian.connect("activated", lambda *_: self._guardian_dialog())
-        for row in (adopt, create, guardian):
+        rows = [adopt, create, guardian]
+        # Machine-wide, not per account: a word is either bad language in
+        # this house or it is not.
+        for name, title, description, noun in EDITABLE_LISTS:
+            row = Adw.ButtonRow(title=f"{title}…")
+            row.connect("activated", lambda *_, n=name, t=title,
+                        d=description, u=noun: ListEditDialog(
+                            self.win, n, t, d, u).present(self.win))
+            rows.append(row)
+        for row in rows:
             actions.add(row)
         self.actions_group = actions
         self.requests_group = None

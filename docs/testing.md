@@ -121,3 +121,21 @@ It is not a substitute for a VM boot. systemd ordering is verified by
 `systemd-analyze verify` inside the image, and the firewall and the
 transparent redirect can only be tested on a booted machine — the proxy
 runs here in regular mode instead.
+
+## Admin app widget tests
+
+The admin app has 1,300 lines of GTK and, until now, no test that ran any
+of it — only tests that read the source with `ast`. Every UI bug this
+project has actually shipped was a widget that threw when it was
+constructed: a `GLib.Variant` unpacked the wrong way, a polkit action that
+prompted twice. Reading the source cannot see any of those.
+
+`just test` now builds the real dialogs against a stub client on a virtual
+display (`xvfb-run`), which needed GTK4, libadwaita and `GI_TYPELIB_PATH`
+adding to the dev shell — pygobject finds a namespace through that path
+and nothing was setting it, so `import Gtk` failed and the tests would
+have skipped themselves into uselessness.
+
+They skip rather than fail where GTK genuinely is not available; the point
+is to catch the bug on a developer's machine, not to make the suite
+unrunnable elsewhere.

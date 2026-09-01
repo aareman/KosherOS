@@ -19,6 +19,20 @@ in
   # yescrypt hashing for guardian.py (ctypes); production Fedora has this natively.
   env.KOSHERD_LIBCRYPT = "${pkgs.libxcrypt}/lib/libcrypt.so.2";
 
+  # pygobject finds a namespace through the typelib path, and nothing sets
+  # it for us. Without this the admin app's widget tests cannot import Gtk
+  # and quietly skip, which is the same as not having them.
+  env.GI_TYPELIB_PATH = pkgs.lib.makeSearchPath "lib/girepository-1.0" [
+    pkgs.gtk4
+    pkgs.libadwaita
+    pkgs.glib.out
+    pkgs.gobject-introspection
+    pkgs.pango.out
+    pkgs.gdk-pixbuf
+    pkgs.graphene
+    pkgs.harfbuzz
+  ];
+
   # Everything the local dev loop needs; nothing is installed on the host.
   packages = [
     (python.withPackages (ps: [
@@ -34,6 +48,12 @@ in
       ps.pillow # covering regions of a picture (imageedit.py)
     ]))
     pkgs.just
+    # GTK4 + libadwaita so the admin app's widgets can actually be built in
+    # a test. Every UI bug this project has shipped was a widget that threw
+    # on construction, which a source-parsing test cannot see.
+    pkgs.gtk4
+    pkgs.libadwaita
+    pkgs.xvfb-run
     pkgs.nftables # `nft --check` of rendered rulesets
     pkgs.shellcheck # the VM test suites and installer scripts
     # Fedora test VM (plain QEMU + cloud-init; no libvirt needed)

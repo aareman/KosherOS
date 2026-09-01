@@ -14,6 +14,8 @@ vmssh := "ssh -F build/vm/ssh_config"
 test *ARGS:
     cd kosherd && python3 -m pytest tests/ -q {{ARGS}}
     PYTHONPATH=kosherd/src:search-app python3 -m pytest search-app/tests -q {{ARGS}}
+    xvfb-run -a env PYTHONPATH=kosherd/src:admin-app/src \
+        python3 -m pytest admin-app/tests -q {{ARGS}}
     cd portal && PYTHONPATH=src:../kosherd/src python3 -m pytest tests/ -q {{ARGS}}
 
 # Unit tests with a coverage report over the modules that can run here.

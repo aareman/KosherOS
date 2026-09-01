@@ -775,8 +775,23 @@ class Daemon:
         import pwd
         import shutil
 
-        if mode not in MODES:
-            raise PolicyError(f"unknown mode {mode!r}")
+        from . import profiles as profiles_mod
+
+        # A profile key rather than a bare mode, so a guest can be set up
+        # in one choice like anybody else. Without this the guest was the
+        # one account with no picture, language or YouTube settings at
+        # all — a hole in exactly the account nobody is watching.
+        if mode in profiles_mod.BY_KEY:
+            profile = profiles_mod.get(mode)
+            g = self.policy.guest
+            g.mode = profile.mode
+            g.blocked_categories = list(profile.blocked_categories)
+            g.media_level = profile.media_level
+            g.language_filter = profile.language_filter
+            g.youtube = dict(profile.youtube)
+            mode = profile.mode
+        elif mode not in MODES:
+            raise PolicyError(f"unknown mode or profile {mode!r}")
         g = self.policy.guest
         if enabled:
             try:

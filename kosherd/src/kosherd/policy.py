@@ -148,6 +148,13 @@ class GuestPolicy:
     whitelist: list[str] = field(default_factory=list)
     rules: list[dict] = field(default_factory=list)
     blocked_categories: list[str] = field(default_factory=list)
+    # The guest gets the same settings as anyone else. Without these a
+    # guest in filtered mode had no picture filtering, no language
+    # filtering and no YouTube limits whatever the household had chosen —
+    # a hole in exactly the account nobody is watching.
+    media_level: str = DEFAULT_MEDIA_LEVEL
+    language_filter: str = "off"
+    youtube: dict = field(default_factory=dict)
 
     def to_dict(self) -> dict:
         d: dict = {"enabled": self.enabled}
@@ -161,6 +168,12 @@ class GuestPolicy:
             d["rules"] = self.rules
         if self.blocked_categories:
             d["blocked_categories"] = self.blocked_categories
+        if self.media_level != DEFAULT_MEDIA_LEVEL:
+            d["media_level"] = self.media_level
+        if self.language_filter != "off":
+            d["language_filter"] = self.language_filter
+        if self.youtube:
+            d["youtube"] = self.youtube
         return d
 
 
@@ -186,6 +199,9 @@ class Policy:
                 mode=self.guest.mode, whitelist=list(self.guest.whitelist),
                 rules=list(self.guest.rules),
                 blocked_categories=list(self.guest.blocked_categories),
+                media_level=self.guest.media_level,
+                language_filter=self.guest.language_filter,
+                youtube=dict(self.guest.youtube),
             ))
         return users
 
@@ -237,6 +253,9 @@ class Policy:
                 whitelist=list(guest_doc.get("whitelist", [])),
                 rules=list(guest_doc.get("rules", [])),
                 blocked_categories=list(guest_doc.get("blocked_categories", [])),
+                media_level=guest_doc.get("media_level", DEFAULT_MEDIA_LEVEL),
+                language_filter=guest_doc.get("language_filter", "off"),
+                youtube=dict(guest_doc.get("youtube", {})),
             ),
         )
 

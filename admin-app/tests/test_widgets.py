@@ -318,3 +318,29 @@ def test_the_rules_dialog_builds_with_rules():
     dialog = admin.RulesDialog(win, "Page rules", rules, lambda new: None)
     drain()
     assert len(dialog.rules) == 2
+
+
+def test_the_guest_can_be_set_up_from_a_profile():
+    # The guest used to be the one account with no picture, language or
+    # YouTube settings at all.
+    from kosherd import profiles
+
+    sent = {}
+
+    class Recording(FakeClient):
+        def set_guest_config(self, enabled, mode, whitelist, pw):
+            sent.update(enabled=enabled, mode=mode)
+
+    win = FakeWindow(Recording())
+    win.policy = {"revision": 1, "users": [], "guardian": {"enabled": False},
+                  "guest": {"enabled": True, "mode": "whitelist",
+                            "whitelist": []}}
+    page = admin.ProfilesPage(win)
+    page.refresh()
+    drain()
+    assert page.guest_group is not None
+    # The dropdown offers profiles, and the daemon accepts profile keys.
+    from kosherd.daemon import Daemon
+
+    assert profiles.get("child").key in {p.key for p in profiles.PROFILES}
+    assert hasattr(Daemon, "impl_SetGuestConfig")

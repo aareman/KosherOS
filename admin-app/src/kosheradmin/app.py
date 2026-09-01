@@ -1169,12 +1169,26 @@ class ProfilesPage(Adw.PreferencesPage):
                        push(s.get_active(), mode, wl_domains))
         group.add(switch)
 
-        mode_row = Adw.ComboRow(title="Guest filter mode",
-                                model=Gtk.StringList.new([MODE_LABELS[m] for m in MODES]))
-        mode_row.set_selected(MODES.index(mode))
-        mode_row.connect("notify::selected",
-                         lambda c, _p: MODES[c.get_selected()] != mode and
-                         push(guest["enabled"], MODES[c.get_selected()], wl_domains))
+        # A profile, like every other account. The guest used to be the
+        # one account with no picture, language or YouTube settings.
+        keys = [p.key for p in profiles_mod.PROFILES]
+        current = profiles_mod.matching(guest)
+        mode_row = Adw.ComboRow(
+            title="Set the guest up as",
+            model=Gtk.StringList.new(
+                [p.label for p in profiles_mod.PROFILES] + [PROFILE_CUSTOM]))
+        mode_row.set_selected(keys.index(current) if current else len(keys))
+        mode_row.set_subtitle(
+            profiles_mod.get(current).description if current
+            else MODE_HINTS.get(mode, ""))
+
+        def on_guest_profile(combo, _p):
+            index = combo.get_selected()
+            if index >= len(keys) or keys[index] == current:
+                return
+            push(guest["enabled"], keys[index], wl_domains)
+
+        mode_row.connect("notify::selected", on_guest_profile)
         group.add(mode_row)
 
         wl_row = Adw.ActionRow(

@@ -125,3 +125,46 @@ def test_an_invalid_media_level_is_rejected():
     doc["users"][0]["media_level"] = "somewhat"
     with pytest.raises(PolicyError):
         Policy.from_dict(doc)
+
+
+# -- the guest account gets the same settings as anyone else ------------------
+
+def test_the_guest_carries_picture_language_and_youtube_settings():
+    # Without these the guest was the one account with no picture
+    # filtering, no language filtering and no YouTube limits whatever the
+    # household had chosen — a hole in exactly the account nobody watches.
+    from kosherd.policy import GuestPolicy, Policy
+
+    policy = Policy(revision=1, users=[], guest=GuestPolicy(
+        enabled=True, uid=1010, mode="filtered",
+        blocked_categories=["adult"], media_level="immodest",
+        language_filter="substitute", youtube={"restrict": "strict"}))
+    guest = next(u for u in policy.effective_users() if u.uid == 1010)
+    assert guest.media_level == "immodest"
+    assert guest.language_filter == "substitute"
+    assert guest.youtube == {"restrict": "strict"}
+    assert guest.blocked_categories == ["adult"]
+
+
+def test_guest_settings_survive_a_round_trip():
+    from kosherd.policy import GuestPolicy, Policy
+
+    policy = Policy(revision=1, users=[], guest=GuestPolicy(
+        enabled=True, uid=1010, mode="filtered", media_level="all",
+        language_filter="block", youtube={"blocked_categories": ["24"]}))
+    again = Policy.from_dict(policy.to_dict())
+    assert again.guest.media_level == "all"
+    assert again.guest.language_filter == "block"
+    assert again.guest.youtube == {"blocked_categories": ["24"]}
+
+
+def test_a_guest_with_no_settings_reads_as_unfiltered_pictures():
+    from kosherd.policy import GuestPolicy, Policy
+
+    policy = Policy(revision=1, users=[],
+                    guest=GuestPolicy(enabled=True, uid=1010, mode="whitelist"))
+    guest = next(u for u in policy.effective_users() if u.uid == 1010)
+    assert guest.media_level == "none"
+    assert guest.language_filter == "off"
+    # ...and an untouched guest does not bloat the saved policy.
+    assert set(policy.to_dict()["guest"]) == {"enabled", "uid"}

@@ -32,6 +32,7 @@ try:
     from kosherd import content as content_mod
     from kosherd import imageedit as imageedit_mod
     from kosherd import language as language_mod
+    from kosherd import accessreq as accessreq_mod
     from kosherd import siterules as siterules_mod
     from kosherd import vision as vision_mod
     from kosherd.uidmap import UidLookup
@@ -48,6 +49,7 @@ except ImportError:  # pragma: no cover - only when interpreters differ
     from kosherd import content as content_mod
     from kosherd import imageedit as imageedit_mod
     from kosherd import language as language_mod
+    from kosherd import accessreq as accessreq_mod
     from kosherd import siterules as siterules_mod
     from kosherd import vision as vision_mod
     from kosherd.uidmap import UidLookup
@@ -56,23 +58,54 @@ except ImportError:  # pragma: no cover - only when interpreters differ
 RULES_PATH = Path("/var/lib/kosher-mitm/rules.json")
 log = logging.getLogger("kosher-filter")
 
+# The reserved path the block page posts to. It is RELATIVE on purpose:
+# posting to a local http:// address from a page the browser considers
+# https is mixed content, which browsers refuse. Staying on the blocked
+# site's own origin keeps the scheme, and the proxy answers the request
+# itself — nothing is ever forwarded to the site.
+REQUEST_PATH = "/__kosheros__/request"
+
+BLOCK_STYLE = """
+ body { font-family: system-ui, sans-serif; background:#0b1a33; color:#e8eefc;
+        display:flex; min-height:100vh; align-items:center; justify-content:center;
+        margin:0; }
+ .card { max-width:32rem; padding:2.5rem; background:#111f3d; border-radius:1rem;
+         box-shadow:0 20px 60px rgba(0,0,0,.45); }
+ h1 { margin:0 0 .5rem; font-size:1.5rem; }
+ p { line-height:1.6; color:#b8c6e4; }
+ code { background:#0b1a33; padding:.15rem .4rem; border-radius:.3rem;
+        color:#93b4ff; word-break:break-all; }
+ form { margin-top:1.5rem; display:flex; flex-direction:column; gap:.6rem; }
+ input, button { font:inherit; padding:.6rem .8rem; border-radius:.5rem;
+        border:1px solid #22335c; }
+ input { background:#0b1a33; color:#e8eefc; }
+ button { background:#7ba2ff; color:#0b1a33; border:0; cursor:pointer;
+        font-weight:600; }
+"""
+
 BLOCK_PAGE = """<!doctype html>
 <html><head><meta charset="utf-8"><title>Blocked — KosherOS</title>
-<style>
- body {{ font-family: system-ui, sans-serif; background:#0b1a33; color:#e8eefc;
-        display:flex; min-height:100vh; align-items:center; justify-content:center;
-        margin:0; }}
- .card {{ max-width:32rem; padding:2.5rem; background:#111f3d; border-radius:1rem;
-         box-shadow:0 20px 60px rgba(0,0,0,.45); }}
- h1 {{ margin:0 0 .5rem; font-size:1.5rem; }}
- p {{ line-height:1.6; color:#b8c6e4; }}
- code {{ background:#0b1a33; padding:.15rem .4rem; border-radius:.3rem;
-        color:#93b4ff; word-break:break-all; }}
-</style></head>
+<style>{style}</style></head>
 <body><div class="card">
   <h1>This page is blocked</h1>
   <p>KosherOS blocked <code>{url}</code>{because}.</p>
-  <p>If you need access to this page, ask the administrator of this computer.</p>
+  <p>If you need this page, you can ask the administrator of this
+     computer for it. Nothing changes until they say yes.</p>
+  <form method="post" action="{request_path}">
+    <input type="hidden" name="url" value="{url}">
+    <input type="text" name="note" maxlength="200"
+           placeholder="Why do you need it? (optional)">
+    <button type="submit">Ask for this page</button>
+  </form>
+</div></body></html>
+"""
+
+ASKED_PAGE = """<!doctype html>
+<html><head><meta charset="utf-8"><title>Asked — KosherOS</title>
+<style>{style}</style></head>
+<body><div class="card">
+  <h1>{heading}</h1>
+  <p>{message}</p>
 </div></body></html>
 """
 
@@ -317,6 +350,14 @@ class KosherFilter:
         uid = self.uids.uid_for_port(client_port) if client_port else None
         flow.metadata["kosher_uid"] = uid
 
+        # Reserved on every host, because the form is posted to the
+        # blocked site's own origin (see REQUEST_PATH). The site never
+        # sees it.
+        if flow.request.method == "POST" and \
+                flow.request.path.split("?", 1)[0] == REQUEST_PATH:
+            self._handle_request_form(flow, uid)
+            return
+
         query = _search_query(flow)
         if query is not None:
             params = urlencode({"q": query})
@@ -531,9 +572,42 @@ class KosherFilter:
     def _block(self, flow: http.HTTPFlow, url: str, because: str) -> None:
         flow.response = http.Response.make(
             403,
-            BLOCK_PAGE.format(url=_escape(url), because=_escape(because)).encode(),
+            BLOCK_PAGE.format(style=BLOCK_STYLE, url=_escape(url),
+                              because=_escape(because),
+                              request_path=REQUEST_PATH).encode(),
             {"Content-Type": "text/html; charset=utf-8"},
         )
+
+    def _handle_request_form(self, flow: http.HTTPFlow, uid) -> None:
+        """Take a request for access off the block page.
+
+        Answered here and never forwarded: the address is reserved and
+        this machine is the only thing that will ever see it.
+        """
+        from urllib.parse import parse_qs
+
+        heading, message = "Could not ask", "Please try again."
+        try:
+            form = parse_qs(flow.request.get_text(strict=False) or "")
+            url = (form.get("url") or [""])[0]
+            note = (form.get("note") or [""])[0]
+            if uid is None:
+                raise accessreq_mod.RequestError("could not tell who is asking")
+            accessreq_mod.submit(uid, url, note)
+        except accessreq_mod.RequestError as e:
+            message = _escape(str(e))
+        except Exception:  # noqa: BLE001 - a failed ask is not a crash
+            log.exception("could not record an access request")
+        else:
+            heading = "Your request was sent"
+            message = ("The administrator of this computer will see it. "
+                       "Nothing has changed yet.")
+        flow.response = http.Response.make(
+            200,
+            ASKED_PAGE.format(style=BLOCK_STYLE, heading=heading,
+                              message=message).encode(),
+            {"Content-Type": "text/html; charset=utf-8",
+             "Cache-Control": "no-store"})
 
 
 def _escape(text: str) -> str:

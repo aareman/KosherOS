@@ -17,6 +17,10 @@ StateDirectoryMode=0755
 # database and word lists to filter with. Nothing else.
 ProtectSystem=strict
 ReadWritePaths=/var/lib/kosher-search
+# Drop-only: the service may create an "ask for this page"
+# request here, and the directory's own 0730 mode stops it
+# reading anyone else's.
+ReadWritePaths=/var/lib/kosher-requests
 PrivateTmp=yes
 NoNewPrivileges=yes
 ProtectHome=yes

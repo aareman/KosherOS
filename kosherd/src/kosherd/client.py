@@ -69,6 +69,17 @@ class DaemonClient:
         self._call("Profiles", "SetBlockedCategories", "(iass)",
                    uid, categories, guardian_password)
 
+    def list_requests(self) -> list[dict]:
+        return json.loads(self._call("Profiles", "ListRequests")[0])
+
+    def approve_request(self, request_id: str, whole_site: bool = False,
+                        guardian_password: str = "") -> None:
+        self._call("Profiles", "ApproveRequest", "(sbs)", request_id,
+                   whole_site, guardian_password)
+
+    def dismiss_request(self, request_id: str) -> None:
+        self._call("Profiles", "DismissRequest", "(s)", request_id)
+
     def set_media_level(self, uid: int, level: str,
                         guardian_password: str = "") -> None:
         self._call("Profiles", "SetMediaLevel", "(iss)", uid, level,

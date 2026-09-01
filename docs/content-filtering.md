@@ -131,3 +131,38 @@ Category lists (1) plus safe search (2), with the list delivered by the
 portal. That is a visible jump in filtering quality, uses infrastructure
 that already exists, needs no new staff, and makes the "filtered internet"
 mode behave the way someone expects when they read the label.
+
+## Asking for a page
+
+Every filter is wrong sometimes. What decides whether a family keeps using
+one is not how often it is wrong, it is what happens next. If the answer is
+"find the parent, get them to open a settings app, work out which of five
+settings caused it and type the address in by hand", the real answer is
+that the filter gets turned off.
+
+So the block page has a button. It records who asked, for what, and why;
+the admin app puts the queue at the top of the page with one button to
+allow it. A request carries no authority of its own — nothing changes
+until an admin says so — which is exactly what lets the asking be
+frictionless.
+
+**Where the form posts.** To the blocked site's own origin, on a reserved
+path (`/__kosheros__/request`), which the proxy answers itself and never
+forwards. A local `http://` address would be mixed content from a page the
+browser considers `https`, and browsers refuse to submit that.
+
+**The spool.** Requests are individual files in `/var/lib/kosher-requests`,
+mode 0730 root:kosher-spool. The two unprivileged services that can create
+one (the proxy and the search service) are in that group: they may drop a
+request, they may not list the directory or read anyone else's. kosherd,
+running as root, is the only reader. Ids are validated as 32 hex characters
+before they are turned into paths.
+
+**What approving does depends on the account's mode**, because making the
+admin work that out is the same friction again. A whitelist account gets
+the domain on its whitelist — an allow rule would do nothing there, since
+its traffic never reaches the proxy. A filtered account gets an allow rule
+placed *ahead* of the existing rules, because one added after whatever
+blocked the page would never be reached. The admin chooses "just this page"
+or "all of this site"; a whitelist account is only offered the site, since
+that is all its enforcement can express.

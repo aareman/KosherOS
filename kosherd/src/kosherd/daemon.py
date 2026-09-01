@@ -53,6 +53,17 @@ INTROSPECTION_XML = """
       <arg direction="in" type="as" name="categories"/>
       <arg direction="in" type="s" name="guardian_password"/>
     </method>
+    <method name="ListRequests">
+      <arg direction="out" type="s" name="requests_json"/>
+    </method>
+    <method name="ApproveRequest">
+      <arg direction="in" type="s" name="request_id"/>
+      <arg direction="in" type="b" name="whole_site"/>
+      <arg direction="in" type="s" name="guardian_password"/>
+    </method>
+    <method name="DismissRequest">
+      <arg direction="in" type="s" name="request_id"/>
+    </method>
     <method name="SetMediaLevel">
       <arg direction="in" type="i" name="uid"/>
       <arg direction="in" type="s" name="level"/>
@@ -239,6 +250,16 @@ ERROR_NAME = "org.kosherlinux.Daemon1.Error"
 
 
 
+def _url_pattern(url: str) -> str:
+    """An allow rule for one page rather than a whole site."""
+    from urllib.parse import urlsplit
+
+    parts = urlsplit(url)
+    host = (parts.hostname or "").lower().strip(".").removeprefix("www.")
+    path = parts.path or "/"
+    return f"{host}{path.rstrip('/') or '/'}"
+
+
 def _default_categories(mode: str) -> tuple[str, ...]:
     """What a new account of this mode blocks before anyone configures it.
 
@@ -370,6 +391,63 @@ class Daemon:
             raise PolicyError(f"uid {uid} is not managed")
         user.whitelist = sorted(set(domains))
         self._save_and_apply()
+        return None
+
+    def impl_ListRequests(self):
+        from . import accessreq
+
+        found = []
+        for document in accessreq.pending():
+            user = self.policy.user(document["uid"])
+            found.append({**document,
+                          "username": user.username if user else "?",
+                          "mode": user.mode if user else "?"})
+        return GLib.Variant("(s)", (json.dumps(found),))
+
+    def impl_ApproveRequest(self, request_id: str, whole_site: bool,
+                            _guardian_pw: str):
+        """Grant a request, in the terms of the account's own mode.
+
+        A whitelist account needs the domain on its whitelist; a filtered
+        account needs an allow rule ahead of whatever blocked it. Making
+        the admin work out which is exactly the friction that gets a filter
+        switched off.
+        """
+        from urllib.parse import urlsplit
+
+        from . import accessreq
+
+        document = accessreq.resolve(request_id)
+        if document is None:
+            raise PolicyError("that request is no longer waiting")
+        user = self.policy.user(document["uid"])
+        if user is None:
+            raise PolicyError("that account is no longer managed")
+
+        parts = urlsplit(document["url"])
+        host = (parts.hostname or "").lower().strip(".")
+        if not host:
+            raise PolicyError("that request has no address")
+
+        if user.mode == "whitelist":
+            if host not in user.whitelist:
+                user.whitelist = sorted({*user.whitelist, host})
+        else:
+            pattern = host if whole_site else _url_pattern(document["url"])
+            if not any(r.get("pattern") == pattern and r.get("action") == "allow"
+                       for r in user.rules):
+                # Ahead of the existing rules: a rule added after the one
+                # that blocked the page would never be reached.
+                user.rules = [{"action": "allow", "pattern": pattern},
+                              *user.rules]
+        self._save_and_apply()
+        log.info("approved access for uid %d to %s", user.uid, host)
+        return None
+
+    def impl_DismissRequest(self, request_id: str):
+        from . import accessreq
+
+        accessreq.resolve(request_id)
         return None
 
     def _managed(self, uid: int):

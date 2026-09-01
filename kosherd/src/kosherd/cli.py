@@ -128,6 +128,31 @@ def cmd_profile(args) -> int:
     return 0
 
 
+def cmd_requests(args) -> int:
+    c = _client()
+    waiting = c.list_requests()
+    if args.action == "list":
+        if not waiting:
+            print("nothing waiting")
+            return 0
+        for r in waiting:
+            note = f"  ({r['note']})" if r.get("note") else ""
+            print(f"  {r['id'][:8]}  {r['username']:<12} {r['url']}{note}")
+        return 0
+
+    match = [r for r in waiting if r["id"].startswith(args.request_id)]
+    if len(match) != 1:
+        print(f"{len(match)} requests match {args.request_id!r}", file=sys.stderr)
+        return 1
+    if args.action == "allow":
+        c.approve_request(match[0]["id"], args.whole_site, _guardian_pw(args))
+        print(f"allowed for {match[0]['username']}")
+    else:
+        c.dismiss_request(match[0]["id"])
+        print("dismissed")
+    return 0
+
+
 def cmd_media(args) -> int:
     c = _client()
     c.set_media_level(args.uid, args.level, _guardian_pw(args))
@@ -445,6 +470,14 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("profile", nargs="?", default="")
     s.add_argument("--guardian-password")
     s.set_defaults(func=cmd_profile)
+
+    s = sub.add_parser("requests", help="pages users have asked for")
+    s.add_argument("action", choices=["list", "allow", "dismiss"])
+    s.add_argument("request_id", nargs="?", default="")
+    s.add_argument("--whole-site", action="store_true",
+                   help="allow the whole site, not just the page")
+    s.add_argument("--guardian-password")
+    s.set_defaults(func=cmd_requests)
 
     s = sub.add_parser("media", help="how much of the web's imagery to hide")
     s.add_argument("uid", type=int)

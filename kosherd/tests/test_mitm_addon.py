@@ -411,6 +411,7 @@ def _request_flow(url):
             "pretty_host": parts.hostname,
             "pretty_url": url,
             "path": parts.path + (f"?{parts.query}" if parts.query else ""),
+            "method": "GET",
             "query": {},
             "headers": {},
         })(),
@@ -418,3 +419,65 @@ def _request_flow(url):
         "client_conn": type("C", (), {"peername": ("127.0.0.1", 40000)})(),
         "metadata": {},
     })()
+
+
+# -- asking for a page --------------------------------------------------------
+
+def test_the_block_page_offers_a_way_to_ask(addon):
+    filt = addon.KosherFilter.__new__(addon.KosherFilter)
+    flow = _request_flow("https://example.com/x")
+    filt._block(flow, "https://example.com/x", " because it is adult")
+    body = flow.response.content.decode()
+    assert addon.REQUEST_PATH in body
+    assert "Ask for this page" in body
+    assert "Nothing changes until they say yes" in body
+
+
+def test_the_ask_form_posts_to_the_same_origin(addon):
+    # A local http:// address would be mixed content from a page the
+    # browser considers https, and browsers refuse to submit that.
+    filt = addon.KosherFilter.__new__(addon.KosherFilter)
+    flow = _request_flow("https://example.com/x")
+    filt._block(flow, "https://example.com/x", "")
+    assert f'action="{addon.REQUEST_PATH}"' in flow.response.content.decode()
+    assert "http://" not in flow.response.content.decode()
+
+
+def test_the_reserved_path_is_answered_here_and_never_forwarded(addon, tmp_path):
+    from kosherd import accessreq
+
+    filt = addon.KosherFilter.__new__(addon.KosherFilter)
+    filt.uids = type("U", (), {"uid_for_port": staticmethod(lambda p: 1001)})()
+    filt.policy = _request_policy()
+    filt.categories = _stub_categories()
+    filt.siterules = type("S", (), {"reason": staticmethod(lambda u: None)})()
+
+    flow = _request_flow("https://example.com" + addon.REQUEST_PATH)
+    flow.request.method = "POST"
+    flow.request.get_text = lambda strict=False: (
+        "url=https%3A%2F%2Fexample.com%2Fneeded&note=for+school")
+    addon.accessreq_mod.SPOOL_DIR = tmp_path
+    import functools
+    addon.accessreq_mod.submit = functools.partial(accessreq.submit, spool=tmp_path)
+
+    filt.request(flow)
+    assert flow.response is not None
+    assert "Your request was sent" in flow.response.content.decode()
+    waiting = accessreq.pending(spool=tmp_path)
+    assert len(waiting) == 1
+    assert waiting[0]["url"] == "https://example.com/needed"
+    assert waiting[0]["note"] == "for school"
+    assert waiting[0]["uid"] == 1001
+
+
+def test_a_get_to_the_reserved_path_is_an_ordinary_request(addon):
+    # Only a POST is ours; a site with a page at that path still works.
+    filt = addon.KosherFilter.__new__(addon.KosherFilter)
+    filt.uids = type("U", (), {"uid_for_port": staticmethod(lambda p: 1001)})()
+    filt.policy = _request_policy()
+    filt.categories = _stub_categories()
+    filt.siterules = type("S", (), {"reason": staticmethod(lambda u: None)})()
+    flow = _request_flow("https://example.com" + addon.REQUEST_PATH)
+    flow.request.method = "GET"
+    filt.request(flow)
+    assert flow.response is None

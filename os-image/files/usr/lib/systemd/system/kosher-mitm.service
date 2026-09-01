@@ -32,6 +32,10 @@ StateDirectoryMode=0750
 # same logo comes back on every page of a site.
 ProtectSystem=strict
 ReadWritePaths=/var/lib/kosher-mitm
+# Drop-only: the service may create an "ask for this page"
+# request here, and the directory's own 0730 mode stops it
+# reading anyone else's.
+ReadWritePaths=/var/lib/kosher-requests
 PrivateTmp=yes
 NoNewPrivileges=yes
 

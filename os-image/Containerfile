@@ -14,7 +14,12 @@ RUN dnf -y install dnsmasq nftables python3-gobject python3-jsonschema python3-p
     && useradd -r -s /usr/sbin/nologin -d /var/lib/kosher-mitm kosher-mitm \
     # Same for search: the front end and the engine behind it run as one
     # unprivileged user and are given only what they filter with.
-    && useradd -r -s /usr/sbin/nologin -d /var/lib/kosher-search kosher-search
+    && useradd -r -s /usr/sbin/nologin -d /var/lib/kosher-search kosher-search \
+    # Both services may drop an "ask for this page" request into the
+    # spool; neither may read it back. See tmpfiles.d/kosher.conf.
+    && groupadd -r kosher-spool \
+    && usermod -aG kosher-spool kosher-mitm \
+    && usermod -aG kosher-spool kosher-search
 # sudo is on dnf's protected list; removing it here is the whole point.
 # podman must STAY: bootc (the update mechanism) depends on it in F44+. The
 # skuid firewall contains rootless containers, and SUB_UID_COUNT=0 below

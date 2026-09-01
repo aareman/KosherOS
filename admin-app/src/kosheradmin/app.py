@@ -745,12 +745,21 @@ class ProfilesPage(Adw.PreferencesPage):
         for row in (adopt, create, guardian):
             actions.add(row)
         self.actions_group = actions
+        self.requests_group = None
 
     def refresh(self) -> None:
         if self.users_group is not None:
             self.remove(self.users_group)
             self.remove(self.guest_group)
             self.remove(self.actions_group)
+            if self.requests_group is not None:
+                self.remove(self.requests_group)
+                self.requests_group = None
+        # Above everything else, because it is the only thing on this page
+        # that somebody is waiting on.
+        self.requests_group = self._build_requests_group()
+        if self.requests_group is not None:
+            self.add(self.requests_group)
         group = Adw.PreferencesGroup(title="Profiles")
         g = self.win.policy["guardian"]["enabled"]
         group.set_description(f"Guardian dual-control is {'ON' if g else 'off'}")
@@ -761,6 +770,80 @@ class ProfilesPage(Adw.PreferencesPage):
         self.guest_group = self._build_guest_group()
         self.add(self.guest_group)
         self.add(self.actions_group)
+
+    def _build_requests_group(self):
+        """Pages somebody has asked for, waiting on an answer.
+
+        Every filter is wrong sometimes. What decides whether a family
+        keeps using one is how easily a wrong call gets fixed — so this
+        sits at the top of the page, and answering is one button.
+        """
+        try:
+            waiting = self.win.client.list_requests()
+        except Exception:  # noqa: BLE001 - never keep the page from loading
+            return None
+        if not waiting:
+            return None
+
+        group = Adw.PreferencesGroup(
+            title=f"Requests ({len(waiting)})",
+            description="Pages someone on this computer has asked for. "
+                        "Nothing has changed until you allow one.")
+        for request in waiting:
+            group.add(self._request_row(request))
+        return group
+
+    def _request_row(self, request: dict) -> Adw.ActionRow:
+        note = request.get("note") or ""
+        subtitle = request["url"]
+        if note:
+            subtitle = f"{note} — {subtitle}"
+        row = Adw.ActionRow(title=f"{request['username']} asked for",
+                            subtitle=subtitle, subtitle_lines=2)
+
+        allow = Gtk.Button(label="Allow", valign=Gtk.Align.CENTER)
+        allow.add_css_class("suggested-action")
+        allow.connect("clicked", lambda _b: self._answer_request(request))
+        no = Gtk.Button(label="No", valign=Gtk.Align.CENTER)
+        no.add_css_class("flat")
+        no.connect("clicked", lambda _b: self.win.call(
+            lambda: self.win.client.dismiss_request(request["id"]),
+            done_msg="Request dismissed"))
+        row.add_suffix(allow)
+        row.add_suffix(no)
+        return row
+
+    def _answer_request(self, request: dict) -> None:
+        from urllib.parse import urlsplit
+
+        host = urlsplit(request["url"]).hostname or request["url"]
+        if request.get("mode") == "whitelist":
+            # A whitelist account can only be granted a whole site: its
+            # traffic never reaches the proxy, so there is no page-level
+            # rule to apply. Say so rather than offering a choice that
+            # would not do what it says.
+            return self.win.with_guardian(lambda pw: self.win.call(
+                lambda: self.win.client.approve_request(request["id"], True, pw),
+                done_msg=f"Allowed {host} for {request['username']}"))
+
+        dialog = Adw.AlertDialog(
+            heading="Allow this?",
+            body=f"{request['username']} asked for:\n{request['url']}")
+        dialog.add_response("cancel", "Cancel")
+        dialog.add_response("page", "Just this page")
+        dialog.add_response("site", f"All of {host}")
+        dialog.set_response_appearance("page", Adw.ResponseAppearance.SUGGESTED)
+
+        def on_response(_d, response):
+            if response not in ("page", "site"):
+                return
+            whole = response == "site"
+            self.win.with_guardian(lambda pw: self.win.call(
+                lambda: self.win.client.approve_request(request["id"], whole, pw),
+                done_msg=f"Allowed for {request['username']}"))
+
+        dialog.connect("response", on_response)
+        dialog.present(self.win)
 
     def _build_guest_group(self) -> Adw.PreferencesGroup:
         guest = self.win.policy.get("guest", {"enabled": False})

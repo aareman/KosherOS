@@ -95,3 +95,29 @@ trapped behind D-Bus or a typelib, it moved into a pure function
 (`access.evaluate`, `mct.filter_spec`, `apps.parse_appstream`,
 `nft.render`) and the caller became a thin wrapper. That is why the
 security-critical parts can be asserted exhaustively in milliseconds.
+
+## `just check-services`
+
+Starts the filtering services inside the built image and drives them.
+
+The unit tests run the decision engines against stubs, and every fault
+these services have actually shipped with was invisible to a unit test and
+obvious the moment something was started for real: SearXNG not installed
+at all, a `settings.yml` it refused to load, a service that could not
+write its spool, a `grep -c` that counted lines. So this layer exists
+between the unit tests and a VM boot.
+
+It checks, against live code: SearXNG answering, a real search rendering
+through the front end, an explicit query refused, an "ask for this page"
+landing in the spool; and in the proxy — a URL rule, a page blocked on its
+words, video blocked at the immodest level, a search sent to the local
+page, a shop's navigation item removed while the rest of the page stays,
+and an unreadable picture hidden rather than shown.
+
+`OFFLINE=1 just check-services` skips the one check that needs the
+internet.
+
+It is not a substitute for a VM boot. systemd ordering is verified by
+`systemd-analyze verify` inside the image, and the firewall and the
+transparent redirect can only be tested on a booted machine — the proxy
+runs here in regular mode instead.

@@ -27,6 +27,15 @@ test-cov:
 # Integration suites INSIDE the dev VM: services, enforcement, apps, guest,
 # inspect mode, persistence. Pass suite prefixes to narrow (just test-vm
 # kosher-fedora 50). Creates test users and changes filter modes — dev VMs only.
+# Start the filtering services inside the built image and drive them.
+# Everything that has shipped broken in these two was invisible to a unit
+# test and obvious the moment something was started for real.
+# OFFLINE=1 skips the one check that needs the internet.
+check-services: build
+    podman run --rm -e OFFLINE="${OFFLINE:-0}" \
+        -v "$PWD/scripts/service-check.sh:/service-check.sh:z" \
+        {{image}} bash /service-check.sh
+
 test-vm VM="kosher-fedora" *SUITES:
     rsync -a -e "{{vmssh}}" scripts/vm-tests/ {{VM}}:/tmp/kosher-vm-tests/
     {{vmssh}} {{VM}} "S=\$([ \$(id -u) = 0 ] || echo sudo); \$S bash /tmp/kosher-vm-tests/run.sh {{SUITES}}"

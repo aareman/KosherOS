@@ -293,6 +293,10 @@ def _stub_policy(media="none", blocked=()):
     })()
 
 
+def _stub_blocklist():
+    return type("B", (), {"contains_any": staticmethod(lambda text: False)})()
+
+
 def _stub_categories():
     return type("C", (), {
         "blocked_categories_of": staticmethod(lambda host, blocked: set()),
@@ -366,6 +370,7 @@ def test_the_proxy_blocks_a_department_before_fetching_the_page(addon):
     filt.policy = _request_policy(blocked=["immodest"])
     filt.categories = _stub_categories()
     filt.siterules = rules
+    filt.blocklist = _stub_blocklist()
 
     blocked = _request_flow("https://www.amazon.com/s?k=x&i=fashion-womens")
     filt.request(blocked)
@@ -388,6 +393,7 @@ def test_a_department_is_only_blocked_for_accounts_that_asked(addon):
     filt.policy = _request_policy(blocked=["gambling"])
     filt.categories = _stub_categories()
     filt.siterules = rules
+    filt.blocklist = _stub_blocklist()
 
     flow = _request_flow("https://www.amazon.com/s?k=x&i=fashion-womens")
     filt.request(flow)
@@ -450,7 +456,12 @@ def test_the_reserved_path_is_answered_here_and_never_forwarded(addon, tmp_path)
     filt.uids = type("U", (), {"uid_for_port": staticmethod(lambda p: 1001)})()
     filt.policy = _request_policy()
     filt.categories = _stub_categories()
-    filt.siterules = type("S", (), {"reason": staticmethod(lambda u: None)})()
+    filt.siterules = type("S", (), {
+        "reason": staticmethod(lambda u: None),
+        "blocked_search": staticmethod(lambda u: None),
+        "search_text": staticmethod(lambda u: None),
+    })()
+    filt.blocklist = _stub_blocklist()
 
     flow = _request_flow("https://example.com" + addon.REQUEST_PATH)
     flow.request.method = "POST"
@@ -476,8 +487,155 @@ def test_a_get_to_the_reserved_path_is_an_ordinary_request(addon):
     filt.uids = type("U", (), {"uid_for_port": staticmethod(lambda p: 1001)})()
     filt.policy = _request_policy()
     filt.categories = _stub_categories()
-    filt.siterules = type("S", (), {"reason": staticmethod(lambda u: None)})()
+    filt.siterules = type("S", (), {
+        "reason": staticmethod(lambda u: None),
+        "blocked_search": staticmethod(lambda u: None),
+        "search_text": staticmethod(lambda u: None),
+    })()
+    filt.blocklist = _stub_blocklist()
     flow = _request_flow("https://example.com" + addon.REQUEST_PATH)
     flow.request.method = "GET"
     filt.request(flow)
     assert flow.response is None
+
+
+# -- a shop's own search box and autocomplete ---------------------------------
+
+def _shop_filter(addon, blocked=("immodest",)):
+    from pathlib import Path
+
+    from kosherd import content, search as search_mod, siterules
+
+    root = Path(__file__).parents[2]
+    filt = addon.KosherFilter.__new__(addon.KosherFilter)
+    filt.uids = type("U", (), {"uid_for_port": staticmethod(lambda p: 1001)})()
+    filt.policy = type("P", (), {
+        "rules_for": staticmethod(lambda uid: []),
+        "blocked_categories_for": staticmethod(lambda uid: list(blocked)),
+        "media_level_for": staticmethod(lambda uid: "none"),
+        "language_filter_for": staticmethod(lambda uid: "off"),
+        "youtube_for": staticmethod(lambda uid: {}),
+    })()
+    filt.categories = _stub_categories()
+    filt.siterules = siterules.load(
+        root / "os-image/files/usr/share/kosher/site-rules.json")
+    filt.blocklist = search_mod.load_blocklist(
+        root / "os-image/files/usr/share/kosher/search-blocklist.json")
+    filt.scorer = content.load(
+        root / "os-image/files/usr/share/kosher/content-terms.json")
+    return filt
+
+
+def test_a_department_search_on_the_shops_own_box_is_blocked(addon):
+    filt = _shop_filter(addon)
+    flow = _request_flow("https://www.amazon.com/s?k=lingerie")
+    filt.request(flow)
+    assert flow.response is not None and flow.response.status_code == 403
+
+
+def test_an_ordinary_search_on_the_same_shop_is_not(addon):
+    filt = _shop_filter(addon)
+    flow = _request_flow("https://www.amazon.com/s?k=laptop+stand")
+    filt.request(flow)
+    assert flow.response is None
+
+
+def test_autocomplete_entries_are_dropped_from_the_response(addon):
+    import json
+
+    filt = _shop_filter(addon)
+    body = json.dumps({"prefix": "li", "suggestions": [
+        {"value": "light bulbs"}, {"value": "lingerie"},
+        {"value": "linen tablecloth"}]}).encode()
+    flow = _suggestion_flow(
+        "https://completion.amazon.com/api/2017/suggestions?prefix=li", body)
+    filt.response(flow)
+    out = json.loads(flow.response.content)
+    assert [s["value"] for s in out["suggestions"]] == ["light bulbs",
+                                                        "linen tablecloth"]
+    assert out["prefix"] == "li"
+
+
+def test_a_stale_content_length_is_not_left_behind(addon):
+    import json
+
+    filt = _shop_filter(addon)
+    body = json.dumps(["lamp", "lingerie"]).encode()
+    flow = _suggestion_flow(
+        "https://completion.amazon.com/api/2017/suggestions?prefix=l", body)
+    flow.response.headers["content-length"] = str(len(body))
+    filt.response(flow)
+    assert "content-length" not in flow.response.headers
+
+
+def test_suggestions_are_left_alone_for_accounts_that_did_not_ask(addon):
+    import json
+
+    filt = _shop_filter(addon, blocked=("gambling",))
+    body = json.dumps(["lamp", "lingerie"]).encode()
+    flow = _suggestion_flow(
+        "https://completion.amazon.com/api/2017/suggestions?prefix=l", body)
+    filt.response(flow)
+    assert json.loads(flow.response.content) == ["lamp", "lingerie"]
+
+
+def test_a_results_page_is_judged_even_when_pictures_are_not_filtered(addon):
+    # An account that blocks immodest sites did not ask to read an
+    # immodest page on a site it does not block.
+    filt = _shop_filter(addon)
+    flow = _suggestion_flow("https://www.amazon.com/s?k=x", b"")
+    flow.response.headers["content-type"] = "text/html"
+    flow.response.get_text = lambda strict=False: (
+        "<html><body>Lingerie sale: bras, panties, thongs, bralettes, "
+        "corsets and intimate apparel. Sexy babydoll and negligee sets."
+        "</body></html>")
+    filt._filter_page(flow, 1001)
+    assert flow.response.status_code == 403
+
+
+def _suggestion_flow(url, body):
+    from urllib.parse import urlsplit
+
+    parts = urlsplit(url)
+    return type("F", (), {
+        "request": type("R", (), {
+            "pretty_host": parts.hostname,
+            "pretty_url": url,
+            "path": parts.path,
+            "method": "GET",
+            "query": {},
+            "headers": {},
+        })(),
+        "response": _Resp(body, {"content-type": "application/json"}),
+        "metadata": {"kosher_uid": 1001},
+    })()
+
+
+def test_a_shops_navigation_does_not_block_its_ordinary_pages(addon):
+    # An Amazon search for socks names lingerie, bras, panties and
+    # swimwear in the sidebar of every page. Blocking that is an outage,
+    # not a filter — the precise rules handle immodest on these sites.
+    filt = _shop_filter(addon)
+    flow = _suggestion_flow("https://www.amazon.com/s?k=socks", b"")
+    flow.response.headers["content-type"] = "text/html"
+    flow.response.get_text = lambda strict=False: (
+        "<html><body>Amazon.com: socks. Department: Clothing, Shoes & "
+        "Jewelry. Women: Dresses, Tops, Sweaters, Coats, Shoes, Jewelry, "
+        "Handbags, Lingerie Sleepwear & Loungewear, Bras, Panties, "
+        "Shapewear, Swimwear, Socks & Hosiery. Men: Shirts, Pants, "
+        "Underwear. Results for socks: cotton crew socks, wool socks."
+        "</body></html>")
+    filt._filter_page(flow, 1001)
+    assert getattr(flow.response, "status_code", 200) != 403
+
+
+def test_a_page_on_a_site_with_no_rules_is_still_judged_strictly(addon):
+    # Nothing precise covers this host, so the scorer is all there is.
+    filt = _shop_filter(addon)
+    flow = _suggestion_flow("https://smallshop.example/page", b"")
+    flow.response.headers["content-type"] = "text/html"
+    flow.response.get_text = lambda strict=False: (
+        "<html><body>Bikini and swimsuit collection. Tankini, monokini and "
+        "beachwear for summer. Swimsuit edition photos.</body></html>")
+    filt._filter_page(flow, 1001)
+    assert flow.response.status_code == 403

@@ -33,7 +33,9 @@ try:
     from kosherd import imageedit as imageedit_mod
     from kosherd import language as language_mod
     from kosherd import accessreq as accessreq_mod
+    from kosherd import search as search_mod
     from kosherd import siterules as siterules_mod
+    from kosherd import suggest as suggest_mod
     from kosherd import vision as vision_mod
     from kosherd.uidmap import UidLookup
     from kosherd.urlrules import BLOCK, decide, parse_rules
@@ -50,7 +52,9 @@ except ImportError:  # pragma: no cover - only when interpreters differ
     from kosherd import imageedit as imageedit_mod
     from kosherd import language as language_mod
     from kosherd import accessreq as accessreq_mod
+    from kosherd import search as search_mod
     from kosherd import siterules as siterules_mod
+    from kosherd import suggest as suggest_mod
     from kosherd import vision as vision_mod
     from kosherd.uidmap import UidLookup
     from kosherd.urlrules import BLOCK, decide, parse_rules
@@ -340,6 +344,7 @@ class KosherFilter:
         self.wordlist = language_mod.load()
         self.vision = vision_mod.ImageFilter()
         self.siterules = siterules_mod.load()
+        self.blocklist = search_mod.load_blocklist()
 
     def request(self, flow: http.HTTPFlow) -> None:
         # Everything reaching this proxy belongs to a filtered user: only
@@ -398,7 +403,7 @@ class KosherFilter:
             # address, so it costs microseconds and happens before the
             # page is fetched.
             if siterules_mod.GATING_CATEGORY in blocked:
-                why = self.siterules.reason(url)
+                why = self.siterules.reason(url) or self._blocked_shop_search(url)
                 if why:
                     log.info("blocked uid=%s %s (%s)", uid, url, why)
                     self._block(flow, url, f" because it is {why}")
@@ -422,7 +427,83 @@ class KosherFilter:
             self._filter_youtube(flow, uid)
             return
 
+        if self.siterules.is_suggestions(flow.request.pretty_url):
+            self._filter_suggestions(flow, uid)
+            return
+
         self._filter_page(flow, uid)
+
+    def _blocked_shop_search(self, url: str) -> str | None:
+        """A search typed into a shop's own box.
+
+        The department rules cover navigating TO a department; the search
+        box on the same page walks straight past them.
+        """
+        why = self.siterules.blocked_search(url)
+        if why:
+            return why
+        text = self.siterules.search_text(url)
+        if text and self.blocklist.contains_any(text):
+            return "a blocked search"
+        return None
+
+    def _is_blocked_suggestion(self, uid: int):
+        """A test for one autocomplete entry, or None if none is needed."""
+        blocked = self.policy.blocked_categories_for(uid)
+        if siterules_mod.GATING_CATEGORY not in blocked:
+            return None
+        tolerance = self._content_tolerance(uid)
+
+        def is_blocked(text: str) -> bool:
+            if self.blocklist.contains_any(text):
+                return True
+            # A suggestion is a few words, not a page: the scorer needs
+            # more evidence than one exists, so the department term list
+            # is what answers here.
+            if self.siterules.blocked_term(text):
+                return True
+            return self.scorer.score(text).at_least(tolerance)
+
+        return is_blocked
+
+    def _filter_suggestions(self, flow: http.HTTPFlow, uid: int) -> None:
+        is_blocked = self._is_blocked_suggestion(uid)
+        if is_blocked is None:
+            return
+        filtered = suggest_mod.filter_json(flow.response.content or b"",
+                                           is_blocked)
+        if filtered is None:
+            return
+        flow.response.content = filtered
+        flow.response.headers["x-kosheros"] = "suggestions-filtered"
+        # The body changed, so any length or integrity header on it is now
+        # a lie the browser would enforce.
+        flow.response.headers.pop("content-length", None)
+
+    def _content_tolerance(self, uid: int, host: str = "") -> str:
+        """How much a page may say before it is blocked for this user.
+
+        Driven by the media level, but never weaker than what the blocked
+        categories already imply: an account that blocks immodest sites did
+        not ask to read an immodest page on a site it does not block.
+
+        On a shop with rules of its own, the floor stops at "suggestive".
+        Those sites carry their whole department list in the navigation of
+        every page — an Amazon search for socks names lingerie, bras,
+        panties and swimwear in the sidebar and scores immodest on that
+        alone. Blocking it would be an outage, not a filter. The precise
+        rules (department addresses, the search box, autocomplete) are what
+        handle immodest there; the scorer is only the backstop for worse.
+        """
+        level = self.policy.media_level_for(uid)
+        tolerance = CONTENT_TOLERANCE.get(level, content_mod.NSFW)
+        if siterules_mod.GATING_CATEGORY in self.policy.blocked_categories_for(uid):
+            floor = content_mod.IMMODEST
+            if host and self.siterules.covers(host):
+                floor = content_mod.SUGGESTIVE
+            if content_mod.SEVERITY[tolerance] > content_mod.SEVERITY[floor]:
+                tolerance = floor
+        return tolerance
 
     def _filter_page(self, flow: http.HTTPFlow, uid: int) -> None:
         """Judge a page by its words when no list has anything to say about it.
@@ -434,7 +515,9 @@ class KosherFilter:
         """
         level = self.policy.media_level_for(uid)
         language_filter = self.policy.language_filter_for(uid)
-        if level == "none" and language_filter == "off":
+        immodest_blocked = siterules_mod.GATING_CATEGORY in \
+            self.policy.blocked_categories_for(uid)
+        if level == "none" and language_filter == "off" and not immodest_blocked:
             return
         content_type = (flow.response.headers.get("content-type") or "").lower()
         if "text/html" not in content_type:
@@ -456,9 +539,9 @@ class KosherFilter:
             # The page has been rewritten; score the cleaned copy below.
             text = content_mod.visible_text(cleaned[:MAX_SCORED_BYTES])
 
-        tolerance = CONTENT_TOLERANCE.get(level)
-        if tolerance is None:
+        if level == "none" and not immodest_blocked:
             return
+        tolerance = self._content_tolerance(uid, flow.request.pretty_host or "")
         verdict = self.scorer.score(text)
         if verdict.at_least(tolerance):
             log.info("blocked uid=%s %s (content: %s, %d points, %s)",

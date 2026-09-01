@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "comment": "Departments on large shops, read from the address rather than looked at. Applies only to accounts that block the 'immodest' category \u2014 the same setting that blocks lingerie retailers outright \u2014 because these are sites a family uses, with parts they do not want. A site listed here is fully described by its own rules; the 'anywhere' list is for shops nobody has written rules for yet. Terms match whole path or query segments, so 'bras' does not match 'brasserie'. An administrator may add or remove a handful; nobody should have to build this. The 'anywhere' list only fires on shop-shaped paths (/shop/, /collections/, /category/ and the like), because an article whose title happens to contain the word is not a department \u2014 the page scorer is the backstop for those.",
+  "comment": "Departments on large shops, read from the address rather than looked at. Applies only to accounts that block the 'immodest' category \u2014 the same setting that blocks lingerie retailers outright \u2014 because these are sites a family uses, with parts they do not want. A site listed here is fully described by its own rules; the 'anywhere' list is for shops nobody has written rules for yet. Terms match whole path or query segments, so 'bras' does not match 'brasserie'. An administrator may add or remove a handful; nobody should have to build this. The 'anywhere' list only fires on shop-shaped paths (/shop/, /collections/, /category/ and the like), because an article whose title happens to contain the word is not a department \u2014 the page scorer is the backstop for those. search_params names the query parameter a site's own search box uses, and suggest_hosts/suggest_paths name its autocomplete endpoint: a department rule is worth nothing if the search box on the same page reaches the department anyway, and autocomplete is worse than the results because it puts the words on screen unprompted while somebody is typing something else.",
   "sites": [
     {
       "hosts": [
@@ -51,6 +51,21 @@
         "womens-intimates",
         "adult-toys",
         "sexual-wellness"
+      ],
+      "search_params": [
+        "k",
+        "field-keywords"
+      ],
+      "suggest_hosts": [
+        "completion.amazon.com",
+        "completion.amazon.co.uk",
+        "completion.amazon.ca",
+        "completion.amazon.de"
+      ],
+      "suggest_paths": [
+        "/api/2017/suggestions",
+        "/search/complete",
+        "/api/2019/suggestions"
       ]
     },
     {
@@ -82,6 +97,16 @@
         "juniors-swim",
         "womens-swim",
         "sexual-wellness"
+      ],
+      "search_params": [
+        "q",
+        "query"
+      ],
+      "suggest_paths": [
+        "/typeahead",
+        "/suggest",
+        "/autocomplete",
+        "/search/autocomplete"
       ]
     },
     {
@@ -116,6 +141,23 @@
         "sexy",
         "erotic",
         "adult-toys"
+      ],
+      "search_params": [
+        "_nkw",
+        "q",
+        "kwd"
+      ],
+      "suggest_hosts": [
+        "autosug.ebay.com",
+        "ir.ebaystatic.com",
+        "suggest.aliexpress.com"
+      ],
+      "suggest_paths": [
+        "/autosug",
+        "/suggest",
+        "/autocomplete",
+        "/typeahead",
+        "/ac"
       ]
     },
     {
@@ -160,6 +202,17 @@
         "crop-tops",
         "mini-skirts",
         "bodycon"
+      ],
+      "search_params": [
+        "q",
+        "query",
+        "text"
+      ],
+      "suggest_paths": [
+        "/suggest",
+        "/autocomplete",
+        "/typeahead",
+        "/searchsuggestions"
       ]
     },
     {

@@ -200,12 +200,43 @@ The reason names the term and the host ("the fashion-womens department of
 amazon.com"), because an admin has to be able to disagree with a specific
 word rather than with a probability.
 
-Two rules keep it from becoming an outage. A site with its own rules is
-*not* also judged by the generic list, so tuning one shop cannot silently
-widen another. And the generic list only fires on shop-shaped addresses
-(`/shop/`, `/collections/`, `/category/`), because an article whose title
-contains the word is not a department — the page scorer is the backstop
-for those.
+### The site's own search box and autocomplete
+
+Blocking the department is worth nothing if the search box on the same
+page reaches it anyway, and autocomplete is worse than the results: it
+puts the words on screen unprompted, while somebody is typing something
+else. So both are filtered.
+
+A search typed into a shop's own box is matched against the same
+department vocabulary the address rules use (`?k=lingerie` on Amazon,
+`?_nkw=bikini` on eBay) plus the explicit search blocklist. `?k=laptop
+stand` and `?_nkw=sefer torah` go through untouched.
+
+Autocomplete comes back as JSON, and every site nests it differently —
+Amazon under `suggestions`, eBay under `res.sug`, others as a bare array.
+Rather than learn each schema and re-learn it when it changes,
+`kosherd/suggest.py` walks whatever came back and drops **list entries**
+whose text is blocked, leaving the structure alone. Dropping entries from
+a list of suggestions is the right edit and the one edit that cannot break
+a response's shape. A suggestion is a few words rather than a page, so the
+term list answers there and not the content scorer, which needs more
+evidence than one word can carry.
+
+### Three rules keep this from becoming an outage
+
+A site with its own rules is *not* also judged by the generic list, so
+tuning one shop cannot silently widen another. The generic list only fires
+on shop-shaped addresses (`/shop/`, `/collections/`, `/category/`),
+because an article whose title contains the word is not a department.
+
+And on a shop with its own rules the page scorer's floor stops at
+*suggestive* rather than *immodest*. Those sites carry their whole
+department list in the navigation of every page: an Amazon search for
+socks names lingerie, bras, panties and swimwear in the sidebar and scores
+immodest on that alone. Blocking it would be an outage, not a filter. The
+precise rules — department addresses, the search box, autocomplete — are
+what handle immodest on those sites; the scorer is the backstop for worse,
+and stays strict everywhere no precise rule exists.
 
 ### The vision model, when it is genuinely needed
 

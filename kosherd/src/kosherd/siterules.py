@@ -34,6 +34,12 @@ RULES_PATHS = (
 # means the lingerie department too.
 GATING_CATEGORY = "immodest"
 
+# The query parameter a shop's search box uses, when its rules do not say.
+DEFAULT_SEARCH_PARAMS = ("q", "k", "query", "search", "keyword", "term")
+# What an autocomplete endpoint's path looks like, when its rules do not say.
+DEFAULT_SUGGEST_PATHS = ("suggest", "autosug", "autocomplete", "typeahead",
+                         "complete", "/ac/", "instant")
+
 # What a category listing's address looks like on a shop nobody has
 # written rules for.
 SHOP_SHAPED = re.compile(
@@ -52,6 +58,13 @@ class SiteRules:
         for site in self.sites:
             hosts = tuple(h.lower().strip(".") for h in site.get("hosts", []))
             self._by_host.append((hosts, _compile(site.get("terms", [])), site))
+        # Terms that block a SEARCH on a shop, pooled across every site:
+        # somebody typing "lingerie" into a shop's own box means the same
+        # thing whichever shop it is, and the department lists are already
+        # exactly that vocabulary.
+        pooled = {t for site in self.sites for t in site.get("terms", [])}
+        pooled |= set(anywhere or [])
+        self._search_terms = _compile(sorted(pooled))
 
     def __len__(self) -> int:
         return len(self.sites)
@@ -91,6 +104,72 @@ class SiteRules:
             if match:
                 return f"a {match.group(0)} section"
         return None
+
+
+    def _site_for(self, host: str) -> dict | None:
+        for hosts, _pattern, site in self._by_host:
+            if any(_under(host, h) for h in hosts):
+                return site
+        return None
+
+    def covers(self, host: str) -> bool:
+        """Does this host have rules of its own?"""
+        return self._site_for((host or "").lower().strip(".")) is not None
+
+    def search_text(self, url: str) -> str | None:
+        """What was typed into this site's own search box, if anything.
+
+        A department rule is worth nothing if the box on the same page
+        reaches the department anyway.
+        """
+        parts = urlsplit(url if "//" in url else "//" + url)
+        site = self._site_for((parts.hostname or "").lower().strip("."))
+        if site is None:
+            return None
+        wanted = site.get("search_params") or DEFAULT_SEARCH_PARAMS
+        for key, value in parse_qsl(parts.query):
+            if key in wanted and value.strip():
+                return unquote_plus(value)
+        return None
+
+    def blocked_term(self, text: str) -> str | None:
+        """The department term in this text, if any.
+
+        Used on a typed search and on each autocomplete entry. A single
+        word like "lingerie" is a department name, not a page: the content
+        scorer needs a page's worth of evidence and will never see it here,
+        so the term list is what has to answer.
+        """
+        if not text or self._search_terms is None:
+            return None
+        match = self._search_terms.search(text.lower())
+        return match.group(0) if match else None
+
+    def blocked_search(self, url: str) -> str | None:
+        """Why a search on this site must not run, or None."""
+        term = self.blocked_term(self.search_text(url) or "")
+        return f"a search for {term}" if term else None
+
+    def is_suggestions(self, url: str) -> bool:
+        """Is this a shop's autocomplete endpoint?
+
+        Worth its own answer because autocomplete is worse than the
+        results: it puts the words on screen unprompted, while somebody is
+        typing something else.
+        """
+        parts = urlsplit(url if "//" in url else "//" + url)
+        host = (parts.hostname or "").lower().strip(".")
+        path = (parts.path or "").lower()
+        for hosts, _pattern, site in self._by_host:
+            extra = tuple(h.lower().strip(".")
+                          for h in site.get("suggest_hosts", []))
+            if not (any(_under(host, h) for h in hosts)
+                    or any(_under(host, h) for h in extra)):
+                continue
+            markers = site.get("suggest_paths") or DEFAULT_SUGGEST_PATHS
+            if any(marker in path for marker in markers):
+                return True
+        return False
 
 
 def _under(host: str, domain: str) -> bool:

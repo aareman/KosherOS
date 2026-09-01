@@ -266,6 +266,21 @@ domains. A truncated database that loads anyway is the worst outcome
 available, because it looks exactly like a working one. The old catalogue
 stays in place through any failure, and there is a test for that.
 
+### Publishing
+
+`just publish-lists https://portal.example` sends this repository's lists
+to a portal, so a family on an older image catches up without waiting for
+a new one — publishing is "send what the next image would have shipped".
+
+Add `--catalog-url` to publish a category-database manifest alongside
+them. The hash is taken from the **local** file rather than from whatever
+the URL returns at that moment, which is the mistake this would otherwise
+invite: signing a hash of something you have not seen.
+
+The script sends only the four names a device will accept. Anything else
+is silently dropped on arrival, and refusing to send it is better than
+discovering that later.
+
 ### An edit is a delta, not a copy
 
 The lists ship complete on purpose. What a family will actually do is

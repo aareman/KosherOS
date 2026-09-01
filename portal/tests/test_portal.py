@@ -287,3 +287,65 @@ def test_the_catalogue_manifest_is_covered_by_the_signature(client):
     with pytest.raises(SyncError):
         verify_envelope(envelope, key, current_revision=0,
                         field="lists", counter="version")
+
+
+def test_the_publishing_script_produces_a_bundle_devices_accept(
+        client, tmp_path, monkeypatch):
+    """End to end: what the script sends is what a device installs.
+
+    The device side was signed, verified and tested while nothing could
+    actually put a bundle into the portal. A feature that only works if
+    somebody hand-crafts JSON is a feature that stays switched off.
+    """
+    import importlib.util
+    import sys
+    from pathlib import Path
+
+    from kosherd import lists
+    from kosherd.sync import verify_envelope
+
+    monkeypatch.setattr(lists, "PORTAL_DIR", tmp_path / "portal")
+    monkeypatch.setattr(lists, "PORTAL_VERSION_PATH",
+                        tmp_path / "portal" / "version.json")
+
+    spec = importlib.util.spec_from_file_location(
+        "publish_lists",
+        Path(__file__).parents[2] / "scripts/publish-lists.py")
+    publish = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(publish)
+
+    # What the script would send, from this repository's own lists.
+    body = {"lists": publish.read_lists()}
+    assert set(body["lists"]) == set(publish.LISTS)
+
+    response = client.put("/api/v1/admin/lists", json=body,
+                          headers=admin_headers())
+    assert response.status_code == 200
+
+    key = client.get("/api/v1/admin/public-key",
+                     headers=admin_headers()).json()["portal_public_key"]
+    device = enrol_a_device(client)
+    envelope = client.get(f"/api/v1/devices/{device['device_id']}/lists",
+                          headers={"X-Device-Token": device["device_token"]}).json()
+    bundle = verify_envelope(envelope, key, current_revision=0,
+                             field="lists", counter="version")
+
+    # And a device installs every one of them.
+    installed = lists.install_portal_lists(bundle["lists"], bundle["version"])
+    assert sorted(installed) == sorted(publish.LISTS)
+
+
+def test_the_script_only_sends_names_a_device_will_accept():
+    # Sending anything else is silently dropped on arrival, which is worse
+    # than refusing to send it.
+    import importlib.util
+    from pathlib import Path
+
+    from kosherd import lists
+
+    spec = importlib.util.spec_from_file_location(
+        "publish_lists",
+        Path(__file__).parents[2] / "scripts/publish-lists.py")
+    publish = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(publish)
+    assert set(publish.LISTS) <= lists.ALLOWED_LISTS

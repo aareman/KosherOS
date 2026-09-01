@@ -29,6 +29,12 @@ test-cov:
 # Integration suites INSIDE the dev VM: services, enforcement, apps, guest,
 # inspect mode, persistence. Pass suite prefixes to narrow (just test-vm
 # kosher-fedora 50). Creates test users and changes filter modes — dev VMs only.
+# Send this repository's filter lists to a portal, so families on an older
+# image catch up without waiting for a new one. Add catalog-url= to publish
+# a category-database manifest alongside them.
+publish-lists PORTAL *ARGS:
+    python3 scripts/publish-lists.py {{PORTAL}} {{ARGS}}
+
 # Measure what the filter costs, inside the built image. Local-first on a
 # weak machine is the constraint everything here is designed against, so
 # the numbers in the docs should be measured rather than estimated.

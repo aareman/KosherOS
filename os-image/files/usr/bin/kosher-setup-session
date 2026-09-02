@@ -34,11 +34,30 @@ ls /dev/dri/card* >/dev/null 2>&1 || want_text=yes
 
 if [ "$want_text" = yes ]; then
     echo "no display available (or kosher.setup=text): using text setup"
-    if kosherctl setup; then
-        echo "text setup completed"
-        exit 0
+    # Talk to the console DIRECTLY, not through this script's stdout.
+    #
+    # The script pipes its stdout to tee -> journald (see the exec above),
+    # and journald assembles stream output into records BY LINE. A prompt
+    # has no trailing newline, so it never becomes a record and never
+    # reaches the screen, while the wizard blocks reading the answer. That
+    # is what made setup hang three times running, and no amount of
+    # flushing in the wizard could fix it — the buffering is in journald,
+    # past the pipe. Giving the wizard /dev/console for stdin and stdout
+    # takes its questions off that pipe entirely; errors still flow to the
+    # log via stderr. /dev/console is a real tty and needs no controlling
+    # terminal, unlike /dev/tty.
+    if [ -w /dev/console ]; then
+        kosherctl setup <>/dev/console >/dev/console && rc=0 || rc=$?
+    else
+        # No console device at all (unusual): fall back and hope stdout is
+        # usable, so a headless-misconfigured machine still gets a chance.
+        kosherctl setup && rc=0 || rc=$?
     fi
-    echo "text setup did not complete"
+    if [ "$rc" = 0 ]; then
+        echo "text setup completed"
+    else
+        echo "text setup did not complete (exit $rc)"
+    fi
     exit 0
 fi
 

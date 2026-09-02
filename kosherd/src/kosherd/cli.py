@@ -389,6 +389,44 @@ def cmd_sync(args) -> int:
     return 0
 
 
+class _Console:
+    """Talk to the person on the terminal, not to the log.
+
+    The setup session pipes its stdout through tee into a log file and the
+    journal, which is right for the record and wrong for a conversation:
+    a prompt has no newline, so it sat in journald's stream buffer and the
+    person saw a banner and then silence. getpass never had the problem
+    because it opens /dev/tty — so the questions do the same, and the log
+    still receives everything via say().
+    """
+
+    def __init__(self):
+        try:
+            self.tty = open("/dev/tty", "r+")
+        except OSError:
+            self.tty = None  # a scripted run with no terminal at all
+
+    def say(self, text: str = "") -> None:
+        print(text)  # the log and the journal
+        if self.tty:
+            self.tty.write(text + "\n")
+            self.tty.flush()
+
+    def ask(self, prompt: str) -> str:
+        if self.tty is None:
+            return input(prompt)
+        self.tty.write(prompt)
+        self.tty.flush()
+        line = self.tty.readline()
+        if not line:
+            raise EOFError("the console closed mid-setup")
+        answer = line.rstrip("\n")
+        # The record shows the question and the answer; passwords go
+        # through getpass and are never echoed anywhere.
+        print(f"{prompt}{answer}")
+        return answer
+
+
 def cmd_setup(args) -> int:
     """Text-mode first-boot setup, for when the graphical wizard cannot run.
 
@@ -416,42 +454,45 @@ def cmd_setup(args) -> int:
         print(f"created {args.username} (uid {uid}); setup complete")
         return 0
 
-    print("\nKosherOS setup\n")
-    print("Create the administrator account for this computer.")
-    print("It manages profiles, filtering and apps. It has no root access.\n")
+    console = _Console()
+    console.say("\nKosherOS setup\n")
+    console.say("Create the administrator account for this computer.")
+    console.say("It manages profiles, filtering and apps. It has no root access.\n")
 
     while True:
-        username = input("Username: ").strip()
+        username = console.ask("Username: ").strip()
         if re.fullmatch(r"[a-z_][a-z0-9_-]*", username or ""):
             break
-        print("  Use lowercase letters, digits, - or _ (starting with a letter).")
+        console.say("  Use lowercase letters, digits, - or _ "
+                    "(starting with a letter).")
 
-    full_name = input(f"Full name [{username}]: ").strip() or username
+    full_name = console.ask(f"Full name [{username}]: ").strip() or username
 
     while True:
         password = getpass.getpass("Password: ")
         if len(password) < 6:
-            print("  At least 6 characters, please.")
+            console.say("  At least 6 characters, please.")
             continue
         if password != getpass.getpass("Confirm password: "):
-            print("  Those did not match.")
+            console.say("  Those did not match.")
             continue
         break
 
     uid = c.create_first_admin(username, full_name, password)
-    print(f"\nCreated {username} (uid {uid}).")
+    console.say(f"\nCreated {username} (uid {uid}).")
 
     guardian = ""
-    if input("\nSet a guardian password (a second password required to "
-             "change filter settings)? [y/N]: ").strip().lower().startswith("y"):
+    if console.ask("\nSet a guardian password (a second password required to "
+                   "change filter settings)? [y/N]: ").strip().lower() \
+            .startswith("y"):
         while True:
             guardian = getpass.getpass("Guardian password: ")
             if len(guardian) >= 6 and guardian == getpass.getpass("Confirm: "):
                 break
-            print("  At least 6 characters, and both must match.")
+            console.say("  At least 6 characters, and both must match.")
 
     c.finish_setup(guardian, "")
-    print("\nSetup complete. Starting the login screen.\n")
+    console.say("\nSetup complete. Starting the login screen.\n")
     return 0
 
 

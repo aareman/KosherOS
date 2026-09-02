@@ -60,3 +60,57 @@ def test_a_missing_service_user_is_stated_not_silently_dropped(tmp_path,
     out = capsys.readouterr().out
     assert "no kosher-mitm user" in out
     assert "no kosher-search user" in out
+
+
+# -- talking to the person, not to the log ------------------------------------
+
+def test_setup_questions_go_to_the_terminal(tmp_path, monkeypatch):
+    """The setup session pipes stdout through tee into the journal.
+
+    A prompt has no newline, so it sat in journald's stream buffer and the
+    person saw a banner and then silence — the boot test typed a password
+    into nothing. getpass never had the problem because it opens /dev/tty,
+    which is why "Password:" appeared in the old console log while
+    "Username:" did not. The questions now do what getpass does.
+    """
+    import io
+
+    from kosherd.cli import _Console
+
+    tty = io.StringIO()
+    tty.readline = lambda: "avraham\n"
+
+    console = _Console.__new__(_Console)
+    console.tty = tty
+    answer = console.ask("Username: ")
+    assert answer == "avraham"
+    assert tty.getvalue() == "Username: "  # written to the tty, unbuffered
+
+
+def test_setup_still_works_with_no_terminal_at_all(monkeypatch):
+    # A scripted run in a pipeline has no /dev/tty; falling back to stdin
+    # keeps it drivable.
+    from kosherd.cli import _Console
+
+    console = _Console.__new__(_Console)
+    console.tty = None
+    monkeypatch.setattr("builtins.input", lambda prompt: "scripted")
+    assert console.ask("Username: ") == "scripted"
+
+
+def test_what_was_asked_and_answered_reaches_the_log(capsys):
+    from kosherd.cli import _Console
+
+    import io
+
+    tty = io.StringIO()
+    tty.readline = lambda: "avraham\n"
+    console = _Console.__new__(_Console)
+    console.tty = tty
+    console.ask("Username: ")
+    console.say("Created avraham (uid 1000).")
+    out = capsys.readouterr().out
+    # The record shows the conversation; a machine whose setup failed has
+    # no account to log in with, so the log is the only witness.
+    assert "Username: avraham" in out
+    assert "Created avraham" in out

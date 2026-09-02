@@ -35,6 +35,11 @@ test-cov:
 publish-lists PORTAL *ARGS:
     python3 scripts/publish-lists.py {{PORTAL}} {{ARGS}}
 
+# Drive the whole first-boot wizard over a pty — the same conversation the
+# boot test types, in a second instead of a boot.
+check-wizard:
+    python3 scripts/wizard-check.py
+
 # Measure what the filter costs, inside the built image. Local-first on a
 # weak machine is the constraint everything here is designed against, so
 # the numbers in the docs should be measured rather than estimated.

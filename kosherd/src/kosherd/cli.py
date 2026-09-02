@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import getpass
+import logging
 import os
 import json
 import re
@@ -16,6 +17,8 @@ import sys
 from pathlib import Path
 
 from . import dns, nft, policy as policy_mod
+
+log = logging.getLogger(__name__)
 
 
 def _client():
@@ -390,86 +393,90 @@ def cmd_sync(args) -> int:
     return 0
 
 
+def _isatty(stream) -> bool:
+    """Whether a stream is a real terminal, tolerant of stand-ins.
+
+    A test or a pipe hands us something with no fileno; that is simply not
+    a tty rather than an error.
+    """
+    try:
+        return os.isatty(stream.fileno())
+    except (OSError, ValueError, AttributeError):
+        return False
+
+
 class _Console:
-    """Talk to the person on the terminal, not to the log.
+    """Talk to the person running setup over stdin/stdout.
 
-    The setup session pipes its stdout through tee into a log and the
-    journal, which is right for the record and wrong for a conversation:
-    a prompt has no newline, so it sat in the stream buffer and the person
-    saw a banner and then silence.
+    History, because this took three boots to get right. The wizard runs
+    as a systemd service with StandardInput=tty, so stdin IS the console;
+    reading from it always worked. What failed:
 
-    The obvious fix — open /dev/tty, as getpass does — is not enough here.
-    /dev/tty is the process's CONTROLLING terminal, and a systemd service
-    with no getty in front of it has none, so the open fails. But systemd's
-    StandardInput=tty still hands us the console on fd 0. So the terminal
-    to use is whichever of stdin/stdout/stderr is a tty, found by name;
-    /dev/tty is only the last resort.
+      1. a getty on the same console stole the input — fixed by Conflicts=;
+      2. input()'s prompt has no trailing newline, and stdout here is a
+         pipe to tee, so the prompt sat unflushed in the buffer and the
+         person saw the banner then silence;
+      3. reaching for /dev/tty to dodge (2) made it worse: a service has no
+         controlling terminal, so /dev/tty does not exist for it.
+
+    The fix for (2) is just to flush. No /dev/tty, no ttyname games: write
+    the prompt to stdout and flush it, read the answer from stdin. The
+    prompt reaches the journal and the console alike, which is why the boot
+    test sees "Username:" whatever prefix journald adds.
     """
 
     def __init__(self):
-        self.tty = self._open_terminal()
-
-    @staticmethod
-    def _open_terminal():
-        for fd in (0, 1, 2):
-            try:
-                if os.isatty(fd):
-                    return open(os.ttyname(fd), "r+")
-            except OSError:
-                continue
-        try:
-            return open("/dev/tty", "r+")
-        except OSError:
-            return None  # a scripted run with no terminal at all
+        # Printed once, so a boot that still cannot prompt says why in the
+        # log instead of hanging in silence. Cheap insurance against a
+        # fourth round trip.
+        log.info("setup console: stdin isatty=%s stdout isatty=%s",
+                 _isatty(sys.stdin), _isatty(sys.stdout))
 
     def say(self, text: str = "") -> None:
-        print(text)  # the log and the journal
-        if self.tty:
-            self.tty.write(text + "\n")
-            self.tty.flush()
+        print(text, flush=True)
 
     def ask(self, prompt: str) -> str:
-        if self.tty is None:
-            return input(prompt)
-        self.tty.write(prompt)
-        self.tty.flush()
-        line = self.tty.readline()
+        # The flush is the whole point: without it the prompt waits in the
+        # buffer while readline blocks, and nothing appears.
+        sys.stdout.write(prompt)
+        sys.stdout.flush()
+        line = sys.stdin.readline()
         if not line:
             raise EOFError("the console closed mid-setup")
-        answer = line.rstrip("\n")
-        # The record shows the question and the answer.
-        print(f"{prompt}{answer}")
-        return answer
+        return line.rstrip("\n")
 
     def ask_secret(self, prompt: str) -> str:
-        """A password: read from the same terminal, with echo off.
+        """A password: read from stdin with echo off when stdin is a tty.
 
-        Not getpass, for the same reason as ask: getpass reads /dev/tty and
-        falls back to stdin with a warning and full echo when there is no
-        controlling terminal — a password typed in the clear on the family
-        setup console. This turns echo off on the terminal we actually have.
+        getpass would do this, but it insists on /dev/tty and falls back to
+        stdin with a warning and full echo when there is no controlling
+        terminal — a password in the clear on the family setup console.
+        Turning echo off on stdin itself avoids both.
         """
-        if self.tty is None:
+        try:
+            fd = sys.stdin.fileno()
+            is_tty = os.isatty(fd)
+        except (OSError, ValueError):
+            is_tty = False
+        if not is_tty:
             return getpass.getpass(prompt)
         import termios
 
-        self.tty.write(prompt)
-        self.tty.flush()
-        fd = self.tty.fileno()
+        sys.stdout.write(prompt)
+        sys.stdout.flush()
         saved = termios.tcgetattr(fd)
         try:
             quiet = termios.tcgetattr(fd)
             quiet[3] &= ~termios.ECHO
             termios.tcsetattr(fd, termios.TCSADRAIN, quiet)
-            line = self.tty.readline()
+            line = sys.stdin.readline()
         finally:
             termios.tcsetattr(fd, termios.TCSADRAIN, saved)
-            self.tty.write("\n")  # the newline the user's Enter did not echo
-            self.tty.flush()
+            sys.stdout.write("\n")  # the Enter the terminal did not echo
+            sys.stdout.flush()
         if not line:
             raise EOFError("the console closed mid-setup")
         return line.rstrip("\n")
-
 
 def cmd_setup(args) -> int:
     """Text-mode first-boot setup, for when the graphical wizard cannot run.

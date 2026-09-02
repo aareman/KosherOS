@@ -218,8 +218,44 @@ def run(disk: Path) -> int:
     return 1 if results.failed else 0
 
 
+def refuse_stale_disk(disk: str) -> None:
+    """Refuse to boot a disk built from an older image.
+
+    `just test-boot` boots whatever qcow2 exists; it does not rebuild it.
+    Three consecutive boots tested a stale disk because nothing said so —
+    every "fix" being verified was not on the disk at all. The container
+    image's own Created time is useless here (bootc pins it to 1980 for
+    reproducibility), so `just vm` stamps the image id beside the disk and
+    this compares it.
+    """
+    import subprocess
+    from pathlib import Path
+
+    stamp = Path(disk).parent / ".image-id"
+    current = subprocess.run(
+        ["podman", "image", "inspect", "localhost/kosher-linux:dev",
+         "--format", "{{.Id}}"], capture_output=True, text=True).stdout.strip()
+    if not current:
+        return  # no local image to compare against; not this harness's call
+    recorded = stamp.read_text().strip() if stamp.exists() else ""
+    if recorded == current:
+        return
+    print("REFUSING TO BOOT A STALE DISK")
+    print(f"  the disk at {disk} was built from "
+          + (f"image {recorded[:12]}" if recorded else "an unknown image")
+          + f", but the current image is {current[:12]}.")
+    print("  Booting it would test old code and report the results as if")
+    print("  they were current — which already cost three boots.")
+    print("  Rebuild the disk first:   just vm")
+    print("  Boot anyway (rarely right): KOSHER_BOOT_STALE_OK=1 just test-boot")
+    import os
+    if os.environ.get("KOSHER_BOOT_STALE_OK") != "1":
+        raise SystemExit(2)
+
+
 def main() -> int:
     disk = Path(sys.argv[1]) if len(sys.argv) > 1 else DEFAULT_DISK
+    refuse_stale_disk(str(disk))
     if not disk.exists():
         print(f"No disk image at {disk}. Build one with: just vm", file=sys.stderr)
         return 2

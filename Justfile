@@ -217,6 +217,10 @@ vm: build
         quay.io/centos-bootc/bootc-image-builder:latest \
         --type qcow2 --rootfs ext4 {{image}}
     sudo chown -R "$USER:" build/qcow2
+    # Stamp which image this disk came from, so a boot test can refuse a
+    # stale disk instead of testing last morning's code. Three boots went
+    # to exactly that.
+    podman image inspect {{image}} --format '{{{{.Id}}}}' > build/qcow2/.image-id
     @echo "qcow2 at build/qcow2/disk.qcow2 — boot with: just boot-image"
 
 # Build the installable ISO (Anaconda). No preset users — the machine runs

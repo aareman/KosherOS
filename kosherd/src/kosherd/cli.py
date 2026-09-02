@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import getpass
+import os
 import json
 import re
 import sys
@@ -392,19 +393,34 @@ def cmd_sync(args) -> int:
 class _Console:
     """Talk to the person on the terminal, not to the log.
 
-    The setup session pipes its stdout through tee into a log file and the
+    The setup session pipes its stdout through tee into a log and the
     journal, which is right for the record and wrong for a conversation:
-    a prompt has no newline, so it sat in journald's stream buffer and the
-    person saw a banner and then silence. getpass never had the problem
-    because it opens /dev/tty — so the questions do the same, and the log
-    still receives everything via say().
+    a prompt has no newline, so it sat in the stream buffer and the person
+    saw a banner and then silence.
+
+    The obvious fix — open /dev/tty, as getpass does — is not enough here.
+    /dev/tty is the process's CONTROLLING terminal, and a systemd service
+    with no getty in front of it has none, so the open fails. But systemd's
+    StandardInput=tty still hands us the console on fd 0. So the terminal
+    to use is whichever of stdin/stdout/stderr is a tty, found by name;
+    /dev/tty is only the last resort.
     """
 
     def __init__(self):
+        self.tty = self._open_terminal()
+
+    @staticmethod
+    def _open_terminal():
+        for fd in (0, 1, 2):
+            try:
+                if os.isatty(fd):
+                    return open(os.ttyname(fd), "r+")
+            except OSError:
+                continue
         try:
-            self.tty = open("/dev/tty", "r+")
+            return open("/dev/tty", "r+")
         except OSError:
-            self.tty = None  # a scripted run with no terminal at all
+            return None  # a scripted run with no terminal at all
 
     def say(self, text: str = "") -> None:
         print(text)  # the log and the journal
@@ -421,10 +437,38 @@ class _Console:
         if not line:
             raise EOFError("the console closed mid-setup")
         answer = line.rstrip("\n")
-        # The record shows the question and the answer; passwords go
-        # through getpass and are never echoed anywhere.
+        # The record shows the question and the answer.
         print(f"{prompt}{answer}")
         return answer
+
+    def ask_secret(self, prompt: str) -> str:
+        """A password: read from the same terminal, with echo off.
+
+        Not getpass, for the same reason as ask: getpass reads /dev/tty and
+        falls back to stdin with a warning and full echo when there is no
+        controlling terminal — a password typed in the clear on the family
+        setup console. This turns echo off on the terminal we actually have.
+        """
+        if self.tty is None:
+            return getpass.getpass(prompt)
+        import termios
+
+        self.tty.write(prompt)
+        self.tty.flush()
+        fd = self.tty.fileno()
+        saved = termios.tcgetattr(fd)
+        try:
+            quiet = termios.tcgetattr(fd)
+            quiet[3] &= ~termios.ECHO
+            termios.tcsetattr(fd, termios.TCSADRAIN, quiet)
+            line = self.tty.readline()
+        finally:
+            termios.tcsetattr(fd, termios.TCSADRAIN, saved)
+            self.tty.write("\n")  # the newline the user's Enter did not echo
+            self.tty.flush()
+        if not line:
+            raise EOFError("the console closed mid-setup")
+        return line.rstrip("\n")
 
 
 def cmd_setup(args) -> int:
@@ -469,11 +513,11 @@ def cmd_setup(args) -> int:
     full_name = console.ask(f"Full name [{username}]: ").strip() or username
 
     while True:
-        password = getpass.getpass("Password: ")
+        password = console.ask_secret("Password: ")
         if len(password) < 6:
             console.say("  At least 6 characters, please.")
             continue
-        if password != getpass.getpass("Confirm password: "):
+        if password != console.ask_secret("Confirm password: "):
             console.say("  Those did not match.")
             continue
         break
@@ -486,8 +530,9 @@ def cmd_setup(args) -> int:
                    "change filter settings)? [y/N]: ").strip().lower() \
             .startswith("y"):
         while True:
-            guardian = getpass.getpass("Guardian password: ")
-            if len(guardian) >= 6 and guardian == getpass.getpass("Confirm: "):
+            guardian = console.ask_secret("Guardian password: ")
+            if len(guardian) >= 6 and \
+                    guardian == console.ask_secret("Confirm: "):
                 break
             console.say("  At least 6 characters, and both must match.")
 

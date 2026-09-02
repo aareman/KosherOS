@@ -87,6 +87,41 @@ def test_setup_questions_go_to_the_terminal(tmp_path, monkeypatch):
     assert tty.getvalue() == "Username: "  # written to the tty, unbuffered
 
 
+def test_a_password_is_read_without_echo_from_the_same_terminal(monkeypatch):
+    # getpass reads /dev/tty and, with no controlling terminal, falls back
+    # to stdin with a warning and full echo — a password typed in the clear
+    # on the family setup console. ask_secret uses the terminal we have.
+    from kosherd.cli import _Console
+
+    class FakeTTY:
+        def __init__(self):
+            self.written = []
+
+        def write(self, text):
+            self.written.append(text)
+
+        def flush(self):
+            pass
+
+        def readline(self):
+            return "hunter2\n"
+
+        def fileno(self):
+            return -1
+
+    console = _Console.__new__(_Console)
+    console.tty = FakeTTY()
+    monkeypatch.setattr("termios.tcgetattr", lambda fd: [0, 0, 0, 0xFFFF])
+    flips = []
+    monkeypatch.setattr("termios.tcsetattr",
+                        lambda fd, when, attrs: flips.append(attrs[3]))
+    secret = console.ask_secret("Password: ")
+    assert secret == "hunter2"
+    # Echo was cleared for the read and restored afterwards.
+    assert flips and flips[0] == 0xFFFF & ~__import__("termios").ECHO
+    assert flips[-1] == 0xFFFF
+
+
 def test_setup_still_works_with_no_terminal_at_all(monkeypatch):
     # A scripted run in a pipeline has no /dev/tty; falling back to stdin
     # keeps it drivable.

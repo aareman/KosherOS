@@ -16,6 +16,8 @@ test *ARGS:
     PYTHONPATH=kosherd/src:search-app python3 -m pytest search-app/tests -q {{ARGS}}
     xvfb-run -a env PYTHONPATH=kosherd/src:admin-app/src \
         python3 -m pytest admin-app/tests -q {{ARGS}}
+    xvfb-run -a env PYTHONPATH=kosherd/src:setup-app/src \
+        python3 -m pytest setup-app/tests -q {{ARGS}}
     python3 scripts/wizard-check.py
     cd portal && PYTHONPATH=src:../kosherd/src python3 -m pytest tests/ -q {{ARGS}}
 
@@ -339,7 +341,7 @@ boot-image:
     qemu-system-x86_64 -enable-kvm -cpu host -m 4096 -smp 4 \
         -drive file=build/qcow2/disk.qcow2,if=virtio \
         -netdev user,id=n0,hostfwd=tcp:127.0.0.1:2223-:22 -device virtio-net-pci,netdev=n0 \
-        -display gtk -serial file:build/qcow2/console.log
+        -device virtio-vga -display gtk -serial file:build/qcow2/console.log
 
 # Point a RUNNING bootc VM at the freshly built local image.
 switch VM: build

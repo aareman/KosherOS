@@ -87,8 +87,17 @@ export XDG_SESSION_TYPE=wayland
 
 for attempt in $(seq "$ATTEMPTS"); do
     echo "starting setup wizard (attempt $attempt/$ATTEMPTS)"
-    cage -- kosher-setup
+    # timeout, because a compositor that cannot get a display HANGS rather
+    # than exits — and a hung cage would freeze first boot forever, past
+    # every retry and the text fallback below. SIGKILL after a grace period
+    # so a wedged wlroots cannot ignore the term. 20 min is far longer than
+    # any real person needs, so this only ever fires on a genuine hang.
+    timeout --kill-after=10s 20m cage -- kosher-setup
     rc=$?
+    if [ "$rc" = 124 ] || [ "$rc" = 137 ]; then
+        echo "the graphical wizard did not start (timed out); using text setup"
+        break
+    fi
     if [ -e "$STAMP" ]; then
         echo "setup complete"
         exit 0

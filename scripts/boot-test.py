@@ -219,38 +219,54 @@ def run(disk: Path) -> int:
 
 
 def refuse_stale_disk(disk: str) -> None:
-    """Refuse to boot a disk built from an older image.
+    """Refuse to boot a disk that is not the current image, freshly built.
 
-    `just test-boot` boots whatever qcow2 exists; it does not rebuild it.
-    Three consecutive boots tested a stale disk because nothing said so —
-    every "fix" being verified was not on the disk at all. The container
-    image's own Created time is useless here (bootc pins it to 1980 for
-    reproducibility), so `just vm` stamps the image id beside the disk and
-    this compares it.
+    `just test-boot` boots whatever qcow2 exists; it never rebuilds it.
+    Three boots in a row tested a stale disk because nothing said so, and a
+    later attempt to guard it was itself defeated by a stamp file written
+    without a rebuild — a two-hour-old disk wearing a fresh stamp. So both
+    things are checked here: the stamp names the current image, AND it was
+    written together with the disk (one `just vm` run writes both seconds
+    apart). Set KOSHER_BOOT_STALE_OK=1 to override.
     """
+    import os
     import subprocess
     from pathlib import Path
 
-    stamp = Path(disk).parent / ".image-id"
+    def short(image_id: str) -> str:
+        return image_id.split(":")[-1][:12]
+
     current = subprocess.run(
         ["podman", "image", "inspect", "localhost/kosher-linux:dev",
          "--format", "{{.Id}}"], capture_output=True, text=True).stdout.strip()
     if not current:
         return  # no local image to compare against; not this harness's call
-    recorded = stamp.read_text().strip() if stamp.exists() else ""
-    if recorded == current:
+    current = short(current)
+
+    stamp = Path(disk).parent / ".image-id"
+    recorded = short(stamp.read_text().strip()) if stamp.exists() else ""
+    try:
+        skew = abs(os.path.getmtime(stamp) - os.path.getmtime(disk))
+    except OSError:
+        skew = 1e9
+
+    ok = recorded == current and skew < 60
+    if ok or os.environ.get("KOSHER_BOOT_STALE_OK") == "1":
+        if not ok:
+            print("WARNING: booting a stale disk because KOSHER_BOOT_STALE_OK=1")
         return
+
     print("REFUSING TO BOOT A STALE DISK")
-    print(f"  the disk at {disk} was built from "
-          + (f"image {recorded[:12]}" if recorded else "an unknown image")
-          + f", but the current image is {current[:12]}.")
-    print("  Booting it would test old code and report the results as if")
-    print("  they were current — which already cost three boots.")
-    print("  Rebuild the disk first:   just vm")
-    print("  Boot anyway (rarely right): KOSHER_BOOT_STALE_OK=1 just test-boot")
-    import os
-    if os.environ.get("KOSHER_BOOT_STALE_OK") != "1":
-        raise SystemExit(2)
+    if recorded != current:
+        print(f"  the disk was built from image {recorded or '(unstamped)'}, "
+              f"but the current image is {current}.")
+    else:
+        print(f"  the stamp names the current image but was written "
+              f"{skew/60:.0f} min from the disk — the disk was not rebuilt "
+              "with it.")
+    print("  Booting it would test old code and report it as current.")
+    print("  Rebuild the disk:   just vm")
+    raise SystemExit(2)
 
 
 def main() -> int:

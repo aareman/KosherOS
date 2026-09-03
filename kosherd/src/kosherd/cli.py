@@ -443,8 +443,6 @@ class _Console:
         line = sys.stdin.readline()
         if not line:
             raise EOFError("the console closed mid-setup")
-        sys.stderr.write(f"[diag ask {prompt!r} -> {line!r}]\n")
-        sys.stderr.flush()
         return line.strip("\r\n")
 
     def ask_secret(self, prompt: str) -> str:
@@ -478,8 +476,6 @@ class _Console:
             sys.stdout.flush()
         if not line:
             raise EOFError("the console closed mid-setup")
-        sys.stderr.write(f"[diag secret {prompt!r} -> {line!r}]\n")
-        sys.stderr.flush()
         return line.strip("\r\n")
 
 def cmd_setup(args) -> int:

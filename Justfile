@@ -337,6 +337,17 @@ boot-installed:
         -display gtk
 
 # Boot the built qcow2 (headless, ssh on localhost:2223 if the image has sshd).
+# Interactive TEXT setup in your own terminal — the proven path (the boot
+# test drives exactly this). Use when the graphical wizard (cage) will not
+# come up on your host's QEMU: serial goes to stdio so you type the answers
+# right here, and kosher.setup=text skips cage entirely. Ctrl-A X to quit.
+boot-image-text:
+    qemu-system-x86_64 -enable-kvm -cpu host -m 4096 -smp 4 \
+        -drive file=build/qcow2/disk.qcow2,if=virtio \
+        -netdev user,id=n0,hostfwd=tcp:127.0.0.1:2223-:22 \
+        -device virtio-net-pci,netdev=n0 \
+        -vga none -nographic
+
 boot-image:
     qemu-system-x86_64 -enable-kvm -cpu host -m 4096 -smp 4 \
         -drive file=build/qcow2/disk.qcow2,if=virtio \

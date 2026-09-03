@@ -94,6 +94,29 @@ def test_a_closed_console_is_an_error_not_a_hang(monkeypatch):
         cli._Console().ask("Username: ")
 
 
+def test_console_lines_survive_crlf_endings(monkeypatch):
+    # The boot mismatch: virtio-serial delivered a trailing carriage
+    # return that rstrip("\n") left in place, so "pw\r" != "pw" and the
+    # two password entries never matched. A real console's line endings
+    # vary (\n, \r\n, \r); strip them all.
+    for raw, want in [("boottest\n", "boottest"),
+                      ("boottest\r\n", "boottest"),
+                      ("boottest\r", "boottest"),
+                      ("boot-test-pw-1\r\n", "boot-test-pw-1")]:
+        monkeypatch.setattr(sys, "stdin", io.StringIO(raw))
+        assert cli._Console().ask("x: ") == want, raw
+
+
+def test_two_entries_with_different_endings_still_match(monkeypatch):
+    # Exactly the boot failure: same password, one read with a CR and one
+    # without, must compare equal.
+    monkeypatch.setattr(sys, "stdin", io.StringIO("secret\r\n"))
+    first = cli._Console().ask("Password: ")
+    monkeypatch.setattr(sys, "stdin", io.StringIO("secret\n"))
+    second = cli._Console().ask("Confirm: ")
+    assert first == second == "secret"
+
+
 def test_a_password_falls_back_to_getpass_without_a_tty(monkeypatch):
     # A pipe or a test stdin has no fileno; that is not a tty, and the
     # secret path must fall back rather than raise. The echo-off branch is

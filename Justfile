@@ -221,7 +221,12 @@ vm: build
     # Stamp which image this disk came from, so a boot test can refuse a
     # stale disk instead of testing last morning's code. Three boots went
     # to exactly that.
-    podman image inspect {{image}} --format '{{{{.Id}}}}' > build/qcow2/.image-id
+    # No Go template: just's escaping renders one with a stray brace, the
+    # same trap that bit the firewall check. This exact line broke `just
+    # vm` at its final step, after the disk was already built.
+    podman image inspect {{image}} --format json \
+        | python3 -c 'import json,sys; print(json.load(sys.stdin)[0]["Id"])' \
+        > build/qcow2/.image-id
     @echo "qcow2 at build/qcow2/disk.qcow2 — boot with: just boot-image"
 
 # Build the installable ISO (Anaconda). No preset users — the machine runs

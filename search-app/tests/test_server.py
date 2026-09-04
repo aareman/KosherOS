@@ -57,7 +57,7 @@ def start(user, results=None, fail=False):
         blocklist=search_mod.load_blocklist(BLOCKLIST),
         scanner=_no_scanner())
     server_mod.Handler.uids = type("Stub", (), {
-        "uid_for_port": staticmethod(lambda port: UID)})()
+        "uid_for_connection": staticmethod(lambda *a, **k: UID)})()
     httpd = server_mod.Server(("127.0.0.1", 0), server_mod.Handler)
     thread = threading.Thread(target=httpd.serve_forever, daemon=True)
     thread.start()

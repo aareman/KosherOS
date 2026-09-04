@@ -492,13 +492,23 @@ class KosherFilter:
         self.page_levels: dict[str, str] = {}
         self.blocklist = search_mod.load_blocklist()
 
+    def _uid_of(self, flow) -> int | None:
+        """Who made this connection. The client's address AND port, plus
+        the destination they asked for (transparent mode recovers it from
+        the socket), so a shared port or a lingering closed connection
+        cannot be mistaken for this person."""
+        peer = getattr(flow.client_conn, "peername", None)
+        if not peer:
+            return None
+        dest = getattr(getattr(flow, "server_conn", None), "address", None) or (None, None)
+        return self.uids.uid_for_connection(peer[0], peer[1], dest[0], dest[1])
+
     def request(self, flow: http.HTTPFlow) -> None:
         # Everything reaching this proxy belongs to a filtered user: only
         # their traffic is redirected here.
         _force_safesearch(flow)
 
-        client_port = flow.client_conn.peername[1] if flow.client_conn.peername else None
-        uid = self.uids.uid_for_port(client_port) if client_port else None
+        uid = self._uid_of(flow)
         flow.metadata["kosher_uid"] = uid
 
         # Reserved on every host, because the form is posted to the

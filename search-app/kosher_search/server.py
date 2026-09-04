@@ -185,7 +185,11 @@ class Handler(BaseHTTPRequestHandler):
             peer = self.connection.getpeername()
         except OSError:
             return None
-        return self.uids.uid_for_port(peer[1])
+        # The search service is on loopback: the client's local end is its
+        # peer address:port, and it connected to us.
+        return self.uids.uid_for_connection(peer[0], peer[1],
+                                            self.server.server_address[0],
+                                            self.server.server_address[1])
 
     def _send(self, body: str, status: int = 200,
               content_type: str = "text/html; charset=utf-8") -> None:

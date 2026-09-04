@@ -48,7 +48,8 @@ def test_uid_lookup_reads_proc_net_tcp(addon, tmp_path):
     lookup = addon.UidLookup()
     lookup.PATHS = (str(proc),)
     assert lookup.uid_for_port(49152) == 1001
-    assert lookup.uid_for_port(8080) == 989
+    # A listening socket is nobody's connection.
+    assert lookup.uid_for_port(8080) is None
     assert lookup.uid_for_port(12345) is None
 
 
@@ -417,7 +418,7 @@ def test_the_proxy_blocks_a_department_before_fetching_the_page(addon):
     rules = siterules.load(
         Path(__file__).parents[2] / "os-image/files/usr/share/kosher/site-rules.json")
     filt = addon.KosherFilter.__new__(addon.KosherFilter)
-    filt.uids = type("U", (), {"uid_for_port": staticmethod(lambda p: 1001)})()
+    filt.uids = type("U", (), {"uid_for_connection": staticmethod(lambda *a, **k: 1001)})()
     filt.policy = _request_policy(blocked=["immodest"])
     filt.categories = _stub_categories()
     filt.siterules = rules
@@ -440,7 +441,7 @@ def test_a_department_is_only_blocked_for_accounts_that_asked(addon):
     rules = siterules.load(
         Path(__file__).parents[2] / "os-image/files/usr/share/kosher/site-rules.json")
     filt = addon.KosherFilter.__new__(addon.KosherFilter)
-    filt.uids = type("U", (), {"uid_for_port": staticmethod(lambda p: 1001)})()
+    filt.uids = type("U", (), {"uid_for_connection": staticmethod(lambda *a, **k: 1001)})()
     filt.policy = _request_policy(blocked=["gambling"])
     filt.categories = _stub_categories()
     filt.siterules = rules
@@ -504,7 +505,7 @@ def test_the_reserved_path_is_answered_here_and_never_forwarded(addon, tmp_path)
     from kosherd import accessreq
 
     filt = addon.KosherFilter.__new__(addon.KosherFilter)
-    filt.uids = type("U", (), {"uid_for_port": staticmethod(lambda p: 1001)})()
+    filt.uids = type("U", (), {"uid_for_connection": staticmethod(lambda *a, **k: 1001)})()
     filt.policy = _request_policy()
     filt.categories = _stub_categories()
     filt.siterules = type("S", (), {
@@ -535,7 +536,7 @@ def test_the_reserved_path_is_answered_here_and_never_forwarded(addon, tmp_path)
 def test_a_get_to_the_reserved_path_is_an_ordinary_request(addon):
     # Only a POST is ours; a site with a page at that path still works.
     filt = addon.KosherFilter.__new__(addon.KosherFilter)
-    filt.uids = type("U", (), {"uid_for_port": staticmethod(lambda p: 1001)})()
+    filt.uids = type("U", (), {"uid_for_connection": staticmethod(lambda *a, **k: 1001)})()
     filt.policy = _request_policy()
     filt.categories = _stub_categories()
     filt.siterules = type("S", (), {
@@ -559,7 +560,7 @@ def _shop_filter(addon, blocked=("immodest",)):
 
     root = Path(__file__).parents[2]
     filt = addon.KosherFilter.__new__(addon.KosherFilter)
-    filt.uids = type("U", (), {"uid_for_port": staticmethod(lambda p: 1001)})()
+    filt.uids = type("U", (), {"uid_for_connection": staticmethod(lambda *a, **k: 1001)})()
     filt.policy = type("P", (), {
         "rules_for": staticmethod(lambda uid: []),
         "blocked_categories_for": staticmethod(lambda uid: list(blocked)),

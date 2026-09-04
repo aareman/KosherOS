@@ -448,6 +448,11 @@ class Daemon:
         if user is None:
             raise PolicyError(f"uid {uid} is not managed")
         user.mode = mode
+        # Entering a filtering mode with nothing to filter is the trap the
+        # defaults exist to prevent; an account switched from "unfiltered"
+        # has an empty list and would otherwise stay wide open.
+        if not user.blocked_categories:
+            user.blocked_categories = list(_default_categories(mode))
         self._save_and_apply()
         return None
 
@@ -539,7 +544,8 @@ class Daemon:
         from . import catalogsync
 
         status["catalog_version"] = catalogsync.installed_version()
-        status["problems"] = selfcheck.problems(found)
+        status["problems"] = selfcheck.problems(found) + \
+            selfcheck.empty_accounts(self.policy.effective_users())
 
         for service in ("kosher-mitm.service", "kosher-dns.service",
                         "kosher-search.service", "kosher-searxng.service"):
@@ -1114,8 +1120,14 @@ class Daemon:
             raise PolicyError(f"could not set password: {res.stderr.strip()}")
         subprocess.run(["usermod", "-aG", "kosher-admin", username], check=False)
 
-        self.policy.users.append(UserPolicy(
-            uid=uid, username=username, mode="filtered", admin=True))
+        # Through _new_user, so the administrator gets the same default
+        # category floor as any account. Built directly, this account had
+        # NO categories: the first real family test found gambling, dating
+        # and VPN sites all open for the admin — "filtered" that filtered
+        # nothing, on the one account every machine has.
+        admin = self._new_user(uid, username, "filtered")
+        admin.admin = True
+        self.policy.users.append(admin)
         self._save_and_apply()
         log.info("first admin created: %s (uid %d)", username, uid)
         return GLib.Variant("(i)", (uid,))

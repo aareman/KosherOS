@@ -93,3 +93,23 @@ def problems(found: list[dict] | None = None) -> list[str]:
             said.append(f"the {label} holds only {entry['entries']} "
                         "entries, so it is truncated or damaged")
     return said
+
+
+# Modes whose whole point is to block categories of site. "none" and
+# "unfiltered" are not on this list: they filter nothing on purpose.
+FILTERING_MODES = ("filtered", "dnsfilter", "whitelist")
+
+
+def empty_accounts(users) -> list[str]:
+    """Accounts in a filtering mode that block no categories.
+
+    This is the fault the first family test found: the administrator was
+    "filtered" and blocked nothing, because the setup wizard skipped the
+    default floor. Whatever the cause, an account that says it filters and
+    filters nothing must be said out loud, not deduced from a site loading.
+    """
+    return [f"{u.username} is set to filter but blocks no categories, so "
+            "gambling, dating and adult sites all load — open Blocked "
+            "content for this account and choose what to block"
+            for u in users
+            if u.mode in FILTERING_MODES and not u.blocked_categories]

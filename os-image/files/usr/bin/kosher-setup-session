@@ -70,20 +70,25 @@ if ! command -v kosher-setup >/dev/null 2>&1; then
     exit 0
 fi
 
-# Release the boot splash before taking the console, otherwise Plymouth and
-# cage fight over the display and the boot appears to hang.
-plymouth quit --retain-splash >/dev/null 2>&1 || true
+# Fully quit, not --retain-splash: retaining keeps Plymouth holding the
+# framebuffer, which is exactly what cage needs to take over. And under a
+# timeout, because `plymouth quit` waits for plymouthd to acknowledge and a
+# wedged plymouthd would otherwise block this script forever — the serial
+# log of one frozen boot ended right here, before cage was ever started.
+echo "step: releasing the boot splash"
+timeout 10s plymouth quit >/dev/null 2>&1 || true
 
+echo "step: preparing the runtime directory"
 export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/kosher-setup}"
 mkdir -p "$XDG_RUNTIME_DIR"
 chmod 700 "$XDG_RUNTIME_DIR"
 
-# cage/wlroots asks libseat for a seat. We run as root from a systemd unit,
-# with no logind session and no seatd, so the default backends fail. The
-# builtin backend takes DRM and input devices directly, which is exactly the
-# case it exists for and requires the root we already have.
-export LIBSEAT_BACKEND="${LIBSEAT_BACKEND:-builtin}"
+# No forced LIBSEAT_BACKEND: the unit opens a logind session for us
+# (PAMName=login on tty1), and libseat's default order tries logind first
+# and falls back to builtin, so both a real seat and a seatless machine
+# work. Forcing builtin threw away the seat we went to the trouble to get.
 export XDG_SESSION_TYPE=wayland
+echo "step: display ready, session=${XDG_SESSION_ID:-none}"
 
 for attempt in $(seq "$ATTEMPTS"); do
     echo "starting setup wizard (attempt $attempt/$ATTEMPTS)"
@@ -112,8 +117,14 @@ echo "giving up on the graphical wizard after $ATTEMPTS attempts"
 echo "Falling back to text setup on this console."
 
 # A machine with no account, no root password and no way in is worse than an
-# ugly prompt. This runs on tty1, where StandardInput=tty gives us a console.
-if kosherctl setup; then
+# ugly prompt. Prompt on the console the person can see, as the primary text
+# path does.
+if [ -w /dev/console ]; then
+    kosherctl setup <>/dev/console >/dev/console && rc=0 || rc=$?
+else
+    kosherctl setup && rc=0 || rc=$?
+fi
+if [ "$rc" = 0 ]; then
     echo "text setup completed"
     exit 0
 fi

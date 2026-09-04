@@ -34,10 +34,19 @@ ExecStart=/usr/bin/kosher-setup-session
 # a hung compositor) would otherwise leave the machine sitting at the splash
 # screen forever with no way to reach a login screen.
 TimeoutStartSec=30min
-# /dev/console, not /dev/tty1: a machine booted headless or over a serial
-# line has no tty1, and the text setup then has nowhere to prompt. console
-# follows whatever the kernel was told to use.
-TTYPath=/dev/console
+# A real virtual terminal and a real logind session — cage's own kiosk
+# recipe. A Wayland compositor needs a VT to take over and a seat that
+# grants it the DRM and input devices; logind provides both, but only to a
+# process inside a session. The earlier TTYPath=/dev/console gave cage no
+# VT at all (in QEMU /dev/console is the serial port), so it sat waiting
+# for a seat that never came and the boot froze at the setup banner.
+# PAMName opens that session for root on tty1, the same way a login would.
+# The TEXT wizard is unaffected: it talks to /dev/console explicitly, so a
+# headless or serial machine still gets its prompts where it can see them.
+TTYPath=/dev/tty1
+PAMName=login
+UtmpIdentifier=tty1
+UtmpMode=user
 StandardInput=tty
 # journal+console: a machine whose setup failed has no account to log in
 # with and a locked root, so the journal is unreachable. Printing to the
@@ -46,6 +55,7 @@ StandardOutput=journal+console
 StandardError=journal+console
 TTYReset=yes
 TTYVHangup=yes
+TTYVTDisallocate=yes
 # Give the console back. Conflicts= stops the getty and nothing restarts
 # it on its own, which would leave a serial or headless machine with no
 # way to log in after setup finished.

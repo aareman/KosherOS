@@ -9,6 +9,7 @@ agent are all just D-Bus clients of it.
 
 from __future__ import annotations
 
+import errno
 import json
 import logging
 import subprocess
@@ -216,6 +217,10 @@ INTROSPECTION_XML = """
   <interface name="org.kosherlinux.Daemon1.Setup">
     <method name="IsComplete">
       <arg direction="out" type="b" name="complete"/>
+    </method>
+    <method name="AdminExists">
+      <arg direction="out" type="b" name="exists"/>
+      <arg direction="out" type="s" name="username"/>
     </method>
     <method name="CreateFirstAdmin">
       <arg direction="in" type="s" name="username"/>
@@ -1046,6 +1051,18 @@ class Daemon:
     def impl_IsComplete(self):
         return GLib.Variant("(b)", (self.setup_complete(),))
 
+    def impl_AdminExists(self):
+        """Whether the account step is already done, and who it made.
+
+        This is what lets the wizard RESUME. A finish step that failed (the
+        boot password could not be written, say) left the admin created but
+        setup unstamped; the wizard came back up at the account page and
+        insisted on a second account, because it had no way to ask.
+        """
+        admin = next((u for u in self.policy.users if u.admin), None)
+        return GLib.Variant("(bs)", (admin is not None,
+                                     admin.username if admin else ""))
+
     def impl_CreateFirstAdmin(self, username: str, full_name: str, password: str):
         import pwd
 
@@ -1102,10 +1119,41 @@ class Daemon:
                        if "grub.pbkdf2" in line), None)
         if digest is None:
             raise PolicyError("unexpected grub2-mkpasswd-pbkdf2 output")
-        GRUB_USER_CFG.parent.mkdir(parents=True, exist_ok=True)
-        GRUB_USER_CFG.write_text(
-            f"GRUB2_PASSWORD={digest}\n")
-        GRUB_USER_CFG.chmod(0o600)
+        # ostree mounts /boot read-only, so a plain write fails with EROFS
+        # ("cannot write") and the first person to enable this on a real
+        # machine saw exactly that. Remount for the write and put it back.
+        # bootupd's static grub.cfg sources ${prefix}/user.cfg and sets
+        # prefix to the boot partition's grub2 dir, so this path is the one
+        # GRUB actually reads.
+        boot = GRUB_USER_CFG.parent.parent
+        remounted = False
+        try:
+            try:
+                GRUB_USER_CFG.parent.mkdir(parents=True, exist_ok=True)
+                GRUB_USER_CFG.write_text(f"GRUB2_PASSWORD={digest}\n")
+            except OSError as e:
+                if e.errno != errno.EROFS:
+                    raise
+                res = subprocess.run(["mount", "-o", "remount,rw", str(boot)],
+                                     capture_output=True, text=True)
+                if res.returncode != 0:
+                    raise PolicyError(
+                        f"could not make {boot} writable: {res.stderr.strip()}"
+                    ) from e
+                remounted = True
+                GRUB_USER_CFG.parent.mkdir(parents=True, exist_ok=True)
+                GRUB_USER_CFG.write_text(f"GRUB2_PASSWORD={digest}\n")
+            GRUB_USER_CFG.chmod(0o600)
+        except OSError as e:
+            raise PolicyError(
+                f"could not write the boot password to {GRUB_USER_CFG}: {e}. "
+                "Turn the boot menu password off for now and set it later in "
+                "KosherOS Admin.") from e
+        finally:
+            if remounted:
+                subprocess.run(["mount", "-o", "remount,ro", str(boot)],
+                               capture_output=True)
+        log.info("boot menu password set")
 
     # ---- Portal ----------------------------------------------------------
 

@@ -24,6 +24,9 @@ created = {}
 class FakeClient:
     # The wizard runs in a forked child, so what it did is recorded to a
     # file the parent can read — a dict would stay in the child's memory.
+    def admin_exists(self):
+        return (False, "")
+
     def setup_complete(self):
         return False
     def create_first_admin(self, username, full_name, password):

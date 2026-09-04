@@ -30,6 +30,10 @@ class DaemonClient:
     def setup_complete(self) -> bool:
         return self._call("Setup", "IsComplete")[0]
 
+    def admin_exists(self) -> tuple[bool, str]:
+        """(exists, username) — lets an interrupted wizard skip the account step."""
+        return tuple(self._call("Setup", "AdminExists"))
+
     def create_first_admin(self, username: str, full_name: str, password: str) -> int:
         return self._call("Setup", "CreateFirstAdmin", "(sss)",
                           username, full_name, password)[0]

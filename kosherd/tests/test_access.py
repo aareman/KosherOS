@@ -168,3 +168,10 @@ def test_syncing_is_not_an_admin_action():
         assert ACTIONS[method] == access.ACTION_READ_CONFIG
         assert not evaluate(method, **{**UNLOCKED,
                                        "guardian_enabled": True}).needs_guardian
+
+
+def test_the_wizard_can_ask_whether_an_admin_exists_at_any_time():
+    # Resume depends on this: a wizard that comes back after a failed finish
+    # step asks first, and must not be told "setup is closed".
+    assert evaluate("AdminExists", **FRESH).allowed
+    assert evaluate("AdminExists", **LOCKED).allowed

@@ -33,6 +33,7 @@ ACTIONS = {
     # afterwards these are refused outright, so this is not a standing
     # privilege-escalation path.
     "IsComplete": ACTION_READ_CONFIG,
+    "AdminExists": ACTION_READ_CONFIG,
     "CreateFirstAdmin": ACTION_MANAGE_USERS,
     "FinishSetup": ACTION_MANAGE_USERS,
     # Unlock is THE prompt: one polkit check opens a sliding session, after
@@ -103,7 +104,9 @@ GUARDIAN_GATED = frozenset({
 })
 
 # First-boot only; closed forever once setup is stamped complete.
-SETUP_METHODS = frozenset({"IsComplete", "CreateFirstAdmin", "FinishSetup"})
+SETUP_METHODS = frozenset({"IsComplete", "AdminExists", "CreateFirstAdmin", "FinishSetup"})
+# Readable forever: the wizard and the apps ask these on every start.
+SETUP_READS = frozenset({"IsComplete", "AdminExists"})
 
 # Methods that need to know which uid called them (session management).
 UID_AWARE = frozenset({"Unlock", "Lock", "Status", "VerifyGuardian", "InstallApp"})
@@ -140,7 +143,7 @@ def evaluate(
     if method in SETUP_METHODS:
         # Nobody could authorize the first-boot wizard: no admin exists yet.
         # Reading whether setup is done stays available forever.
-        if method != "IsComplete" and setup_complete:
+        if method not in SETUP_READS and setup_complete:
             return Requirement(refusal=SETUP_CLOSED)
         return Requirement()
 

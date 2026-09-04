@@ -507,30 +507,41 @@ def cmd_setup(args) -> int:
 
     console = _Console()
     console.say("\nKosherOS setup\n")
-    console.say("Create the administrator account for this computer.")
-    console.say("It manages profiles, filtering and apps. It has no root access.\n")
 
-    while True:
-        username = console.ask("Username: ").strip()
-        if re.fullmatch(r"[a-z_][a-z0-9_-]*", username or ""):
+    # Resume: an earlier run may have created the administrator and then
+    # failed at a later step. Do not demand a second one.
+    try:
+        exists, who = c.admin_exists()
+    except Exception:  # noqa: BLE001 - an older daemon; behave as before
+        exists, who = False, ""
+    if exists:
+        console.say(f"The administrator account '{who}' already exists; "
+                    "continuing with the remaining steps.\n")
+    else:
+        console.say("Create the administrator account for this computer.")
+        console.say("It manages profiles, filtering and apps. It has no root access.\n")
+
+        while True:
+            username = console.ask("Username: ").strip()
+            if re.fullmatch(r"[a-z_][a-z0-9_-]*", username or ""):
+                break
+            console.say("  Use lowercase letters, digits, - or _ "
+                        "(starting with a letter).")
+
+        full_name = console.ask(f"Full name [{username}]: ").strip() or username
+
+        while True:
+            password = console.ask_secret("Password: ")
+            if len(password) < 6:
+                console.say("  At least 6 characters, please.")
+                continue
+            if password != console.ask_secret("Confirm password: "):
+                console.say("  Those did not match.")
+                continue
             break
-        console.say("  Use lowercase letters, digits, - or _ "
-                    "(starting with a letter).")
 
-    full_name = console.ask(f"Full name [{username}]: ").strip() or username
-
-    while True:
-        password = console.ask_secret("Password: ")
-        if len(password) < 6:
-            console.say("  At least 6 characters, please.")
-            continue
-        if password != console.ask_secret("Confirm password: "):
-            console.say("  Those did not match.")
-            continue
-        break
-
-    uid = c.create_first_admin(username, full_name, password)
-    console.say(f"\nCreated {username} (uid {uid}).")
+        uid = c.create_first_admin(username, full_name, password)
+        console.say(f"\nCreated {username} (uid {uid}).")
 
     guardian = ""
     if console.ask("\nSet a guardian password (a second password required to "

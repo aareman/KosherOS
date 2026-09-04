@@ -197,6 +197,23 @@ class Window(Adw.ApplicationWindow):
             "nobody on KosherOS has root access.")
         self.full_name = Adw.EntryRow(title="Full name")
         self.username = Adw.EntryRow(title="Username")
+        # An installer or image may already have made a login account. Say
+        # so and offer it, instead of letting the person discover it as
+        # "'abba' already exists" after typing the name they wanted.
+        try:
+            existing = self.client.existing_accounts()
+        except Exception:  # noqa: BLE001 - an older daemon
+            existing = []
+        if existing:
+            names = ", ".join(existing)
+            self.existing_note = Adw.ActionRow(
+                title=f"This computer already has an account: {names}",
+                subtitle="Enter its name to make it the administrator — the "
+                         "password you set here becomes its password. Or "
+                         "enter a new name to create a fresh account.")
+            self.existing_note.add_prefix(Gtk.Image(icon_name="dialog-information-symbolic"))
+            group.add(self.existing_note)
+            self.username.set_text(existing[0])
         group.add(self.full_name)
         group.add(self.username)
         self.admin_pw = PasswordPair(group, "Password", on_change=self._revalidate)

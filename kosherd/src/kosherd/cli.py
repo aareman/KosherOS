@@ -520,9 +520,18 @@ def cmd_setup(args) -> int:
     else:
         console.say("Create the administrator account for this computer.")
         console.say("It manages profiles, filtering and apps. It has no root access.\n")
+        try:
+            existing = c.existing_accounts()
+        except Exception:  # noqa: BLE001 - an older daemon
+            existing = []
+        if existing:
+            console.say(f"This computer already has an account: {', '.join(existing)}.")
+            console.say("Enter its name to make it the administrator (the password you")
+            console.say("set becomes its password), or a new name for a fresh account.\n")
 
         while True:
-            username = console.ask("Username: ").strip()
+            prompt = f"Username [{existing[0]}]: " if existing else "Username: "
+            username = console.ask(prompt).strip() or (existing[0] if existing else "")
             if re.fullmatch(r"[a-z_][a-z0-9_-]*", username or ""):
                 break
             console.say("  Use lowercase letters, digits, - or _ "

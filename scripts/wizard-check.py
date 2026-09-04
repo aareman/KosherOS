@@ -27,6 +27,9 @@ class FakeClient:
     def admin_exists(self):
         return (False, "")
 
+    def existing_accounts(self):
+        return []
+
     def setup_complete(self):
         return False
     def create_first_admin(self, username, full_name, password):

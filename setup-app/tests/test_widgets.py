@@ -35,6 +35,9 @@ class FakeClient:
     def admin_exists(self):
         return (bool(self.admin), self.admin)
 
+    def existing_accounts(self):
+        return []
+
     def create_first_admin(self, username, full_name, password):
         self.created.append(username)
         return 1000
@@ -129,3 +132,16 @@ def test_optional_protections_only_gate_when_switched_on():
     win.grub_pw.entry.set_text("boot-pass-1")
     win.grub_pw.confirm.set_text("boot-pass-1")
     assert win.next.get_sensitive()
+
+
+def test_a_pre_existing_account_is_offered_not_hidden():
+    # The dev disk used to bake in "abba"; an installer or kickstart may
+    # do the same. The wizard must say so and offer it.
+    class WithAccount(FakeClient):
+        def existing_accounts(self):
+            return ["abba"]
+
+    setup.DaemonClient = lambda: WithAccount()  # type: ignore[assignment]
+    win = setup.Window(application=setup.App())
+    assert win.username.get_text() == "abba"
+    assert "abba" in win.existing_note.get_title()

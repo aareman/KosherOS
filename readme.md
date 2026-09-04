@@ -48,7 +48,7 @@ just dev-install   # install the whole filter stack into that VM
 just deploy-kosherd# push local kosherd code into the VM and restart it (~1 s)
 just fedora-ssh    # shell into the VM
 just build         # build the OS image (layer-cached)
-just vm            # build a bootable qcow2 from it (dev login: abba/kosher)
+just vm            # build a bootable qcow2 from it (first boot runs the setup wizard)
 just iso           # installable ISO (asks which disk; no preset users)
 just iso-unattended# DEV ONLY: same but wipes every disk without asking
 just usb-image     # raw disk image to dd onto a USB stick — try KosherOS on

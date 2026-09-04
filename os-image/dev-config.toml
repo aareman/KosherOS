@@ -1,10 +1,9 @@
 # bootc-image-builder config for DEV disk images only (just vm).
-# Production installs create the admin in the first-boot wizard (stage 4)
-# and never ship a preset password.
-[[customizations.user]]
-name = "abba"
-password = "kosher"
-groups = ["kosher-admin"]
+#
+# No preset user: the dev disk boots into the same first-boot wizard a
+# family sees, and the administrator is created there. There used to be an
+# "abba" account baked in here, and it made the very first wizard run say
+# "'abba' already exists" to someone who had no idea it did.
 
 # Dev disks only: sshd on + key-only root ssh, so `just deploy-kosherd
 # kosher-gui` can push code into the running GUI VM without a disk rebuild

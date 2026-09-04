@@ -175,3 +175,9 @@ def test_the_wizard_can_ask_whether_an_admin_exists_at_any_time():
     # step asks first, and must not be told "setup is closed".
     assert evaluate("AdminExists", **FRESH).allowed
     assert evaluate("AdminExists", **LOCKED).allowed
+
+
+def test_the_wizard_can_list_pre_existing_accounts_before_setup():
+    assert evaluate("ExistingAccounts", **FRESH).allowed
+    # ...but not forever: it is only the wizard's business.
+    assert not evaluate("ExistingAccounts", **LOCKED).allowed

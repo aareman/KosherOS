@@ -34,6 +34,7 @@ ACTIONS = {
     # privilege-escalation path.
     "IsComplete": ACTION_READ_CONFIG,
     "AdminExists": ACTION_READ_CONFIG,
+    "ExistingAccounts": ACTION_READ_CONFIG,
     "CreateFirstAdmin": ACTION_MANAGE_USERS,
     "FinishSetup": ACTION_MANAGE_USERS,
     # Unlock is THE prompt: one polkit check opens a sliding session, after
@@ -104,7 +105,8 @@ GUARDIAN_GATED = frozenset({
 })
 
 # First-boot only; closed forever once setup is stamped complete.
-SETUP_METHODS = frozenset({"IsComplete", "AdminExists", "CreateFirstAdmin", "FinishSetup"})
+SETUP_METHODS = frozenset({"IsComplete", "AdminExists", "ExistingAccounts",
+                           "CreateFirstAdmin", "FinishSetup"})
 # Readable forever: the wizard and the apps ask these on every start.
 SETUP_READS = frozenset({"IsComplete", "AdminExists"})
 

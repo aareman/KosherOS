@@ -222,6 +222,9 @@ INTROSPECTION_XML = """
       <arg direction="out" type="b" name="exists"/>
       <arg direction="out" type="s" name="username"/>
     </method>
+    <method name="ExistingAccounts">
+      <arg direction="out" type="as" name="usernames"/>
+    </method>
     <method name="CreateFirstAdmin">
       <arg direction="in" type="s" name="username"/>
       <arg direction="in" type="s" name="full_name"/>
@@ -1063,6 +1066,22 @@ class Daemon:
         return GLib.Variant("(bs)", (admin is not None,
                                      admin.username if admin else ""))
 
+    @staticmethod
+    def _human_accounts() -> list[str]:
+        """Login accounts that exist before setup made any: uid 1000+, a
+        real shell, and not one of ours. An installer, a kickstart or a
+        dev image may have created one."""
+        import pwd
+
+        return sorted(
+            e.pw_name for e in pwd.getpwall()
+            if 1000 <= e.pw_uid < 60000
+            and not e.pw_name.startswith("kosher-")
+            and e.pw_shell not in ("/sbin/nologin", "/usr/sbin/nologin", "/bin/false"))
+
+    def impl_ExistingAccounts(self):
+        return GLib.Variant("(as)", (self._human_accounts(),))
+
     def impl_CreateFirstAdmin(self, username: str, full_name: str, password: str):
         import pwd
 
@@ -1071,13 +1090,22 @@ class Daemon:
         if len(password) < 6:
             raise PolicyError("password must be at least 6 characters")
         try:
-            pwd.getpwnam(username)
+            existing = pwd.getpwnam(username)
         except KeyError:
-            pass
-        else:
-            raise PolicyError(f"'{username}' already exists")
+            existing = None
 
-        uid = self._accounts_create_user(username, full_name)
+        if existing is None:
+            uid = self._accounts_create_user(username, full_name)
+        elif username in self._human_accounts():
+            # Adopt it. Refusing here ("already exists") was a dead end: the
+            # person had to invent a second account for a computer that
+            # already had the one they wanted. The password they type
+            # becomes its password; whatever the installer set is gone.
+            uid = existing.pw_uid
+            log.info("adopting existing account %s (uid %d) as the first admin",
+                     username, uid)
+        else:
+            raise PolicyError(f"'{username}' is a system account; choose another name")
         # The admin sets a real password here (not SET_AT_LOGIN): they will
         # need it immediately for polkit prompts.
         res = subprocess.run(["chpasswd"], input=f"{username}:{password}",

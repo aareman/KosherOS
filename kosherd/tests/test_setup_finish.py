@@ -96,3 +96,20 @@ def test_a_boot_that_cannot_be_made_writable_is_a_clear_error(user_cfg, monkeypa
 
 def test_the_dbus_interface_offers_admin_exists():
     assert 'name="AdminExists"' in d.INTROSPECTION_XML
+
+
+def test_human_accounts_excludes_system_and_our_own(monkeypatch):
+    import pwd
+
+    class E:
+        def __init__(self, name, uid, shell="/bin/bash"):
+            self.pw_name, self.pw_uid, self.pw_shell = name, uid, shell
+
+    monkeypatch.setattr(pwd, "getpwall", lambda: [
+        E("root", 0), E("abba", 1000), E("kosher-search", 1001),
+        E("svc", 1002, "/usr/sbin/nologin"), E("imma", 1003), E("nobody", 65534)])
+    assert d.Daemon._human_accounts() == ["abba", "imma"]
+
+
+def test_the_dbus_interface_offers_existing_accounts():
+    assert 'name="ExistingAccounts"' in d.INTROSPECTION_XML

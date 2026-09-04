@@ -34,6 +34,10 @@ class DaemonClient:
         """(exists, username) — lets an interrupted wizard skip the account step."""
         return tuple(self._call("Setup", "AdminExists"))
 
+    def existing_accounts(self) -> list[str]:
+        """Login accounts an installer or image created before setup."""
+        return list(self._call("Setup", "ExistingAccounts")[0])
+
     def create_first_admin(self, username: str, full_name: str, password: str) -> int:
         return self._call("Setup", "CreateFirstAdmin", "(sss)",
                           username, full_name, password)[0]

@@ -125,6 +125,61 @@ class Results:
                 print("        " + detail.strip().replace("\n", "\n        "))
 
 
+def _shell(console: Console, command: str, marker: str, timeout: int = 60) -> str:
+    """Run one command in the logged-in shell; return what it printed."""
+    start = len(console.text)
+    console.send(f"{command}; echo {marker}=$?")
+    console.expect(rf"{marker}=\d+", timeout)
+    out = console.text[start:]
+    # Drop the echoed command line and shell escape sequences.
+    out = re.sub(r"\x1b\[[0-9;?]*[a-zA-Z]", "", out)          # CSI colours etc.
+    out = re.sub(r"(\x1b)?\]3008;[^\\\x07]*(\\|\x07)", "", out)   # shell integration marks
+    return out
+
+
+def enforcement(console: Console, results: "Results") -> None:
+    """Log in on the serial console as the new administrator and probe.
+
+    Uses sites from the shipped catalogue rather than the tiny seed list,
+    so this also proves the 5-million-domain database is present and
+    consulted, not just that a hard-coded name is refused.
+    """
+    if not console.expect(r"kosheros login: ", 120):
+        results.check("a console login is offered after setup", False, console.tail())
+        return
+    console.send(ADMIN_USER)
+    console.expect(r"Password: ", 30)
+    console.send(ADMIN_PASSWORD)
+    if not console.expect(rf"{ADMIN_USER}@kosheros", 60):
+        results.check("the administrator can log in", False, console.tail())
+        return
+    results.check("the administrator can log in", True)
+
+    # No network in this VM (a firewalled CI runner, say) is not a filter
+    # fault. Establish reachability first so a failure below means what it
+    # says.
+    probe = _shell(console, 'curl -s -m 20 -o /dev/null -w "code=%{http_code}" https://example.com/', "REACH")
+    if "code=200" not in probe:
+        print("  SKIP  enforcement checks: no internet from the VM")
+        return
+
+    issuer = _shell(console, "curl -sv -m 20 -o /dev/null https://example.com/ 2>&1 | grep -i issuer", "ISS")
+    results.check("the administrator's HTTPS is inspected by the proxy",
+                  "mitmproxy" in issuer, issuer[-400:])
+
+    # gambling is in the default floor; unibet is classified only in the
+    # full catalogue, not the seed.
+    blocked = _shell(console, 'curl -s -m 20 -o /dev/null -w "code=%{http_code}" https://www.unibet.com/', "GAMB")
+    results.check("a gambling site is blocked for the administrator by default",
+                  "code=403" in blocked, blocked[-400:])
+    dating = _shell(console, 'curl -s -m 20 -o /dev/null -w "code=%{http_code}" https://tinder.com/', "DATE")
+    results.check("a dating site is blocked for the administrator by default",
+                  "code=403" in dating, dating[-400:])
+    page = _shell(console, "curl -s -m 20 https://www.unibet.com/ | grep -c 'This page is blocked'", "PAGE")
+    results.check("a blocked site shows the block page, not an error",
+                  re.search(r"^[1-9]\d*\s*$", page, re.M) is not None, page[-400:])
+
+
 def run(disk: Path) -> int:
     results = Results()
     workdir = Path(tempfile.mkdtemp(prefix="kosher-boot-test-"))
@@ -200,6 +255,13 @@ def run(disk: Path) -> int:
             results.check("the login screen starts afterwards",
                           console.expect(r"GNOME Display Manager|login:", 240),
                           console.tail())
+            # Now the check that matters most and was missing: log in as the
+            # account the wizard just made and see whether its traffic is
+            # actually filtered. The first family test found the wizard's
+            # administrator in "filtered" mode with no categories at all —
+            # every boot test before this one passed while gambling sites
+            # loaded for the admin, because nothing here ever tried one.
+            enforcement(console, results)
         else:
             results.check("setup asks for an administrator", False, console.tail())
     except (TimeoutError, OSError) as e:

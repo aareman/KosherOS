@@ -116,37 +116,69 @@ ASKED_PAGE = """<!doctype html>
 """
 
 
+# Every connection that reaches this proxy belongs to a FILTERED user:
+# nftables redirects only their web traffic here. So a uid we have no rules
+# for is never "some other user" — it is a filtered user whose policy has
+# not reached us yet (the rules file missing or stale, a just-created
+# account, or a source-port lookup that lost a race). Serving that as the
+# open web is the failure the first family test hit: an account shows as
+# filtered and filters nothing. We fail CLOSED to a safe floor instead.
+def _fail_closed_entry() -> dict:
+    try:
+        blocked = list(categories_mod.DEFAULT_BLOCKED)
+    except Exception:  # noqa: BLE001 - categories module unavailable
+        blocked = ["adult", "gambling", "dating", "malware", "proxy"]
+    return {"rules": [], "blocked_categories": blocked,
+            "media_level": "immodest", "language_filter": "substitute",
+            "youtube": {"restrict": "strict"}}
+
+
 class PolicyCache:
-    """Per-uid rules, reloaded when kosherd rewrites the rules file."""
+    """Per-uid rules, reloaded when kosherd rewrites the rules file.
+
+    Unknown uids do not get an empty policy — they get the fail-closed
+    floor, because everything here is a filtered user (see above).
+    """
 
     def __init__(self, path: Path = RULES_PATH):
         self.path = path
         self._mtime = 0.0
+        self._known: set[int] = set()
         self._rules: dict[int, list] = {}
         self._blocked: dict[int, list] = {}
         self._media: dict[int, str] = {}
         self._language: dict[int, str] = {}
         self._youtube: dict[int, dict] = {}
+        self._fallback = _fail_closed_entry()
+
+    def _is_known(self, uid: int | None) -> bool:
+        self._refresh()
+        return uid is not None and uid in self._known
 
     def rules_for(self, uid: int | None):
-        self._refresh()
-        return self._rules.get(uid, []) if uid is not None else []
+        if not self._is_known(uid):
+            return parse_rules(self._fallback["rules"])
+        return self._rules.get(uid, [])
 
     def blocked_categories_for(self, uid: int | None) -> list:
-        self._refresh()
-        return self._blocked.get(uid, []) if uid is not None else []
+        if not self._is_known(uid):
+            return list(self._fallback["blocked_categories"])
+        return self._blocked.get(uid, [])
 
     def media_level_for(self, uid: int | None) -> str:
-        self._refresh()
-        return self._media.get(uid, "none") if uid is not None else "none"
+        if not self._is_known(uid):
+            return self._fallback["media_level"]
+        return self._media.get(uid, "none")
 
     def language_filter_for(self, uid: int | None) -> str:
-        self._refresh()
-        return self._language.get(uid, "off") if uid is not None else "off"
+        if not self._is_known(uid):
+            return self._fallback["language_filter"]
+        return self._language.get(uid, "off")
 
     def youtube_for(self, uid: int | None) -> dict:
-        self._refresh()
-        return self._youtube.get(uid, {}) if uid is not None else {}
+        if not self._is_known(uid):
+            return dict(self._fallback["youtube"])
+        return self._youtube.get(uid, {})
 
     def _refresh(self) -> None:
         try:
@@ -184,6 +216,7 @@ class PolicyCache:
         self._media = media
         self._language = language
         self._youtube = youtube
+        self._known = set(rules)
         self._mtime = mtime
         log.info("loaded rules for %d users", len(rules))
 

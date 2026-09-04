@@ -122,10 +122,39 @@ def test_cache_still_reads_the_older_rules_only_shape(addon, tmp_path):
     assert cache.blocked_categories_for(1001) == []
 
 
-def test_categories_are_empty_for_unknown_users(addon, tmp_path):
+def test_unknown_users_fail_closed_not_open(addon, tmp_path):
+    # Everything reaching the proxy is a filtered user; a uid we have no
+    # entry for is one whose policy has not arrived, not a stranger. It
+    # must get the safe floor, never the open web. This is the bug the
+    # first family test hit — an account that showed as filtered and
+    # filtered nothing.
+    from kosherd.categories import DEFAULT_BLOCKED
+
     cache = addon.PolicyCache(_rules_file(tmp_path, {}))
-    assert cache.blocked_categories_for(4242) == []
-    assert cache.blocked_categories_for(None) == []
+    assert set(cache.blocked_categories_for(4242)) == set(DEFAULT_BLOCKED)
+    assert set(cache.blocked_categories_for(None)) == set(DEFAULT_BLOCKED)
+    assert cache.media_level_for(4242) == "immodest"
+    assert cache.language_filter_for(None) == "substitute"
+    assert cache.youtube_for(4242).get("restrict") == "strict"
+
+
+def test_a_known_user_keeps_their_own_empty_choice(addon, tmp_path):
+    # A uid we DO have an entry for is respected as written, even if empty:
+    # the floor is a default for the absent, not an override of the known.
+    path = _rules_file(tmp_path, {
+        "1001": {"rules": [], "blocked_categories": [], "media_level": "none"}})
+    cache = addon.PolicyCache(path)
+    assert cache.blocked_categories_for(1001) == []
+    assert cache.media_level_for(1001) == "none"
+
+
+def test_a_missing_rules_file_fails_closed(addon, tmp_path):
+    # No file at all (proxy started before kosherd wrote one) is the most
+    # dangerous moment; it must not be an open window.
+    from kosherd.categories import DEFAULT_BLOCKED
+
+    cache = addon.PolicyCache(tmp_path / "nope.json")
+    assert set(cache.blocked_categories_for(1001)) == set(DEFAULT_BLOCKED)
 
 
 # -- media level and YouTube --------------------------------------------------
@@ -137,7 +166,8 @@ def test_cache_reads_media_level_and_youtube(addon, tmp_path):
     cache = addon.PolicyCache(path)
     assert cache.media_level_for(1001) == "immodest"
     assert cache.youtube_for(1001)["restrict"] == "strict"
-    assert cache.media_level_for(4242) == "none"  # unknown user unaffected
+    # An unknown user is not "unaffected" — it fails closed to the floor.
+    assert cache.media_level_for(4242) == "immodest"
 
 
 def test_youtube_restrict_header_per_level(addon):
@@ -219,7 +249,8 @@ def test_cache_reads_the_language_filter(addon, tmp_path):
     path = _rules_file(tmp_path, {"1001": {"rules": [], "language_filter": "block"}})
     cache = addon.PolicyCache(path)
     assert cache.language_filter_for(1001) == "block"
-    assert cache.language_filter_for(4242) == "off"
+    # Unknown user fails closed to substitution, not "off".
+    assert cache.language_filter_for(4242) == "substitute"
 
 
 def test_page_scoring_uses_the_same_ladder_as_search(addon):

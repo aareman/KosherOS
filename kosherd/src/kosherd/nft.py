@@ -33,7 +33,29 @@ MODE_CHAINS = {
 }
 
 # mitmproxy listens here; filtered users' web traffic is redirected to it.
-MITM_PORT = 8080
+MITM_PORT = 8080  # legacy single port; kept for tools that still name it
+
+# One loopback port PER FILTERED USER, so the proxy knows who is connecting
+# from the port it accepted on. Before this, every user was redirected to
+# one port and the proxy worked the owner out by scanning /proc/net/tcp for
+# the client's source port — a lookup a browser's connection churn could
+# get wrong (a TIME_WAIT ghost, two sockets sharing a port), and a wrong
+# owner meant the wrong policy. nftables already dispatches by skuid; the
+# port simply carries that decision to the proxy. Deterministic, per boot
+# and across it, with nothing to race.
+MITM_PORT_BASE = 30000
+
+
+def mitm_ports(policy: Policy) -> dict[int, int]:
+    """uid -> the proxy port that user's web traffic is redirected to.
+
+    Sequential from MITM_PORT_BASE in uid order. Rendered into the nft
+    ruleset, the proxy's rules file and its listener list from this one
+    function, so the three can never disagree.
+    """
+    inspected = sorted(u.uid for u in policy.effective_users()
+                       if u.mode in INSPECTED_MODES)
+    return {uid: MITM_PORT_BASE + i for i, uid in enumerate(inspected)}
 
 # The KosherOS search front end (the page users get) and the metasearch
 # engine behind it. Only the front end filters, so the backend must not be
@@ -100,14 +122,13 @@ def render(policy: Policy, *, dns_uid: int, mitm_uid: int | None = None,
 
     # Filtered mode: send this user's web traffic into the local mitmproxy,
     # which decrypts it so URL rules can be applied.
-    inspected = sorted(u.uid for u in policy.effective_users()
-                       if u.mode in INSPECTED_MODES)
-    if inspected and mitm_uid is not None:
-        uids = ", ".join(str(u) for u in inspected)
-        web_redirect = (
-            f"        meta skuid {{ {uids} }} tcp dport {{ 80, 443 }} "
-            f"redirect to :{MITM_PORT}\n"
-        )
+    ports = mitm_ports(policy)
+    if ports and mitm_uid is not None:
+        # One rule per user: the destination port IS the user's identity to
+        # the proxy (see mitm_ports).
+        web_redirect = "".join(
+            f"        meta skuid {uid} tcp dport {{ 80, 443 }} redirect to :{port}\n"
+            for uid, port in ports.items())
     else:
         web_redirect = ""
 

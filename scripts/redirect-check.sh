@@ -36,21 +36,26 @@ fi
 say "the origin is reachable before any rules load" "ok"
 
 install -d -m 0750 -o kosher-mitm -g kosher-mitm /var/lib/kosher-mitm
+# The filtered user's own listener port: the FIRST filtered uid gets the
+# base port (kosherd/nft.py mitm_ports). The proxy identifies the user from
+# the port the connection arrives on, so the entry must carry it.
+PORT=30000
 cat > /var/lib/kosher-mitm/rules.json <<EOF
-{"$FILTERED": {"rules": [{"action": "block", "pattern": "$TARGET/*"}],
+{"$FILTERED": {"port": $PORT,
+   "rules": [{"action": "block", "pattern": "$TARGET/*"}],
    "blocked_categories": [], "media_level": "none",
    "language_filter": "off", "youtube": {}}}
 EOF
 chmod 644 /var/lib/kosher-mitm/rules.json
 
 setpriv --reuid="$MITM" --regid="$MITM" --clear-groups \
-    mitmdump --mode transparent --listen-host 0.0.0.0 --listen-port 8080 \
+    mitmdump --mode "transparent@0.0.0.0:$PORT" \
         --set confdir=/var/lib/kosher-mitm --set block_global=false \
         --set termlog_verbosity=warn \
         --scripts /usr/share/kosher/mitm/kosher_filter.py \
         > /tmp/mitm.log 2>&1 &
 for _ in $(seq 1 30); do
-    (echo > /dev/tcp/127.0.0.1/8080) 2>/dev/null && break; sleep 1
+    (echo > "/dev/tcp/127.0.0.1/$PORT") 2>/dev/null && break; sleep 1
 done
 
 cat > /tmp/policy.json <<EOF
@@ -62,9 +67,9 @@ cat > /tmp/policy.json <<EOF
  ]}
 EOF
 kosherctl render-nft /tmp/policy.json > /tmp/kosher.nft
-grep -q "redirect to :8080" /tmp/kosher.nft \
-    && say "the ruleset contains a redirect at all" "ok" \
-    || { say "the ruleset contains a redirect at all" "FAILED"; fail=1; }
+grep -q "meta skuid $FILTERED tcp dport { 80, 443 } redirect to :$PORT" /tmp/kosher.nft \
+    && say "the filtered user is redirected to their own port" "ok" \
+    || { say "the filtered user is redirected to their own port" "FAILED"; fail=1; }
 nft -f /tmp/kosher.nft || { echo "  the ruleset does not load"; exit 1; }
 
 # Our block page is unmistakable, so seeing it proves the whole chain:

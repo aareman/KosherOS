@@ -102,8 +102,12 @@ def test_inspect_mode_redirects_web_to_mitmproxy():
     pol.users[0].mode = "filtered"
     out = nft.render(pol, dns_uid=989, mitm_uid=988)
     inspected = sorted(u.uid for u in pol.effective_users() if u.mode == "filtered")
-    uids = ", ".join(str(u) for u in inspected)
-    assert f"meta skuid {{ {uids} }} tcp dport {{ 80, 443 }} redirect to :8080" in out
+    # One rule per user, each to their OWN port: the port tells the proxy
+    # who is connecting.
+    ports = nft.mitm_ports(pol)
+    for uid in inspected:
+        assert f"meta skuid {uid} tcp dport {{ 80, 443 }} redirect to :{ports[uid]}" in out
+    assert len(set(ports.values())) == len(inspected), "ports must be distinct"
     # inspected users still get the filtered egress policy and evasion block
     for uid in inspected:
         assert f"{uid} : jump mode_filtered" in out
@@ -119,7 +123,7 @@ def test_no_mitm_redirect_without_filtered_users():
             user.mode = "whitelist"
     pol.guest.mode = "whitelist"
     out = nft.render(pol, dns_uid=989, mitm_uid=988)
-    assert "redirect to :8080" not in out
+    assert "redirect to :3" not in out  # no per-user proxy port at all
 
 
 # -- the five modes -----------------------------------------------------------
@@ -143,7 +147,7 @@ def test_only_filtered_traffic_is_decrypted():
     out = nft.render(policy_of("dnsfilter", "filtered", "unfiltered"),
                      dns_uid=989, mitm_uid=988)
     # uid 1001 is the filtered one; nobody else is redirected to the proxy.
-    assert "meta skuid { 1001 } tcp dport { 80, 443 } redirect to :8080" in out
+    assert "meta skuid 1001 tcp dport { 80, 443 } redirect to :30000" in out
 
 
 def test_unfiltered_users_get_the_plain_resolver():
@@ -180,3 +184,16 @@ def test_the_search_service_resolves_names_without_being_redirected():
 def test_without_a_search_user_nothing_about_search_is_rendered():
     ruleset = nft.render(_example(), dns_uid=989)
     assert str(nft.SEARCH_BACKEND_PORT) not in ruleset
+
+
+def test_user_ports_are_deterministic_and_shared_by_every_renderer():
+    # The same function feeds the ruleset, the proxy's rules file and its
+    # listener list, so a uid can never be redirected to a port nobody is
+    # listening on, or answered by the wrong user's policy.
+    pol = policy_of("filtered", "filtered", "unfiltered")
+    ports = nft.mitm_ports(pol)
+    assert ports == {1000: 30000, 1001: 30001}
+    assert nft.mitm_ports(pol) == ports
+    out = nft.render(pol, dns_uid=989, mitm_uid=988)
+    for uid, port in ports.items():
+        assert f"meta skuid {uid} tcp dport {{ 80, 443 }} redirect to :{port}" in out

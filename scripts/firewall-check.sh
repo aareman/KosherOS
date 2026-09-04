@@ -68,6 +68,14 @@ kosherctl render-nft /tmp/policy.json > /tmp/kosher.nft || {
 nft -f /tmp/kosher.nft || { echo "  the real ruleset does not LOAD"; exit 1; }
 say "the rendered ruleset loads" "ok"
 
+# A filtered user's web traffic is redirected to THEIR proxy port (the first
+# filtered uid gets the base port; see kosherd/nft.py mitm_ports). This test
+# is about the firewall, not the proxy, so a stub answers on that port: for
+# a filtered account "gets through" means "through the firewall, into the
+# proxy's slot". check-redirect proves the proxy end with the real thing.
+python3 -m http.server --bind 127.0.0.1 30000 >/dev/null 2>&1 &
+for _ in $(seq 1 20); do (echo > /dev/tcp/127.0.0.1/30000) 2>/dev/null && break; sleep 0.5; done
+
 # Does this user reach the server? "yes" or "no".
 reach() {
     if setpriv --reuid="$(uid "$1")" --regid=0 --clear-groups \

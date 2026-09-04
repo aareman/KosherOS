@@ -67,15 +67,16 @@ def write_mitm_rules(policy: Policy) -> None:
     The proxy never sees the policy itself — only what it must enforce,
     group readable by kosher-mitm.
     """
+    ports = nft.mitm_ports(policy)
     per_user = {}
     for user in policy.effective_users():
         if user.mode not in INSPECTED_MODES:
             continue
-        if not (user.rules or user.blocked_categories
-                or user.media_level != "none" or user.youtube
-                or getattr(user, "language_filter", "off") != "off"):
-            continue
+        # Every inspected user is listed, even one with nothing configured:
+        # the entry carries the port the proxy identifies them by. (The
+        # proxy still fails closed for a port it has no entry for.)
         per_user[str(user.uid)] = {
+            "port": ports[user.uid],
             "rules": user.rules,
             "blocked_categories": user.blocked_categories,
             "media_level": user.media_level,
@@ -84,6 +85,15 @@ def write_mitm_rules(policy: Policy) -> None:
         }
     MITM_DIR.mkdir(parents=True, exist_ok=True)
     _write_atomic(MITM_RULES_PATH, json.dumps(per_user, indent=2) + "\n", mode=0o644)
+    # The listener list, one transparent mode per user port. systemd splits
+    # the unquoted $MITM_MODES on whitespace into separate arguments.
+    modes = " ".join(f"--mode transparent@127.0.0.1:{port}"
+                     for port in sorted(ports.values()))
+    # Beside the rules file (not a fixed path), so a relocated rules file in
+    # a test or a future layout takes its listener list with it. Read by
+    # kosher-mitm.service as EnvironmentFile.
+    _write_atomic(MITM_RULES_PATH.with_name("listen.env"),
+                  f"MITM_MODES={modes}\n", mode=0o644)
 
 
 def search_uid() -> int | None:

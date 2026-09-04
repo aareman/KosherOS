@@ -144,12 +144,20 @@ class PolicyCache:
         self.path = path
         self._mtime = 0.0
         self._known: set[int] = set()
+        self._by_port: dict[int, int] = {}
         self._rules: dict[int, list] = {}
         self._blocked: dict[int, list] = {}
         self._media: dict[int, str] = {}
         self._language: dict[int, str] = {}
         self._youtube: dict[int, dict] = {}
         self._fallback = _fail_closed_entry()
+
+    def uid_for_listener_port(self, port: int | None) -> int | None:
+        """Whose traffic arrives on this port. kosherd gives every filtered
+        user their own port and redirects them to it, so this is the whole
+        identification — no socket table, nothing to race."""
+        self._refresh()
+        return self._by_port.get(port) if port is not None else None
 
     def _is_known(self, uid: int | None) -> bool:
         self._refresh()
@@ -205,12 +213,15 @@ class PolicyCache:
         media: dict[int, str] = {}
         language: dict[int, str] = {}
         youtube: dict[int, dict] = {}
+        by_port: dict[int, int] = {}
         for uid_text, raw in doc.items():
             try:
                 uid = int(uid_text)
                 # Older files were {uid: [rules]}; current ones carry
                 # categories too.
                 entry = raw if isinstance(raw, dict) else {"rules": raw}
+                if entry.get("port") is not None:
+                    by_port[int(entry["port"])] = uid
                 rules[uid] = parse_rules(entry.get("rules", []))
                 blocked[uid] = list(entry.get("blocked_categories", []))
                 media[uid] = entry.get("media_level", "none")
@@ -224,6 +235,7 @@ class PolicyCache:
         self._language = language
         self._youtube = youtube
         self._known = set(rules)
+        self._by_port = by_port
         self._mtime = mtime
         log.info("loaded rules for %d users", len(rules))
 
@@ -500,10 +512,16 @@ class KosherFilter:
         self.blocklist = search_mod.load_blocklist()
 
     def _uid_of(self, flow) -> int | None:
-        """Who made this connection. The client's address AND port, plus
-        the destination they asked for (transparent mode recovers it from
-        the socket), so a shared port or a lingering closed connection
-        cannot be mistaken for this person."""
+        """Who made this connection: the port it ARRIVED on. nftables sends
+        each filtered user to their own listener, so the answer is a map
+        lookup with nothing to race. The socket-table lookup that preceded
+        this could confuse a person with a TIME_WAIT ghost or another
+        socket sharing their source port; it is kept only as a fallback for
+        a rules file that predates per-user ports."""
+        sock = getattr(flow.client_conn, "sockname", None)
+        uid = self.policy.uid_for_listener_port(sock[1] if sock else None)
+        if uid is not None:
+            return uid
         peer = getattr(flow.client_conn, "peername", None)
         if not peer:
             return None

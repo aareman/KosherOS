@@ -383,3 +383,36 @@ that still acts is worse than a wordy subtitle.
 
 YouTube stays greyed out everywhere but filtered mode, and that one is
 genuine: nothing outside the proxy can see which video is playing.
+
+
+## Who is connecting: one port per user
+
+The proxy has to know which person a connection belongs to, because two
+people at the same machine get different filtering. nftables already knows
+— it dispatches every packet by the owning uid (`meta skuid`) — so rather
+than redirect everyone to one proxy port and have the proxy rediscover the
+owner afterwards, kosherd gives **each filtered user their own loopback
+port** (30000, 30001, … in uid order) and redirects them to it. The proxy
+listens on exactly that set and reads the user from the port a connection
+arrived on. One map lookup, deterministic, nothing to race.
+
+The first design redirected everyone to port 8080 and scanned
+`/proc/net/tcp` for the client's source port. A few `curl`s never caught
+what a browser's connection churn did: a just-closed connection lingers in
+TIME_WAIT reporting uid 0, Linux reuses its port for a new connection to a
+different server, and the scan found the ghost first — so a child became
+"root", a uid with no policy, which then meant the open web. The
+`kosherd.uidmap` lookup still exists (the search service uses it, matching
+the full 4-tuple on live sockets only), and the proxy falls back to it
+only for a rules file that predates per-user ports.
+
+"Who is at the keyboard" would not have been enough either: GNOME's Switch
+User leaves the previous session running, and a browser left open there
+keeps making requests under its own uid while somebody else is active.
+The owner of the socket is the only right answer, and the port carries it.
+
+Whatever the identification, a uid the proxy holds no policy for gets the
+fail-closed floor (the default categories, immodest media, substituted
+language), never the open web. Every connection reaching the proxy is a
+filtered user's by construction, so an unknown one is a fault to log —
+and it is logged — not a stranger to wave through.

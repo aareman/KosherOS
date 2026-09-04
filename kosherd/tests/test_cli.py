@@ -32,7 +32,7 @@ def test_rendering_offline_produces_the_ruleset_that_is_applied(tmp_path,
     monkeypatch.setattr(pwd, "getpwnam", getpwnam)
     cli.main(["render-nft", str(policy)])
     out = capsys.readouterr().out
-    assert "redirect to :8080" in out, "the interception rule is missing"
+    assert "redirect to :30000" in out, "the interception rule is missing"
     assert "8889" in out, "the search back end guard is missing"
 
 

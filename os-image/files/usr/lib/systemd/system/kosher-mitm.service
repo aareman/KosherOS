@@ -13,10 +13,14 @@ Group=kosher-mitm
 # the proxy recovers the original destination from the socket.
 # /usr/bin/env so the unit works whether mitmproxy came from the distro
 # package or a pip install in a dev VM.
+# One listener per filtered user (see kosherd/nft.py mitm_ports): the port
+# a connection arrives on tells the proxy whose it is. kosherd writes the
+# list to listen.env on every policy apply and restarts this service. The
+# Environment= line is the fallback for a first start before any apply.
+Environment="MITM_MODES=--mode transparent@127.0.0.1:30000"
+EnvironmentFile=-/var/lib/kosher-mitm/listen.env
 ExecStart=/usr/bin/env mitmdump \
-    --mode transparent \
-    --listen-host 127.0.0.1 \
-    --listen-port 8080 \
+    $MITM_MODES \
     --set confdir=/var/lib/kosher-mitm \
     --set block_global=false \
     --set termlog_verbosity=warn \

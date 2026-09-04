@@ -337,6 +337,7 @@ def _image_flow():
 
 def _stub_policy(media="none", blocked=()):
     return type("P", (), {
+        "uid_for_listener_port": staticmethod(lambda port: None),
         "media_level_for": staticmethod(lambda uid: media),
         "blocked_categories_for": staticmethod(lambda uid: list(blocked)),
     })()
@@ -454,6 +455,7 @@ def test_a_department_is_only_blocked_for_accounts_that_asked(addon):
 
 def _request_policy(blocked=()):
     return type("P", (), {
+        "uid_for_listener_port": staticmethod(lambda port: None),
         "rules_for": staticmethod(lambda uid: []),
         "blocked_categories_for": staticmethod(lambda uid: list(blocked)),
         "youtube_for": staticmethod(lambda uid: {}),
@@ -562,6 +564,7 @@ def _shop_filter(addon, blocked=("immodest",)):
     filt = addon.KosherFilter.__new__(addon.KosherFilter)
     filt.uids = type("U", (), {"uid_for_connection": staticmethod(lambda *a, **k: 1001)})()
     filt.policy = type("P", (), {
+        "uid_for_listener_port": staticmethod(lambda port: None),
         "rules_for": staticmethod(lambda uid: []),
         "blocked_categories_for": staticmethod(lambda uid: list(blocked)),
         "media_level_for": staticmethod(lambda uid: "none"),
@@ -1004,3 +1007,32 @@ def test_a_clean_page_is_not_remembered_at_all(addon):
     filt.page_levels = {"https://example.com/x": vision.IMMODEST}
     filt._remember_page("https://example.com/x", content.CLEAN)
     assert filt.page_levels == {}
+
+
+# -- per-user listener ports -------------------------------------------------
+
+def test_the_cache_maps_listener_ports_to_users(addon, tmp_path):
+    # kosherd redirects each filtered user to their own port; the proxy
+    # learns who is connecting from the port alone. Nothing to race.
+    path = _rules_file(tmp_path, {
+        "1000": {"port": 30000, "rules": [], "blocked_categories": ["adult"]},
+        "1001": {"port": 30001, "rules": [], "blocked_categories": ["social"]},
+    })
+    cache = addon.PolicyCache(path)
+    assert cache.uid_for_listener_port(30000) == 1000
+    assert cache.uid_for_listener_port(30001) == 1001
+    assert cache.uid_for_listener_port(8080) is None
+    assert cache.uid_for_listener_port(None) is None
+
+
+def test_the_filter_identifies_a_user_by_the_port_they_arrived_on(addon, tmp_path):
+    path = _rules_file(tmp_path, {"1001": {"port": 30001, "rules": []}})
+    filt = addon.KosherFilter.__new__(addon.KosherFilter)
+    filt.policy = addon.PolicyCache(path)
+    # A socket-table lookup that would say "root" must not be consulted.
+    filt.uids = type("U", (), {"uid_for_connection": staticmethod(lambda *a, **k: 0)})()
+    flow = types.SimpleNamespace(
+        client_conn=types.SimpleNamespace(sockname=("127.0.0.1", 30001),
+                                          peername=("10.0.2.15", 51515)),
+        server_conn=types.SimpleNamespace(address=("1.2.3.4", 443)))
+    assert filt._uid_of(flow) == 1001

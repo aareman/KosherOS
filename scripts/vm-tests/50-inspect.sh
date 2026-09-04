@@ -23,8 +23,11 @@ check "the inspection CA is in the system trust store" 0 \
 check_contains "rules are rendered for the proxy" "blocked" \
     cat /var/lib/kosher-mitm/rules.json
 check "Firefox is told to honour system roots" 0 test -f /etc/firefox/policies/policies.json
-check_contains "web traffic is redirected into the proxy" "redirect to :8080" \
+check_contains "web traffic is redirected into the proxy" "redirect to :3" \
     nft list chain inet kosher dns_redirect
+# Each filtered user has their own listener; the proxy must be on all of them.
+check_contains "the proxy listens on the per-user ports" "transparent@127.0.0.1:30000" \
+    cat /var/lib/kosher-mitm/listen.env
 # The proxy must never read the policy itself.
 check "the proxy cannot read the policy" 1 as kosher-mitm cat /var/lib/kosher/policy.json
 

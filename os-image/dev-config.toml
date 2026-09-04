@@ -14,5 +14,7 @@
 name = "root"
 key = "@SSH_KEY@"
 
-[customizations.services]
-enabled = ["sshd"]
+# No [customizations.services] block: bootc-image-builder did not apply it
+# to disk images, so dev disks had no sshd at all. sshd is enabled in the
+# image and gated on /root/.ssh/authorized_keys existing (see the sshd
+# drop-in in os-image/files), which the root key above provides.

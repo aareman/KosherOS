@@ -108,7 +108,7 @@ RUN passwd -l root \
     && groupadd -r kosher-admin \
     && sed -i -e 's/^SUB_UID_COUNT.*/SUB_UID_COUNT 0/' -e 's/^SUB_GID_COUNT.*/SUB_GID_COUNT 0/' /etc/login.defs \
     && systemctl mask systemd-resolved.service debug-shell.service \
-    && systemctl disable sshd.service 2>/dev/null || true \
+    && systemctl enable sshd.service \
     && systemctl enable kosherd.service kosher-firewall.service kosher-dns.service \
     && systemctl enable bootc-fetch-apply-updates.timer \
     && rm -f /etc/flatpak/remotes.d/*.flatpakrepo

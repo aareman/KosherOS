@@ -153,7 +153,14 @@ class PolicyCache:
 
     def _is_known(self, uid: int | None) -> bool:
         self._refresh()
-        return uid is not None and uid in self._known
+        known = uid is not None and uid in self._known
+        if not known:
+            # Loud, because this is the moment a person is being filtered
+            # by the floor instead of their own policy. A run of these in
+            # the journal is the signature of a lookup or propagation
+            # fault, which is what to go and fix.
+            log.warning("no policy for uid=%s; applying the fail-closed floor", uid)
+        return known
 
     def rules_for(self, uid: int | None):
         if not self._is_known(uid):

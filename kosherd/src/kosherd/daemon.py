@@ -1110,7 +1110,16 @@ class Daemon:
 
     @staticmethod
     def _set_grub_password(password: str) -> None:
-        """Password-protect the boot menu (blocks kernel-argument edits)."""
+        """Password-protect the boot menu (blocks kernel-argument edits).
+
+        Checked against the GRUB source, because getting this wrong locks a
+        family out of their own computer: with `superusers` set, GRUB
+        restricts an entry to superusers only when the entry has a users
+        list. Fedora's blscfg passes users=NULL for a BLS entry with no
+        `grub_users` field, and ostree's entries have none — so they still
+        BOOT freely; only editing an entry or opening the command line asks
+        for this password. Which is exactly the point.
+        """
         res = subprocess.run(["grub2-mkpasswd-pbkdf2"], text=True,
                              input=f"{password}\n{password}\n", capture_output=True)
         if res.returncode != 0:

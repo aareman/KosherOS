@@ -116,6 +116,19 @@ class PasswordPair:
             self.on_change()
 
 
+def _icons_out_of_tab_order(root: Gtk.Widget) -> None:
+    """Take the small in-row icon buttons (the password peek eye, the edit
+    pencil) out of the Tab chain. Tab should move to the NEXT FIELD; the
+    icons remain mouse-clickable."""
+    child = root.get_first_child()
+    while child is not None:
+        if isinstance(child, (Gtk.Button, Gtk.ToggleButton, Gtk.MenuButton)) \
+                and not isinstance(child, Gtk.Switch):
+            child.set_focusable(False)
+        _icons_out_of_tab_order(child)
+        child = child.get_next_sibling()
+
+
 def _page(title: str, description: str) -> tuple[Gtk.Box, Adw.PreferencesGroup]:
     box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=18,
                   margin_top=36, margin_bottom=36, margin_start=48, margin_end=48,
@@ -141,27 +154,45 @@ class Window(Adw.ApplicationWindow):
         self.toasts = Adw.ToastOverlay()
         self.set_content(self.toasts)
 
-        self.stack = Gtk.Stack(transition_type=Gtk.StackTransitionType.SLIDE_LEFT)
+        self.stack = Gtk.Stack(transition_type=Gtk.StackTransitionType.SLIDE_LEFT,
+                               vexpand=True)
+        # Back bottom-left, Next bottom-right: where a wizard's feet go.
+        # They used to live in the header bar, which reads as window chrome —
+        # the person filling in the last field had to travel to the top of
+        # the window to continue.
         self.back = Gtk.Button(label="Back", visible=False)
         self.back.connect("clicked", lambda _b: self._back())
         self.next = Gtk.Button(label="Get Started")
         self.next.add_css_class("suggested-action")
+        self.next.add_css_class("pill")
         self.next.connect("clicked", lambda _b: self._advance())
 
         header = Adw.HeaderBar(show_end_title_buttons=False,
                                show_start_title_buttons=False)
-        header.pack_start(self.back)
-        header.pack_end(self.next)
+
+        actions = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL,
+                          margin_top=12, margin_bottom=24,
+                          margin_start=48, margin_end=48)
+        actions.append(self.back)
+        spring = Gtk.Box(hexpand=True)
+        actions.append(spring)
+        actions.append(self.next)
 
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         box.append(header)
         box.append(self.stack)
+        box.append(actions)
         self.toasts.set_child(box)
 
         self.stack.add_named(self._welcome_page(), "welcome")
         self.stack.add_named(self._admin_page(), "admin")
         self.stack.add_named(self._protect_page(), "protect")
         self.stack.add_named(self._firmware_page(), "firmware")
+        self.stack.add_named(self._working_page(), "working")
+        # Tab moves between FIELDS. Without this it stops on every row's
+        # internal icon (the password "peek" eye and friends), which nobody
+        # tabbing through a form wants; the icons stay mouse-clickable.
+        _icons_out_of_tab_order(self.stack)
         # Resume: if a previous run already created the administrator (a
         # failed finish step, a crash, a reboot mid-wizard), do not ask for
         # a second one — the daemon refuses it anyway, which left a person
@@ -177,6 +208,35 @@ class Window(Adw.ApplicationWindow):
             self._go("welcome")
 
     # -- pages -------------------------------------------------------------
+
+    def _working_page(self) -> Gtk.Widget:
+        """A real loading screen for the slow steps, so the person always
+        knows the machine is doing something rather than wondering whether
+        their click took."""
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=18,
+                      valign=Gtk.Align.CENTER, halign=Gtk.Align.CENTER)
+        self.spinner = Gtk.Spinner(width_request=48, height_request=48)
+        self.working_label = Gtk.Label(label="Working…")
+        self.working_label.add_css_class("title-2")
+        self.working_detail = Gtk.Label(label="")
+        self.working_detail.add_css_class("dim-label")
+        box.append(self.spinner)
+        box.append(self.working_label)
+        box.append(self.working_detail)
+        return box
+
+    def _busy(self, title: str, detail: str = "") -> None:
+        self._before_busy = self.stack.get_visible_child_name()
+        self.working_label.set_text(title)
+        self.working_detail.set_text(detail)
+        self.spinner.start()
+        self.back.set_visible(False)
+        self.next.set_sensitive(False)
+        self.stack.set_visible_child_name("working")
+
+    def _unbusy(self, back_to: str | None = None) -> None:
+        self.spinner.stop()
+        self._go(back_to or self._before_busy)
 
     def _welcome_page(self) -> Gtk.Widget:
         page = Adw.StatusPage(
@@ -219,6 +279,15 @@ class Window(Adw.ApplicationWindow):
         self.admin_pw = PasswordPair(group, "Password", on_change=self._revalidate)
         self.full_name.connect("changed", self._suggest_username)
         self.username.connect("changed", lambda _e: self._revalidate())
+        # Enter walks the form: each field hands the keyboard to the next,
+        # and the last one presses Create Account if everything is valid.
+        self.full_name.connect("entry-activated", lambda _e: self.username.grab_focus())
+        self.username.connect("entry-activated", lambda _e: self.admin_pw.entry.grab_focus())
+        self.admin_pw.entry.connect("entry-activated",
+                                    lambda _e: self.admin_pw.confirm.grab_focus())
+        self.admin_pw.confirm.connect(
+            "entry-activated",
+            lambda _e: self._advance() if self._page_valid() else None)
         return box
 
     def _protect_page(self) -> Gtk.Widget:
@@ -286,9 +355,14 @@ class Window(Adw.ApplicationWindow):
     def _go(self, name: str) -> None:
         self.stack.set_visible_child_name(name)
         self.back.set_visible(name in self.PREVIOUS)
+        self.next.set_visible(True)
+        self.next.set_sensitive(True)
         self.next.set_label({"welcome": "Get Started", "admin": "Create Account",
                              "protect": "Continue", "firmware": "Finish"}[name])
         self._revalidate()
+        # Put the keyboard where the person will type next.
+        if name == "admin":
+            self.full_name.grab_focus()
 
     def _back(self) -> None:
         name = self.stack.get_visible_child_name()
@@ -334,15 +408,15 @@ class Window(Adw.ApplicationWindow):
             self.toast("Passwords must match and be at least 6 characters")
             return
 
-        self.next.set_sensitive(False)
+        self._busy("Creating the account…",
+                   f"Setting up '{username}' and applying the filter defaults")
 
         def on_done(uid):
             self.admin_uid = uid
-            self.next.set_sensitive(True)
-            self._go("protect")
+            self._unbusy("protect")
 
         def on_error(e):
-            self.next.set_sensitive(True)
+            self._unbusy("admin")
             self.toast(_error_text(e))
 
         _run_async(lambda: self.client.create_first_admin(
@@ -362,10 +436,11 @@ class Window(Adw.ApplicationWindow):
                 return
             grub = self.grub_pw.text()
 
-        self.next.set_sensitive(False)
+        self._busy("Finishing setup…",
+                   "Applying protection settings and starting the login screen")
         _run_async(lambda: self.client.finish_setup(guardian, grub),
                    lambda _r: self.get_application().quit(),
-                   lambda e: (self.next.set_sensitive(True), self.toast(_error_text(e))))
+                   lambda e: (self._unbusy("protect"), self.toast(_error_text(e))))
 
     def toast(self, text: str) -> None:
         self.toasts.add_toast(Adw.Toast(title=text, timeout=5))

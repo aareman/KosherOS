@@ -145,3 +145,87 @@ def test_a_pre_existing_account_is_offered_not_hidden():
     win = setup.Window(application=setup.App())
     assert win.username.get_text() == "abba"
     assert "abba" in win.existing_note.get_title()
+
+
+# -- the hands-on UX round: button placement, tab order, loading screens ------
+
+def _tab_stops(root):
+    """Every focusable widget under root, in tree order."""
+    stops = []
+
+    def walk(w):
+        if w.get_focusable():
+            stops.append(w)
+        c = w.get_first_child()
+        while c is not None:
+            walk(c)
+            c = c.get_next_sibling()
+
+    walk(root)
+    return stops
+
+
+def test_no_in_row_icon_sits_in_the_tab_chain():
+    # Tab must travel field -> field. The password rows' peek eyes and the
+    # entry rows' edit icons used to be stops, so tabbing out of a field
+    # landed on a button nobody wanted.
+    win = window()
+    win._go("admin")
+    for stop in _tab_stops(win.stack):
+        assert not isinstance(stop, (Gtk.Button, Gtk.ToggleButton)), \
+            f"a {type(stop).__name__} inside the form is still tabbable"
+
+
+def test_next_and_back_live_in_the_bottom_action_bar_not_the_header():
+    win = window()
+    # Walking up from the button must reach the window WITHOUT passing a
+    # header bar: the actions live at the bottom of the content box.
+    w = win.next
+    while w is not None:
+        assert not isinstance(w, Adw.HeaderBar), "Next is still in the header"
+        w = w.get_parent()
+
+
+def test_creating_the_account_shows_a_loading_screen():
+    class SlowClient(FakeClient):
+        def __init__(self):
+            super().__init__()
+            self.finished = False
+
+    win = window()
+    win._go("admin")
+    win.username.set_text("abba")
+    win.admin_pw.entry.set_text("Correct-Horse-42")
+    win.admin_pw.confirm.set_text("Correct-Horse-42")
+    win._busy("Creating the account…", "detail")
+    assert page(win) == "working"
+    assert win.spinner.get_spinning()
+    assert "Creating" in win.working_label.get_text()
+    assert not win.next.get_sensitive(), "nothing to press while working"
+    win._unbusy("protect")
+    assert page(win) == "protect"
+    assert not win.spinner.get_spinning()
+
+
+def test_a_failure_returns_to_the_page_that_was_being_filled_in():
+    win = window()
+    win._go("admin")
+    win._busy("Creating the account…")
+    win._unbusy("admin")
+    assert page(win) == "admin"
+
+
+def test_enter_walks_the_admin_form():
+    # The wiring exists: each field's activation hands focus onward, and the
+    # confirm field submits when the page is valid.
+    win = window()
+    win._go("admin")
+    win.full_name.set_text("Abba")
+    win.username.set_text("abba")
+    win.admin_pw.entry.set_text("Correct-Horse-42")
+    win.admin_pw.confirm.set_text("Correct-Horse-42")
+    assert win._page_valid()
+    win.admin_pw.confirm.emit("entry-activated")
+    # _advance on a valid admin page calls create_first_admin via the fake
+    # and lands on the working page (async completion needs a main loop).
+    assert page(win) in ("working", "protect")

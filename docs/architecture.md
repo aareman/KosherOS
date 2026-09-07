@@ -182,5 +182,5 @@ device to images signed for our registry (stage 2).
 | policy engine | `just test`, `just render` | < 1 s |
 | daemon in a dev VM | `just deploy-kosherd VM` | ~1 s |
 | stock-VM stack install | `just dev-install VM` | ~1 min |
-| OS image | `just build` → `just switch VM` | ~minutes, layer-cached |
+| OS image |  `just build` → `just vm-upgrade` | ~minutes, layer-cached |
 | full disk image | `just vm` | ~10 min |

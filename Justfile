@@ -354,10 +354,37 @@ boot-image:
         -netdev user,id=n0,hostfwd=tcp:127.0.0.1:2223-:22 -device virtio-net-pci,netdev=n0 \
         -device virtio-vga -display gtk -serial file:build/qcow2/console.log
 
-# Point a RUNNING bootc VM at the freshly built local image.
-switch VM: build
-    podman push {{image}} --tls-verify=false $(hostname -I | awk '{print $1}'):5000/kosher-linux:dev
-    ssh {{VM}} "bootc switch --transport registry --enforce-container-sigpolicy=false $(hostname -I | awk '{print $1}'):5000/kosher-linux:dev && systemctl reboot"
+# Update the RUNNING dev VM (started with `just boot-image`) to the image
+# just built — WITHOUT rebuilding the disk. Only changed layers transfer,
+# and /var persists: accounts, policy and completed setup all survive the
+# reboot. This is the everyday iteration path; `just vm` (sudo, minutes,
+# wipes state) is only for a genuinely fresh machine.
+#
+# How: a rootless registry on the host serves the image; inside the VM,
+# 10.0.2.2 is qemu's user-network alias for the host, and `bootc switch`
+# pulls the changed layers and stages an atomic reboot into them.
+vm-upgrade: build
+    #!/usr/bin/env bash
+    set -euo pipefail
+    SSH="ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR -o ConnectTimeout=5 -p 2223 root@127.0.0.1"
+    if ! $SSH true 2>/dev/null; then
+        echo "No VM answering on 127.0.0.1:2223 — start one with: just boot-image" >&2
+        exit 1
+    fi
+    podman inspect kosher-dev-registry >/dev/null 2>&1         || podman create --name kosher-dev-registry -p 127.0.0.1:5077:5000 docker.io/library/registry:2
+    podman start kosher-dev-registry >/dev/null
+    for _ in $(seq 1 20); do curl -sf http://127.0.0.1:5077/v2/ >/dev/null && break; sleep 0.5; done
+    podman push --tls-verify=false localhost/kosher-linux:dev 127.0.0.1:5077/kosher-linux:dev
+    $SSH 'mkdir -p /etc/containers/registries.conf.d
+          printf "[[registry]]\nlocation = \"10.0.2.2:5077\"\ninsecure = true\n" \
+              > /etc/containers/registries.conf.d/50-kosher-dev.conf
+          bootc switch 10.0.2.2:5077/kosher-linux:dev'
+    # Keep the staleness stamp honest: after the reboot the disk runs the
+    # image we just built, so boot tests must not refuse it as stale.
+    podman image inspect --format json localhost/kosher-linux:dev         | python3 -c 'import json,sys; print(json.load(sys.stdin)[0]["Id"])'         > build/qcow2/.image-id
+    touch -r build/qcow2/disk.qcow2 build/qcow2/.image-id
+    echo "Staged. Rebooting the VM into the new image..."
+    $SSH 'systemctl reboot' || true
 
 # --- Portal (stage 6) ---------------------------------------------------------
 

@@ -1,5 +1,5 @@
 # Kosher Linux OS image — a thin, locked-down layer over Fedora bootc.
-# Build:  just build      Test in a VM:  just vm / just switch
+# Build:  just build      Fresh VM disk:  just vm      Update a RUNNING VM:  just vm-upgrade
 FROM quay.io/fedora/fedora-bootc:44
 
 # --- Packages ---------------------------------------------------------------
@@ -30,12 +30,78 @@ RUN for p in sudo toolbox gnome-boxes gnome-software PackageKit \
     done; \
     ! rpm -q sudo && rpm -q bootc
 
+# Build/branding tooling in one early layer, so the later steps that use it
+# are cheap and local. Layer ORDER in this file is deliberate: the heavy,
+# rarely-changing work (package installs, pip wheels, the SearXNG clone,
+# the multi-minute category download) comes first, and the things that
+# change every day — unit files, configs, our code — come last. Before
+# this, `COPY os-image/files/ /` sat near the top, so editing one systemd
+# unit re-downloaded the entire category database and every wheel.
+RUN dnf -y install checkpolicy policycoreutils policycoreutils-python-utils \
+        librsvg2-tools plymouth-plugin-script dconf git-core && dnf clean all
+
+# --- Heavy, stable artifacts (network; change ~never) -------------------------
+# mitmproxy is not packaged for Fedora 44, so install it from PyPI (with its
+# dependencies — unlike our own packages, which are --no-deps).
+RUN python3 -m pip install --prefix=/usr mitmproxy
+# The image detector: NudeNet's ONNX model is about 5 MB and runs on the
+# CPU in tens of milliseconds, which is the only kind of model that fits a
+# product whose premise is that it works on a weak machine with nothing
+# leaving the house. onnxruntime and Pillow come with it; Pillow is also
+# what covers a detected region instead of blanking the whole picture.
+RUN python3 -m pip install --prefix=/usr nudenet onnxruntime pillow \
+    || echo "WARNING: no image model; picture filtering will hide pictures"
+# SearXNG is the metasearch engine behind our search page. It is a large
+# dependency and the only reason it is here is that scraping search
+# engines is the part that breaks constantly, and SearXNG is the project
+# that keeps up with it. Everything version-specific stays behind its JSON
+# API, which is stable, so an upgrade cannot reach our filtering.
+#
+# From git, and from a source tree rather than a wheel. The name "searxng"
+# on PyPI belongs to an unrelated project, and `pip install` of the repo
+# fails outright: its setup.py imports searx/__init__.py, which imports
+# msgspec before anything is installed. Upstream's own instructions are to
+# clone and install requirements.txt, which is what this does; the unit
+# runs it with PYTHONPATH pointing at the tree.
+# TODO(stage 2): pin a commit rather than tracking master, so an image
+# rebuild is reproducible.
+ARG SEARXNG_REF=master
+RUN git clone --depth 1 --branch "${SEARXNG_REF}" \
+        https://github.com/searxng/searxng /usr/share/kosher/searxng-src \
+    && python3 -m pip install --prefix=/usr \
+        -r /usr/share/kosher/searxng-src/requirements.txt \
+    && rm -rf /usr/share/kosher/searxng-src/.git \
+    || echo "WARNING: SearXNG did not install; search will be unavailable"
+
+# The category database is built here rather than committed: a family must
+# not have to assemble lists, and the shipped JSON seed is only a fallback
+# for a build with no network. Millions of domains in SQLite cost a few MB
+# of page cache to query; the same data in a dict would cost hundreds of MB
+# of RAM on exactly the low-end machine this has to run on.
+COPY scripts/fetch-categories.py scripts/curated-sites.json /tmp/
+RUN python3 /tmp/fetch-categories.py \
+        --out /usr/share/kosher/categories/categories.sqlite \
+    || echo "WARNING: category import failed; falling back to the seed list"
+RUN rm -f /tmp/fetch-categories.py /tmp/curated-sites.json
+
+# Third-party sources are enabled outright rather than prompted for: the
+# catalog allowlist already decides what may be installed, so asking the
+# person setting up a family computer to rule on repositories is a question
+# with no useful answer.
+RUN fedora-third-party enable && fedora-third-party query
+
+# Flathub is the SOURCE of apps; the catalog allowlist (+ the remote filter
+# kosherd renders from it) decides what may actually be installed, and only
+# kosherd may install at all.
+RUN flatpak remote-add --system --if-not-exists \
+        flathub https://dl.flathub.org/repo/flathub.flatpakrepo
+
 # --- Static configuration (units, polkit, dbus, dnsmasq, baseline firewall) --
 COPY os-image/files/ /
 
 # SELinux: dnsmasq needs a netfilter netlink socket to feed the nft whitelist
 # sets (not covered by Fedora's stock dnsmasq policy).
-RUN dnf -y install checkpolicy policycoreutils policycoreutils-python-utils && \
+RUN true && \
     # The plain resolver for unfiltered users listens on 5354, which SELinux
     # does not know is DNS; without this dnsmasq cannot bind it at all.
     (semanage port -a -t dns_port_t -p udp 5354 || \
@@ -44,8 +110,7 @@ RUN dnf -y install checkpolicy policycoreutils policycoreutils-python-utils && \
      semanage port -m -t dns_port_t -p tcp 5354) && \
     checkmodule -M -m -o /tmp/kosher-dnsmasq-nftset.mod /usr/share/kosher/selinux/kosher-dnsmasq-nftset.te && \
     semodule_package -o /tmp/kosher-dnsmasq-nftset.pp -m /tmp/kosher-dnsmasq-nftset.mod && \
-    semodule -i /tmp/kosher-dnsmasq-nftset.pp && rm -f /tmp/kosher-dnsmasq-nftset.* && \
-    dnf clean all
+    semodule -i /tmp/kosher-dnsmasq-nftset.pp && rm -f /tmp/kosher-dnsmasq-nftset.*
 
 # --- Lockdown ----------------------------------------------------------------
 # Identity: KosherOS, powered by Fedora (Fedora Remix terms). ID stays
@@ -69,7 +134,7 @@ RUN . /usr/lib/os-release \
 
 # --- Branding: boot splash, login screen, wallpaper, GRUB --------------------
 COPY branding/ /usr/share/kosher/branding/
-RUN dnf -y install librsvg2-tools plymouth-plugin-script dconf && dnf clean all \
+RUN true \
     # logo raster for plymouth + GDM
     && rsvg-convert -w 256 -h 256 /usr/share/kosher/branding/kosheros-logo.svg \
          -o /usr/share/plymouth/themes/kosheros/logo.png \
@@ -98,11 +163,6 @@ RUN dnf -y install librsvg2-tools plymouth-plugin-script dconf && dnf clean all 
          > /usr/lib/bootc/kargs.d/10-kosheros.toml \
     && dconf update
 
-# Third-party sources are enabled outright rather than prompted for: the
-# catalog allowlist already decides what may be installed, so asking the
-# person setting up a family computer to rule on repositories is a question
-# with no useful answer.
-RUN fedora-third-party enable && fedora-third-party query
 
 RUN passwd -l root \
     && groupadd -r kosher-admin \
@@ -117,11 +177,6 @@ RUN passwd -l root \
 # TODO(stage 2): replace with sigstoreSigned policy for the real registry:
 #   /etc/containers/policy.json + /etc/containers/registries.d/kosher.yaml
 
-# Flathub is the SOURCE of apps; the catalog allowlist (+ the remote filter
-# kosherd renders from it) decides what may actually be installed, and only
-# kosherd may install at all.
-RUN flatpak remote-add --system --if-not-exists \
-        flathub https://dl.flathub.org/repo/flathub.flatpakrepo
 
 # --- kosherd + apps (last layers: change most often) --------------------------
 COPY kosherd/ /tmp/kosherd/
@@ -132,55 +187,11 @@ COPY setup-app/ /tmp/setup-app/
 COPY policy/schema/policy.schema.json /usr/share/kosher/policy.schema.json
 COPY mitm/ /usr/share/kosher/mitm/
 
-# The category database is built here rather than committed: a family must
-# not have to assemble lists, and the shipped JSON seed is only a fallback
-# for a build with no network. Millions of domains in SQLite cost a few MB
-# of page cache to query; the same data in a dict would cost hundreds of MB
-# of RAM on exactly the low-end machine this has to run on.
-COPY scripts/fetch-categories.py scripts/curated-sites.json /tmp/
-RUN python3 /tmp/fetch-categories.py \
-        --out /usr/share/kosher/categories/categories.sqlite \
-    || echo "WARNING: category import failed; falling back to the seed list"
-RUN rm -f /tmp/fetch-categories.py /tmp/curated-sites.json
-# mitmproxy is not packaged for Fedora 44, so install it from PyPI (with its
-# dependencies — unlike our own packages, which are --no-deps).
-RUN python3 -m pip install --prefix=/usr mitmproxy
-# The image detector: NudeNet's ONNX model is about 5 MB and runs on the
-# CPU in tens of milliseconds, which is the only kind of model that fits a
-# product whose premise is that it works on a weak machine with nothing
-# leaving the house. onnxruntime and Pillow come with it; Pillow is also
-# what covers a detected region instead of blanking the whole picture.
-RUN python3 -m pip install --prefix=/usr nudenet onnxruntime pillow \
-    || echo "WARNING: no image model; picture filtering will hide pictures"
-# SearXNG is the metasearch engine behind our search page. It is a large
-# dependency and the only reason it is here is that scraping search
-# engines is the part that breaks constantly, and SearXNG is the project
-# that keeps up with it. Everything version-specific stays behind its JSON
-# API, which is stable, so an upgrade cannot reach our filtering.
-#
-# From git, and from a source tree rather than a wheel. The name "searxng"
-# on PyPI belongs to an unrelated project, and `pip install` of the repo
-# fails outright: its setup.py imports searx/__init__.py, which imports
-# msgspec before anything is installed. Upstream's own instructions are to
-# clone and install requirements.txt, which is what this does; the unit
-# runs it with PYTHONPATH pointing at the tree.
-# TODO(stage 2): pin a commit rather than tracking master, so an image
-# rebuild is reproducible.
-ARG SEARXNG_REF=master
-RUN dnf -y install git-core && dnf clean all \
-    && git clone --depth 1 --branch "${SEARXNG_REF}" \
-        https://github.com/searxng/searxng /usr/share/kosher/searxng-src \
-    && python3 -m pip install --prefix=/usr \
-        -r /usr/share/kosher/searxng-src/requirements.txt \
-    && rm -rf /usr/share/kosher/searxng-src/.git \
-    || echo "WARNING: SearXNG did not install; search will be unavailable"
-
 # Validate OUR settings against the SearXNG that just landed, and fail the
 # build if they do not agree. Both halves of this caught a real bug that
 # had already shipped: an invalid `preferences.lock` entry stopped the
 # engine starting at all, and disabling an engine SearXNG does not have
 # does not disable anything — it defines a broken one.
-COPY os-image/files/usr/share/kosher/searxng/ /usr/share/kosher/searxng/
 RUN SEARXNG_SETTINGS_PATH=/usr/share/kosher/searxng/settings.yml \
     PYTHONPATH=/usr/share/kosher/searxng-src python3 - <<'PYEOF'
 import sys

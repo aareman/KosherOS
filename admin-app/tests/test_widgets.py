@@ -366,9 +366,17 @@ def _rows(widget, found=None):
 
 
 def _row_named(page, title):
+    # The per-user settings moved from an expander in the list to a full
+    # detail page (UserDetailPage). Searching "the page" for a user setting
+    # now means searching that detail page, built for the page's first user.
     for row in _rows(page):
         if row.get_title() == title:
             return row
+    if hasattr(page, "win") and page.win.policy.get("users"):
+        detail = admin.UserDetailPage(page.win, page.win.policy["users"][0])
+        for row in _rows(detail):
+            if row.get_title() == title:
+                return row
     raise AssertionError(f"no row titled {title!r}")
 
 
@@ -477,3 +485,91 @@ def test_removing_an_account_asks_first():
     drain()
     # Presenting the dialog must not delete anything on its own.
     assert removed == []
+
+
+# -- the detail-page redesign ---------------------------------------------------
+# The user's feedback after configuring in expanders: "doesn't give enough
+# space to work... text is cut off... can we have a 'detail' screen arranged
+# with tabs... should also be check all / none".
+
+def _detail(mode="filtered", **kw):
+    win = FakeWindow(FakeClient())
+    user = a_user(mode=mode, **kw)
+    win.policy = {"revision": 1, "users": [user],
+                  "guardian": {"enabled": False}, "guest": {"enabled": False}}
+    return admin.UserDetailPage(win, user), win, user
+
+
+def test_the_detail_page_has_the_three_tabs():
+    page, _win, _user = _detail()
+    names = []
+    stack_pages = page.stack.get_pages()
+    for i in range(stack_pages.get_n_items()):
+        names.append(stack_pages.get_item(i).get_name())
+    assert names == ["filtering", "media", "account"]
+
+
+def test_every_setting_made_the_move():
+    page, _w, _u = _detail()
+    for title in ("Set up as", "Filter mode", "Whitelist", "Page rules",
+                  "Blocked content", "Pictures and video", "Bad language",
+                  "YouTube", "Installed apps", "Allow Wi-Fi sign-in",
+                  "Administrator", "Can install approved apps"):
+        assert any(r.get_title() == title for r in _rows(page)), \
+            f"{title} was lost in the move to the detail page"
+
+
+def test_the_list_row_is_compact_and_opens_the_detail():
+    win = FakeWindow(FakeClient())
+    win.policy = {"revision": 1, "users": [a_user()],
+                  "guardian": {"enabled": False}, "guest": {"enabled": False}}
+    page = admin.ProfilesPage(win)
+    row = page._user_row(a_user())
+    assert isinstance(row, Adw.ActionRow) and row.get_activatable()
+    assert not isinstance(row, Adw.ExpanderRow), \
+        "settings must not live inside a collapsing list row"
+
+
+def test_no_preferences_page_is_nested_in_a_scrolled_window():
+    # An Adw.PreferencesPage scrolls itself; nesting one in a
+    # Gtk.ScrolledWindow squashes every row to zero height — the "empty
+    # labels with toggles, only some visible" bug.
+    def offenders(widget, inside_scroller=False, found=None):
+        found = [] if found is None else found
+        if isinstance(widget, Adw.PreferencesPage) and inside_scroller:
+            found.append(widget)
+        inside = inside_scroller or isinstance(widget, Gtk.ScrolledWindow)
+        child = widget.get_first_child()
+        while child is not None:
+            offenders(child, inside, found)
+            child = child.get_next_sibling()
+        return found
+
+    page, win, user = _detail()
+    assert not offenders(page)
+    for dialog in (admin.CategoryDialog(win, user, lambda c: None),
+                   admin.YouTubeDialog(win, user, lambda s: None)):
+        assert not offenders(dialog), type(dialog).__name__
+
+
+def test_the_category_dialog_has_all_and_none():
+    page, win, user = _detail()
+    dialog = admin.CategoryDialog(win, user, lambda c: None)
+    drain()
+    assert dialog.switches, "categories never loaded"
+    dialog._set_all(True)
+    assert dialog.chosen == set(dialog.switches)
+    dialog._set_all(False)
+    assert dialog.chosen == set()
+
+
+def test_the_youtube_kinds_have_all_and_none_and_labels():
+    page, win, user = _detail()
+    dialog = admin.YouTubeDialog(win, user, lambda s: None)
+    assert len(dialog.kind_switches) == len(admin.YOUTUBE_CATEGORIES)
+    for code, row in dialog.kind_switches.items():
+        assert row.get_title(), f"kind {code} has an empty label"
+    dialog._set_all_kinds(True)
+    assert len(dialog.blocked) == len(admin.YOUTUBE_CATEGORIES)
+    dialog._set_all_kinds(False)
+    assert not dialog.blocked

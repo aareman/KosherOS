@@ -32,8 +32,9 @@ MODE_LABELS = {
 MODE_HINTS = {
     "none": "No web access at all. Printing and local network still work.",
     "whitelist": "Only the sites listed below, and safe search is forced.",
-    "dnsfilter": "Blocks known adult sites and forces safe search. This "
-                 "user's connections are not read.",
+    "dnsfilter": "Basic protection only: blocks known bad sites and forces "
+                 "safe search. Pages and pictures are NOT checked in this "
+                 "mode — for that, use Filtered internet.",
     "filtered": "Safe search, page rules and content filtering. To judge "
                 "pages this reads the connection, so this user's HTTPS is "
                 "decrypted on this computer.",
@@ -173,9 +174,17 @@ class Window(Adw.ApplicationWindow):
         lock_btn.connect("clicked", lambda _b: self._lock())
         self.header.pack_end(lock_btn)
 
-        self.content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
-        self.content.append(self.header)
-        self.content.append(stack)
+        root_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        root_box.append(self.header)
+        root_box.append(stack)
+        # A navigation view, so configuring one person gets a full page of
+        # its own instead of an expander squeezed into the list. The user's
+        # words after configuring in the expanders: "doesn't give enough
+        # space to work... text is cut off".
+        self.nav = Adw.NavigationView()
+        self.nav.add(Adw.NavigationPage(child=root_box, title="KosherOS Admin",
+                                        tag="root"))
+        self.content = self.nav
 
         # Locked state: one password, then everything works.
         self.lock_view = Adw.StatusPage(
@@ -229,6 +238,22 @@ class Window(Adw.ApplicationWindow):
         self.toasts.set_child(self.lock_view)
         _run_async(self.client.lock, lambda _r: None, lambda e: self.toast(_error_text(e)))
 
+    def open_user_detail(self, user: dict) -> None:
+        page = UserDetailPage(self, user)
+        self.nav.push(page)
+
+    def refresh_open_detail(self) -> None:
+        """After a policy reload, rebuild the detail page being viewed so it
+        shows the new state instead of the dict it was opened with."""
+        page = self.nav.get_visible_page()
+        if isinstance(page, UserDetailPage):
+            fresh = next((u for u in self.policy["users"]
+                          if u["uid"] == page.uid), None)
+            if fresh is None:
+                self.nav.pop_to_tag("root")  # the account was removed
+            else:
+                page.rebuild(fresh)
+
     # -- shared helpers ------------------------------------------------------
 
     def toast(self, text: str) -> None:
@@ -248,6 +273,7 @@ class Window(Adw.ApplicationWindow):
             self.policy = policy
             self.profiles_page.refresh()
             self.system_page.refresh()
+            self.refresh_open_detail()
 
         _run_async(self.client.get_policy, on_done, lambda e: self.toast(_error_text(e)))
 
@@ -494,17 +520,26 @@ class CategoryDialog(Adw.Dialog):
         save.add_css_class("suggested-action")
         save.connect("clicked", lambda _b: (on_save(sorted(self.chosen)), self.close()))
         header.pack_end(save)
+        # Bulk selection: fifteen toggles one at a time is busywork.
+        none_btn = Gtk.Button(label="None", tooltip_text="Turn every category off")
+        none_btn.connect("clicked", lambda _b: self._set_all(False))
+        all_btn = Gtk.Button(label="All", tooltip_text="Turn every category on")
+        all_btn.connect("clicked", lambda _b: self._set_all(True))
+        header.pack_start(all_btn)
+        header.pack_start(none_btn)
 
         self.group = Adw.PreferencesGroup(
             margin_start=12, margin_end=12, margin_top=6, margin_bottom=12)
         page = Adw.PreferencesPage()
         page.add(self.group)
-        scroller = Gtk.ScrolledWindow(vexpand=True)
-        scroller.set_child(page)
+        # An Adw.PreferencesPage scrolls itself. Nesting it in a
+        # ScrolledWindow gave it unbounded height and squashed every row
+        # to nothing — the 'empty labels, only some visible' bug.
+        page.set_vexpand(True)
 
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         box.append(header)
-        box.append(scroller)
+        box.append(page)
         self.set_child(box)
         self._load()
 
@@ -520,6 +555,7 @@ class CategoryDialog(Adw.Dialog):
                 switch = Adw.SwitchRow(title=category["label"], subtitle=name,
                                        active=name in self.chosen)
                 switch.connect("notify::active", self._toggle, name)
+                self.switches[name] = switch
                 self.group.add(switch)
 
         _run_async(self.win.client.list_categories, on_done,
@@ -530,6 +566,12 @@ class CategoryDialog(Adw.Dialog):
             self.chosen.add(name)
         else:
             self.chosen.discard(name)
+
+    def _set_all(self, on: bool) -> None:
+        for name, switch in self.switches.items():
+            switch.set_active(on)
+        # Rows not yet built (the list loads async) still count.
+        self.chosen = set(self.switches) if on else set()
 
 
 class ListEditDialog(Adw.Dialog):
@@ -583,11 +625,13 @@ class ListEditDialog(Adw.Dialog):
         page = Adw.PreferencesPage()
         for group in (self.summary, self.added_group, self.removed_group):
             page.add(group)
-        scroller = Gtk.ScrolledWindow(vexpand=True)
-        scroller.set_child(page)
+        # An Adw.PreferencesPage scrolls itself. Nesting it in a
+        # ScrolledWindow gave it unbounded height and squashed every row
+        # to nothing — the 'empty labels, only some visible' bug.
+        page.set_vexpand(True)
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         box.append(header)
-        box.append(scroller)
+        box.append(page)
         self.set_child(box)
         self._load()
 
@@ -802,19 +846,35 @@ class YouTubeDialog(Adw.Dialog):
             description="Turn one on to block that kind of video for this "
                         "person. YouTube labels every video with one of "
                         "these.")
+        bulk = Gtk.Box(spacing=6)
+        self.kind_switches: dict[str, Adw.SwitchRow] = {}
+        all_btn = Gtk.Button(label="All", valign=Gtk.Align.CENTER)
+        all_btn.connect("clicked", lambda _b: self._set_all_kinds(True))
+        none_btn = Gtk.Button(label="None", valign=Gtk.Align.CENTER)
+        none_btn.connect("clicked", lambda _b: self._set_all_kinds(False))
+        bulk.append(all_btn)
+        bulk.append(none_btn)
+        categories.set_header_suffix(bulk)
         for code, label in sorted(YOUTUBE_CATEGORIES.items(),
                                   key=lambda kv: kv[1]):
             row = Adw.SwitchRow(title=label, active=code in self.blocked)
             row.connect("notify::active", self._toggle_category, code)
+            self.kind_switches[code] = row
             categories.add(row)
         page.add(categories)
 
-        scroller = Gtk.ScrolledWindow(vexpand=True)
-        scroller.set_child(page)
+        # An Adw.PreferencesPage scrolls itself. Nesting it in a
+        # ScrolledWindow gave it unbounded height and squashed every row
+        # to nothing — the 'empty labels, only some visible' bug.
+        page.set_vexpand(True)
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         box.append(header)
-        box.append(scroller)
+        box.append(page)
         self.set_child(box)
+
+    def _set_all_kinds(self, on: bool) -> None:
+        for row in self.kind_switches.values():
+            row.set_active(on)
 
     def _settings(self) -> dict:
         settings = {"restrict": self.restrict}
@@ -1210,260 +1270,20 @@ class ProfilesPage(Adw.PreferencesPage):
         group.add(wl_row)
         return group
 
-    def _user_row(self, user: dict) -> Adw.ExpanderRow:
-        row = Adw.ExpanderRow(title=user["username"])
+    def _user_row(self, user: dict) -> Adw.ActionRow:
         current = profiles_mod.matching(user)
         badges = [profiles_mod.get(current).label if current
                   else MODE_LABELS[user["mode"]]]
         if user.get("admin"):
             badges.append("admin")
-        row.set_subtitle(" · ".join(badges))
-
-        # One choice that sets everything below it. Most people should
-        # never have to open the rest of this row.
-        keys = [p.key for p in profiles_mod.PROFILES]
-        profile_row = Adw.ComboRow(
-            title="Set up as",
-            model=Gtk.StringList.new(
-                [p.label for p in profiles_mod.PROFILES] + [PROFILE_CUSTOM]))
-        profile_row.set_selected(keys.index(current) if current else len(keys))
-        profile_row.set_subtitle(
-            profiles_mod.get(current).description if current
-            else "These settings do not match any of the ready-made ones.")
-
-        def on_profile(combo, _p):
-            index = combo.get_selected()
-            if index >= len(keys):
-                return  # "Custom" is a readout, not a thing you can pick
-            key = keys[index]
-            if key == current:
-                return
-            self.win.with_guardian(lambda pw: self.win.call(
-                lambda: self.win.client.apply_profile(user["uid"], key, pw),
-                done_msg=f"{user['username']} → {profiles_mod.get(key).label}"))
-
-        profile_row.connect("notify::selected", on_profile)
-        row.add_row(profile_row)
-
-        mode_row = Adw.ComboRow(title="Filter mode",
-                                model=Gtk.StringList.new([MODE_LABELS[m] for m in MODES]))
-        mode_row.set_selected(MODES.index(user["mode"]))
-        # Inspect mode decrypts this user's web traffic; say so plainly.
-        mode_row.set_subtitle(MODE_HINTS.get(user["mode"], ""))
-
-        def on_mode(combo, _p):
-            new_mode = MODES[combo.get_selected()]
-            if new_mode == user["mode"]:
-                return
-            self.win.with_guardian(lambda pw: self.win.call(
-                lambda: self.win.client.set_filter_mode(user["uid"], new_mode, pw),
-                done_msg=f"{user['username']} → {MODE_LABELS[new_mode]}"))
-
-        mode_row.connect("notify::selected", on_mode)
-        row.add_row(mode_row)
-
-        domains = user.get("whitelist", [])
-        wl_row = Adw.ActionRow(title="Whitelist",
-                               subtitle=f"{len(domains)} domain{'s' if len(domains) != 1 else ''}")
-        wl_row.set_activatable(True)
-        wl_row.add_suffix(Gtk.Image(icon_name="go-next-symbolic"))
-        wl_row.connect("activated", lambda _r: WhitelistDialog(
-            self.win, f"Whitelist — {user['username']}", domains,
-            lambda new: self.win.with_guardian(lambda pw: self.win.call(
-                lambda: self.win.client.set_whitelist(user["uid"], new, pw),
-                done_msg=f"Whitelist saved for {user['username']}"))).present(self.win))
-        row.add_row(wl_row)
-        if user["mode"] != "whitelist":
-            wl_row.set_sensitive(False)
-            wl_row.set_subtitle("Only used in Whitelist only mode")
-
-        rules = user.get("rules", [])
-        rules_row = Adw.ActionRow(
-            title="Page rules",
-            subtitle=f"{len(rules)} rule{'s' if len(rules) != 1 else ''}",
-            activatable=True)
-        rules_row.add_suffix(Gtk.Image(icon_name="go-next-symbolic"))
-        rules_row.connect("activated", lambda _r: RulesDialog(
-            self.win, f"Page rules — {user['username']}", rules,
-            lambda new: self.win.with_guardian(lambda pw: self.win.call(
-                lambda: self.win.client.set_url_rules(user["uid"], new, pw),
-                done_msg=f"Page rules saved for {user['username']}"))).present(self.win))
-        if user["mode"] != "filtered":
-            rules_row.set_sensitive(False)
-            rules_row.set_subtitle("Only used in “Filtered internet” mode")
-        row.add_row(rules_row)
-
-        blocked = user.get("blocked_categories", [])
-        cats_row = Adw.ActionRow(
-            title="Blocked content",
-            subtitle=(", ".join(sorted(blocked)) if blocked else "Nothing blocked"),
-            activatable=True)
-        cats_row.add_suffix(Gtk.Image(icon_name="go-next-symbolic"))
-        cats_row.connect("activated", lambda _r: CategoryDialog(
-            self.win, user,
-            lambda chosen: self.win.with_guardian(lambda pw: self.win.call(
-                lambda: self.win.client.set_blocked_categories(
-                    user["uid"], chosen, pw),
-                done_msg=f"Content settings saved for {user['username']}"))
-            ).present(self.win))
-        if user["mode"] == "unfiltered":
-            cats_row.set_sensitive(False)
-            cats_row.set_subtitle("An unfiltered account blocks nothing")
-        row.add_row(cats_row)
-
-        media_row = Adw.ComboRow(
-            title="Pictures and video",
-            model=Gtk.StringList.new([MEDIA_LABELS[m] for m in MEDIA_LEVELS]))
-        level = user.get("media_level", "none")
-        media_row.set_selected(MEDIA_LEVELS.index(level)
-                               if level in MEDIA_LEVELS else 0)
-        media_row.set_subtitle(MEDIA_HINTS.get(level, ""))
-
-        def on_media(combo, _p):
-            new_level = MEDIA_LEVELS[combo.get_selected()]
-            if new_level == user.get("media_level", "none"):
-                return
-            self.win.with_guardian(lambda pw: self.win.call(
-                lambda: self.win.client.set_media_level(user["uid"], new_level, pw),
-                done_msg=f"Pictures: {MEDIA_LABELS[new_level].lower()}"))
-
-        media_row.connect("notify::selected", on_media)
-        # NOT greyed out outside filtered mode. It used to be, with a
-        # subtitle saying pictures can only be filtered there — which
-        # stopped being true: this setting also decides whether image
-        # search results are shown at all, in every mode. Disabling a
-        # control that still acts is worse than a wordy subtitle.
-        if user["mode"] in ("none", "unfiltered"):
-            media_row.set_sensitive(False)
-            media_row.set_subtitle(MODE_NOTHING_APPLIES[user["mode"]])
-        elif user["mode"] != "filtered":
-            media_row.set_subtitle(
-                "Pictures on pages are not checked in this mode — only "
-                "“Filtered internet” can see them. This still decides "
-                "whether image search results are shown.")
-        row.add_row(media_row)
-
-        language_row = Adw.ComboRow(
-            title="Bad language",
-            model=Gtk.StringList.new([LANGUAGE_LABELS[m] for m in LANGUAGE_ORDER]))
-        setting = user.get("language_filter", "off")
-        language_row.set_selected(LANGUAGE_ORDER.index(setting)
-                                  if setting in LANGUAGE_ORDER else 0)
-        language_row.set_subtitle(
-            "Replacing reads better than blocking: a page that reads "
-            "normally minus the language beats one that refuses to load.")
-
-        def on_language(combo, _p):
-            new_setting = LANGUAGE_ORDER[combo.get_selected()]
-            if new_setting == user.get("language_filter", "off"):
-                return
-            self.win.with_guardian(lambda pw: self.win.call(
-                lambda: self.win.client.set_language_filter(
-                    user["uid"], new_setting, pw),
-                done_msg=LANGUAGE_LABELS[new_setting]))
-
-        language_row.connect("notify::selected", on_language)
-        if user["mode"] in ("none", "unfiltered"):
-            language_row.set_sensitive(False)
-            language_row.set_subtitle(MODE_NOTHING_APPLIES[user["mode"]])
-        elif user["mode"] != "filtered":
-            language_row.set_subtitle(
-                "Pages are not rewritten in this mode — only “Filtered "
-                "internet” can read them. This still blocks searches "
-                "containing bad language.")
-        row.add_row(language_row)
-
-        youtube = user.get("youtube") or {}
-        blocked_kinds = youtube.get("blocked_categories", [])
-        allowed_channels = youtube.get("allowed_channels", [])
-        if allowed_channels:
-            yt_summary = f"{len(allowed_channels)} approved channel(s) only"
-        elif blocked_kinds:
-            yt_summary = f"{len(blocked_kinds)} kind(s) of video blocked"
-        else:
-            yt_summary = ("Restricted Mode: "
-                          + YOUTUBE_RESTRICT_LABELS.get(
-                              youtube.get("restrict", "moderate"), "Moderate"))
-        yt_row = Adw.ActionRow(title="YouTube", subtitle=yt_summary,
-                               activatable=True)
-        yt_row.add_suffix(Gtk.Image(icon_name="go-next-symbolic"))
-        yt_row.connect("activated", lambda _r: YouTubeDialog(
-            self.win, user,
-            lambda settings: self.win.with_guardian(lambda pw: self.win.call(
-                lambda: self.win.client.set_youtube(user["uid"], settings, pw),
-                done_msg=f"YouTube settings saved for {user['username']}"))
-            ).present(self.win))
-        if user["mode"] != "filtered":
-            # Genuinely inert here, unlike the two above: nothing outside
-            # the proxy can see which video is playing.
-            yt_row.set_sensitive(False)
-            yt_row.set_subtitle(
-                "Only used in “Filtered internet” mode; every other mode is "
-                "enforced at the connection, which cannot see which video "
-                "is playing.")
-        row.add_row(yt_row)
-
-        apps_row = Adw.ActionRow(
-            title="Installed apps",
-            subtitle="See what is installed and uninstall or hide apps",
-            activatable=True)
-        apps_row.add_suffix(Gtk.Image(icon_name="go-next-symbolic"))
-        apps_row.connect("activated", lambda _r: UserAppsDialog(
-            self.win, user, self.win.reload).present(self.win))
-        row.add_row(apps_row)
-
-        # Hotel and airport Wi-Fi. Without this a filtered laptop cannot
-        # reach the sign-in page, so it cannot get online at all — and the
-        # only fix was a terminal, which is not a fix.
-        captive = Adw.ActionRow(
-            title="Allow Wi-Fi sign-in",
-            subtitle="Opens this account's connection for 10 minutes so a "
-                     "hotel or airport sign-in page can load. Filtering "
-                     "resumes on its own.",
-            subtitle_lines=3, activatable=True)
-        captive.add_suffix(Gtk.Image(icon_name="network-wireless-symbolic"))
-        captive.connect("activated", lambda _r: self.win.call(
-            lambda: self.win.client.set_captive_mode(user["uid"], 10),
-            done_msg=f"{user['username']} can sign in to Wi-Fi for 10 minutes"))
-        if user["mode"] == "unfiltered":
-            captive.set_sensitive(False)
-            captive.set_subtitle("An unfiltered account needs no window.")
-        row.add_row(captive)
-
-        is_admin = Adw.SwitchRow(
-            title="Administrator",
-            subtitle="Can change every setting here, including for other "
-                     "people. There was no way to grant this before, so a "
-                     "second parent could never be made one.",
-            subtitle_lines=3, active=bool(user.get("admin")))
-
-        def on_admin(switch, _param):
-            wanted = switch.get_active()
-            if wanted == bool(user.get("admin")):
-                return
-            self.win.with_guardian(lambda pw: self.win.call(
-                lambda: self.win.client.set_user_admin(user["uid"], wanted, pw),
-                done_msg=(f"{user['username']} is "
-                          + ("now an administrator" if wanted
-                             else "no longer an administrator"))))
-
-        is_admin.connect("notify::active", on_admin)
-        row.add_row(is_admin)
-
-        installs = Adw.SwitchRow(title="Can install approved apps",
-                                 subtitle="Only apps on the approved list, from the KosherOS Store",
-                                 active=user.get("can_install_apps", True))
-        installs.connect("notify::active", lambda s, _p: (
-            s.get_active() != user.get("can_install_apps", True) and self.win.call(
-                lambda: self.win.client.set_user_can_install(user["uid"], s.get_active()),
-                done_msg=f"App installs {'enabled' if s.get_active() else 'disabled'} for {user['username']}")))
-        row.add_row(installs)
-
-        remove = Adw.ButtonRow(title="Remove This Account…")
-        remove.add_css_class("destructive-action")
-        remove.connect("activated", lambda *_: self._confirm_remove(user))
-        row.add_row(remove)
+        row = Adw.ActionRow(title=user["username"],
+                            subtitle=" · ".join(badges), activatable=True)
+        row.add_suffix(Gtk.Image(icon_name="go-next-symbolic"))
+        row.connect("activated",
+                    lambda _r, u=user: self.win.open_user_detail(u))
         return row
+
+
 
     def _confirm_remove(self, user: dict) -> None:
         dialog = Adw.AlertDialog(
@@ -1583,6 +1403,322 @@ class ProfilesPage(Adw.PreferencesPage):
 
         dialog.connect("response", on_response)
         dialog.present(self.win)
+
+
+class UserDetailPage(Adw.NavigationPage):
+    """One person, one full page: everything about their account, in tabs.
+
+    This replaces the settings-inside-an-expander layout, which cramped a
+    dozen controls into a list row — the user configuring an account had
+    no room to work and text was cut off. Tabs: Filtering (what they may
+    reach), Media (what pages look like), Account (the account itself).
+    """
+
+    def __init__(self, win: Window, user: dict):
+        super().__init__(title=user["username"], tag=f"user-{user['uid']}")
+        self.win = win
+        self.uid = user["uid"]
+        self._build(user)
+
+    def rebuild(self, user: dict) -> None:
+        selected = self.stack.get_visible_child_name()
+        self._build(user)
+        if selected:
+            self.stack.set_visible_child_name(selected)
+
+    def _build(self, user: dict) -> None:
+        self.stack = Adw.ViewStack()
+
+        filtering = Adw.PreferencesPage()
+        filtering.add(self._profile_group(user))
+        filtering.add(self._reach_group(user))
+        self.stack.add_titled_with_icon(filtering, "filtering", "Filtering",
+                                        "funnel-symbolic")
+
+        media = Adw.PreferencesPage()
+        media.add(self._media_group(user))
+        self.stack.add_titled_with_icon(media, "media", "Media",
+                                        "video-display-symbolic")
+
+        account = Adw.PreferencesPage()
+        account.add(self._account_group(user))
+        account.add(self._danger_group(user))
+        self.stack.add_titled_with_icon(account, "account", "Account",
+                                        "system-users-symbolic")
+
+        header = Adw.HeaderBar(
+            title_widget=Adw.ViewSwitcher(stack=self.stack,
+                                          policy=Adw.ViewSwitcherPolicy.WIDE))
+        view = Adw.ToolbarView()
+        view.add_top_bar(header)
+        view.set_content(self.stack)
+        self.set_child(view)
+
+    def _profile_group(self, user: dict) -> Adw.PreferencesGroup:
+        group = Adw.PreferencesGroup(
+            title="Profile",
+            description="One choice that sets everything below it.")
+
+        current = profiles_mod.matching(user)
+        keys = [p.key for p in profiles_mod.PROFILES]
+        profile_row = Adw.ComboRow(
+            title="Set up as",
+            model=Gtk.StringList.new(
+                [p.label for p in profiles_mod.PROFILES] + [PROFILE_CUSTOM]))
+        profile_row.set_selected(keys.index(current) if current else len(keys))
+        profile_row.set_subtitle(
+            profiles_mod.get(current).description if current
+            else "These settings do not match any of the ready-made ones.")
+
+        def on_profile(combo, _p):
+            index = combo.get_selected()
+            if index >= len(keys):
+                return  # "Custom" is a readout, not a thing you can pick
+            key = keys[index]
+            if key == current:
+                return
+            self.win.with_guardian(lambda pw: self.win.call(
+                lambda: self.win.client.apply_profile(user["uid"], key, pw),
+                done_msg=f"{user['username']} → {profiles_mod.get(key).label}"))
+
+        profile_row.connect("notify::selected", on_profile)
+        group.add(profile_row)
+
+        mode_row = Adw.ComboRow(title="Filter mode",
+                                model=Gtk.StringList.new([MODE_LABELS[m] for m in MODES]))
+        mode_row.set_selected(MODES.index(user["mode"]))
+        # Inspect mode decrypts this user's web traffic; say so plainly.
+        mode_row.set_subtitle(MODE_HINTS.get(user["mode"], ""))
+
+        def on_mode(combo, _p):
+            new_mode = MODES[combo.get_selected()]
+            if new_mode == user["mode"]:
+                return
+            self.win.with_guardian(lambda pw: self.win.call(
+                lambda: self.win.client.set_filter_mode(user["uid"], new_mode, pw),
+                done_msg=f"{user['username']} → {MODE_LABELS[new_mode]}"))
+
+        mode_row.connect("notify::selected", on_mode)
+        group.add(mode_row)
+        return group
+
+    def _reach_group(self, user: dict) -> Adw.PreferencesGroup:
+        group = Adw.PreferencesGroup(title="What they can reach")
+        domains = user.get("whitelist", [])
+        wl_row = Adw.ActionRow(title="Whitelist",
+                               subtitle=f"{len(domains)} domain{'s' if len(domains) != 1 else ''}")
+        wl_row.set_activatable(True)
+        wl_row.add_suffix(Gtk.Image(icon_name="go-next-symbolic"))
+        wl_row.connect("activated", lambda _r: WhitelistDialog(
+            self.win, f"Whitelist — {user['username']}", domains,
+            lambda new: self.win.with_guardian(lambda pw: self.win.call(
+                lambda: self.win.client.set_whitelist(user["uid"], new, pw),
+                done_msg=f"Whitelist saved for {user['username']}"))).present(self.win))
+        group.add(wl_row)
+        if user["mode"] != "whitelist":
+            wl_row.set_sensitive(False)
+            wl_row.set_subtitle("Only used in Whitelist only mode")
+
+        rules = user.get("rules", [])
+        rules_row = Adw.ActionRow(
+            title="Page rules",
+            subtitle=f"{len(rules)} rule{'s' if len(rules) != 1 else ''}",
+            activatable=True)
+        rules_row.add_suffix(Gtk.Image(icon_name="go-next-symbolic"))
+        rules_row.connect("activated", lambda _r: RulesDialog(
+            self.win, f"Page rules — {user['username']}", rules,
+            lambda new: self.win.with_guardian(lambda pw: self.win.call(
+                lambda: self.win.client.set_url_rules(user["uid"], new, pw),
+                done_msg=f"Page rules saved for {user['username']}"))).present(self.win))
+        if user["mode"] != "filtered":
+            rules_row.set_sensitive(False)
+            rules_row.set_subtitle("Only used in “Filtered internet” mode")
+        group.add(rules_row)
+
+        blocked = user.get("blocked_categories", [])
+        cats_row = Adw.ActionRow(
+            title="Blocked content",
+            subtitle=(", ".join(sorted(blocked)) if blocked else "Nothing blocked"),
+            activatable=True)
+        cats_row.add_suffix(Gtk.Image(icon_name="go-next-symbolic"))
+        cats_row.connect("activated", lambda _r: CategoryDialog(
+            self.win, user,
+            lambda chosen: self.win.with_guardian(lambda pw: self.win.call(
+                lambda: self.win.client.set_blocked_categories(
+                    user["uid"], chosen, pw),
+                done_msg=f"Content settings saved for {user['username']}"))
+            ).present(self.win))
+        if user["mode"] == "unfiltered":
+            cats_row.set_sensitive(False)
+            cats_row.set_subtitle("An unfiltered account blocks nothing")
+        group.add(cats_row)
+        return group
+
+    def _media_group(self, user: dict) -> Adw.PreferencesGroup:
+        group = Adw.PreferencesGroup(
+            title="Pages and pictures",
+            description="How much of the web's imagery and language this "
+                        "account sees.")
+        media_row = Adw.ComboRow(
+            title="Pictures and video",
+            model=Gtk.StringList.new([MEDIA_LABELS[m] for m in MEDIA_LEVELS]))
+        level = user.get("media_level", "none")
+        media_row.set_selected(MEDIA_LEVELS.index(level)
+                               if level in MEDIA_LEVELS else 0)
+        media_row.set_subtitle(MEDIA_HINTS.get(level, ""))
+
+        def on_media(combo, _p):
+            new_level = MEDIA_LEVELS[combo.get_selected()]
+            if new_level == user.get("media_level", "none"):
+                return
+            self.win.with_guardian(lambda pw: self.win.call(
+                lambda: self.win.client.set_media_level(user["uid"], new_level, pw),
+                done_msg=f"Pictures: {MEDIA_LABELS[new_level].lower()}"))
+
+        media_row.connect("notify::selected", on_media)
+        # NOT greyed out outside filtered mode. It used to be, with a
+        # subtitle saying pictures can only be filtered there — which
+        # stopped being true: this setting also decides whether image
+        # search results are shown at all, in every mode. Disabling a
+        # control that still acts is worse than a wordy subtitle.
+        if user["mode"] in ("none", "unfiltered"):
+            media_row.set_sensitive(False)
+            media_row.set_subtitle(MODE_NOTHING_APPLIES[user["mode"]])
+        elif user["mode"] != "filtered":
+            media_row.set_subtitle(
+                "Pictures on pages are not checked in this mode — only "
+                "“Filtered internet” can see them. This still decides "
+                "whether image search results are shown.")
+        group.add(media_row)
+
+        language_row = Adw.ComboRow(
+            title="Bad language",
+            model=Gtk.StringList.new([LANGUAGE_LABELS[m] for m in LANGUAGE_ORDER]))
+        setting = user.get("language_filter", "off")
+        language_row.set_selected(LANGUAGE_ORDER.index(setting)
+                                  if setting in LANGUAGE_ORDER else 0)
+        language_row.set_subtitle(
+            "Replacing reads better than blocking: a page that reads "
+            "normally minus the language beats one that refuses to load.")
+
+        def on_language(combo, _p):
+            new_setting = LANGUAGE_ORDER[combo.get_selected()]
+            if new_setting == user.get("language_filter", "off"):
+                return
+            self.win.with_guardian(lambda pw: self.win.call(
+                lambda: self.win.client.set_language_filter(
+                    user["uid"], new_setting, pw),
+                done_msg=LANGUAGE_LABELS[new_setting]))
+
+        language_row.connect("notify::selected", on_language)
+        if user["mode"] in ("none", "unfiltered"):
+            language_row.set_sensitive(False)
+            language_row.set_subtitle(MODE_NOTHING_APPLIES[user["mode"]])
+        elif user["mode"] != "filtered":
+            language_row.set_subtitle(
+                "Pages are not rewritten in this mode — only “Filtered "
+                "internet” can read them. This still blocks searches "
+                "containing bad language.")
+        group.add(language_row)
+
+        youtube = user.get("youtube") or {}
+        blocked_kinds = youtube.get("blocked_categories", [])
+        allowed_channels = youtube.get("allowed_channels", [])
+        if allowed_channels:
+            yt_summary = f"{len(allowed_channels)} approved channel(s) only"
+        elif blocked_kinds:
+            yt_summary = f"{len(blocked_kinds)} kind(s) of video blocked"
+        else:
+            yt_summary = ("Restricted Mode: "
+                          + YOUTUBE_RESTRICT_LABELS.get(
+                              youtube.get("restrict", "moderate"), "Moderate"))
+        yt_row = Adw.ActionRow(title="YouTube", subtitle=yt_summary,
+                               activatable=True)
+        yt_row.add_suffix(Gtk.Image(icon_name="go-next-symbolic"))
+        yt_row.connect("activated", lambda _r: YouTubeDialog(
+            self.win, user,
+            lambda settings: self.win.with_guardian(lambda pw: self.win.call(
+                lambda: self.win.client.set_youtube(user["uid"], settings, pw),
+                done_msg=f"YouTube settings saved for {user['username']}"))
+            ).present(self.win))
+        if user["mode"] != "filtered":
+            # Genuinely inert here, unlike the two above: nothing outside
+            # the proxy can see which video is playing.
+            yt_row.set_sensitive(False)
+            yt_row.set_subtitle(
+                "Only used in “Filtered internet” mode; every other mode is "
+                "enforced at the connection, which cannot see which video "
+                "is playing.")
+        group.add(yt_row)
+        return group
+
+    def _account_group(self, user: dict) -> Adw.PreferencesGroup:
+        group = Adw.PreferencesGroup(title="This account")
+        apps_row = Adw.ActionRow(
+            title="Installed apps",
+            subtitle="See what is installed and uninstall or hide apps",
+            activatable=True)
+        apps_row.add_suffix(Gtk.Image(icon_name="go-next-symbolic"))
+        apps_row.connect("activated", lambda _r: UserAppsDialog(
+            self.win, user, self.win.reload).present(self.win))
+        group.add(apps_row)
+
+        # Hotel and airport Wi-Fi. Without this a filtered laptop cannot
+        # reach the sign-in page, so it cannot get online at all — and the
+        # only fix was a terminal, which is not a fix.
+        captive = Adw.ActionRow(
+            title="Allow Wi-Fi sign-in",
+            subtitle="Opens this account's connection for 10 minutes so a "
+                     "hotel or airport sign-in page can load. Filtering "
+                     "resumes on its own.",
+            subtitle_lines=3, activatable=True)
+        captive.add_suffix(Gtk.Image(icon_name="network-wireless-symbolic"))
+        captive.connect("activated", lambda _r: self.win.call(
+            lambda: self.win.client.set_captive_mode(user["uid"], 10),
+            done_msg=f"{user['username']} can sign in to Wi-Fi for 10 minutes"))
+        if user["mode"] == "unfiltered":
+            captive.set_sensitive(False)
+            captive.set_subtitle("An unfiltered account needs no window.")
+        group.add(captive)
+
+        is_admin = Adw.SwitchRow(
+            title="Administrator",
+            subtitle="Can change every setting here, including for other "
+                     "people. There was no way to grant this before, so a "
+                     "second parent could never be made one.",
+            subtitle_lines=3, active=bool(user.get("admin")))
+
+        def on_admin(switch, _param):
+            wanted = switch.get_active()
+            if wanted == bool(user.get("admin")):
+                return
+            self.win.with_guardian(lambda pw: self.win.call(
+                lambda: self.win.client.set_user_admin(user["uid"], wanted, pw),
+                done_msg=(f"{user['username']} is "
+                          + ("now an administrator" if wanted
+                             else "no longer an administrator"))))
+
+        is_admin.connect("notify::active", on_admin)
+        group.add(is_admin)
+
+        installs = Adw.SwitchRow(title="Can install approved apps",
+                                 subtitle="Only apps on the approved list, from the KosherOS Store",
+                                 active=user.get("can_install_apps", True))
+        installs.connect("notify::active", lambda s, _p: (
+            s.get_active() != user.get("can_install_apps", True) and self.win.call(
+                lambda: self.win.client.set_user_can_install(user["uid"], s.get_active()),
+                done_msg=f"App installs {'enabled' if s.get_active() else 'disabled'} for {user['username']}")))
+        group.add(installs)
+        return group
+
+    def _danger_group(self, user: dict) -> Adw.PreferencesGroup:
+        group = Adw.PreferencesGroup()
+        remove = Adw.ButtonRow(title="Remove This Account…")
+        remove.add_css_class("destructive-action")
+        remove.connect("activated",
+                       lambda *_: self.win.profiles_page._confirm_remove(user))
+        group.add(remove)
+        return group
 
 
 class AppsPage(Adw.PreferencesPage):

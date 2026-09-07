@@ -1,0 +1,8 @@
+# The login screen (GDM greeter) runs on its own dconf profile, so the
+# desktop's color-scheme does not reach it. Force the light scheme here so
+# the greeter matches the airy, light first-boot wizard and desktop rather
+# than showing GNOME's dark default — the jump from a light wizard to a
+# dark login screen was jarring.
+[org/gnome/desktop/interface]
+color-scheme='default'
+gtk-theme='Adwaita'

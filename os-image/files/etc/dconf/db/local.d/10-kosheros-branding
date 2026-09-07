@@ -19,7 +19,9 @@ disable-user-list=false
 banner-message-enable=false
 
 [org/gnome/desktop/interface]
-color-scheme='prefer-dark'
+# Light by default, to match the wizard and login screen — the
+# "airy cloud" look. A preference, not locked: a user may switch to dark.
+color-scheme='default'
 
 [org/gnome/shell]
 favorite-apps=['org.mozilla.firefox.desktop', 'org.kosherlinux.Store.desktop', 'org.gnome.Nautilus.desktop', 'org.gnome.Settings.desktop']

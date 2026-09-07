@@ -15,7 +15,7 @@ import gi
 
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
-from gi.repository import Adw, Gio, GLib, Gtk  # noqa: E402
+from gi.repository import Adw, Gdk, Gio, GLib, Gtk  # noqa: E402
 
 from kosherd.client import DaemonClient  # noqa: E402
 
@@ -114,6 +114,26 @@ class PasswordPair:
             self.match.add_css_class("error")
         if self.on_change:
             self.on_change()
+
+
+def _tab_goes_to(row: Gtk.Widget, target) -> None:
+    """Make Tab from this row land on `target` (a widget, or a callable
+    returning one). GTK4 has no focus-chain API, and tabbing out of a row
+    inside an Adw.PreferencesGroup wanders into the list's own machinery —
+    from the last field of a form, Tab must reach the button that submits
+    it. Shift+Tab is left alone."""
+    controller = Gtk.EventControllerKey()
+
+    def on_key(_c, keyval, _keycode, state):
+        if keyval in (Gdk.KEY_Tab, Gdk.KEY_KP_Tab) \
+                and not (state & Gdk.ModifierType.SHIFT_MASK):
+            widget = target() if callable(target) else target
+            widget.grab_focus()
+            return True
+        return False
+
+    controller.connect("key-pressed", on_key)
+    row.add_controller(controller)
 
 
 def _icons_out_of_tab_order(root: Gtk.Widget) -> None:
@@ -288,6 +308,7 @@ class Window(Adw.ApplicationWindow):
         self.admin_pw.confirm.connect(
             "entry-activated",
             lambda _e: self._advance() if self._page_valid() else None)
+        _tab_goes_to(self.admin_pw.confirm, lambda: self.next)
         return box
 
     def _protect_page(self) -> Gtk.Widget:
@@ -316,6 +337,8 @@ class Window(Adw.ApplicationWindow):
         self.grub_pw.set_sensitive(False)
         self.grub_switch.connect("notify::active", lambda s, _p: (
             self.grub_pw.set_sensitive(s.get_active()), self._revalidate()))
+        _tab_goes_to(self.guardian_pw.confirm, lambda: self.grub_switch)
+        _tab_goes_to(self.grub_pw.confirm, lambda: self.next)
         return box
 
     def _firmware_page(self) -> Gtk.Widget:

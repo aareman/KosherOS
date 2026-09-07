@@ -11,6 +11,7 @@ UI half of those is pinned here; the daemon half in kosherd/tests.
 import pytest
 
 gi = pytest.importorskip("gi")
+from gi.repository import GLib  # noqa: E402
 try:
     gi.require_version("Gtk", "4.0")
     gi.require_version("Adw", "1")
@@ -229,3 +230,51 @@ def test_enter_walks_the_admin_form():
     # _advance on a valid admin page calls create_first_admin via the fake
     # and lands on the working page (async completion needs a main loop).
     assert page(win) in ("working", "protect")
+
+
+def test_tab_from_the_confirm_field_reaches_the_next_button():
+    # GTK4 has no focus chain; without an explicit hop, Tab out of the
+    # confirm field wandered into the list machinery and never reached
+    # Next. The hop is a key controller on the row; drive its handler the
+    # way a Tab keypress would.
+    from gi.repository import Gdk
+
+    win = window()
+    win.present()  # focus only moves in a mapped window
+    while GLib.MainContext.default().iteration(False):
+        pass
+    win._go("admin")
+
+    def controllers(w):
+        obs = w.observe_controllers()
+        return [obs.get_item(i) for i in range(obs.get_n_items())]
+
+    keys = [c for c in controllers(win.admin_pw.confirm)
+            if isinstance(c, Gtk.EventControllerKey)]
+    assert keys, "no key controller on the confirm field"
+    # Spy on the destination: what matters is that the hop sends focus to
+    # Next. (Where GTK ultimately parks focus inside an off-screen test
+    # window is its own business and flaky under xvfb.)
+    grabbed = []
+    original = win.next.grab_focus
+    win.next.grab_focus = lambda: (grabbed.append(True), original())[1]
+    try:
+        handled = [k.emit("key-pressed", Gdk.KEY_Tab, 23, Gdk.ModifierType(0))
+                   for k in keys]
+    finally:
+        win.next.grab_focus = original
+    assert any(handled), "Tab was not claimed by the hop"
+    assert grabbed, "Tab from confirm did not send focus to Next"
+
+
+def test_shift_tab_from_the_confirm_field_is_left_alone():
+    from gi.repository import Gdk
+
+    win = window()
+    win._go("admin")
+    obs = win.admin_pw.confirm.observe_controllers()
+    keys = [obs.get_item(i) for i in range(obs.get_n_items())
+            if isinstance(obs.get_item(i), Gtk.EventControllerKey)]
+    handled = [k.emit("key-pressed", Gdk.KEY_Tab, 23,
+                      Gdk.ModifierType.SHIFT_MASK) for k in keys]
+    assert not any(handled), "Shift+Tab must keep its normal behaviour"

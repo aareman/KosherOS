@@ -296,3 +296,57 @@ def test_a_filtered_user_is_not_offered_sites_to_ask_for(get):
 def test_a_post_to_anything_else_is_a_404(get):
     status, body = post({"mode": "filtered"}, "/nope", "url=x")
     assert status == 404
+
+
+# -- the tabs render like what they hold ---------------------------------------
+
+def _fetch(httpd, path):
+    import urllib.request
+
+    port = httpd.server_address[1]
+    with urllib.request.urlopen(f"http://127.0.0.1:{port}{path}", timeout=10) as r:
+        return r.read().decode()
+
+
+def test_the_images_tab_renders_a_thumbnail_grid():
+    httpd = start({"mode": "filtered"}, results=[
+        {"url": "https://pics.example/a", "title": "A cat",
+         "img_src": "https://pics.example/a.jpg",
+         "thumbnail_src": "https://pics.example/a_t.jpg"},
+        {"url": "https://pics.example/b", "title": "B cat",
+         "img_src": "https://pics.example/b.jpg"},
+    ])
+    try:
+        page = _fetch(httpd, "/search?q=cats&category=images")
+    finally:
+        httpd.shutdown()
+    assert 'class="imgrid"' in page
+    assert 'a_t.jpg' in page, "prefers the thumbnail over the full image"
+    assert 'b.jpg' in page, "falls back to img_src"
+    assert 'class="result"' not in page.replace("result media", ""), \
+        "image results must not render as the text list"
+
+
+def test_the_videos_tab_shows_thumbnails_and_length():
+    httpd = start({"mode": "filtered"}, results=[
+        {"url": "https://vid.example/w", "title": "A video",
+         "content": "about things", "thumbnail": "https://vid.example/t.jpg",
+         "length": "12:34"},
+    ])
+    try:
+        page = _fetch(httpd, "/search?q=cats&category=videos")
+    finally:
+        httpd.shutdown()
+    assert "result media" in page and "t.jpg" in page and "12:34" in page
+
+
+def test_the_news_tab_shows_the_date():
+    httpd = start({"mode": "filtered"}, results=[
+        {"url": "https://news.example/x", "title": "A story",
+         "content": "words", "publishedDate": "2026-09-07T10:00:00"},
+    ])
+    try:
+        page = _fetch(httpd, "/search?q=cats&category=news")
+    finally:
+        httpd.shutdown()
+    assert "2026-09-07" in page

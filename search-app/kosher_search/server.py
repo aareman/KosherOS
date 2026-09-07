@@ -91,6 +91,19 @@ main { padding:1.25rem; }
   color:var(--fg); }
 .ask button { padding:.55rem 1rem; }
 .result form { display:inline; }
+.imgrid { display:grid; grid-template-columns:repeat(auto-fill,minmax(160px,1fr));
+  gap:.8rem; }
+.imgrid a { display:block; border-radius:8px; overflow:hidden;
+  background:var(--card); border:1px solid var(--line); text-decoration:none; }
+.imgrid img { width:100%; height:130px; object-fit:cover; display:block; }
+.imgrid .cap { display:block; padding:.3rem .5rem; font-size:.78rem;
+  color:var(--muted); white-space:nowrap; overflow:hidden;
+  text-overflow:ellipsis; }
+.result .meta { color:var(--muted); font-size:.8rem; margin-top:.15rem; }
+.result.media { display:flex; gap:.9rem; }
+.result.media img { width:168px; height:96px; object-fit:cover;
+  border-radius:8px; background:var(--card); flex:none; }
+.result.media .body { min-width:0; }
 .result .askbtn { background:none; border:0; color:var(--muted); padding:0;
   font-size:.82rem; cursor:pointer; text-decoration:underline; }
 h1 { font-size:1.15rem; margin:0 0 .75rem; }
@@ -345,15 +358,55 @@ class Handler(BaseHTTPRequestHandler):
         if hidden:
             blocks.append(f'<p class="hidden-count">{hidden} result(s) hidden '
                           "by the filter for this account.</p>")
-        for result in kept:
-            url = result.get("url", "")
-            title = result.get("title") or url
-            snippet = result.get("content") or ""
-            blocks.append(
-                '<div class="result">'
-                f'<a class="title" href="{esc(url)}">{esc(title)}</a>'
-                f'<div class="url">{esc(url)}</div>'
-                f"<p>{esc(snippet)}</p></div>")
+        # Each tab renders like the kind of thing it holds. All of these
+        # used to render as the general text list, which made the Images,
+        # News and Videos tabs look broken — a wall of bare links where a
+        # person expects pictures and thumbnails. The thumbnails themselves
+        # are fetched by the browser through the proxy, so the account's
+        # media filtering applies to them exactly as everywhere else.
+        if category == "images":
+            cells = []
+            for result in kept:
+                src = result.get("thumbnail_src") or result.get("img_src") or ""
+                if not src or src.startswith("data:"):
+                    continue
+                url = result.get("url", "")
+                title = result.get("title") or url
+                cells.append(
+                    f'<a href="{esc(url)}">'
+                    f'<img src="{esc(src)}" alt="{esc(title)}" loading="lazy">'
+                    f'<span class="cap">{esc(title)}</span></a>')
+            blocks.append(f'<div class="imgrid">{"".join(cells)}</div>')
+        else:
+            for result in kept:
+                url = result.get("url", "")
+                title = result.get("title") or url
+                snippet = result.get("content") or ""
+                meta = []
+                published = (result.get("publishedDate") or "")[:10]
+                if published:
+                    meta.append(esc(published))
+                if result.get("length"):
+                    meta.append(esc(result["length"]))
+                if result.get("author"):
+                    meta.append(esc(result["author"]))
+                meta_html = (f'<div class="meta">{" · ".join(meta)}</div>'
+                             if meta else "")
+                thumb = result.get("thumbnail") or result.get("thumbnail_src") or ""
+                if category == "videos" and thumb and not thumb.startswith("data:"):
+                    blocks.append(
+                        '<div class="result media">'
+                        f'<img src="{esc(thumb)}" alt="" loading="lazy">'
+                        '<div class="body">'
+                        f'<a class="title" href="{esc(url)}">{esc(title)}</a>'
+                        f'<div class="url">{esc(url)}</div>{meta_html}'
+                        f"<p>{esc(snippet)}</p></div></div>")
+                else:
+                    blocks.append(
+                        '<div class="result">'
+                        f'<a class="title" href="{esc(url)}">{esc(title)}</a>'
+                        f'<div class="url">{esc(url)}</div>{meta_html}'
+                        f"<p>{esc(snippet)}</p></div>")
 
         pager = []
         if page > 1:

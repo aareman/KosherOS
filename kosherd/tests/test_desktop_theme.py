@@ -54,3 +54,21 @@ def test_firefox_trusts_the_system_ca_store():
 
     pol = json.loads((FILES / "etc/firefox/policies/policies.json").read_text())
     assert pol["policies"]["Certificates"]["ImportEnterpriseRoots"] is True
+
+
+def test_searxng_must_not_lock_categories():
+    # Locking `categories` in SearXNG's preferences pins every query to the
+    # default category — including our own front end's categories=
+    # parameter. The search page's Images/News/Videos tabs silently
+    # returned general web results because of exactly this. Category
+    # choice is not a safety setting: results are filtered identically in
+    # every category and thumbnails load through the proxy.
+    import re
+
+    text = (FILES / "usr/share/kosher/searxng/settings.yml").read_text()
+    lock = re.search(r"preferences:\s*\n\s*lock:\n((?:\s*(?:-|#).*\n)+)", text)
+    assert lock, "the preferences lock block should exist"
+    locked = [l.strip().lstrip("- ") for l in lock.group(1).splitlines()
+              if l.strip().startswith("-")]
+    assert "safesearch" in locked, "safe search must stay locked"
+    assert "categories" not in locked

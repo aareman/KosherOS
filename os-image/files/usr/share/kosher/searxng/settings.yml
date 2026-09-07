@@ -51,7 +51,12 @@ preferences:
   lock:
     - safesearch
     - autocomplete
-    - categories
+    # categories is deliberately NOT locked: locking it pins every query to
+    # the default category — including our own front end's categories=
+    # parameter, which is how the Images/News/Videos tabs select what to
+    # search. The tabs returned general results for weeks because of it.
+    # Category choice is not a safety setting: results are filtered the
+    # same in every category, and thumbnails load through the proxy.
     - language
     - image_proxy
     - method

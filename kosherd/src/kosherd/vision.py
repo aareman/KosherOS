@@ -268,8 +268,17 @@ def hides(media_level: str, verdict: ImageVerdict) -> bool:
     return verdict.at_least(threshold)
 
 
+# Bump whenever the JUDGEMENT changes — label sets, thresholds, the skin
+# rule, body extrapolation. The verdict cache is keyed by picture hash plus
+# this, so a fix cannot be defeated by verdicts reached under the old
+# logic: a family test found a swimsuit thumbnail still "clean" after the
+# skin rule shipped, because its clean verdict from earlier was still in
+# the cache.
+JUDGEMENT_VERSION = 3
+
+
 def digest(data: bytes) -> str:
-    return hashlib.sha256(data).hexdigest()
+    return hashlib.sha256(data + f":judgement-v{JUDGEMENT_VERSION}".encode()).hexdigest()
 
 
 _SCHEMA = """

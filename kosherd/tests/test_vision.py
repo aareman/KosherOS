@@ -383,3 +383,13 @@ def test_hidden_pictures_cover_the_whole_figure_not_a_fragment():
     assert verdict.level != vision.CLEAN
     # a region at least as tall as the extrapolated body exists
     assert any(h > 300 for x, y, w, h in verdict.regions), verdict.regions
+
+
+def test_a_judgement_change_invalidates_cached_verdicts(monkeypatch):
+    # The cache is keyed by picture AND judgement version: after a fix to
+    # the rules, a picture judged "clean" under the old rules must be
+    # judged again, not served from cache.
+    data = b"\x89PNG the same picture bytes"
+    before = vision.digest(data)
+    monkeypatch.setattr(vision, "JUDGEMENT_VERSION", vision.JUDGEMENT_VERSION + 1)
+    assert vision.digest(data) != before

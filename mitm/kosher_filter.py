@@ -20,6 +20,7 @@ from __future__ import annotations
 import base64
 import json
 import logging
+import re
 from pathlib import Path
 from urllib.parse import urlencode
 
@@ -512,21 +513,47 @@ class KosherFilter:
         self.blocklist = search_mod.load_blocklist()
 
     def _uid_of(self, flow) -> int | None:
-        """Who made this connection: the port it ARRIVED on. nftables sends
-        each filtered user to their own listener, so the answer is a map
-        lookup with nothing to race. The socket-table lookup that preceded
-        this could confuse a person with a TIME_WAIT ghost or another
-        socket sharing their source port; it is kept only as a fallback for
-        a rules file that predates per-user ports."""
-        sock = getattr(flow.client_conn, "sockname", None)
-        uid = self.policy.uid_for_listener_port(sock[1] if sock else None)
+        """Who made this connection: the LISTENER PORT it arrived on.
+
+        nftables sends each filtered user to their own transparent listener
+        (kosherd/nft.py mitm_ports), so the port that accepted the
+        connection is the person's identity — a map lookup, nothing to
+        race. The port comes from the flow's proxy_mode, NOT from
+        client_conn.sockname: in transparent mode mitmproxy overwrites
+        sockname with the ORIGINAL DESTINATION (the real server's IP:443),
+        so reading a listener port there always missed and fell through to
+        the socket-table scan, which under a browser's connection churn
+        returns the wrong owner or none — the exact non-determinism the
+        per-user ports exist to remove.
+        """
+        port = self._listener_port(flow)
+        uid = self.policy.uid_for_listener_port(port)
         if uid is not None:
             return uid
+        # Fallback for a rules file that predates per-user ports, or a mode
+        # we could not read a port from. Matches the full 4-tuple on live
+        # sockets; still racy, hence the fallback and not the primary path.
         peer = getattr(flow.client_conn, "peername", None)
         if not peer:
             return None
         dest = getattr(getattr(flow, "server_conn", None), "address", None) or (None, None)
         return self.uids.uid_for_connection(peer[0], peer[1], dest[0], dest[1])
+
+    @staticmethod
+    def _listener_port(flow) -> int | None:
+        """The local port this connection was accepted on, from the flow's
+        proxy mode. `custom_listen_port` is the direct answer; the spec
+        string ('transparent@127.0.0.1:30000') is the fallback if a future
+        mitmproxy drops the attribute."""
+        mode = getattr(flow.client_conn, "proxy_mode", None)
+        if mode is None:
+            return None
+        port = getattr(mode, "custom_listen_port", None)
+        if isinstance(port, int):
+            return port
+        spec = getattr(mode, "full_spec", None) or str(mode)
+        match = re.search(r"@[^@]*:(\d+)\b", spec)
+        return int(match.group(1)) if match else None
 
     def request(self, flow: http.HTTPFlow) -> None:
         # Everything reaching this proxy belongs to a filtered user: only

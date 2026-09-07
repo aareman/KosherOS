@@ -1025,14 +1025,48 @@ def test_the_cache_maps_listener_ports_to_users(addon, tmp_path):
     assert cache.uid_for_listener_port(None) is None
 
 
-def test_the_filter_identifies_a_user_by_the_port_they_arrived_on(addon, tmp_path):
+def _mode(port: int):
+    # Mimics mitmproxy's ProxyMode: the listener the connection arrived on.
+    return types.SimpleNamespace(custom_listen_port=port,
+                                 full_spec=f"transparent@127.0.0.1:{port}")
+
+
+def test_the_filter_identifies_a_user_by_the_listener_port(addon, tmp_path):
     path = _rules_file(tmp_path, {"1001": {"port": 30001, "rules": []}})
     filt = addon.KosherFilter.__new__(addon.KosherFilter)
     filt.policy = addon.PolicyCache(path)
-    # A socket-table lookup that would say "root" must not be consulted.
+    # A socket-table lookup that would say "root" must NEVER be consulted.
     filt.uids = type("U", (), {"uid_for_connection": staticmethod(lambda *a, **k: 0)})()
+    # In transparent mode sockname is the ORIGINAL DESTINATION, not the
+    # listener — the trap the old code fell into. Set it to prove the port
+    # comes from proxy_mode instead.
     flow = types.SimpleNamespace(
-        client_conn=types.SimpleNamespace(sockname=("127.0.0.1", 30001),
+        client_conn=types.SimpleNamespace(
+            proxy_mode=_mode(30001),
+            sockname=("93.184.216.34", 443),  # the real server, a red herring
+            peername=("10.0.2.15", 51515)),
+        server_conn=types.SimpleNamespace(address=("93.184.216.34", 443)))
+    assert filt._uid_of(flow) == 1001
+
+
+def test_the_listener_port_is_read_from_the_proxy_mode(addon):
+    flow = types.SimpleNamespace(client_conn=types.SimpleNamespace(proxy_mode=_mode(30005)))
+    assert addon.KosherFilter._listener_port(flow) == 30005
+    # Fallback to the spec string if the attribute is ever missing.
+    flow.client_conn.proxy_mode = types.SimpleNamespace(
+        custom_listen_port=None, full_spec="transparent@127.0.0.1:30007")
+    assert addon.KosherFilter._listener_port(flow) == 30007
+
+
+def test_an_unresolvable_port_falls_back_to_the_socket_scan(addon, tmp_path):
+    # No proxy_mode (some future mode, or a non-transparent path): the
+    # 4-tuple socket lookup is the fallback, not a crash.
+    path = _rules_file(tmp_path, {"1001": {"port": 30001, "rules": []}})
+    filt = addon.KosherFilter.__new__(addon.KosherFilter)
+    filt.policy = addon.PolicyCache(path)
+    filt.uids = type("U", (), {"uid_for_connection": staticmethod(lambda *a, **k: 1001)})()
+    flow = types.SimpleNamespace(
+        client_conn=types.SimpleNamespace(proxy_mode=None,
                                           peername=("10.0.2.15", 51515)),
         server_conn=types.SimpleNamespace(address=("1.2.3.4", 443)))
     assert filt._uid_of(flow) == 1001

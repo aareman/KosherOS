@@ -363,6 +363,41 @@ boot-image:
 # How: a rootless registry on the host serves the image; inside the VM,
 # 10.0.2.2 is qemu's user-network alias for the host, and `bootc switch`
 # pulls the changed layers and stages an atomic reboot into them.
+# Is the running VM booted into the image just built? Two comparisons,
+# because half of one debugging day went to a VM quietly one build behind:
+# the VM's booted digest vs the registry (what vm-upgrade last pushed), and
+# the local image vs the stamp of the last push (unpushed local changes).
+vm-status:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    reg=$(curl -sI -H "Accept: application/vnd.oci.image.manifest.v1+json" \
+        http://127.0.0.1:5077/v2/kosher-linux/manifests/dev 2>/dev/null \
+        | tr -d "\r" | awk -F"sha256:" "/[Dd]ocker-[Cc]ontent-[Dd]igest/ {print substr(\$2,1,12)}")
+    booted=$(ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR -o ConnectTimeout=5 -p 2223 root@127.0.0.1 \
+        "bootc status 2>/dev/null | grep -i digest | head -1" 2>/dev/null | grep -o "sha256:[0-9a-f]*" | sed s/sha256:// | cut -c1-12)
+    localid=$(podman images --no-trunc -q localhost/kosher-linux:dev | head -1 | sed s/sha256:// | cut -c1-12)
+    pushed=$(cut -c1-12 build/qcow2/.image-id 2>/dev/null || echo "")
+    echo "local build   : ${localid:-none}"
+    echo "last pushed   : ${pushed:-never} (registry tag: ${reg:-no registry})"
+    echo "vm booted     : ${booted:-no VM answering on 2223}"
+    stale=0
+    if [ -n "$localid" ] && [ -n "$pushed" ] && [ "$localid" != "$pushed" ]; then
+        echo "STALE: the local build is newer than the last push — run: just vm-upgrade"; stale=1
+    fi
+    if [ -n "$reg" ] && [ -n "$booted" ] && [ "$reg" != "$booted" ]; then
+        echo "STALE: the VM has not booted the last pushed build — run: just vm-upgrade"; stale=1
+    fi
+    [ "$stale" = 0 ] && echo "OK: the VM is running the current build"
+
+# Update the RUNNING dev VM (started with `just boot-image`) to the image
+# just built — WITHOUT rebuilding the disk. Only changed layers transfer,
+# and /var persists: accounts, policy and completed setup all survive the
+# reboot. This is the everyday iteration path; `just vm` (sudo, minutes,
+# wipes state) is only for a genuinely fresh machine.
+#
+# How: a rootless registry on the host serves the image; inside the VM,
+# 10.0.2.2 is qemu's user-network alias for the host, and `bootc switch`
+# pulls the changed layers and stages an atomic reboot into them.
 # Is the running VM booted into the image just built? Prints both digests.
 # Use after vm-upgrade, or whenever behaviour looks stale — half of one
 # debugging day went to testing a VM that was quietly one build behind.
@@ -393,7 +428,12 @@ vm-upgrade: build
     $SSH 'mkdir -p /etc/containers/registries.conf.d
           printf "[[registry]]\nlocation = \"10.0.2.2:5077\"\ninsecure = true\n" \
               > /etc/containers/registries.conf.d/50-kosher-dev.conf
-          bootc switch 10.0.2.2:5077/kosher-linux:dev'
+          # switch only sets the SOURCE and is a no-op when it is already
+          # this ref — rerunning vm-upgrade then rebooted into the same old
+          # image and looked like the update did nothing. upgrade is what
+          # pulls the newest digest of the current source and stages it.
+          bootc switch 10.0.2.2:5077/kosher-linux:dev 2>/dev/null || true
+          bootc upgrade'
     # Keep the staleness stamp honest: after the reboot the disk runs the
     # image we just built, so boot tests must not refuse it as stale.
     podman image inspect --format json localhost/kosher-linux:dev         | python3 -c 'import json,sys; print(json.load(sys.stdin)[0]["Id"])'         > build/qcow2/.image-id

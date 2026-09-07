@@ -78,11 +78,52 @@ def a_bundle():
 def test_uninspected_users_get_their_categories_blocked_in_dns():
     from kosherd.policy import UserPolicy
 
+    # social renders here; adult does NOT — the upstream family resolver
+    # (1.1.1.3) blocks adult and malware for every query already, and the
+    # full adult list is millions of domains, far past what a dnsmasq
+    # config on a low-end machine can carry.
     policy = Policy(users=[UserPolicy(uid=1001, username="k", mode="dnsfilter",
-                                      blocked_categories=["adult"])])
+                                      blocked_categories=["adult", "social"])])
     out = dns.render_category_blocks(policy, a_bundle())
-    assert "address=/bad.com/0.0.0.0" in out
-    assert "chat.com" not in out
+    assert "address=/chat.com/0.0.0.0" in out
+    assert "bad.com" not in out
+    assert "upstream family" in out
+    assert "watch.com" not in out
+
+
+def test_whitelist_users_add_no_dns_category_blocks():
+    from kosherd.policy import UserPolicy
+
+    # Default-deny already: nothing a whitelist user blocks needs a DNS
+    # entry — and rendering it crashed once the sqlite catalogue landed.
+    policy = Policy(users=[UserPolicy(uid=1001, username="w", mode="whitelist",
+                                      blocked_categories=["social"])])
+    out = dns.render_category_blocks(policy, a_bundle())
+    assert "address=" not in out
+
+
+def test_the_sqlite_catalogue_renders_too(tmp_path):
+    # Switching to whitelist/dnsfilter mode raised AttributeError once the
+    # real catalogue (sqlite, no .domains dict) shipped: the renderer only
+    # knew the JSON bundle's shape.
+    import sqlite3
+
+    from kosherd.categories import SqliteBundle
+    from kosherd.policy import UserPolicy
+
+    db = sqlite3.connect(tmp_path / "c.sqlite")
+    db.executescript(
+        "CREATE TABLE domains(domain TEXT, category TEXT,"
+        " PRIMARY KEY(domain,category)) WITHOUT ROWID;"
+        "CREATE TABLE meta(key TEXT PRIMARY KEY, value TEXT);")
+    db.executemany("INSERT INTO domains VALUES (?,?)",
+                   [("bet.com", "gambling"), ("bad.com", "adult")])
+    db.commit(); db.close()
+    policy = Policy(users=[UserPolicy(uid=1, username="d", mode="dnsfilter",
+                                      blocked_categories=["gambling", "adult"])])
+    out = dns.render_category_blocks(policy, SqliteBundle(tmp_path / "c.sqlite"))
+    assert "address=/bet.com/0.0.0.0" in out
+    assert "bad.com" not in out
 
 
 def test_filtered_users_are_left_to_the_proxy():
@@ -101,14 +142,14 @@ def test_mixed_uninspected_profiles_block_the_union():
 
     policy = Policy(users=[
         UserPolicy(uid=1001, username="a", mode="dnsfilter",
-                   blocked_categories=["adult"]),
+                   blocked_categories=["video"]),
         UserPolicy(uid=1002, username="b", mode="dnsfilter",
                    blocked_categories=["social"]),
     ])
     out = dns.render_category_blocks(policy, a_bundle())
-    assert "address=/bad.com/0.0.0.0" in out
+    assert "address=/watch.com/0.0.0.0" in out
     assert "address=/chat.com/0.0.0.0" in out
-    assert "watch.com" not in out
+    assert "bad.com" not in out
 
 
 # -- the CNAME target has to be one dnsmasq already knows ---------------------

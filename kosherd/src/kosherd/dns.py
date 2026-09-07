@@ -141,7 +141,22 @@ def render_category_blocks(policy: Policy, bundle) -> str:
     for user in policy.effective_users():
         if user.mode in INSPECTED_MODES:
             continue  # the proxy does this one precisely
+        if user.mode == "whitelist":
+            # Default-deny already: only whitelisted sites resolve to
+            # anything reachable, so category blocks add nothing here.
+            continue
         wanted |= set(user.blocked_categories)
+
+    # Categories NOT rendered at this layer, however chosen:
+    # - adult and malware: the upstream family resolver (Cloudflare
+    #   1.1.1.3) already blocks both for every query this resolver
+    #   forwards, and the full adult list alone is millions of domains —
+    #   far past what a dnsmasq config on a low-end machine can carry.
+    #   (This also crashed outright once the sqlite catalogue landed: the
+    #   old code walked bundle.domains, which only the JSON seed has.)
+    # - the rest are tens of thousands at most, which dnsmasq handles.
+    upstream_covered = {"adult", "malware"}
+    rendered = wanted - upstream_covered
 
     lines = [
         f"# Rendered by kosherd from policy revision {policy.revision}. DO NOT EDIT.",
@@ -149,11 +164,13 @@ def render_category_blocks(policy: Policy, bundle) -> str:
     if not wanted:
         lines.append("# No uninspected user blocks a category.")
         return "\n".join(lines) + "\n"
-
-    lines.append(f"# Blocking {', '.join(sorted(wanted))} for users the proxy "
-                 "does not see.")
-    for domain in sorted(d for d, cats in bundle.domains.items()
-                         if wanted & set(cats)):
+    if wanted & upstream_covered:
+        lines.append("# adult/malware are blocked by the upstream family "
+                     "resolver for every query.")
+    if rendered:
+        lines.append(f"# Blocking {', '.join(sorted(rendered))} for users "
+                     "the proxy does not see.")
+    for domain in bundle.domains_in(rendered):
         # 0.0.0.0 rather than NXDOMAIN: a browser shows a connection error
         # instead of retrying elsewhere.
         lines.append(f"address=/{domain}/0.0.0.0")

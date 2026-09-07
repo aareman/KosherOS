@@ -106,6 +106,11 @@ class Bundle:
         """Which of `blocked` this host falls under (empty means allow)."""
         return self.categories_of(host) & set(blocked)
 
+    def domains_in(self, wanted) -> list[str]:
+        """Every domain classified under any of `wanted`, sorted."""
+        chosen = set(wanted)
+        return sorted(d for d, cats in self.domains.items() if chosen & set(cats))
+
 
 def parse(doc: dict) -> Bundle:
     """Build a bundle from the on-disk JSON form."""
@@ -221,6 +226,16 @@ class SqliteBundle:
 
     def blocked_categories_of(self, host: str, blocked) -> set[str]:
         return self.categories_of(host) & set(blocked)
+
+    def domains_in(self, wanted) -> list[str]:
+        """Every domain classified under any of `wanted`, sorted."""
+        chosen = sorted(set(wanted))
+        if not chosen:
+            return []
+        marks = ",".join("?" for _ in chosen)
+        return [row[0] for row in self._connect().execute(
+            f"SELECT DISTINCT domain FROM domains WHERE category IN ({marks}) "
+            "ORDER BY domain", chosen)]
 
 
 def load_any(*directories: Path):

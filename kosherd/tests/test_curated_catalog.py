@@ -64,3 +64,18 @@ def test_the_builder_merges_curated_rows(tmp_path, monkeypatch):
     # Filtering by category works, for a partial rebuild.
     only_sports = mod.curated_rows({"sports"})
     assert only_sports and all(c == "sports" for _, c in only_sports)
+
+
+def test_the_source_meta_insert_is_a_parameter_tuple():
+    # A dropped trailing comma made this a bare string once, the INSERT
+    # raised, and the catalogue shipped with empty meta (kosherd logged
+    # "version 0"). Keep both meta inserts binding a tuple.
+    import re
+
+    src = (ROOT / "scripts/fetch-categories.py").read_text()
+    for key in ("version", "source"):
+        m = re.search(rf"INSERT OR REPLACE INTO meta VALUES \('{key}', \?\)\",\s*\((.*?)\)\)",
+                      src, re.S)
+        assert m, f"could not find the {key} meta insert"
+        assert m.group(1).rstrip().endswith(","), \
+            f"the {key} meta insert must bind a tuple (trailing comma)"

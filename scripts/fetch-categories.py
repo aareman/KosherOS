@@ -214,8 +214,20 @@ def build(out: Path, only: set[str] | None) -> int:
     db.execute("INSERT OR REPLACE INTO meta VALUES ('version', ?)",
                (time.strftime("%Y-%m-%d"),))
     db.execute("INSERT OR REPLACE INTO meta VALUES ('source', ?)",
-               ("University of Toulouse (UT1) blacklists + KosherOS curated"))
+               ("University of Toulouse (UT1) blacklists + KosherOS curated",))
     db.commit()
+
+    # Guard against shipping a catalogue with no version/source. This is not
+    # paranoia: a dropped trailing comma once turned the source INSERT's
+    # parameter tuple into a bare string, the statement raised, and the
+    # catalogue shipped with empty meta — kosherd then logged "version 0"
+    # and the admin app had no version to show. Fail the build instead.
+    meta = dict(db.execute("SELECT key, value FROM meta").fetchall())
+    missing = {"version", "source"} - set(meta)
+    if missing:
+        db.close()
+        raise SystemExit(f"catalogue meta is incomplete, missing {sorted(missing)}")
+
     db.execute("VACUUM")
     db.close()
     return total

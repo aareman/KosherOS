@@ -185,6 +185,22 @@ def body_box(face, width, height):
 # below this; beachwear sits far above.
 SKIN_LIMIT = 0.22
 
+# A body-part detection this weak is not a verdict on its own, but it is
+# enough to say "there is a figure here" for the skin measurement.
+PART_HINT_CONFIDENCE = 0.12
+
+
+def _union_grown(boxes, width, height, grow: float = 1.0):
+    """The box around all `boxes`, grown by `grow` of its size, clipped."""
+    left = min(x for x, y, w, h in boxes)
+    top = min(y for x, y, w, h in boxes)
+    right = max(x + w for x, y, w, h in boxes)
+    bottom = max(y + h for x, y, w, h in boxes)
+    dw, dh = int((right - left) * grow), int((bottom - top) * grow)
+    left, top = max(0, left - dw), max(0, top - dh)
+    right, bottom = min(width, right + dw), min(height, bottom + dh)
+    return (left, top, right - left, bottom - top)
+
 
 def skin_fraction(image_bytes: bytes, box) -> float | None:
     """How much of `box` is skin-toned, by the classic YCbCr gate."""
@@ -600,4 +616,16 @@ class ImageFilter:
                         IMMODEST,
                         tuple(body_box(f, *size) for f in female),
                         True)
+        # No face in frame — a figure seen from behind, say — but body parts
+        # were found. A woman in a sports shirt photographed from the back
+        # came back clean: no face to hang a body box on, no exposed class.
+        # Measure skin over the whole detected figure instead.
+        parts = [d.box for d in detections
+                 if d.label in PERSON_LABELS and d.label not in FACES
+                 and d.score >= PART_HINT_CONFIDENCE]
+        if verdict.level == CLEAN and parts and not faces:
+            figure = _union_grown(parts, *size)
+            fraction = skin_fraction(image_bytes, figure)
+            if fraction is not None and fraction >= SKIN_LIMIT:
+                return ImageVerdict(IMMODEST, (figure,), True)
         return verdict

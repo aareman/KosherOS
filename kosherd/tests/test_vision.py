@@ -319,3 +319,67 @@ def test_whether_there_was_a_person_survives_the_cache(tmp_path):
     assert cache.get("abc").has_person is True
     cache.put("def", vision.ImageVerdict(CLEAN, (), has_person=False))
     assert cache.get("def").has_person is False
+
+
+# -- skin-exposure promotion: what the labels cannot see -------------------------
+
+def _skin_photo(skin_box=None, size=(300, 400)):
+    """A photo with a skin-toned rectangle where a figure would be."""
+    from PIL import Image, ImageDraw
+    import io
+
+    im = Image.new("RGB", size, (30, 90, 160))  # blue background
+    if skin_box:
+        ImageDraw.Draw(im).rectangle(skin_box, fill=(224, 172, 130))  # skin tone
+    out = io.BytesIO(); im.save(out, "PNG")
+    return out.getvalue()
+
+
+def test_a_female_face_over_exposed_skin_is_promoted_to_immodest():
+    # Bare shoulders / short skirt: no exposure class exists, so the labels
+    # say clean. The body below the face is mostly skin — promote.
+    photo = _skin_photo(skin_box=(60, 60, 240, 400))
+    face = vision.Detection("FACE_FEMALE", 0.9, (120, 30, 60, 60))
+    verdict = vision.ImageFilter._person_aware(photo, [face],
+                                               vision.judge([face]))
+    assert verdict.level == vision.IMMODEST
+    assert verdict.regions, "the figure is what gets covered"
+
+
+def test_a_female_face_over_clothing_stays_clean():
+    photo = _skin_photo(skin_box=None)  # clothed: no skin below the face
+    face = vision.Detection("FACE_FEMALE", 0.9, (120, 30, 60, 60))
+    verdict = vision.ImageFilter._person_aware(photo, [face],
+                                               vision.judge([face]))
+    assert verdict.level == vision.CLEAN
+
+
+def test_a_figure_from_behind_with_exposed_skin_is_promoted():
+    # Photographed from the back: no face, only a weak covered-buttocks
+    # detection — but the figure is mostly skin (legs, arms).
+    photo = _skin_photo(skin_box=(80, 40, 220, 380))
+    part = vision.Detection("BUTTOCKS_COVERED", 0.15, (120, 200, 60, 50))
+    verdict = vision.ImageFilter._person_aware(photo, [part],
+                                               vision.judge([part]))
+    assert verdict.level == vision.IMMODEST
+
+
+def test_a_figure_from_behind_fully_clothed_stays_clean():
+    photo = _skin_photo(skin_box=None)
+    part = vision.Detection("BUTTOCKS_COVERED", 0.15, (120, 200, 60, 50))
+    verdict = vision.ImageFilter._person_aware(photo, [part],
+                                               vision.judge([part]))
+    assert verdict.level == vision.CLEAN
+
+
+def test_hidden_pictures_cover_the_whole_figure_not_a_fragment():
+    # Legs under a short skirt: an exposed-class hit covered only its own
+    # box; the rest of the person stayed visible.
+    photo = _skin_photo(skin_box=(60, 60, 240, 400))
+    face = vision.Detection("FACE_FEMALE", 0.9, (120, 30, 60, 60))
+    belly = vision.Detection("BELLY_EXPOSED", 0.8, (130, 200, 40, 40))
+    verdict = vision.ImageFilter._person_aware(photo, [face, belly],
+                                               vision.judge([face, belly]))
+    assert verdict.level != vision.CLEAN
+    # a region at least as tall as the extrapolated body exists
+    assert any(h > 300 for x, y, w, h in verdict.regions), verdict.regions

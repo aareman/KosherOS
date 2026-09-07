@@ -347,9 +347,10 @@ def _stub_blocklist():
     return type("B", (), {"contains_any": staticmethod(lambda text: False)})()
 
 
-def _stub_categories():
+def _stub_categories(source_cats=()):
     return type("C", (), {
         "blocked_categories_of": staticmethod(lambda host, blocked: set()),
+        "categories_of": staticmethod(lambda host: set(source_cats)),
     })()
 
 
@@ -1070,3 +1071,90 @@ def test_an_unresolvable_port_falls_back_to_the_socket_scan(addon, tmp_path):
                                           peername=("10.0.2.15", 51515)),
         server_conn=types.SimpleNamespace(address=("1.2.3.4", 443)))
     assert filt._uid_of(flow) == 1001
+
+
+# -- the hands-on media round: block-all means all; sources the catalogue
+# -- already distrusts lose their imagery outright ----------------------------
+
+def _image_flow_sized(addon, n_bytes, host="cdn.example.com", referer=""):
+    headers = {"content-type": "image/jpeg"}
+    req_headers = {"referer": referer} if referer else {}
+    return types.SimpleNamespace(
+        request=types.SimpleNamespace(pretty_host=host, pretty_url=f"https://{host}/x.jpg",
+                                      headers=req_headers),
+        response=types.SimpleNamespace(content=b"x" * n_bytes, headers=headers))
+
+
+def _media_filter(addon, level, source_cats=()):
+    filt = addon.KosherFilter.__new__(addon.KosherFilter)
+    filt.policy = type("P", (), {
+        "media_level_for": staticmethod(lambda uid: level),
+        "blocked_categories_for": staticmethod(lambda uid: []),
+    })()
+    filt.categories = _stub_categories(source_cats)
+    filt.page_levels = {}
+    filt.vision = _stub_vision(None)
+    return filt
+
+
+def test_block_all_hides_even_tiny_images(addon):
+    # Shopping thumbnails fit under any byte floor; "all" must mean all.
+    filt = _media_filter(addon, "all")
+    flow = _image_flow_sized(addon, 900)
+    filt._filter_image(flow, 1001)
+    assert flow.response.content == addon.BLANK_PNG
+
+
+def test_an_immodest_source_loses_its_imagery_outright(addon):
+    # people.com is catalogued immodest; a modesty-filtering account gets
+    # its pictures hidden with no model involved.
+    filt = _media_filter(addon, "immodest", source_cats={"immodest"})
+    flow = _image_flow_sized(addon, 20000, host="people.com")
+    filt._filter_image(flow, 1001)
+    assert flow.response.content == addon.BLANK_PNG
+
+
+def test_the_referring_page_counts_as_the_source_too(addon):
+    # Celebrity sites serve their pictures from CDNs; the Referer names
+    # the page the picture sits on.
+    calls = []
+
+    class C:
+        @staticmethod
+        def blocked_categories_of(host, blocked):
+            return set()
+
+        @staticmethod
+        def categories_of(host):
+            calls.append(host)
+            return {"immodest"} if host == "people.com" else set()
+
+    filt = _media_filter(addon, "immodest")
+    filt.categories = C()
+    flow = _image_flow_sized(addon, 20000, host="img.cdn.net",
+                             referer="https://people.com/gallery")
+    filt._filter_image(flow, 1001)
+    assert flow.response.content == addon.BLANK_PNG
+    assert "people.com" in calls
+
+
+def test_the_weakest_level_only_distrusts_adult_sources(addon):
+    from kosherd import vision
+
+    filt = _media_filter(addon, "nsfw", source_cats={"immodest"})
+    filt.vision = _stub_vision(vision.ImageVerdict(vision.CLEAN, ()))
+    flow = _image_flow_sized(addon, 20000, host="people.com")
+    filt._filter_image(flow, 1001)
+    assert flow.response.content != addon.BLANK_PNG, \
+        "nsfw-level accounts did not ask for celebrity sites to be hidden"
+
+
+def test_inline_data_images_are_stripped_at_block_all(addon):
+    import re as _re
+
+    html = ('<html><body><img src="data:image/webp;base64,AAAA%s">' 
+            '<p>hello</p></body></html>' % ("QUFB" * 200))
+    blanked = addon.DATA_IMAGE_RE.sub(addon.BLANK_DATA_URI, html)
+    assert "data:image/webp" not in blanked
+    assert addon.BLANK_DATA_URI in blanked
+    assert "<p>hello</p>" in blanked

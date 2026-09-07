@@ -102,9 +102,14 @@ PERSON_LABELS = (NSFW_LABELS | SUGGESTIVE_LABELS | IMMODEST_LABELS
 
 # Below this the detector is guessing. Deliberately low: a missed explicit
 # region costs far more than a blurred elbow.
-MIN_CONFIDENCE = 0.25
+# 0.18 after immodest images slipped through on a celebrity site: the
+# borderline detections are exactly the immodest ones, and for a modesty
+# filter a false cover is a far smaller cost than a miss.
+MIN_CONFIDENCE = 0.18
 # A picture smaller than this is an icon, a spacer or a tracking pixel.
-MIN_IMAGE_BYTES = 6000
+# 2500, not 6000: modern WebP/AVIF thumbnails fit a lot of person into
+# very few bytes, and thumbnails were walking through the old gate.
+MIN_IMAGE_BYTES = 2500
 # Inference must not stall the page.
 DETECT_TIMEOUT = 2.0
 

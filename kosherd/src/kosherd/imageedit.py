@@ -22,11 +22,13 @@ log = logging.getLogger(__name__)
 
 # Grow each region by this fraction of its size before covering it. The
 # detector's boxes are tight, and a tight box leaves a visible fringe of
-# exactly what it was meant to cover.
-MARGIN = 0.12
-# Pixel blocks per region edge. Low enough that nothing is recoverable,
-# high enough that the shape of the picture survives.
-BLOCKS = 6
+# exactly what it was meant to cover. 0.35 after the first hands-on family
+# test: at 0.12 the fringe was still suggestive — the covered area must
+# comfortably swallow the detection and its surroundings.
+MARGIN = 0.35
+# Pixel blocks per region edge. Fewer blocks = coarser = more destroyed;
+# 4 leaves only a hint that something was there, which is the point.
+BLOCKS = 4
 
 
 def cover(image_bytes: bytes, regions) -> bytes | None:

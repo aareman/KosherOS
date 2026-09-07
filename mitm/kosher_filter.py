@@ -22,7 +22,7 @@ import json
 import logging
 import re
 from pathlib import Path
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlsplit
 
 from mitmproxy import http
 
@@ -303,6 +303,13 @@ def _force_safesearch(flow: http.HTTPFlow) -> None:
 # A 1x1 transparent PNG: replacing an image with this keeps page layout
 # intact, which matters — a page whose pictures became broken icons looks
 # broken, and people route around things that look broken.
+# An inline (data: URI) image in page HTML. Matches the whole URI so a
+# substitution swaps the picture and nothing else.
+DATA_IMAGE_RE = re.compile(r"data:image/[a-zA-Z0-9.+-]+;base64,[A-Za-z0-9+/=]+")
+# What an inline image becomes: a 1x1 transparent PNG, as a data URI.
+BLANK_DATA_URI = ("data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAA"
+                  "fFcSJAAAADUlEQVR42mNk+P+/HgAFhAJ/wlseKgAAAABJRU5ErkJggg==")
+
 BLANK_PNG = base64.b64decode(
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
 )
@@ -320,7 +327,15 @@ VIDEO_TYPES = ("video/", "application/vnd.apple.mpegurl",
 VIDEO_BLOCKED_LEVELS = ("all", "immodest", "suggestive")
 # Below this, an image is an icon, a spacer or a tracking pixel: not worth
 # hiding and not worth a classifier's time.
-MIN_IMAGE_BYTES = 6000
+MIN_IMAGE_BYTES = 2500  # keep in step with kosherd.vision
+# Media level -> catalogue categories whose sites get their imagery hidden
+# outright at that level. The weakest level only distrusts adult sites; the
+# modesty levels also distrust celebrity/immodest ones.
+IMMODEST_SOURCES = {
+    "nsfw": frozenset({"adult"}),
+    "suggestive": frozenset({"adult", "immodest"}),
+    "immodest": frozenset({"adult", "immodest"}),
+}
 
 
 def _is_image(flow) -> bool:
@@ -762,9 +777,18 @@ class KosherFilter:
         if not body:
             return
         stripped = False
+        if level == "all" and "data:image/" in body:
+            # Shopping sites inline thumbnails as data: URIs straight into
+            # the HTML, so they never appear as image responses at all —
+            # and "block all pictures" showed pictures. Replace every
+            # inline image with the blank, and write the page back.
+            body = DATA_IMAGE_RE.sub(BLANK_DATA_URI, body)
+            flow.response.text = body
+            stripped = True
         if immodest_blocked:
-            body, stripped = self._strip_shop_navigation(
+            body, nav_stripped = self._strip_shop_navigation(
                 flow, flow.request.pretty_host or "", body)
+            stripped = stripped or nav_stripped
         text = content_mod.visible_text(body[:MAX_SCORED_BYTES])
 
         if language_filter != "off" and self.wordlist.contains_any(text):
@@ -812,14 +836,17 @@ class KosherFilter:
         if level == "none":
             return
         body = flow.response.content or b""
-        if len(body) < MIN_IMAGE_BYTES:
-            return  # icons, spacers, tracking pixels
 
         # "all" needs no judgement, which is why it is the only level that
-        # is right every time.
+        # is right every time — and it comes BEFORE the small-image gate:
+        # "block all pictures" must mean all of them, and shopping sites'
+        # thumbnails fit comfortably under any byte floor.
         if level == "all":
             self._blank_image(flow)
             return
+
+        if len(body) < MIN_IMAGE_BYTES:
+            return  # icons, spacers, tracking pixels
 
         # Source-based suppression costs nothing and covers the worst of the
         # web: if the page's own domain is in a category this user blocks,
@@ -830,6 +857,26 @@ class KosherFilter:
                 host, self.policy.blocked_categories_for(uid)):
             self._blank_image(flow)
             return
+
+        # And the catalogue's OWN judgement of the source, independent of
+        # what this account blocks for browsing: a site classified adult or
+        # immodest (celebrity sites are) hosts imagery to match, so an
+        # account that asked for pictures to be filtered gets that site's
+        # pictures hidden outright — no model, no borderline misses. Both
+        # the image's host and the page it sits on count, because big sites
+        # serve their pictures from CDNs.
+        sources = IMMODEST_SOURCES.get(level)
+        if sources:
+            referer = flow.request.headers.get("referer", "")
+            referer_host = urlsplit(referer).hostname or ""
+            for candidate in (host, referer_host):
+                if candidate and (self.categories.categories_of(candidate)
+                                  & sources):
+                    log.info("hid a picture from %s (source is %s)",
+                             candidate,
+                             ",".join(sorted(self.categories.categories_of(candidate) & sources)))
+                    self._blank_image(flow)
+                    return
 
         verdict = self.vision.verdict(body)
         # Cheap: it only writes when the answer has changed.

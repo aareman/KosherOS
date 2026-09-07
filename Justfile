@@ -363,6 +363,21 @@ boot-image:
 # How: a rootless registry on the host serves the image; inside the VM,
 # 10.0.2.2 is qemu's user-network alias for the host, and `bootc switch`
 # pulls the changed layers and stages an atomic reboot into them.
+# Is the running VM booted into the image just built? Prints both digests.
+# Use after vm-upgrade, or whenever behaviour looks stale — half of one
+# debugging day went to testing a VM that was quietly one build behind.
+vm-status:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    local_id=$(podman images --no-trunc -q localhost/kosher-linux:dev | head -1 | sed s/sha256:// | cut -c1-12)
+    echo "local image : $local_id"
+    booted=$(ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR -p 2223 root@127.0.0.1 \
+        "bootc status 2>/dev/null | grep -i digest | head -1" 2>/dev/null | grep -o "sha256:[0-9a-f]*" | sed s/sha256:// | cut -c1-12)
+    echo "vm booted   : ${booted:-(no VM answering on 2223)}"
+    if [ -n "$booted" ] && [ "$booted" != "$local_id" ]; then
+        echo "STALE: the VM is not running the current build — run: just vm-upgrade"
+    fi
+
 vm-upgrade: build
     #!/usr/bin/env bash
     set -euo pipefail

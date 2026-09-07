@@ -107,8 +107,20 @@ def test_a_repeated_word_cannot_convict_alone(scorer):
 
 def test_phrases_beat_their_parts(scorer):
     # "sex video" must score as the phrase, not as the weak word "sex".
-    assert scorer.score("sex video").at_least(content.NSFW)
+    # A second corroborating term is present because one distinct term
+    # alone never convicts (the single-witness rule).
+    assert scorer.score("sex video xxx").at_least(content.NSFW)
     assert scorer.score("sex").level == content.CLEAN
+
+
+def test_one_distinct_term_never_convicts_alone(scorer):
+    # A bookstore was blocked as nsfw because its genre menu contains the
+    # word "erotica" on every page. However often a single term repeats,
+    # it stays just under conviction; real filth corroborates.
+    single = "erotica " * 40
+    assert scorer.score(single).level == content.CLEAN
+    assert scorer.score("erotica xxx").at_least(content.NSFW), \
+        "two distinct terms still convict"
 
 
 def test_terms_match_whole_words_only(scorer):

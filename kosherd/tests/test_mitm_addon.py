@@ -1158,3 +1158,101 @@ def test_inline_data_images_are_stripped_at_block_all(addon):
     assert "data:image/webp" not in blanked
     assert addon.BLANK_DATA_URI in blanked
     assert "<p>hello</p>" in blanked
+
+
+def test_a_person_in_a_search_thumbnail_is_hidden_at_modesty_levels(addon):
+    # Search thumbnails are the whole web shrunk past what the detector can
+    # judge; beach and sheer-fabric shots sailed through at "immodest".
+    # A detected person in one is now reason enough.
+    from kosherd import vision
+
+    filt = addon.KosherFilter.__new__(addon.KosherFilter)
+    filt.policy = _stub_policy(media="immodest")
+    filt.categories = _stub_categories()
+    filt.page_levels = {}
+    filt.vision = _stub_vision(vision.ImageVerdict(vision.CLEAN, (),
+                                                   has_person=True))
+    flow = _image_flow()
+    flow.request.pretty_host = "tse1.mm.bing.net"
+    filt._filter_image(flow, 1001)
+    assert flow.response.content == addon.BLANK_PNG
+
+
+def test_a_search_thumbnail_without_a_person_passes(addon):
+    from kosherd import vision
+
+    filt = addon.KosherFilter.__new__(addon.KosherFilter)
+    filt.policy = _stub_policy(media="immodest")
+    filt.categories = _stub_categories()
+    filt.page_levels = {}
+    filt.vision = _stub_vision(vision.ImageVerdict(vision.CLEAN, (),
+                                                   has_person=False))
+    flow = _image_flow()
+    flow.request.pretty_host = "tse1.mm.bing.net"
+    original = flow.response.content
+    filt._filter_image(flow, 1001)
+    assert flow.response.content == original, "a landscape thumbnail passes"
+
+
+def test_search_thumb_hosts_are_recognised(addon):
+    for host in ("tse1.mm.bing.net", "ts3.mm.bing.net",
+                 "encrypted-tbn0.gstatic.com",
+                 "external-content.duckduckgo.com"):
+        assert addon._is_search_thumb(host), host
+    for host in ("www.gstatic.com", "example.com", "images.example.com"):
+        assert not addon._is_search_thumb(host), host
+
+
+def test_an_allow_rule_beats_the_content_scorer(addon):
+    # The administrator allowed a wrongly-blocked bookstore by URL rule and
+    # it stayed blocked: rules were only honoured in the request hook, and
+    # the response-side content scorer blocked it again a moment later.
+    from kosherd import content
+
+    filt = addon.KosherFilter.__new__(addon.KosherFilter)
+    filt.policy = type("P", (), {
+        "media_level_for": staticmethod(lambda uid: "immodest"),
+        "language_filter_for": staticmethod(lambda uid: "off"),
+        "blocked_categories_for": staticmethod(lambda uid: []),
+        "rules_for": staticmethod(lambda uid: addon.parse_rules(
+            [{"action": "allow", "pattern": "books.example/*"}])),
+    })()
+    filt.categories = _stub_categories()
+    filt.page_levels = {}
+    filt.siterules = type("S", (), {
+        "reason": staticmethod(lambda url: None),
+        "is_suggestions": staticmethod(lambda url: False)})()
+    filt.scorer = content.Scorer({"erotica": (content.NSFW, 25),
+                                  "xxx": (content.NSFW, 25)})
+    filt.wordlist = type("W", (), {
+        "contains_any": staticmethod(lambda text: False)})()
+
+    body = "<html><body>erotica xxx erotica xxx</body></html>"
+    flow = types.SimpleNamespace(
+        request=types.SimpleNamespace(
+            pretty_host="books.example",
+            pretty_url="https://books.example/genres", headers={}),
+        response=types.SimpleNamespace(
+            headers={"content-type": "text/html"},
+            get_text=lambda strict=False: body))
+    original = flow.response
+    filt._filter_page(flow, 1001)
+    # _block replaces the response object; the allow rule must prevent that.
+    assert flow.response is original, \
+        "an explicit allow rule must beat the content scorer"
+
+    # And the same page WITHOUT the rule is blocked — proving the scorer
+    # genuinely convicts it and the rule is what saved it.
+    filt.policy.rules_for = staticmethod(lambda uid: [])
+    flow2 = types.SimpleNamespace(
+        request=types.SimpleNamespace(
+            pretty_host="books.example",
+            pretty_url="https://books.example/genres", headers={}),
+        response=types.SimpleNamespace(
+            headers={"content-type": "text/html"},
+            get_text=lambda strict=False: body))
+    filt._remember_page = lambda url, level: None
+    filt._block = lambda *a, **k: blocked.append(True)
+    blocked = []
+    filt._filter_page(flow2, 1001)
+    assert blocked, "without the rule the scorer must convict this page"

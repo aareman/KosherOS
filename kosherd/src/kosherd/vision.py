@@ -90,7 +90,7 @@ SUGGESTIVE_LABELS = frozenset({
 IMMODEST_LABELS = frozenset({
     "FEET_EXPOSED", "MALE_BREAST_EXPOSED", "BELLY_COVERED", "ARMPITS_COVERED",
 })
-FEMALE_LABELS = frozenset({"FEMALE_FACE", "FEMALE_BREAST_COVERED",
+FEMALE_LABELS = frozenset({"FACE_FEMALE", "FEMALE_BREAST_COVERED",
                            "FEMALE_BREAST_EXPOSED", "FEMALE_GENITALIA_COVERED",
                            "FEMALE_GENITALIA_EXPOSED"})
 
@@ -98,7 +98,11 @@ FEMALE_LABELS = frozenset({"FEMALE_FACE", "FEMALE_BREAST_COVERED",
 # the immodesty judgement is not: the detector has no label for a bare arm,
 # but it is good at finding people.
 PERSON_LABELS = (NSFW_LABELS | SUGGESTIVE_LABELS | IMMODEST_LABELS
-                 | frozenset({"FEMALE_FACE", "MALE_FACE"}))
+                 # NudeNet spells faces FACE_FEMALE / FACE_MALE. These were
+                 # FEMALE_FACE / MALE_FACE for weeks — labels the model never
+                 # emits — so a detected face never counted as a person and
+                 # every person-presence rule silently never fired.
+                 | frozenset({"FACE_FEMALE", "FACE_MALE"}))
 
 # Below this the detector is guessing. Deliberately low: a missed explicit
 # region costs far more than a blurred elbow.
@@ -336,6 +340,30 @@ class NudeNetDetector:
             return None
         import tempfile
 
+        # Small pictures blind the model: on ~200px search thumbnails the
+        # detector missed a swimsuit photo entirely — not even the face.
+        # Upscaling to ~640 on the short side before detection restores
+        # most of it, for a few milliseconds of Pillow. The BOXES scale
+        # back down so covers land on the original image.
+        scale = 1.0
+        try:
+            import io as _io
+
+            from PIL import Image
+
+            with Image.open(_io.BytesIO(image_bytes)) as im:
+                short = min(im.size)
+                if 0 < short < 480:
+                    scale = min(640 / short, 4.0)
+                    resized = im.convert("RGB").resize(
+                        (int(im.width * scale), int(im.height * scale)),
+                        Image.Resampling.LANCZOS)
+                    out = _io.BytesIO()
+                    resized.save(out, "JPEG", quality=90)
+                    image_bytes = out.getvalue()
+        except Exception:  # noqa: BLE001 - detection on the original instead
+            scale = 1.0
+
         # NudeNet reads a path, not bytes.
         with tempfile.NamedTemporaryFile(suffix=".img") as handle:
             handle.write(image_bytes)
@@ -352,7 +380,10 @@ class NudeNetDetector:
                 found.append(Detection(
                     label=str(item.get("class", "")),
                     score=float(item.get("score", 0.0)),
-                    box=(int(box[0]), int(box[1]), int(box[2]), int(box[3]))))
+                    # Detection ran on the upscaled copy; the boxes must
+                    # land on the ORIGINAL image the caller will edit.
+                    box=(int(box[0] / scale), int(box[1] / scale),
+                         int(box[2] / scale), int(box[3] / scale))))
             except (TypeError, ValueError, IndexError):
                 continue
         return found

@@ -39,7 +39,7 @@ def test_the_weakest_signals_are_immodest():
 def test_a_face_alone_is_not_a_finding():
     # Otherwise every photograph of a person is a finding, which is not a
     # filter, it is an off switch with extra steps.
-    assert vision.level_of([det("FEMALE_FACE"), det("MALE_FACE")]) == CLEAN
+    assert vision.level_of([det("FACE_FEMALE"), det("FACE_MALE")]) == CLEAN
 
 
 def test_the_strongest_finding_wins():
@@ -53,7 +53,7 @@ def test_a_low_confidence_guess_is_not_a_finding():
 
 def test_the_verdict_carries_the_regions_worth_covering():
     verdict = vision.judge([det("FEMALE_BREAST_EXPOSED", box=(1, 2, 3, 4)),
-                            det("FEMALE_FACE", box=(5, 6, 7, 8))])
+                            det("FACE_FEMALE", box=(5, 6, 7, 8))])
     assert verdict.level == NSFW
     # The face is not the problem and covering it helps nobody.
     assert verdict.regions == ((1, 2, 3, 4),)
@@ -302,11 +302,11 @@ def test_the_page_has_to_be_bad_enough_for_this_account():
 def test_a_face_is_enough_to_count_as_a_person():
     # The detector is reliable about finding people and unreliable about
     # judging modesty, which is exactly why the two are used differently.
-    assert vision.judge([det("FEMALE_FACE")]).has_person
-    assert vision.judge([det("MALE_FACE")]).has_person
+    assert vision.judge([det("FACE_FEMALE")]).has_person
+    assert vision.judge([det("FACE_MALE")]).has_person
     assert not vision.judge([]).has_person
     # ...and a face alone is still not a finding on its own.
-    assert vision.judge([det("FEMALE_FACE")]).level == CLEAN
+    assert vision.judge([det("FACE_FEMALE")]).level == CLEAN
 
 
 def test_whether_there_was_a_person_survives_the_cache(tmp_path):

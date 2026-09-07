@@ -338,6 +338,16 @@ IMMODEST_SOURCES = {
 }
 
 
+# The thumbnail hosts of the big image searches. Not page images — these
+# serve nothing but shrunken copies of arbitrary web imagery.
+def _is_search_thumb(host: str) -> bool:
+    host = host.lower()
+    return (host.endswith("mm.bing.net")
+            or (host.startswith("encrypted-tbn") and host.endswith(".gstatic.com"))
+            or host == "external-content.duckduckgo.com"
+            or host.endswith(".qwant.com") and "pics" in host)
+
+
 def _is_image(flow) -> bool:
     content_type = (flow.response.headers.get("content-type") or "").lower()
     return content_type.startswith(IMAGE_TYPES)
@@ -805,6 +815,15 @@ class KosherFilter:
 
         if level == "none" and not immodest_blocked:
             return
+        # An explicit ALLOW rule is the administrator overriding the
+        # machine's judgement for this page; the content scorer must honour
+        # it. It did not: rules were only consulted in the request hook, so
+        # allowing a wrongly-blocked site changed nothing — the response
+        # scorer blocked it again a moment later.
+        action, pattern = decide(self.policy.rules_for(uid),
+                                 flow.request.pretty_url)
+        if action != BLOCK and pattern is not None:
+            return
         tolerance = self._content_tolerance(
             uid, flow.request.pretty_host or "", stripped)
         verdict = self.scorer.score(text)
@@ -886,6 +905,16 @@ class KosherFilter:
             # Hiding is the safe direction, and it is the honest one: an
             # account that asked for pictures to be checked should not
             # quietly get unchecked pictures.
+            self._blank_image(flow)
+            return
+        # Image-search thumbnails are aggregated pictures of the whole web,
+        # shrunk past what the detector can reliably judge — beach and
+        # sheer-fabric shots sailed through at "immodest". At the modesty
+        # levels, a PERSON in a search thumbnail is reason enough to hide
+        # it; a landscape or product shot passes untouched.
+        if level in ("immodest", "suggestive") and verdict.has_person \
+                and _is_search_thumb(flow.request.pretty_host or ""):
+            log.info("hid a search thumbnail with a person for uid=%s", uid)
             self._blank_image(flow)
             return
         if not vision_mod.hides(level, verdict):

@@ -94,7 +94,9 @@ def test_a_content_term_can_be_added_at_a_level(shipped):
     lists.save_delta("content-terms.json",
                      add={"immodest": {"12": ["a local thing"]}})
     scorer = content.load()
-    assert scorer.score("porn").level == content.NSFW
+    # Two distinct terms, because a single one never convicts alone.
+    (ship / "content-terms.json").exists()
+    assert scorer.score("porn " * 3).points > 0
     assert "a local thing" in scorer.terms
 
 

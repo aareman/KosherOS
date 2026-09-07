@@ -124,6 +124,16 @@ class Scorer:
             # than the first, and the tenth is worth nothing.
             earned[level] += round(weight * (1 + math.log(min(count, MAX_REPEATS), 3)))
 
+        # The single-witness rule: ONE distinct term can never convict a
+        # page by itself, however often it repeats. A bookstore was blocked
+        # as nsfw because its genre menu contains the word "erotica" on
+        # every page — one word, repeated by navigation, out-scored the
+        # threshold. Anything genuinely objectionable corroborates across
+        # several terms; a lone hit is capped just under conviction.
+        if len(counts) == 1:
+            for level in earned:
+                earned[level] = min(earned[level], threshold - 1)
+
         # Evidence flows downhill: explicit words also make a page immodest.
         cumulative = 0
         level = CLEAN

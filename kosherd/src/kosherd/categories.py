@@ -32,19 +32,32 @@ LOCAL_BUNDLE_DIR = lists.OVERRIDE_DIR / "categories"
 # What each category means, for the admin UI. The wording matters: an admin
 # is choosing on behalf of a family, so the label has to say what will
 # actually stop working.
+# The user-facing categories, in the order the admin app shows them. This
+# is the authoritative set: only these are offered as filter toggles, so a
+# family never sees raw UT1 buckets like "astrology", "blog" or "radio".
+# Each maps a catalogue category to a label; the catalogue may hold more
+# categories than this, and they are simply not surfaced.
 CATEGORY_LABELS = {
     "adult": "Adult and pornography",
+    "immodest": "Immodest imagery",
     "gambling": "Gambling and betting",
     "dating": "Dating and matchmaking",
     "social": "Social networks",
     "video": "Video and streaming",
-    "shopping": "Shopping and marketplaces",
+    "sports": "Sports",
     "games": "Games",
+    "shopping": "Shopping and marketplaces",
     "news": "News and media",
+    "drugs": "Drugs",
+    "violence": "Violence",
     "ads": "Advertising and trackers",
     "malware": "Malware and phishing",
     "proxy": "Proxies, VPNs and filter bypass",
 }
+
+# The order above is the display order; a category not in here is a
+# catalogue-internal bucket, never shown as a filter toggle.
+USER_FACING_CATEGORIES = tuple(CATEGORY_LABELS)
 
 # Blocked by default for a newly filtered account. Deliberately narrow:
 # categories that are about danger or immodesty rather than taste, so the

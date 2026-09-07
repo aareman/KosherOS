@@ -139,6 +139,32 @@ def domains_in(archive: Path, name: str) -> list[str]:
         return []
 
 
+CURATED_PATH = Path(__file__).with_name("curated-sites.json")
+
+
+def curated_rows(only: set[str] | None) -> list[tuple[str, str]]:
+    """Mainstream sites the UT1 lists miss, so a family's real categories are
+    complete out of the box. UT1 is deep but patchy on the obvious names:
+    it has thousands of sports blogs and not espn.com, nba.com or
+    skysports.com. This fills that in for the categories a family reaches."""
+    if not CURATED_PATH.exists():
+        return []
+    import json
+
+    data = json.loads(CURATED_PATH.read_text())
+    rows = []
+    for category, sites in data.items():
+        if category.startswith("_"):
+            continue
+        if only and category not in only:
+            continue
+        for site in sites:
+            host = site.split("/", 1)[0].strip().lower()  # drop any path
+            if host and "." in host and " " not in host:
+                rows.append((host, category))
+    return rows
+
+
 def build(out: Path, only: set[str] | None) -> int:
     out.parent.mkdir(parents=True, exist_ok=True)
     if out.exists():
@@ -173,10 +199,22 @@ def build(out: Path, only: set[str] | None) -> int:
             finally:
                 archive.unlink(missing_ok=True)
 
+    curated = curated_rows(only)
+    if curated:
+        # OR REPLACE, not OR IGNORE: a curated classification is deliberate
+        # and should win over a UT1 row that put the same domain elsewhere.
+        db.executemany(
+            "INSERT OR REPLACE INTO domains (domain, category) VALUES (?, ?)",
+            curated)
+        db.commit()
+        total += len(curated)
+        print(f"  curated supplement -> {len(curated):,} mainstream sites",
+              flush=True)
+
     db.execute("INSERT OR REPLACE INTO meta VALUES ('version', ?)",
                (time.strftime("%Y-%m-%d"),))
     db.execute("INSERT OR REPLACE INTO meta VALUES ('source', ?)",
-               ("University of Toulouse (UT1) blacklists",))
+               ("University of Toulouse (UT1) blacklists + KosherOS curated"))
     db.commit()
     db.execute("VACUUM")
     db.close()

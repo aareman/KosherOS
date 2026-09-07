@@ -1,0 +1,66 @@
+{
+  "_comment": "Mainstream sites the University of Toulouse list misses, so the categories a family actually reaches are complete out of the box. Bare registrable domains; the lookup walks parents, so 'espn.com' also covers 'www.espn.com' and 'secure.espn.com'. Add liberally: over-covering a well-known site in its obvious category is the safe direction. Keep it to sites a non-technical family would recognise; the long tail is UT1's job.",
+  "sports": [
+    "espn.com", "espn.co.uk", "nba.com", "mlb.com", "nhl.com", "nfl.com",
+    "bleacherreport.com", "cbssports.com", "foxsports.com", "nbcsports.com",
+    "skysports.com", "bbc.co.uk/sport", "goal.com", "theathletic.com",
+    "sportingnews.com", "si.com", "yardbarker.com", "sbnation.com",
+    "eurosport.com", "formula1.com", "pgatour.com", "atptour.com",
+    "espncricinfo.com", "livescore.com", "flashscore.com", "365scores.com",
+    "onefootball.com", "fifa.com", "uefa.com", "olympics.com", "wwe.com",
+    "ufc.com", "dazn.com", "247sports.com", "maxpreps.com", "hudl.com"
+  ],
+  "gambling": [
+    "888.com", "888casino.com", "888sport.com", "888poker.com", "bet365.com",
+    "draftkings.com", "fanduel.com", "betmgm.com", "caesars.com", "williamhill.com",
+    "ladbrokes.com", "paddypower.com", "betfair.com", "pokerstars.com",
+    "partypoker.com", "unibet.com", "betway.com", "bovada.lv", "stake.com",
+    "roobet.com", "bwin.com", "coral.co.uk", "skybet.com", "betfred.com",
+    "pointsbet.com", "barstoolsportsbook.com", "hardrockbet.com", "chumba.com",
+    "luckylandslots.com", "sweepslots.com", "casino.com", "borgataonline.com",
+    "wynnbet.com", "betrivers.com", "espnbet.com"
+  ],
+  "dating": [
+    "tinder.com", "bumble.com", "hinge.co", "match.com", "okcupid.com",
+    "plentyoffish.com", "pof.com", "eharmony.com", "zoosk.com", "badoo.com",
+    "grindr.com", "her.app", "coffeemeetsbagel.com", "happn.com", "meetme.com",
+    "adultfriendfinder.com", "ashleymadison.com", "seeking.com", "elitesingles.com",
+    "silversingles.com", "christianmingle.com", "jdate.com", "ourtime.com",
+    "feeld.co", "raya.co"
+  ],
+  "social": [
+    "facebook.com", "instagram.com", "twitter.com", "x.com", "tiktok.com",
+    "snapchat.com", "reddit.com", "tumblr.com", "pinterest.com", "linkedin.com",
+    "threads.net", "vk.com", "discord.com", "telegram.org", "whatsapp.com",
+    "wechat.com", "weibo.com", "quora.com", "mastodon.social", "bsky.app",
+    "onlyfans.com", "patreon.com", "twitch.tv", "kick.com", "clubhouse.com",
+    "9gag.com", "imgur.com", "flickr.com"
+  ],
+  "video": [
+    "youtube.com", "netflix.com", "hulu.com", "disneyplus.com", "max.com",
+    "primevideo.com", "peacocktv.com", "paramountplus.com", "vimeo.com",
+    "dailymotion.com", "crunchyroll.com", "tubitv.com", "pluto.tv", "rumble.com",
+    "bitchute.com", "vevo.com", "apple.com/tv", "hbomax.com"
+  ],
+  "shopping": [
+    "amazon.com", "ebay.com", "aliexpress.com", "temu.com", "shein.com",
+    "wish.com", "etsy.com", "walmart.com", "target.com", "bestbuy.com",
+    "wayfair.com", "overstock.com", "alibaba.com", "asos.com", "zara.com",
+    "hm.com", "nike.com", "adidas.com", "macys.com", "kohls.com", "costco.com"
+  ],
+  "games": [
+    "roblox.com", "minecraft.net", "epicgames.com", "steampowered.com",
+    "store.steampowered.com", "ea.com", "origin.com", "ubisoft.com", "battle.net",
+    "miniclip.com", "poki.com", "crazygames.com", "coolmathgames.com", "y8.com",
+    "addictinggames.com", "kongregate.com", "newgrounds.com", "friv.com",
+    "chess.com", "lichess.org", "twitch.tv", "xbox.com", "playstation.com",
+    "nintendo.com", "itch.io", "fortnite.com"
+  ],
+  "proxy": [
+    "nordvpn.com", "expressvpn.com", "protonvpn.com", "surfshark.com",
+    "cyberghostvpn.com", "tunnelbear.com", "hide.me", "hidemyass.com",
+    "proxysite.com", "kproxy.com", "croxyproxy.com", "hola.org", "psiphon.ca",
+    "ultrasurf.us", "torproject.org", "1.1.1.1", "opendns.com", "windscribe.com",
+    "mullvad.net", "privateinternetaccess.com", "ipvanish.com"
+  ]
+}

@@ -137,11 +137,11 @@ COPY mitm/ /usr/share/kosher/mitm/
 # for a build with no network. Millions of domains in SQLite cost a few MB
 # of page cache to query; the same data in a dict would cost hundreds of MB
 # of RAM on exactly the low-end machine this has to run on.
-COPY scripts/fetch-categories.py /tmp/fetch-categories.py
+COPY scripts/fetch-categories.py scripts/curated-sites.json /tmp/
 RUN python3 /tmp/fetch-categories.py \
         --out /usr/share/kosher/categories/categories.sqlite \
     || echo "WARNING: category import failed; falling back to the seed list"
-RUN rm -f /tmp/fetch-categories.py
+RUN rm -f /tmp/fetch-categories.py /tmp/curated-sites.json
 # mitmproxy is not packaged for Fedora 44, so install it from PyPI (with its
 # dependencies — unlike our own packages, which are --no-deps).
 RUN python3 -m pip install --prefix=/usr mitmproxy

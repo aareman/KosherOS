@@ -711,14 +711,20 @@ class Daemon:
         from . import categories as categories_mod
 
         bundle = categories_mod.load_any()
+        present = bundle.categories
         return GLib.Variant("(s)", (json.dumps({
             "version": bundle.version,
             "source": bundle.source,
             "domains": len(bundle),
+            # Only the user-facing set, in its defined order — never the raw
+            # catalogue buckets. A labelled category with no domains in this
+            # catalogue is still offered (a future or partial catalogue may
+            # fill it); the UI can note it is empty.
             "categories": [
                 {"name": name,
-                 "label": categories_mod.CATEGORY_LABELS.get(name, name)}
-                for name in sorted(bundle.categories)
+                 "label": categories_mod.CATEGORY_LABELS[name],
+                 "present": name in present}
+                for name in categories_mod.USER_FACING_CATEGORIES
             ],
         }),))
 

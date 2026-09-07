@@ -20,6 +20,7 @@ from __future__ import annotations
 import json
 import logging
 import sqlite3
+import threading
 from dataclasses import dataclass, field
 from . import lists
 from pathlib import Path
@@ -164,15 +165,35 @@ class SqliteBundle:
 
     def __init__(self, path: Path):
         self.path = Path(path)
-        # check_same_thread: the proxy answers requests on worker threads;
-        # reads are safe and SQLite serialises them.
-        self._db = sqlite3.connect(self.path, check_same_thread=False)
-        self._db.execute("PRAGMA query_only = ON")
-        meta = dict(self._db.execute("SELECT key, value FROM meta").fetchall())
+        # ONE SQLite CONNECTION PER THREAD, kept in thread-local storage.
+        #
+        # The proxy answers requests on mitmproxy's worker threads, and a
+        # single sqlite3.Connection shared across threads — even with
+        # check_same_thread=False — does NOT serialise cursor use: two
+        # threads calling execute().fetchall() on the same connection can
+        # clobber each other's results, and the failure is SILENT — a query
+        # returns an empty set instead of raising. That is exactly what bit
+        # us: a filtered user's traffic reached the proxy, the category
+        # lookup came back empty on a contended query, nothing matched, and
+        # a site that should have been blocked loaded. It was a heisenbug —
+        # any added statement changed the timing and "fixed" it. A
+        # per-thread connection removes the sharing entirely; each is
+        # read-only (query_only) against the same on-disk file.
+        self._local = threading.local()
+        # Metadata and the count are read once, on the constructing thread.
+        db = self._connect()
+        meta = dict(db.execute("SELECT key, value FROM meta").fetchall())
         self.version = meta.get("version", "0")
         self.source = meta.get("source", "")
-        self._count = self._db.execute(
-            "SELECT count(*) FROM domains").fetchone()[0]
+        self._count = db.execute("SELECT count(*) FROM domains").fetchone()[0]
+
+    def _connect(self) -> sqlite3.Connection:
+        db = getattr(self._local, "db", None)
+        if db is None:
+            db = sqlite3.connect(self.path, check_same_thread=False)
+            db.execute("PRAGMA query_only = ON")
+            self._local.db = db
+        return db
 
     def __len__(self) -> int:
         return self._count
@@ -180,17 +201,18 @@ class SqliteBundle:
     @property
     def categories(self) -> set[str]:
         return {row[0] for row in
-                self._db.execute("SELECT DISTINCT category FROM domains")}
+                self._connect().execute("SELECT DISTINCT category FROM domains")}
 
     def categories_of(self, host: str) -> set[str]:
         host = (host or "").lower().strip(".")
         if not host:
             return set()
+        db = self._connect()
         labels = host.split(".")
         # Longest suffix first, so a specific subdomain beats its parent.
         for start in range(len(labels) - 1):
             candidate = ".".join(labels[start:])
-            rows = self._db.execute(
+            rows = db.execute(
                 "SELECT category FROM domains WHERE domain = ?",
                 (candidate,)).fetchall()
             if rows:

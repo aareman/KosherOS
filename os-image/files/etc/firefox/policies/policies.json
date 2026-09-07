@@ -20,6 +20,9 @@
     "SearchSuggestEnabled": false,
     "DisablePocket": true,
     "DisableTelemetry": true,
-    "DisableFirefoxStudies": true
+    "DisableFirefoxStudies": true,
+    "Certificates": {
+      "ImportEnterpriseRoots": true
+    }
   }
 }

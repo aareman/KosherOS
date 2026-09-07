@@ -44,3 +44,13 @@ def test_both_dconf_keyfiles_parse():
     # a typo fails the test suite first.
     for path in (GREETER, DESKTOP):
         _dconf(path)  # raises on malformed content
+
+
+def test_firefox_trusts_the_system_ca_store():
+    # Firefox keeps its own trust store; without this it does not trust the
+    # proxy's inspection CA (which lives in the system store), so every
+    # intercepted HTTPS page faults and filtering appears broken.
+    import json
+
+    pol = json.loads((FILES / "etc/firefox/policies/policies.json").read_text())
+    assert pol["policies"]["Certificates"]["ImportEnterpriseRoots"] is True

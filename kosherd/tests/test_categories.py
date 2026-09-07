@@ -167,3 +167,58 @@ def test_a_corrupt_database_falls_back_rather_than_failing(tmp_path):
     (tmp_path / "categories.json").write_text(_json.dumps(
         {"version": "fallback", "domains": {"adult": ["bad.com"]}}))
     assert load_any(tmp_path).version == "fallback"
+
+
+def test_sqlite_bundle_is_safe_under_concurrent_queries(tmp_path):
+    """The proxy queries this from mitmproxy's worker threads. A single
+    shared connection returned empty results on contended queries WITHOUT
+    raising — a filtered site loaded because its category came back empty.
+    Per-thread connections must make concurrent lookups correct.
+    """
+    import threading
+
+    from kosherd.categories import SqliteBundle
+
+    rows = [("gamble.com", "gambling"), ("date.com", "dating"),
+            ("shop.com", "shopping"), ("news.com", "news"),
+            ("vid.com", "video"), ("porn.com", "adult")]
+    build_db(tmp_path / "categories.sqlite", rows)
+    bundle = SqliteBundle(tmp_path / "categories.sqlite")
+
+    want = {d: {c} for d, c in rows}
+    errors = []
+
+    def hammer():
+        for _ in range(400):
+            for domain, expected in want.items():
+                got = bundle.categories_of(domain)
+                if got != expected:
+                    errors.append((domain, expected, got))
+                    return
+
+    threads = [threading.Thread(target=hammer) for _ in range(8)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    assert not errors, f"concurrent lookups returned wrong results: {errors[:5]}"
+
+
+def test_each_thread_gets_its_own_connection(tmp_path):
+    import threading
+
+    from kosherd.categories import SqliteBundle
+
+    build_db(tmp_path / "categories.sqlite", [("x.com", "adult")])
+    bundle = SqliteBundle(tmp_path / "categories.sqlite")
+    seen = []
+
+    def grab():
+        seen.append(id(bundle._connect()))
+
+    main_conn = id(bundle._connect())
+    t = threading.Thread(target=grab)
+    t.start()
+    t.join()
+    assert seen and seen[0] != main_conn, "a worker thread reused the main connection"

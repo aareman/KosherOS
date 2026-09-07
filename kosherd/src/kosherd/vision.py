@@ -164,6 +164,52 @@ def level_of(detections) -> str:
     return CLEAN
 
 
+FACES = frozenset({"FACE_FEMALE", "FACE_MALE"})
+
+# A face box says where a person is; the body hangs below it. There is no
+# detector class for legs, knees or shoulders — a short skirt or a bare
+# shoulder is invisible to the labels — so covering and skin measurement
+# work on this estimated extent instead.
+def body_box(face, width, height):
+    x, y, w, h = face
+    left = max(0, int(x - 1.1 * w))
+    top = max(0, int(y - 0.6 * h))
+    right = min(width, int(x + w + 1.1 * w))
+    bottom = min(height, int(y + 8.5 * h))
+    return (left, top, right - left, bottom - top)
+
+
+# The fraction of skin-toned pixels in a region above which a person is
+# showing too much for the immodest level: legs under a short skirt, bare
+# shoulders and arms. Faces and hands alone in a body-sized region sit far
+# below this; beachwear sits far above.
+SKIN_LIMIT = 0.22
+
+
+def skin_fraction(image_bytes: bytes, box) -> float | None:
+    """How much of `box` is skin-toned, by the classic YCbCr gate."""
+    try:
+        import io
+
+        from PIL import Image
+
+        with Image.open(io.BytesIO(image_bytes)) as im:
+            x, y, w, h = box
+            region = im.convert("YCbCr").crop(
+                (x, y, min(x + w, im.width), min(y + h, im.height)))
+            if region.width < 8 or region.height < 8:
+                return None
+            # Sample down: precision is not needed to measure a fraction.
+            region = region.resize((min(96, region.width),
+                                    min(96, region.height)))
+            data = region.getdata()
+            skin = sum(1 for (Y, cb, cr) in data
+                       if Y > 60 and 77 <= cb <= 127 and 133 <= cr <= 173)
+            return skin / max(1, len(data))
+    except Exception:  # noqa: BLE001 - a measurement, never a crash
+        return None
+
+
 def judge(detections) -> ImageVerdict:
     """A verdict, with the regions worth covering."""
     kept = [d for d in detections if d.score >= MIN_CONFIDENCE]
@@ -513,5 +559,45 @@ class ImageFilter:
         if detections is None:
             return None
         verdict = judge(detections)
+        verdict = self._person_aware(image_bytes, detections, verdict)
         self.cache.put(sha, verdict)
+        return verdict
+
+    @staticmethod
+    def _person_aware(image_bytes, detections, verdict) -> ImageVerdict:
+        """Whole figures, not fragments.
+
+        Two family-test findings: a covered detection left the rest of the
+        person visible (legs under a short skirt), and images with no
+        detectable class at all — bare shoulders, exposed legs — came back
+        clean. So: when a picture is being hidden and a face was found, the
+        whole estimated figure joins the covered regions; and a clean
+        picture with a female face is promoted to immodest when the figure
+        shows too much skin for the labels to have caught.
+        """
+        try:
+            import io
+
+            from PIL import Image
+
+            with Image.open(io.BytesIO(image_bytes)) as im:
+                size = im.size
+        except Exception:  # noqa: BLE001
+            return verdict
+        faces = [d.box for d in detections
+                 if d.label in FACES and d.score >= MIN_CONFIDENCE]
+        female = [d.box for d in detections
+                  if d.label == "FACE_FEMALE" and d.score >= MIN_CONFIDENCE]
+        if verdict.level != CLEAN and faces:
+            bodies = tuple(body_box(f, *size) for f in faces)
+            return ImageVerdict(verdict.level, verdict.regions + bodies,
+                                verdict.has_person)
+        if verdict.level == CLEAN and female:
+            for face in female:
+                fraction = skin_fraction(image_bytes, body_box(face, *size))
+                if fraction is not None and fraction >= SKIN_LIMIT:
+                    return ImageVerdict(
+                        IMMODEST,
+                        tuple(body_box(f, *size) for f in female),
+                        True)
         return verdict

@@ -187,17 +187,21 @@ def test_covering_changes_the_region_and_leaves_the_rest(photo):
     from PIL import Image
     import io
 
-    covered = imageedit.cover(photo, [(40, 40, 80, 80)])
+    covered = imageedit.cover(photo, [(40, 40, 60, 60)])
     assert covered is not None
     after = Image.open(io.BytesIO(covered)).convert("RGB")
-    # Outside the region (with its margin), the picture is untouched.
-    assert after.getpixel((5, 5)) == (10, 200, 10)
-    # Inside, the fine detail is gone: the checkerboard has averaged into
-    # a handful of flat blocks, so nothing of it is recoverable.
-    patch = {after.getpixel((x, y)) for x in range(50, 110, 2)
-             for y in range(50, 110, 2)}
-    assert patch & {(255, 0, 0), (0, 0, 255)} == set()
-    assert len(patch) < 40
+    # Far outside the region and its (now generous) margin, untouched.
+    assert after.getpixel((195, 195)) == (10, 200, 10)
+    # Inside, the fine detail is gone. The cover is a heavy blur with
+    # noise (not flat pixel blocks), so the test is not "few colours" but
+    # "nothing of the original survives": no pure checkerboard pixel, and
+    # nothing even close to the saturated red/blue it was made of.
+    pixels = [after.getpixel((x, y)) for x in range(55, 95, 2)
+              for y in range(55, 95, 2)]
+    assert not any(p in ((255, 0, 0), (0, 0, 255)) for p in pixels)
+    assert not any((r > 220 and g < 40 and b < 40)
+                   or (b > 220 and r < 40 and g < 40)
+                   for r, g, b in pixels), "saturated originals leaked through"
 
 
 def test_covering_nothing_is_not_an_edit(photo):

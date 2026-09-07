@@ -22,17 +22,20 @@ log = logging.getLogger(__name__)
 
 # Grow each region by this fraction of its size before covering it. The
 # detector's boxes are tight, and a tight box leaves a visible fringe of
-# exactly what it was meant to cover. 0.35 after the first hands-on family
-# test: at 0.12 the fringe was still suggestive — the covered area must
-# comfortably swallow the detection and its surroundings.
-MARGIN = 0.35
-# Pixel blocks per region edge. Fewer blocks = coarser = more destroyed;
-# 4 leaves only a hint that something was there, which is the point.
-BLOCKS = 4
+# exactly what it was meant to cover. Generous, after two rounds of family
+# feedback that the covered area was too small.
+MARGIN = 0.5
 
 
 def cover(image_bytes: bytes, regions) -> bytes | None:
-    """Return the image with `regions` pixelated, or None if it cannot be done.
+    """Return the image with `regions` covered, or None if it cannot be done.
+
+    The cover is a heavy blur with light noise underneath, composited
+    through a feathered mask — after family feedback in three steps: the
+    tight pixel blocks left a fringe; blocks plus static destroyed the
+    content but shouted about it; this destroys as much and sits quietly in
+    the picture. Blur radius scales with the region, noise stops the blur
+    being invertible, and the feather melts the edges into the photo.
 
     None means the caller should fall back to hiding the whole picture:
     silently returning the original would be the one failure mode that
@@ -41,10 +44,13 @@ def cover(image_bytes: bytes, regions) -> bytes | None:
     if not regions:
         return None
     try:
-        from PIL import Image
+        from PIL import Image, ImageDraw, ImageFilter
     except ImportError:
         return None
     try:
+        import io
+        import os
+
         with Image.open(io.BytesIO(image_bytes)) as source:
             image = source.convert("RGB") if source.mode not in ("RGB", "RGBA") \
                 else source.copy()
@@ -55,10 +61,21 @@ def cover(image_bytes: bytes, regions) -> bytes | None:
                 if right <= left or bottom <= top:
                     continue
                 patch = image.crop((left, top, right, bottom))
-                small = patch.resize((max(1, BLOCKS), max(1, BLOCKS)),
-                                     Image.Resampling.BILINEAR)
-                image.paste(small.resize(patch.size, Image.Resampling.NEAREST),
-                            (left, top))
+                pw, ph = patch.size
+                radius = max(12, min(pw, ph) // 4)
+                blurred = patch.filter(ImageFilter.GaussianBlur(radius))
+                noise = Image.frombytes("L", (pw, ph),
+                                        os.urandom(pw * ph)).convert(blurred.mode)
+                covered = Image.blend(blurred, noise, 0.12)
+                covered = covered.filter(ImageFilter.GaussianBlur(radius // 2))
+                # Feather: a soft-edged mask melts the cover into the photo
+                # instead of stamping a hard rectangle on it.
+                feather = max(6, min(pw, ph) // 8)
+                mask = Image.new("L", (pw, ph), 0)
+                ImageDraw.Draw(mask).rectangle(
+                    (feather, feather, pw - feather, ph - feather), fill=255)
+                mask = mask.filter(ImageFilter.GaussianBlur(feather))
+                image.paste(covered, (left, top), mask)
             out = io.BytesIO()
             if fmt.upper() in ("JPEG", "JPG"):
                 image.convert("RGB").save(out, "JPEG", quality=85)

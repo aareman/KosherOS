@@ -720,11 +720,15 @@ class Daemon:
             # catalogue buckets. A labelled category with no domains in this
             # catalogue is still offered (a future or partial catalogue may
             # fill it); the UI can note it is empty.
+            # Alphabetical by the label the person actually reads, so the
+            # toggle list is scannable rather than in an internal order.
             "categories": [
                 {"name": name,
                  "label": categories_mod.CATEGORY_LABELS[name],
                  "present": name in present}
-                for name in categories_mod.USER_FACING_CATEGORIES
+                for name in sorted(
+                    categories_mod.USER_FACING_CATEGORIES,
+                    key=lambda n: categories_mod.CATEGORY_LABELS[n].lower())
             ],
         }),))
 

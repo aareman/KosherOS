@@ -19,16 +19,27 @@ Group=kosher-mitm
 # Environment= line is the fallback for a first start before any apply.
 Environment="MITM_MODES=--mode transparent@127.0.0.1:30000"
 EnvironmentFile=-/var/lib/kosher-mitm/listen.env
+# The filter script is COPIED to /run before start and loaded from there,
+# never from /usr. This is load-bearing: mitmproxy's script loader only
+# loads a script when its mtime exceeds an initial value of 0.0 — and on
+# an ostree image every file under /usr has mtime 0, so the addon was
+# silently never loaded at all. The proxy then intercepted TLS with no
+# filtering: every site loaded, nothing was logged, and any copy of the
+# script (which acquired a real mtime) appeared to "fix" it. The copy in
+# /run always has a real timestamp.
+ExecStartPre=/usr/bin/install -m 0644 \
+    /usr/share/kosher/mitm/kosher_filter.py /run/kosher-mitm/kosher_filter.py
 ExecStart=/usr/bin/env mitmdump \
     $MITM_MODES \
     --set confdir=/var/lib/kosher-mitm \
     --set block_global=false \
     --set termlog_verbosity=warn \
     --set flow_detail=0 \
-    --scripts /usr/share/kosher/mitm/kosher_filter.py
+    --scripts /run/kosher-mitm/kosher_filter.py
 Restart=on-failure
 RestartSec=2
 StateDirectory=kosher-mitm
+RuntimeDirectory=kosher-mitm
 StateDirectoryMode=0750
 # It never reads the policy; kosherd renders uid -> URL rules into
 # /var/lib/kosher-mitm/rules.json for it. images.sqlite, beside it, caches

@@ -358,7 +358,8 @@ def _rows(widget, found=None):
     found = [] if found is None else found
     child = widget.get_first_child()
     while child is not None:
-        if isinstance(child, (Adw.ActionRow, Adw.ComboRow, Adw.SwitchRow)):
+        if isinstance(child, (Adw.ActionRow, Adw.ComboRow, Adw.SwitchRow,
+                              Adw.ButtonRow)):
             found.append(child)
         _rows(child, found)
         child = child.get_next_sibling()
@@ -573,3 +574,49 @@ def test_the_youtube_kinds_have_all_and_none_and_labels():
     assert len(dialog.blocked) == len(admin.YOUTUBE_CATEGORIES)
     dialog._set_all_kinds(False)
     assert not dialog.blocked
+
+
+# -- presets: save the current settings as one, see it offered ----------------
+
+def test_the_detail_page_offers_the_familys_presets_and_a_save_button():
+    from kosherd import profiles
+
+    win = FakeWindow(FakeClient())
+    user = a_user(mode="filtered", blocked_categories=["adult", "sports"],
+                  media_level="immodest")
+    preset = profiles.to_dict(profiles.from_user(user, "Mine"))
+    win.policy = {"revision": 1, "users": [user], "custom_profiles": [preset],
+                  "guardian": {"enabled": False}, "guest": {"enabled": False}}
+    page = admin.UserDetailPage(win, user)
+    rows = _rows(page)
+    combo = next(r for r in rows if r.get_title() == "Set up as")
+    labels = [combo.get_model().get_string(i)
+              for i in range(combo.get_model().get_n_items())]
+    assert "Mine (yours)" in labels
+    # the account matches its own preset, so it is selected
+    assert labels[combo.get_selected()] == "Mine (yours)"
+    titles = [r.get_title() for r in rows]
+    assert "Save These Settings as a Preset…" in titles
+    assert "Delete This Preset…" in titles, "shown because the current preset is custom"
+
+
+def test_without_a_matching_custom_preset_there_is_nothing_to_delete():
+    win = FakeWindow(FakeClient())
+    user = a_user(mode="filtered")
+    win.policy = {"revision": 1, "users": [user],
+                  "guardian": {"enabled": False}, "guest": {"enabled": False}}
+    page = admin.UserDetailPage(win, user)
+    titles = [r.get_title() for r in _rows(page)]
+    assert "Save These Settings as a Preset…" in titles
+    assert "Delete This Preset…" not in titles
+
+
+def test_the_save_preset_dialog_needs_a_name():
+    win = FakeWindow(FakeClient())
+    user = a_user()
+    win.policy = {"revision": 1, "users": [user],
+                  "guardian": {"enabled": False}, "guest": {"enabled": False}}
+    dialog = admin.SavePresetDialog(win, user)
+    assert not dialog.save_button.get_sensitive()
+    dialog.name.set_text("Mine")
+    assert dialog.save_button.get_sensitive()

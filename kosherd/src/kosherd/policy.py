@@ -185,6 +185,8 @@ class Policy:
     guardian_enabled: bool = False
     system_whitelist: list[str] = field(default_factory=list)
     guest: GuestPolicy = field(default_factory=GuestPolicy)
+    # A family's own presets, saved from a tuned account (see profiles.py).
+    custom_profiles: list[dict] = field(default_factory=list)
 
     def user(self, uid: int) -> UserPolicy | None:
         return next((u for u in self.users if u.uid == uid), None)
@@ -215,6 +217,8 @@ class Policy:
             "source": self.source,
             "users": [u.to_dict() for u in self.users],
             "guardian": {"enabled": self.guardian_enabled},
+            **({"custom_profiles": list(self.custom_profiles)}
+               if self.custom_profiles else {}),
             "system_whitelist": self.system_whitelist,
             "guest": self.guest.to_dict(),
         }
@@ -245,6 +249,7 @@ class Policy:
                 for u in doc["users"]
             ],
             guardian_enabled=doc["guardian"]["enabled"],
+            custom_profiles=list(doc.get("custom_profiles") or []),
             system_whitelist=list(doc.get("system_whitelist", [])),
             guest=GuestPolicy(
                 enabled=guest_doc["enabled"],

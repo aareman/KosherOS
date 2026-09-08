@@ -14,6 +14,7 @@ afterwards by an admin who wants to.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 
 from .categories import DEFAULT_BLOCKED
@@ -118,24 +119,72 @@ PROFILES = (
 BY_KEY = {p.key: p for p in PROFILES}
 DEFAULT_PROFILE = "child"
 
-
-def get(key: str) -> Profile:
-    try:
-        return BY_KEY[key]
-    except KeyError:
-        raise KeyError(f"unknown profile {key!r}") from None
+# Custom presets — a family's own, saved from an account they have tuned —
+# carry this prefix so they can never collide with a built-in key.
+CUSTOM_PREFIX = "custom-"
 
 
-def describe() -> list[dict]:
+def slug(label: str) -> str:
+    """'Yeshiva bochur' -> 'custom-yeshiva-bochur'."""
+    body = re.sub(r"[^a-z0-9]+", "-", label.strip().lower()).strip("-")
+    return CUSTOM_PREFIX + (body or "preset")
+
+
+def to_dict(profile: Profile) -> dict:
+    return {"key": profile.key, "label": profile.label,
+            "description": profile.description, "mode": profile.mode,
+            "blocked_categories": list(profile.blocked_categories),
+            "media_level": profile.media_level,
+            "language_filter": profile.language_filter,
+            "youtube": dict(profile.youtube),
+            "can_install_apps": profile.can_install_apps}
+
+
+def from_dict(doc: dict) -> Profile:
+    return Profile(
+        key=str(doc["key"]), label=str(doc.get("label") or doc["key"]),
+        description=str(doc.get("description") or ""),
+        mode=str(doc["mode"]),
+        blocked_categories=tuple(sorted(doc.get("blocked_categories") or [])),
+        media_level=str(doc.get("media_level") or "none"),
+        language_filter=str(doc.get("language_filter") or "off"),
+        youtube=dict(doc.get("youtube") or {}),
+        can_install_apps=bool(doc.get("can_install_apps", True)))
+
+
+def from_user(user, label: str, description: str = "") -> Profile:
+    """Snapshot an account's current settings as a preset.
+
+    The everyday path to a good preset: a parent tunes one child's account
+    until it is right, then saves it and applies it to the others.
+    """
+    return Profile(
+        key=slug(label), label=label.strip(), description=description.strip(),
+        mode=str(_field(user, "mode")),
+        blocked_categories=tuple(sorted(_field(user, "blocked_categories", []) or [])),
+        media_level=str(_field(user, "media_level", "none") or "none"),
+        language_filter=str(_field(user, "language_filter", "off") or "off"),
+        youtube=dict(_field(user, "youtube", {}) or {}),
+        can_install_apps=bool(_field(user, "can_install_apps", True)))
+
+
+def all_profiles(custom=()) -> tuple[Profile, ...]:
+    """Built-ins first, in their order, then the family's own presets."""
+    return PROFILES + tuple(c if isinstance(c, Profile) else from_dict(c)
+                            for c in (custom or ()))
+
+
+def get(key: str, custom=()) -> Profile:
+    for profile in all_profiles(custom):
+        if profile.key == key:
+            return profile
+    raise KeyError(f"unknown profile {key!r}")
+
+
+def describe(custom=()) -> list[dict]:
     """The profiles, for the admin app and the portal."""
-    return [
-        {"key": p.key, "label": p.label, "description": p.description,
-         "mode": p.mode, "media_level": p.media_level,
-         "language_filter": p.language_filter,
-         "blocked_categories": list(p.blocked_categories),
-         "youtube": dict(p.youtube), "can_install_apps": p.can_install_apps}
-        for p in PROFILES
-    ]
+    return [{**to_dict(p), "custom": p.key.startswith(CUSTOM_PREFIX)}
+            for p in all_profiles(custom)]
 
 
 def _field(user, name, default=None):
@@ -145,13 +194,13 @@ def _field(user, name, default=None):
     return getattr(user, name, default)
 
 
-def matching(user) -> str | None:
+def matching(user, custom=()) -> str | None:
     """The profile a user's settings correspond to, if any.
 
     Lets the admin app show "Teenager" instead of a page of switches, while
     still telling the truth when someone has customised beyond a profile.
     """
-    for profile in PROFILES:
+    for profile in all_profiles(custom):
         if (_field(user, "mode") == profile.mode
                 and sorted(_field(user, "blocked_categories", []) or [])
                     == sorted(profile.blocked_categories)

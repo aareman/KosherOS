@@ -225,8 +225,18 @@ def cmd_profile(args) -> int:
     if args.action == "list":
         for p in c.list_profiles():
             mark = " (default)" if p.get("default") else ""
-            print(f"  {p['key']:<12} {p['label']}{mark}")
-            print(f"               {p['description']}")
+            mark += " (yours)" if p.get("custom") else ""
+            print(f"  {p['key']:<24} {p['label']}{mark}")
+            if p.get("description"):
+                print(f"                           {p['description']}")
+        return 0
+    if args.action == "save":
+        key = c.save_profile(args.uid, args.profile, "", _guardian_pw(args))
+        print(f"saved uid {args.uid}'s settings as preset {key}")
+        return 0
+    if args.action == "delete":
+        c.delete_profile(args.profile, _guardian_pw(args))
+        print(f"deleted preset {args.profile}")
         return 0
     c.apply_profile(args.uid, args.profile, _guardian_pw(args))
     print(f"uid {args.uid} set to the {args.profile} profile")
@@ -716,8 +726,8 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("--guardian-password")
     s.set_defaults(func=cmd_admin)
 
-    s = sub.add_parser("profile", help="apply a ready-made profile to a user")
-    s.add_argument("action", choices=["list", "set"])
+    s = sub.add_parser("profile", help="apply, save or delete a profile (preset)")
+    s.add_argument("action", choices=["list", "set", "save", "delete"])
     s.add_argument("uid", type=int, nargs="?", default=0)
     s.add_argument("profile", nargs="?", default="")
     s.add_argument("--guardian-password")

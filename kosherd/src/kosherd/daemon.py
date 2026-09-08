@@ -106,6 +106,17 @@ INTROSPECTION_XML = """
     <method name="ListProfiles">
       <arg direction="out" type="s" name="profiles_json"/>
     </method>
+    <method name="SaveProfile">
+      <arg direction="in" type="i" name="uid"/>
+      <arg direction="in" type="s" name="label"/>
+      <arg direction="in" type="s" name="description"/>
+      <arg direction="in" type="s" name="guardian_password"/>
+      <arg direction="out" type="s" name="key"/>
+    </method>
+    <method name="DeleteProfile">
+      <arg direction="in" type="s" name="key"/>
+      <arg direction="in" type="s" name="guardian_password"/>
+    </method>
     <method name="ListCategories">
       <arg direction="out" type="s" name="categories_json"/>
     </method>
@@ -681,10 +692,60 @@ class Daemon:
     def impl_ListProfiles(self):
         from . import profiles
 
-        described = profiles.describe()
+        described = profiles.describe(self.policy.custom_profiles)
         for entry in described:
             entry["default"] = entry["key"] == profiles.DEFAULT_PROFILE
         return GLib.Variant("(s)", (json.dumps(described),))
+
+    def impl_SaveProfile(self, uid: int, label: str, description: str,
+                         _guardian_pw: str):
+        """Snapshot an account's current settings as a named preset.
+
+        The everyday path to a good preset: tune one child's account until
+        it is right, save it, apply it to the others. Saving the same label
+        again replaces that preset.
+        """
+        from . import profiles
+
+        user = self.policy.user(uid)
+        if user is None:
+            raise PolicyError(f"uid {uid} is not managed")
+        if not label.strip():
+            raise PolicyError("a preset needs a name")
+        if len(label.strip()) > 60:
+            raise PolicyError("keep the preset name under 60 characters")
+        preset = profiles.from_user(user, label, description)
+        if preset.key in profiles.BY_KEY:
+            raise PolicyError(f"'{label}' is a built-in profile; pick another name")
+        self.policy.custom_profiles = [
+            c for c in self.policy.custom_profiles if c.get("key") != preset.key
+        ] + [profiles.to_dict(preset)]
+        self._save_only()
+        log.info("saved preset %s from uid %d", preset.key, uid)
+        return GLib.Variant("(s)", (preset.key,))
+
+    def impl_DeleteProfile(self, key: str, _guardian_pw: str):
+        from . import profiles
+
+        if not key.startswith(profiles.CUSTOM_PREFIX):
+            raise PolicyError("built-in profiles cannot be deleted")
+        before = len(self.policy.custom_profiles)
+        self.policy.custom_profiles = [
+            c for c in self.policy.custom_profiles if c.get("key") != key]
+        if len(self.policy.custom_profiles) == before:
+            raise PolicyError(f"no preset {key!r}")
+        self._save_only()
+        return None
+
+    def _save_only(self) -> None:
+        """Persist and announce a policy change that alters no enforcement
+        (a preset saved or deleted): no ruleset render, no proxy restart."""
+        policy_mod.save(self.policy)
+        if self.connection:
+            self.connection.emit_signal(
+                None, OBJECT_PATH, "org.kosherlinux.Daemon1.Profiles", "PolicyChanged",
+                GLib.Variant("(i)", (self.policy.revision,)),
+            )
 
     def impl_ApplyProfile(self, uid: int, profile_key: str, _guardian_pw: str):
         from . import profiles
@@ -693,7 +754,7 @@ class Daemon:
         if user is None:
             raise PolicyError(f"uid {uid} is not managed")
         try:
-            profile = profiles.get(profile_key)
+            profile = profiles.get(profile_key, self.policy.custom_profiles)
         except KeyError as e:
             raise PolicyError(str(e)) from None
 
@@ -756,7 +817,7 @@ class Daemon:
         return None
 
     @staticmethod
-    def _new_user(uid: int, username: str, mode: str) -> UserPolicy:
+    def _new_user(uid: int, username: str, mode: str, custom=()) -> UserPolicy:
         """A new account's starting settings.
 
         `mode` may name a ready-made profile instead of a bare filter mode,
@@ -766,8 +827,8 @@ class Daemon:
         """
         from . import profiles as profiles_mod
 
-        if mode in profiles_mod.BY_KEY:
-            profile = profiles_mod.get(mode)
+        if mode in {p.key for p in profiles_mod.all_profiles(custom)}:
+            profile = profiles_mod.get(mode, custom)
             return UserPolicy(
                 uid=uid, username=username, mode=profile.mode,
                 blocked_categories=list(profile.blocked_categories),
@@ -783,7 +844,8 @@ class Daemon:
 
         from . import profiles as profiles_mod
 
-        if mode not in MODES and mode not in profiles_mod.BY_KEY:
+        if mode not in MODES and mode not in {
+                p.key for p in profiles_mod.all_profiles(self.policy.custom_profiles)}:
             raise PolicyError(f"unknown mode or profile {mode!r}")
         try:
             existing_uid = pwd.getpwnam(username).pw_uid
@@ -796,7 +858,7 @@ class Daemon:
                 f"'{username}' already exists — use Adopt Existing User to manage it"
             )
         uid = self._accounts_create_user(username, full_name)
-        self.policy.users.append(self._new_user(uid, username, mode))
+        self.policy.users.append(self._new_user(uid, username, mode, self.policy.custom_profiles))
         self._save_and_apply()
         return GLib.Variant("(i)", (uid,))
 
@@ -810,8 +872,9 @@ class Daemon:
         # in one choice like anybody else. Without this the guest was the
         # one account with no picture, language or YouTube settings at
         # all — a hole in exactly the account nobody is watching.
-        if mode in profiles_mod.BY_KEY:
-            profile = profiles_mod.get(mode)
+        custom = self.policy.custom_profiles
+        if mode in {p.key for p in profiles_mod.all_profiles(custom)}:
+            profile = profiles_mod.get(mode, custom)
             g = self.policy.guest
             g.mode = profile.mode
             g.blocked_categories = list(profile.blocked_categories)
@@ -856,7 +919,8 @@ class Daemon:
 
         from . import profiles as profiles_mod
 
-        if mode not in MODES and mode not in profiles_mod.BY_KEY:
+        if mode not in MODES and mode not in {
+                p.key for p in profiles_mod.all_profiles(self.policy.custom_profiles)}:
             raise PolicyError(f"unknown mode or profile {mode!r}")
         try:
             uid = pwd.getpwnam(username).pw_uid
@@ -866,7 +930,7 @@ class Daemon:
             raise PolicyError("cannot manage system accounts")
         if self.policy.user(uid) is not None:
             raise PolicyError(f"{username} is already managed")
-        self.policy.users.append(self._new_user(uid, username, mode))
+        self.policy.users.append(self._new_user(uid, username, mode, self.policy.custom_profiles))
         self._save_and_apply()
         return GLib.Variant("(i)", (uid,))
 

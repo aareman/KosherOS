@@ -159,6 +159,55 @@
           }
         }
       }
+    },
+    "custom_profiles": {
+      "type": "array",
+      "description": "The family's own presets, saved from a tuned account. Same fields as a built-in profile; keys start with 'custom-'.",
+      "items": {
+        "type": "object",
+        "required": [
+          "key",
+          "label",
+          "mode"
+        ],
+        "properties": {
+          "key": {
+            "type": "string",
+            "pattern": "^custom-[a-z0-9-]+$"
+          },
+          "label": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 60
+          },
+          "description": {
+            "type": "string",
+            "maxLength": 300
+          },
+          "mode": {
+            "type": "string"
+          },
+          "blocked_categories": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "media_level": {
+            "type": "string"
+          },
+          "language_filter": {
+            "type": "string"
+          },
+          "youtube": {
+            "type": "object"
+          },
+          "can_install_apps": {
+            "type": "boolean"
+          }
+        },
+        "additionalProperties": false
+      }
     }
   },
   "$defs": {

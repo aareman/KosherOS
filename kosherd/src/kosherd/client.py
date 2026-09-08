@@ -128,6 +128,15 @@ class DaemonClient:
     def list_profiles(self) -> list[dict]:
         return json.loads(self._call("Profiles", "ListProfiles")[0])
 
+    def save_profile(self, uid: int, label: str, description: str = "",
+                     guardian_password: str = "") -> str:
+        """Snapshot this account's settings as a named preset; returns its key."""
+        return self._call("Profiles", "SaveProfile", "(isss)", uid, label,
+                          description, guardian_password)[0]
+
+    def delete_profile(self, key: str, guardian_password: str = "") -> None:
+        self._call("Profiles", "DeleteProfile", "(ss)", key, guardian_password)
+
     def list_categories(self) -> dict:
         return json.loads(self._call("Profiles", "ListCategories")[0])
 

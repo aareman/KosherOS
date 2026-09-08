@@ -1271,8 +1271,9 @@ class ProfilesPage(Adw.PreferencesPage):
         return group
 
     def _user_row(self, user: dict) -> Adw.ActionRow:
-        current = profiles_mod.matching(user)
-        badges = [profiles_mod.get(current).label if current
+        custom = self.win.policy.get("custom_profiles", [])
+        current = profiles_mod.matching(user, custom)
+        badges = [profiles_mod.get(current, custom).label if current
                   else MODE_LABELS[user["mode"]]]
         if user.get("admin"):
             badges.append("admin")
@@ -1340,14 +1341,18 @@ class ProfilesPage(Adw.PreferencesPage):
         # A profile, not a bare filter mode: an account created with a mode
         # and nothing else has to be configured eight more times, which is
         # how accounts end up half set up.
-        keys = [p.key for p in profiles_mod.PROFILES]
+        custom = self.win.policy.get("custom_profiles", [])
+        all_profiles = profiles_mod.all_profiles(custom)
+        keys = [p.key for p in all_profiles]
         mode = Adw.ComboRow(
             title="Set up as",
-            model=Gtk.StringList.new([p.label for p in profiles_mod.PROFILES]))
+            model=Gtk.StringList.new(
+                [p.label + (" (yours)" if p.key.startswith(profiles_mod.CUSTOM_PREFIX) else "")
+                 for p in all_profiles]))
         mode.set_selected(keys.index(profiles_mod.DEFAULT_PROFILE))
         mode.set_subtitle(profiles_mod.get(profiles_mod.DEFAULT_PROFILE).description)
         mode.connect("notify::selected", lambda c, _p: mode.set_subtitle(
-            profiles_mod.get(keys[c.get_selected()]).description))
+            profiles_mod.get(keys[c.get_selected()], custom).description))
         group.add(mode)
         box.append(group)
         dialog.set_extra_child(box)
@@ -1405,6 +1410,55 @@ class ProfilesPage(Adw.PreferencesPage):
         dialog.present(self.win)
 
 
+class SavePresetDialog(Adw.Dialog):
+    """Name the settings of one account so they can be applied to others."""
+
+    def __init__(self, win: Window, user: dict):
+        super().__init__(title=f"Save preset from {user['username']}",
+                         content_width=460)
+        self.win = win
+        self.user = user
+        header = Adw.HeaderBar()
+        save = Gtk.Button(label="Save")
+        save.add_css_class("suggested-action")
+        save.connect("clicked", lambda _b: self._save())
+        header.pack_end(save)
+        self.save_button = save
+
+        page = Adw.PreferencesPage()
+        group = Adw.PreferencesGroup(
+            description="Everything on this account — filter mode, blocked "
+                        "content, pictures, language, YouTube, app installs — "
+                        "becomes a preset you can pick for any account.")
+        self.name = Adw.EntryRow(title="Preset name")
+        self.description = Adw.EntryRow(title="Description (optional)")
+        group.add(self.name)
+        group.add(self.description)
+        page.add(group)
+        page.set_vexpand(True)
+        self.name.connect("changed", lambda _e: save.set_sensitive(
+            bool(self.name.get_text().strip())))
+        save.set_sensitive(False)
+        self.name.connect("entry-activated", lambda _e: self._save())
+
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        box.append(header)
+        box.append(page)
+        self.set_child(box)
+
+    def _save(self) -> None:
+        label = self.name.get_text().strip()
+        if not label:
+            return
+        description = self.description.get_text().strip()
+        self.save_button.set_sensitive(False)
+        self.win.with_guardian(lambda pw: self.win.call(
+            lambda: self.win.client.save_profile(
+                self.user["uid"], label, description, pw),
+            done_msg=f"Saved preset “{label}”"))
+        self.close()
+
+
 class UserDetailPage(Adw.NavigationPage):
     """One person, one full page: everything about their account, in tabs.
 
@@ -1459,16 +1513,21 @@ class UserDetailPage(Adw.NavigationPage):
             title="Profile",
             description="One choice that sets everything below it.")
 
-        current = profiles_mod.matching(user)
-        keys = [p.key for p in profiles_mod.PROFILES]
+        # Built-ins plus the family's own presets, saved from tuned accounts.
+        custom = self.win.policy.get("custom_profiles", [])
+        profiles = profiles_mod.all_profiles(custom)
+        current = profiles_mod.matching(user, custom)
+        keys = [p.key for p in profiles]
         profile_row = Adw.ComboRow(
             title="Set up as",
             model=Gtk.StringList.new(
-                [p.label for p in profiles_mod.PROFILES] + [PROFILE_CUSTOM]))
+                [p.label + (" (yours)" if p.key.startswith(profiles_mod.CUSTOM_PREFIX) else "")
+                 for p in profiles] + [PROFILE_CUSTOM]))
         profile_row.set_selected(keys.index(current) if current else len(keys))
         profile_row.set_subtitle(
-            profiles_mod.get(current).description if current
-            else "These settings do not match any of the ready-made ones.")
+            profiles_mod.get(current, custom).description if current
+            else "These settings do not match any preset. Save them as one "
+                 "below to reuse them on another account.")
 
         def on_profile(combo, _p):
             index = combo.get_selected()
@@ -1479,10 +1538,23 @@ class UserDetailPage(Adw.NavigationPage):
                 return
             self.win.with_guardian(lambda pw: self.win.call(
                 lambda: self.win.client.apply_profile(user["uid"], key, pw),
-                done_msg=f"{user['username']} → {profiles_mod.get(key).label}"))
+                done_msg=f"{user['username']} → {profiles_mod.get(key, custom).label}"))
 
         profile_row.connect("notify::selected", on_profile)
         group.add(profile_row)
+
+        # The path to a good preset: tune one account, save it, apply it to
+        # the others.
+        save_row = Adw.ButtonRow(title="Save These Settings as a Preset…")
+        save_row.connect("activated", lambda *_: SavePresetDialog(
+            self.win, user).present(self.win))
+        group.add(save_row)
+        if current and current.startswith(profiles_mod.CUSTOM_PREFIX):
+            delete_row = Adw.ButtonRow(title="Delete This Preset…")
+            delete_row.add_css_class("destructive-action")
+            delete_row.connect("activated",
+                               lambda *_: self._confirm_delete_preset(current))
+            group.add(delete_row)
 
         mode_row = Adw.ComboRow(title="Filter mode",
                                 model=Gtk.StringList.new([MODE_LABELS[m] for m in MODES]))
@@ -1710,6 +1782,27 @@ class UserDetailPage(Adw.NavigationPage):
                 done_msg=f"App installs {'enabled' if s.get_active() else 'disabled'} for {user['username']}")))
         group.add(installs)
         return group
+
+    def _confirm_delete_preset(self, key: str) -> None:
+        custom = self.win.policy.get("custom_profiles", [])
+        label = profiles_mod.get(key, custom).label
+        dialog = Adw.AlertDialog(
+            heading=f"Delete the preset “{label}”?",
+            body="Accounts set up with it keep their settings; only the "
+                 "preset itself goes.")
+        dialog.add_response("cancel", "Cancel")
+        dialog.add_response("delete", "Delete")
+        dialog.set_response_appearance("delete",
+                                       Adw.ResponseAppearance.DESTRUCTIVE)
+
+        def on_response(_d, response):
+            if response == "delete":
+                self.win.with_guardian(lambda pw: self.win.call(
+                    lambda: self.win.client.delete_profile(key, pw),
+                    done_msg=f"Deleted preset “{label}”"))
+
+        dialog.connect("response", on_response)
+        dialog.present(self.win)
 
     def _danger_group(self, user: dict) -> Adw.PreferencesGroup:
         group = Adw.PreferencesGroup()

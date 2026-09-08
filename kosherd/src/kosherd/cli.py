@@ -230,16 +230,22 @@ def cmd_profile(args) -> int:
             if p.get("description"):
                 print(f"                           {p['description']}")
         return 0
-    if args.action == "save":
-        key = c.save_profile(args.uid, args.profile, "", _guardian_pw(args))
-        print(f"saved uid {args.uid}'s settings as preset {key}")
-        return 0
     if args.action == "delete":
-        c.delete_profile(args.profile, _guardian_pw(args))
-        print(f"deleted preset {args.profile}")
+        key = args.profile or args.uid  # `profile delete custom-x`
+        c.delete_profile(key, _guardian_pw(args))
+        print(f"deleted preset {key}")
         return 0
-    c.apply_profile(args.uid, args.profile, _guardian_pw(args))
-    print(f"uid {args.uid} set to the {args.profile} profile")
+    try:
+        uid = int(args.uid)
+    except ValueError:
+        print(f"error: {args.uid!r} is not a uid", file=sys.stderr)
+        return 2
+    if args.action == "save":
+        key = c.save_profile(uid, args.profile, "", _guardian_pw(args))
+        print(f"saved uid {uid}'s settings as preset {key}")
+        return 0
+    c.apply_profile(uid, args.profile, _guardian_pw(args))
+    print(f"uid {uid} set to the {args.profile} profile")
     return 0
 
 
@@ -728,7 +734,10 @@ def main(argv: list[str] | None = None) -> int:
 
     s = sub.add_parser("profile", help="apply, save or delete a profile (preset)")
     s.add_argument("action", choices=["list", "set", "save", "delete"])
-    s.add_argument("uid", type=int, nargs="?", default=0)
+    # `delete` takes only a preset key, so the first positional is not
+    # always a uid; it is checked as one only where a uid is meant.
+    s.add_argument("uid", nargs="?", default="0",
+                   help="account uid (set/save); the preset key for delete")
     s.add_argument("profile", nargs="?", default="")
     s.add_argument("--guardian-password")
     s.set_defaults(func=cmd_profile)

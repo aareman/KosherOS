@@ -164,3 +164,29 @@ def test_list_profiles_includes_the_familys_presets():
     listed = json.loads(daemon.impl_ListProfiles().unpack()[0])
     assert any(p["key"] == "custom-mine" and p["custom"] for p in listed)
     assert any(p["key"] == "child" and not p["custom"] for p in listed)
+
+
+# -- the command line -------------------------------------------------------------
+
+def test_the_cli_deletes_a_preset_by_key_alone(monkeypatch, capsys):
+    from kosherd import cli
+
+    calls = []
+
+    class C:
+        def delete_profile(self, key, pw=""):
+            calls.append(key)
+
+        def save_profile(self, uid, label, desc, pw=""):
+            calls.append((uid, label)); return "custom-x"
+
+        def apply_profile(self, uid, key, pw=""):
+            calls.append((uid, key))
+
+    monkeypatch.setattr(cli, "_client", lambda: C())
+    monkeypatch.setattr(cli, "_guardian_pw", lambda a: "")
+    assert cli.main(["profile", "delete", "custom-x"]) == 0
+    assert cli.main(["profile", "save", "1000", "Mine"]) == 0
+    assert cli.main(["profile", "set", "1000", "custom-x"]) == 0
+    assert calls == ["custom-x", (1000, "Mine"), (1000, "custom-x")]
+    assert cli.main(["profile", "set", "notanumber", "custom-x"]) == 2

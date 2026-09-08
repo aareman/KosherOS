@@ -717,10 +717,18 @@ class Daemon:
         preset = profiles.from_user(user, label, description)
         if preset.key in profiles.BY_KEY:
             raise PolicyError(f"'{label}' is a built-in profile; pick another name")
+        previous = list(self.policy.custom_profiles)
         self.policy.custom_profiles = [
-            c for c in self.policy.custom_profiles if c.get("key") != preset.key
+            c for c in previous if c.get("key") != preset.key
         ] + [profiles.to_dict(preset)]
-        self._save_only()
+        try:
+            self._save_only()
+        except Exception:
+            # Never leave memory ahead of disk: a failed save (schema,
+            # disk) must not make the daemon believe in a preset the
+            # policy file does not hold.
+            self.policy.custom_profiles = previous
+            raise
         log.info("saved preset %s from uid %d", preset.key, uid)
         return GLib.Variant("(s)", (preset.key,))
 
@@ -729,12 +737,16 @@ class Daemon:
 
         if not key.startswith(profiles.CUSTOM_PREFIX):
             raise PolicyError("built-in profiles cannot be deleted")
-        before = len(self.policy.custom_profiles)
-        self.policy.custom_profiles = [
-            c for c in self.policy.custom_profiles if c.get("key") != key]
-        if len(self.policy.custom_profiles) == before:
+        previous = list(self.policy.custom_profiles)
+        remaining = [c for c in previous if c.get("key") != key]
+        if len(remaining) == len(previous):
             raise PolicyError(f"no preset {key!r}")
-        self._save_only()
+        self.policy.custom_profiles = remaining
+        try:
+            self._save_only()
+        except Exception:
+            self.policy.custom_profiles = previous
+            raise
         return None
 
     def _save_only(self) -> None:

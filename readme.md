@@ -73,7 +73,7 @@ locked down when the user has sudo.
 1. ✅ Filter core: kosherd, per-user nftables enforcement, dnsmasq whitelist sets, kosherctl
 2. ✅ Bootc OS image (builds, lint-clean, boots to GNOME) — CI publish + signing still pending
 3. ✅ Admin app (GTK4) + KosherOS Store: approved-app allowlist over upstream Flathub, installs performed by kosherd with live progress
-4. ✅ Branding: KosherOS identity, boot splash, login screen, wallpaper — see [docs/branding.md](docs/branding.md); real logo artwork still to come
+4. ✅ Branding: KosherOS identity, boot splash, login screen, the real wallpaper — see [docs/branding.md](docs/branding.md); real logo artwork still to come. ✅ **Desktop layouts** per account — classic (taskbar, for everyone), tiling (PaperWM) and advanced (a niri + Noctalia session); see [docs/desktop.md](docs/desktop.md). Not yet seen on a booted machine
 5. ✅ Installable ISO (`just iso`) + first-boot wizard (admin account, guardian, boot password, firmware checklist)
 6. ✅ Portal: signed policy sync, signed filter-list updates and a signed
    catalogue manifest (`portal/`) — remote-support channel and web UI still

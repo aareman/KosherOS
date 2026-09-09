@@ -1,7 +1,9 @@
 # Kosher Linux — Architecture
 
 A family-friendly, filtered Linux distribution: Fedora bootc/ostree immutable
-base, GNOME desktop, per-user filter modes, and administration without root.
+base, GNOME desktop (three per-account layouts — see
+[desktop.md](desktop.md)), per-user filter modes, and administration without
+root.
 
 ## The core idea: admin without root
 

@@ -8,11 +8,18 @@ Fedora references don't need scrubbing; only primary branding changes.
 is real artwork (`branding/wallpaper.png`, 4978×3340, light sepia — the
 reason the desktop, greeter and Noctalia all default to the light scheme;
 its GIMP source `wallpaper.xcf` stays in the repo and out of the image).
-The logomark in `branding/kosheros-logo.svg` (256×256 viewBox) is still a
-placeholder; replacing that file re-brands the boot splash, login screen and
-the classic desktop's start button on the next build — no other changes
-needed. `wallpaper.svg` is the earlier placeholder gradient, still
-installed for anything pointing at it.
+The logo is `branding/logo.png` (1316×1088 with alpha, source `logo.xcf`);
+the Containerfile scales it to 256 px for Plymouth and the classic
+desktop's start button and to 64 px for the login screen, fitted in a
+square with transparent padding. Replacing that file re-brands all three on
+the next build. `kosheros-logo.svg` and `wallpaper.svg` are the earlier
+placeholders, kept in the repo but no longer drawn anywhere except the
+SVG wallpaper copy installed for anything still pointing at it.
+
+Worth checking on a booted machine: the logo is a light, low-contrast
+image, so at 64 px on the light login screen and at 48 px on the taskbar it
+may read as a faint blob. If so, a bolder mark (a dark outline or a solid
+version) for the small sizes is the fix — a second file, not a redesign.
 
 ## Surfaces, boot → desktop (in user-visible order)
 

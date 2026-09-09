@@ -157,16 +157,28 @@ RUN . /usr/lib/os-release \
 
 # --- Branding: boot splash, login screen, wallpaper, GRUB --------------------
 COPY branding/ /usr/share/kosher/branding/
+# The logo is real artwork (branding/logo.png, a PNG with alpha), so the
+# rasters for Plymouth, GDM and the classic desktop's start button are
+# scaled from it — fitted inside a square, aspect kept, transparent padding
+# — rather than rendered from the old placeholder SVG. Pillow is already in
+# the image for the picture filter. The plymouth theme directory is shipped
+# by the COPY above, so the first target's directory exists.
+RUN mkdir -p /usr/share/pixmaps && python3 - <<'PYEOF'
+from PIL import Image
+src = Image.open("/usr/share/kosher/branding/logo.png").convert("RGBA")
+for size, out in ((256, "/usr/share/plymouth/themes/kosheros/logo.png"),
+                  (256, "/usr/share/pixmaps/kosheros-logo.png"),
+                  # GDM draws the logo at native size, so the login screen
+                  # gets a small one — a big logo overlaps the account hints.
+                  (64, "/usr/share/pixmaps/kosheros-logo-login.png")):
+    im = src.copy()
+    im.thumbnail((size, size), Image.LANCZOS)
+    canvas = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+    canvas.paste(im, ((size - im.width) // 2, (size - im.height) // 2))
+    canvas.save(out)
+    print("logo", size, out)
+PYEOF
 RUN true \
-    # logo raster for plymouth + GDM
-    && rsvg-convert -w 256 -h 256 /usr/share/kosher/branding/kosheros-logo.svg \
-         -o /usr/share/plymouth/themes/kosheros/logo.png \
-    && install -D -m644 /usr/share/plymouth/themes/kosheros/logo.png \
-         /usr/share/pixmaps/kosheros-logo.png \
-    # GDM draws the logo at native size, so ship a small one for the login
-    # screen — a big logo overlaps the account hints.
-    && rsvg-convert -w 64 -h 64 /usr/share/kosher/branding/kosheros-logo.svg \
-         -o /usr/share/pixmaps/kosheros-logo-login.png \
     # The wallpaper is the real artwork (PNG); the SVG is the older
     # placeholder gradient, kept for anything still pointing at it. The
     # GIMP source travels in the repo, not in the image.

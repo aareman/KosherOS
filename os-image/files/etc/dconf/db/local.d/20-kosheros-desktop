@@ -20,8 +20,9 @@ allow-extension-installation=false
 # GNOME opens the Activities overview on an empty session; a person who
 # just signed in should see their desktop, not a search box.
 hide-overview-on-startup=true
-# The start button is the KosherOS mark.
-show-apps-icon-file='/usr/share/kosher/branding/kosheros-logo.svg'
+# The start button is the KosherOS mark (scaled from branding/logo.png by
+# the Containerfile).
+show-apps-icon-file='/usr/share/pixmaps/kosheros-logo.png'
 show-apps-icon-side-padding=10
 # Group windows of one app under one icon and cycle them on click, the
 # way the Windows taskbar does; previews on hover so a group is legible.

@@ -241,9 +241,9 @@ def test_the_machine_wide_default_is_the_classic_layout():
 def test_the_start_button_is_the_kosheros_mark():
     cp = _dconf(DESKTOP_DCONF)
     icon = cp["org/gnome/shell/extensions/dash-to-panel"]["show-apps-icon-file"].strip("'")
-    # Shipped by the branding COPY in the Containerfile.
-    assert icon.startswith("/usr/share/kosher/branding/")
-    assert (ROOT / "branding" / Path(icon).name).exists()
+    # Produced by the Containerfile's branding step from the real logo.
+    assert icon in CONTAINERFILE
+    assert (ROOT / "branding/logo.png").exists()
 
 
 def test_the_keys_the_helper_writes_are_not_locked():

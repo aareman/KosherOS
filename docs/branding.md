@@ -8,18 +8,27 @@ Fedora references don't need scrubbing; only primary branding changes.
 is real artwork (`branding/wallpaper.png`, 4978×3340, light sepia — the
 reason the desktop, greeter and Noctalia all default to the light scheme;
 its GIMP source `wallpaper.xcf` stays in the repo and out of the image).
-The logo is `branding/logo.png` (1316×1088 with alpha, source `logo.xcf`);
-the Containerfile scales it to 256 px for Plymouth and the classic
-desktop's start button and to 64 px for the login screen, fitted in a
-square with transparent padding. Replacing that file re-brands all three on
-the next build. `kosheros-logo.svg` and `wallpaper.svg` are the earlier
-placeholders, kept in the repo but no longer drawn anywhere except the
-SVG wallpaper copy installed for anything still pointing at it.
+The logo is `branding/logo.png` (1316×1088 with alpha, source `logo.xcf`).
+`branding/rasters.py`, run at image build, makes every raster from the two
+artwork files:
 
-Worth checking on a booted machine: the logo is a light, low-contrast
-image, so at 64 px on the light login screen and at 48 px on the taskbar it
-may read as a faint blob. If so, a bolder mark (a dark outline or a solid
-version) for the small sizes is the fix — a second file, not a redesign.
+- the boot-splash logo and the classic desktop's start button (256 px,
+  fitted in a square);
+- the **login-screen lockup**: the logo with "KosherOS" set beside it in an
+  italic serif (Noto Serif in the image), because GDM's logo key is one
+  image drawn at native size and the ellipse alone read as a faint blob;
+- the wallpaper plus a **crop per screen shape** (16:9, 16:10, 3:2, 4:3,
+  5:4, 21:9), each anchored top-left so the wordmark painted into the
+  corner survives, and `kosheros.xml`, which lists them so gnome-bg picks
+  the one matching the screen. GNOME's zoom on the single 3:2 picture
+  cropped from the centre and cut the word off on 16:9 and 4:3 screens.
+
+Replacing either artwork file re-brands everything on the next build. If
+the wallpaper is ever repainted, a wordmark kept ~10% in from every edge
+would need none of the cropping care. `kosheros-logo.svg` and
+`wallpaper.svg` are the earlier placeholders, kept in the repo but no longer
+drawn anywhere except the SVG wallpaper copy installed for anything still
+pointing at it.
 
 ## Surfaces, boot → desktop (in user-visible order)
 

@@ -1,12 +1,16 @@
 # KosherOS desktop branding defaults (dconf; see also 10-kosheros-locks).
+# The XML, not the PNG: it lists a crop per screen shape, each keeping the
+# wordmark in the top-left corner, and gnome-bg picks the one that matches
+# the screen. "zoom" on the single 3:2 picture cropped from the centre and
+# cut the word off on 16:9 and 4:3 screens. See branding/rasters.py.
 [org/gnome/desktop/background]
-picture-uri='file:///usr/share/backgrounds/kosheros/kosheros.png'
-picture-uri-dark='file:///usr/share/backgrounds/kosheros/kosheros.png'
+picture-uri='file:///usr/share/backgrounds/kosheros/kosheros.xml'
+picture-uri-dark='file:///usr/share/backgrounds/kosheros/kosheros.xml'
 picture-options='zoom'
 primary-color='#0b1a33'
 
 [org/gnome/desktop/screensaver]
-picture-uri='file:///usr/share/backgrounds/kosheros/kosheros.png'
+picture-uri='file:///usr/share/backgrounds/kosheros/kosheros.xml'
 picture-options='zoom'
 primary-color='#0b1a33'
 

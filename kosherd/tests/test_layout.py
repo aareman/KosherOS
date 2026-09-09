@@ -241,8 +241,8 @@ def test_the_machine_wide_default_is_the_classic_layout():
 def test_the_start_button_is_the_kosheros_mark():
     cp = _dconf(DESKTOP_DCONF)
     icon = cp["org/gnome/shell/extensions/dash-to-panel"]["show-apps-icon-file"].strip("'")
-    # Produced by the Containerfile's branding step from the real logo.
-    assert icon in CONTAINERFILE
+    # Produced at build by branding/rasters.py from the real logo.
+    assert icon.lstrip("/") in (ROOT / "branding/rasters.py").read_text()
     assert (ROOT / "branding/logo.png").exists()
 
 
@@ -334,7 +334,10 @@ def test_the_noctalia_seed_parses_and_turns_the_polkit_agent_on():
 
 def test_the_wallpaper_directory_gets_a_raster_copy():
     # Noctalia is pointed at the directory; a PNG is what every shell draws.
-    assert "/usr/share/backgrounds/kosheros/kosheros.png" in CONTAINERFILE
+    # The build runs branding/rasters.py, which writes it there.
+    assert "python3 /usr/share/kosher/branding/rasters.py" in CONTAINERFILE
+    rasters = (ROOT / "branding/rasters.py").read_text()
+    assert "usr/share/backgrounds/kosheros/kosheros.png" in rasters
 
 
 def test_the_dconf_keyfile_parses():

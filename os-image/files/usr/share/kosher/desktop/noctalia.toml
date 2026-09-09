@@ -22,7 +22,6 @@ mode = "light"
 [wallpaper]
 enabled = true
 directory = "/usr/share/backgrounds/kosheros"
-fill_mode = "crop"
 
 [lockscreen]
 enabled = true

@@ -383,9 +383,14 @@ class Window(Adw.ApplicationWindow):
         self.next.set_label({"welcome": "Get Started", "admin": "Create Account",
                              "protect": "Continue", "firmware": "Finish"}[name])
         self._revalidate()
-        # Put the keyboard where the person will type next.
+        # Put the keyboard where the person will type next — and on the
+        # welcome page, on the button, so Enter starts the wizard: there is
+        # nothing to type there, and a person who reads the screen and
+        # presses Enter should not find nothing happens.
         if name == "admin":
             self.full_name.grab_focus()
+        elif name == "welcome":
+            self.next.grab_focus()
 
     def _back(self) -> None:
         name = self.stack.get_visible_child_name()

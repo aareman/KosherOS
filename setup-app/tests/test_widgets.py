@@ -278,3 +278,12 @@ def test_shift_tab_from_the_confirm_field_is_left_alone():
     handled = [k.emit("key-pressed", Gdk.KEY_Tab, 23,
                       Gdk.ModifierType.SHIFT_MASK) for k in keys]
     assert not any(handled), "Shift+Tab must keep its normal behaviour"
+
+
+def test_enter_on_the_welcome_page_starts_the_wizard():
+    # Nothing to type on the first page, so the keyboard belongs on the
+    # button: a person who reads the screen and presses Enter must not find
+    # that nothing happens.
+    win = window()
+    assert page(win) == "welcome"
+    assert win.get_focus() is win.next

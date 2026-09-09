@@ -35,8 +35,10 @@ MARGIN = 0.6
 # handful of pixels first throws the shape away entirely, and costs less
 # than the blur it replaces because the blur then runs on a thumbnail.
 FROST_CELLS = 6
-# How much the cover is pulled toward the region's own average colour,
-# which flattens what contrast survives without stamping a flat block.
+# How much the cover is pulled toward a flat grey of the region's own
+# lightness, which flattens what contrast survives without stamping a flat
+# block. Grey, not the region's colour: the average colour of a figure is
+# skin tone, and a cover in skin tone reads as a pink blob.
 FLATTEN = 0.35
 # Noise under the blur, so the cover cannot be undone by deconvolution.
 NOISE = 0.10
@@ -108,8 +110,13 @@ def cover(image_bytes: bytes, regions, style: str = FROST) -> bytes | None:
                     Image.Resampling.BOX)
                 frosted = small.resize((pw, ph), Image.Resampling.BICUBIC)
                 frosted = frosted.filter(ImageFilter.GaussianBlur(max(8, min(pw, ph) // 6)))
-                mean = tuple(int(v) for v in ImageStat.Stat(patch.convert("RGB")).mean)
-                flat = Image.new("RGB", (pw, ph), mean).convert(frosted.mode)
+                # Neutral, not pink: a figure's average colour is skin
+                # tone, and a cover in skin tone reads as a pink blob. Take
+                # the colour out (keep the brightness) and flatten toward a
+                # grey of the region's own lightness instead.
+                frosted = frosted.convert("L").convert(frosted.mode)
+                lightness = int(ImageStat.Stat(patch.convert("L")).mean[0])
+                flat = Image.new("L", (pw, ph), lightness).convert(frosted.mode)
                 covered = Image.blend(frosted, flat, FLATTEN)
                 noise = Image.frombytes("L", (pw, ph),
                                         os.urandom(pw * ph)).convert(covered.mode)

@@ -107,3 +107,19 @@ def test_the_cover_is_not_slow():
     started = time.monotonic()
     imageedit.cover(src, [(200, 200, 500, 700)])
     assert time.monotonic() - started < 1.5, "a cover must not cost more than a detection"
+
+
+def test_the_frost_is_neutral_not_skin_toned():
+    # A figure's average colour is skin tone, and a cover pulled toward it
+    # read as a pink blob. The cover must come out grey: low saturation
+    # everywhere inside the region, whatever colour the region was.
+    im = Image.new("RGB", (400, 400), (10, 200, 10))
+    for x in range(100, 300):
+        for y in range(80, 360):
+            im.putpixel((x, y), (230, 160, 140))  # a warm pink skin tone
+    out = io.BytesIO(); im.save(out, "PNG")
+    covered = Image.open(io.BytesIO(imageedit.cover(out.getvalue(), [(120, 100, 160, 240)]))).convert("RGB")
+    for x in range(150, 250, 10):
+        for y in range(150, 300, 10):
+            r, g, b = covered.getpixel((x, y))
+            assert max(r, g, b) - min(r, g, b) < 24, (x, y, (r, g, b))

@@ -45,7 +45,7 @@ CHANGES = ["SetFilterMode", "SetWhitelist", "SetUrlRules", "CreateUser",
            "AdoptUser", "RemoveUser", "RemoveApp", "ApproveApp",
            "UnapproveApp", "SetUserApps", "SetUserCanInstall", "ApplyUpdate",
            "SetCaptiveMode", "SetGuardianPassword", "DisableGuardian",
-           "SetGuestConfig", "Enrol", "Unenrol", "SetLayout"]
+           "SetGuestConfig", "Enrol", "Unenrol", "SetLayout", "SetCoverStyle"]
 
 
 @pytest.mark.parametrize("method", READS + CHANGES)

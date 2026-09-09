@@ -58,6 +58,21 @@ MEDIA_LEVEL_LABELS = {
 }
 DEFAULT_MEDIA_LEVEL = "none"
 
+# How a picture that is kept but partly hidden gets covered.
+#   frost  the detected figure is frosted: shrunk to a few cells, smoothed
+#          back, flattened toward its own colour — the shape is gone, the
+#          page keeps its layout
+#   skin   skin-toned pixels inside the detected figure are painted a solid
+#          colour through an expanded mask; clothing and background stay.
+#          Falls back to frost where the skin gate finds nothing to paint,
+#          since a gate tuned on colour does not see every skin tone
+COVER_STYLES = ("frost", "skin")
+COVER_STYLE_LABELS = {
+    "frost": "Frost the figure",
+    "skin": "Paint over skin",
+}
+DEFAULT_COVER_STYLE = "frost"
+
 # YouTube is enough of the web on its own to deserve its own settings.
 YOUTUBE_CATEGORIES = {
     "1": "Film & Animation", "2": "Autos & Vehicles", "10": "Music",
@@ -132,6 +147,7 @@ class UserPolicy:
     youtube: dict = field(default_factory=dict)
     language_filter: str = "off"
     layout: str = DEFAULT_LAYOUT
+    cover_style: str = DEFAULT_COVER_STYLE
 
     def to_dict(self) -> dict:
         d: dict = {"uid": self.uid, "username": self.username, "mode": self.mode}
@@ -155,6 +171,8 @@ class UserPolicy:
             d["can_install_apps"] = False
         if self.layout != DEFAULT_LAYOUT:
             d["layout"] = self.layout
+        if self.cover_style != DEFAULT_COVER_STYLE:
+            d["cover_style"] = self.cover_style
         return d
 
 
@@ -267,6 +285,7 @@ class Policy:
                     youtube=dict(u.get("youtube", {})),
                     language_filter=u.get("language_filter", "off"),
                     layout=u.get("layout", DEFAULT_LAYOUT),
+                    cover_style=u.get("cover_style", DEFAULT_COVER_STYLE),
                 )
                 for u in doc["users"]
             ],

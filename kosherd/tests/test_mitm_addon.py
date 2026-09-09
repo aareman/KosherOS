@@ -1517,3 +1517,33 @@ def test_hidden_pictures_drop_the_length_header(addon):
     asyncio.run(filt.response(flow))
     assert flow.response.content == addon.BLANK_PNG
     assert "content-length" not in flow.response.headers
+
+
+# -- the cover style travels with the account ---------------------------------
+
+def test_the_proxy_reads_the_cover_style_and_falls_closed_to_frost(addon, tmp_path):
+    rules = tmp_path / "rules.json"
+    rules.write_text(json.dumps({"1001": {"port": 30001, "rules": [], "cover_style": "skin"},
+                                 "1002": {"port": 30002, "rules": []}}))
+    cache = addon.PolicyCache(rules)
+    assert cache.cover_style_for(1001) == "skin"
+    assert cache.cover_style_for(1002) == "frost"
+    assert cache.cover_style_for(4242) == "frost", "the unknown-uid floor"
+
+
+def test_the_skin_style_does_not_hide_a_dominant_figure_whole(addon):
+    from kosherd.vision import NSFW, ImageVerdict
+
+    body = _real_photo()
+    flow = _hflow("image/jpeg", body=body)
+    filt = _filt(addon, media="nsfw",
+                 vision=_async_vision(ImageVerdict(NSFW, ((20, 20, 260, 260),), True)))
+    filt.policy = type("P", (), {
+        "uid_for_listener_port": staticmethod(lambda port: None),
+        "media_level_for": staticmethod(lambda uid: "nsfw"),
+        "blocked_categories_for": staticmethod(lambda uid: []),
+        "cover_style_for": staticmethod(lambda uid: "skin"),
+    })()
+    asyncio.run(filt.response(flow))
+    assert flow.response.content != addon.BLANK_PNG, "painted, not hidden whole"
+    assert flow.response.headers["x-kosheros"] == "image-covered=nsfw"

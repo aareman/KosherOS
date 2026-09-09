@@ -66,6 +66,13 @@ INERT = {
     # them. Listed so the matrix says so rather than being silent about it.
     "layout": {mode: "a desktop preference applied at sign-in, not a filter"
                for mode in MODES},
+    # Read by the proxy alone, which only filtered-mode traffic reaches.
+    "cover_style": {
+        "none": "no traffic leaves at all",
+        "whitelist": "pictures never reach the proxy that covers them",
+        "dnsfilter": "pictures never reach the proxy that covers them",
+        "unfiltered": "an unfiltered account enforces nothing at all",
+    },
 }
 
 EVERYTHING = {
@@ -76,6 +83,7 @@ EVERYTHING = {
     "language_filter": "substitute",
     "youtube": {"restrict": "strict", "blocked_categories": ["24"]},
     "layout": "tiling",
+    "cover_style": "skin",
 }
 
 
@@ -96,7 +104,7 @@ def rendered(mode: str) -> str:
                 or u.youtube or u.language_filter != "off"):
             per_user[str(u.uid)] = {
                 "rules": u.rules, "blocked_categories": u.blocked_categories,
-                "media_level": u.media_level,
+                "media_level": u.media_level, "cover_style": u.cover_style,
                 "language_filter": u.language_filter, "youtube": u.youtube}
     parts.append(json.dumps(per_user))
     return "\n".join(parts)
@@ -111,6 +119,7 @@ EVIDENCE = {
     "language_filter": "substitute",
     "youtube": '"restrict"',
     "layout": "tiling",
+    "cover_style": '"skin"',
 }
 
 

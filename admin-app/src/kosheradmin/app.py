@@ -17,7 +17,7 @@ from gi.repository import Adw, Gio, GLib, Gtk  # noqa: E402
 
 from kosherd import profiles as profiles_mod  # noqa: E402
 from kosherd.client import DaemonClient  # noqa: E402
-from kosherd.policy import LAYOUTS, MEDIA_LEVELS, MODES, YOUTUBE_CATEGORIES  # noqa: E402
+from kosherd.policy import COVER_STYLES, LAYOUTS, MEDIA_LEVELS, MODES, YOUTUBE_CATEGORIES  # noqa: E402
 
 APP_ID = "org.kosherlinux.Admin"
 
@@ -61,6 +61,20 @@ MEDIA_HINTS = {
            "judgement call, which is why it is the only setting that is "
            "right every time.",
 }
+
+# How a picture that is kept but partly hidden gets covered.
+COVER_LABELS = {
+    "frost": "Frost the figure",
+    "skin": "Paint over skin",
+}
+COVER_HINTS = {
+    "frost": "The person is frosted out: the shape is gone, the rest of the "
+             "picture and the page stay. The default.",
+    "skin": "Skin inside the picture is painted a solid grey, with a margin; "
+            "clothing and background stay. Where the colour check finds no "
+            "skin to paint, the figure is frosted instead.",
+}
+COVER_ORDER = ("frost", "skin")
 
 LANGUAGE_LABELS = {
     "off": "Leave bad language alone",
@@ -1685,6 +1699,29 @@ class UserDetailPage(Adw.NavigationPage):
                 "“Filtered internet” can see them. This still decides "
                 "whether image search results are shown.")
         group.add(media_row)
+
+        cover_row = Adw.ComboRow(
+            title="Covered pictures look like",
+            model=Gtk.StringList.new([COVER_LABELS[k] for k in COVER_ORDER]))
+        style = user.get("cover_style", "frost")
+        cover_row.set_selected(COVER_ORDER.index(style) if style in COVER_ORDER else 0)
+        cover_row.set_subtitle(COVER_HINTS.get(style, ""))
+        cover_row.set_subtitle_lines(4)
+
+        def on_cover(combo, _p):
+            new_style = COVER_ORDER[combo.get_selected()]
+            if new_style == user.get("cover_style", "frost"):
+                return
+            self.win.call(
+                lambda: self.win.client.set_cover_style(user["uid"], new_style),
+                done_msg=f"Covered pictures: {COVER_LABELS[new_style].lower()}")
+
+        cover_row.connect("notify::selected", on_cover)
+        if user["mode"] in ("none", "unfiltered") or level in ("none", "all"):
+            cover_row.set_sensitive(False)
+            cover_row.set_subtitle("Only matters when pictures are checked and "
+                                   "partly covered.")
+        group.add(cover_row)
 
         language_row = Adw.ComboRow(
             title="Bad language",

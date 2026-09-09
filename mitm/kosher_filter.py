@@ -132,7 +132,8 @@ def _fail_closed_entry() -> dict:
     except Exception:  # noqa: BLE001 - categories module unavailable
         blocked = ["adult", "gambling", "dating", "malware", "proxy"]
     return {"rules": [], "blocked_categories": blocked,
-            "media_level": "immodest", "language_filter": "substitute",
+            "media_level": "immodest", "cover_style": "frost",
+            "language_filter": "substitute",
             "youtube": {"restrict": "strict"}}
 
 
@@ -151,6 +152,7 @@ class PolicyCache:
         self._rules: dict[int, list] = {}
         self._blocked: dict[int, list] = {}
         self._media: dict[int, str] = {}
+        self._cover: dict[int, str] = {}
         self._language: dict[int, str] = {}
         self._youtube: dict[int, dict] = {}
         self._fallback = _fail_closed_entry()
@@ -188,6 +190,11 @@ class PolicyCache:
             return self._fallback["media_level"]
         return self._media.get(uid, "none")
 
+    def cover_style_for(self, uid: int | None) -> str:
+        if not self._is_known(uid):
+            return self._fallback["cover_style"]
+        return self._cover.get(uid, "frost")
+
     def language_filter_for(self, uid: int | None) -> str:
         if not self._is_known(uid):
             return self._fallback["language_filter"]
@@ -214,6 +221,7 @@ class PolicyCache:
         rules: dict[int, list] = {}
         blocked: dict[int, list] = {}
         media: dict[int, str] = {}
+        cover: dict[int, str] = {}
         language: dict[int, str] = {}
         youtube: dict[int, dict] = {}
         by_port: dict[int, int] = {}
@@ -228,6 +236,7 @@ class PolicyCache:
                 rules[uid] = parse_rules(entry.get("rules", []))
                 blocked[uid] = list(entry.get("blocked_categories", []))
                 media[uid] = entry.get("media_level", "none")
+                cover[uid] = entry.get("cover_style", "frost")
                 language[uid] = entry.get("language_filter", "off")
                 youtube[uid] = dict(entry.get("youtube", {}))
             except Exception as e:  # noqa: BLE001 - one bad entry must not break all
@@ -235,6 +244,7 @@ class PolicyCache:
         self._rules = rules
         self._blocked = blocked
         self._media = media
+        self._cover = cover
         self._language = language
         self._youtube = youtube
         self._known = set(rules)
@@ -1040,20 +1050,27 @@ class KosherFilter:
             return True
         # When the cover would take most of the picture, a frosted rectangle
         # in a frame of background helps nobody and costs a decode, a blur
-        # and a re-encode. Hide it whole, instantly.
-        if imageedit_mod.dominant(body, verdict.regions):
+        # and a re-encode. Hide it whole, instantly. (Not for the skin
+        # style, whose whole point is to leave the rest of the figure.)
+        if self._style_for(uid) == imageedit_mod.FROST and \
+                imageedit_mod.dominant(body, verdict.regions):
             self._blank_image(flow)
             return True
         return False
 
-    def _cover(self, body: bytes, verdict) -> bytes | None:
+    def _style_for(self, uid: int) -> str:
+        """How this account wants a kept picture covered (see imageedit)."""
+        getter = getattr(self.policy, "cover_style_for", None)
+        return getter(uid) if getter else imageedit_mod.FROST
+
+    def _cover(self, body: bytes, verdict, style: str = imageedit_mod.FROST) -> bytes | None:
         """The covered picture, from the cache of recent covers when the
         same picture came past a moment ago. CPU work: run on a worker."""
-        cache_key = vision_mod.digest(body) + "|" + ",".join(
+        cache_key = vision_mod.digest(body) + "|" + style + "|" + ",".join(
             "-".join(str(v) for v in box) for box in verdict.regions)
         covered = self.covers.get(cache_key)
         if covered is None:
-            covered = imageedit_mod.cover(body, verdict.regions)
+            covered = imageedit_mod.cover(body, verdict.regions, style=style)
             if covered is not None:
                 self.covers.put(cache_key, covered)
         return covered
@@ -1080,7 +1097,7 @@ class KosherFilter:
         verdict = self.vision.verdict(body)
         if self._image_settle(flow, uid, level, verdict):
             return
-        self._apply_cover(flow, verdict, self._cover(body, verdict))
+        self._apply_cover(flow, verdict, self._cover(body, verdict, self._style_for(uid)))
 
     async def _filter_image_async(self, flow: http.HTTPFlow, uid: int) -> None:
         """The picture path as the proxy runs it: the model and the cover
@@ -1092,7 +1109,8 @@ class KosherFilter:
         verdict = await self.vision.verdict_async(body)
         if self._image_settle(flow, uid, level, verdict):
             return
-        covered = await self.vision.run_async(self._cover, body, verdict)
+        covered = await self.vision.run_async(self._cover, body, verdict,
+                                              self._style_for(uid))
         self._apply_cover(flow, verdict, covered)
 
     # ---- video -------------------------------------------------------------

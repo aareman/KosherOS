@@ -69,6 +69,10 @@ ACTIONS = {
     # per-uid at the network layer whatever draws the windows.
     "SetLayout": ACTION_MANAGE_USERS,
     "GetMyLayout": ACTION_READ_OWN,
+    # How a covered picture looks. Cosmetic — the media level decides what
+    # is judged and cannot be loosened here — so an account-management
+    # action rather than a filter one, and no guardian gate.
+    "SetCoverStyle": ACTION_MANAGE_USERS,
     "ApproveRequest": ACTION_MANAGE_FILTER,
     "DismissRequest": ACTION_MANAGE_USERS,
     "ListRequests": ACTION_READ_CONFIG,

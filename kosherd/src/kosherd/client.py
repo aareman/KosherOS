@@ -123,6 +123,9 @@ class DaemonClient:
     def set_layout(self, uid: int, layout: str) -> None:
         self._call("Profiles", "SetLayout", "(is)", uid, layout)
 
+    def set_cover_style(self, uid: int, style: str) -> None:
+        self._call("Profiles", "SetCoverStyle", "(is)", uid, style)
+
     def my_layout(self) -> str:
         """The calling user's own desktop layout (any active local user)."""
         return self._call("Profiles", "GetMyLayout")[0]

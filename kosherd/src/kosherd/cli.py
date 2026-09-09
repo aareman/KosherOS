@@ -291,6 +291,15 @@ def cmd_layout(args) -> int:
     return 0
 
 
+def cmd_cover(args) -> int:
+    from .policy import COVER_STYLE_LABELS
+
+    c = _client()
+    c.set_cover_style(args.uid, args.style)
+    print(f"uid {args.uid}: covered pictures -> {COVER_STYLE_LABELS[args.style].lower()}")
+    return 0
+
+
 def cmd_language(args) -> int:
     c = _client()
     c.set_language_filter(args.uid, args.setting, _guardian_pw(args))
@@ -785,6 +794,11 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("setting", choices=["off", "substitute", "block"])
     s.add_argument("--guardian-password")
     s.set_defaults(func=cmd_language)
+
+    s = sub.add_parser("cover", help="how a user's covered pictures look")
+    s.add_argument("uid", type=int)
+    s.add_argument("style", choices=list(policy_mod.COVER_STYLES))
+    s.set_defaults(func=cmd_cover)
 
     s = sub.add_parser("layout", help="how a user's desktop is laid out")
     s.add_argument("uid", type=int)

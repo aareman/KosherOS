@@ -102,6 +102,10 @@ INTROSPECTION_XML = """
       <arg direction="in" type="i" name="uid"/>
       <arg direction="in" type="s" name="layout"/>
     </method>
+    <method name="SetCoverStyle">
+      <arg direction="in" type="i" name="uid"/>
+      <arg direction="in" type="s" name="style"/>
+    </method>
     <method name="GetMyLayout">
       <arg direction="out" type="s" name="layout"/>
     </method>
@@ -719,6 +723,21 @@ class Daemon:
             raise
         self._accounts_set_session(uid, layout)
         log.info("uid %d desktop layout -> %s", uid, layout)
+        return None
+
+    def impl_SetCoverStyle(self, uid: int, style: str):
+        """How a kept-but-partly-hidden picture is covered for this account.
+
+        Cosmetic — what is judged and when is the media level — so no
+        guardian gate; but the proxy reads it from the rendered rules, so
+        it is saved AND applied.
+        """
+        from .policy import COVER_STYLES
+
+        if style not in COVER_STYLES:
+            raise PolicyError(f"unknown cover style {style!r}")
+        self._managed(uid).cover_style = style
+        self._save_and_apply()
         return None
 
     def impl_GetMyLayout(self, _uid: int):

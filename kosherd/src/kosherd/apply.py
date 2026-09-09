@@ -80,6 +80,7 @@ def write_mitm_rules(policy: Policy) -> None:
             "rules": user.rules,
             "blocked_categories": user.blocked_categories,
             "media_level": user.media_level,
+            "cover_style": getattr(user, "cover_style", "frost"),
             "language_filter": getattr(user, "language_filter", "off"),
             "youtube": user.youtube,
         }

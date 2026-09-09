@@ -181,10 +181,10 @@ def test_only_inspected_users_rules_reach_the_proxy(tmp_path, monkeypatch):
     # whitelist user is not: nothing of theirs reaches the proxy.
     assert rules_written(tmp_path) == {
         "1001": {"port": 30000, "rules": block, "blocked_categories": [],
-                 "media_level": "none", "language_filter": "off",
+                 "media_level": "none", "cover_style": "frost", "language_filter": "off",
                  "youtube": {}},
         "1003": {"port": 30001, "rules": [], "blocked_categories": [],
-                 "media_level": "none", "language_filter": "off",
+                 "media_level": "none", "cover_style": "frost", "language_filter": "off",
                  "youtube": {}}}
     listen = (tmp_path / "mitm" / "listen.env").read_text()
     assert listen == ("MITM_MODES=--mode transparent@127.0.0.1:30000 "
@@ -258,7 +258,7 @@ def test_categories_alone_are_enough_to_reach_the_proxy(tmp_path, monkeypatch):
     write_mitm_rules(policy)
     assert rules_written(tmp_path) == {
         "1001": {"port": 30000, "rules": [], "blocked_categories": ["adult"],
-                 "media_level": "none", "language_filter": "off",
+                 "media_level": "none", "cover_style": "frost", "language_filter": "off",
                  "youtube": {}}}
 
 

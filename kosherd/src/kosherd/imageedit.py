@@ -46,13 +46,30 @@ NOISE = 0.10
 # and costs a decode, a blur and a re-encode.
 DOMINANT = 0.6
 
+# The two cover styles (policy.COVER_STYLES).
+FROST = "frost"
+SKIN = "skin"
+# The skin style paints skin-toned pixels inside the detected figure this
+# solid colour, through a mask grown by SKIN_EXPAND of the region's short
+# side so the edge of a limb does not show. The gate is the classic YCbCr
+# one, which is tuned on colour and does not see every skin tone equally;
+# where it finds less than SKIN_MINIMUM of the region to paint, the region
+# is frosted instead, so a person the gate cannot see is still covered.
+SKIN_FILL = (118, 118, 118)
+SKIN_EXPAND = 0.08
+SKIN_MINIMUM = 0.04
+# The mask is computed on a copy no larger than this on its long side: a
+# dilation over a full-size photo is slow, and a mask needs no detail.
+SKIN_MASK_MAX = 256
 
-def cover(image_bytes: bytes, regions) -> bytes | None:
+
+def cover(image_bytes: bytes, regions, style: str = FROST) -> bytes | None:
     """Return the image with `regions` covered, or None if it cannot be done.
 
-    None means the caller should fall back to hiding the whole picture:
-    silently returning the original would be the one failure mode that
-    matters.
+    `style` is FROST (the figure frosted) or SKIN (skin inside the figure
+    painted solid; see the constants above). None means the caller should
+    fall back to hiding the whole picture: silently returning the original
+    would be the one failure mode that matters.
     """
     if not regions:
         return None
@@ -74,6 +91,13 @@ def cover(image_bytes: bytes, regions) -> bytes | None:
                     continue
                 patch = image.crop((left, top, right, bottom))
                 pw, ph = patch.size
+                if style == SKIN:
+                    mask = skin_mask(patch)
+                    if mask is not None:
+                        fill = Image.new("RGB", (pw, ph), SKIN_FILL).convert(image.mode)
+                        image.paste(fill, (left, top), mask)
+                        continue
+                    # Nothing the gate could see: frost the region instead.
                 # Frost: down to a few cells and back up, then smooth the
                 # cell edges. All the shape information goes in the first
                 # step; the rest is making it sit quietly in the picture.
@@ -103,6 +127,39 @@ def cover(image_bytes: bytes, regions) -> bytes | None:
     except Exception:  # noqa: BLE001 - a picture we cannot edit gets hidden
         log.debug("could not cover regions", exc_info=True)
         return None
+
+
+def skin_mask(patch):
+    """A mask of the skin-toned pixels in `patch`, grown so a limb's edge is
+    inside it — or None when there is too little skin for a paint to be the
+    right cover (see SKIN_MINIMUM)."""
+    from PIL import Image, ImageChops, ImageFilter
+
+    pw, ph = patch.size
+    scale = min(1.0, SKIN_MASK_MAX / max(1, max(pw, ph)))
+    small = patch.convert("YCbCr")
+    if scale < 1.0:
+        small = small.resize((max(1, int(pw * scale)), max(1, int(ph * scale))),
+                             Image.Resampling.BILINEAR)
+    y, cb, cr = small.split()
+    gate = ImageChops.multiply(
+        ImageChops.multiply(y.point(lambda v: 255 if v > 60 else 0),
+                            cb.point(lambda v: 255 if 77 <= v <= 127 else 0)),
+        cr.point(lambda v: 255 if 133 <= v <= 173 else 0))
+    if not gate.getbbox():
+        return None
+    coverage = sum(1 for v in gate.getdata() if v) / max(1, gate.width * gate.height)
+    if coverage < SKIN_MINIMUM:
+        return None
+    # Expand: dilate by a fraction of the region's short side, at mask scale.
+    grow = max(3, int(min(gate.size) * SKIN_EXPAND)) | 1
+    grown = gate.filter(ImageFilter.MaxFilter(grow))
+    # Soften the staircase the dilation leaves, then harden it again.
+    grown = grown.filter(ImageFilter.GaussianBlur(1.5)).point(lambda v: 255 if v > 96 else 0)
+    if grown.size != (pw, ph):
+        grown = grown.resize((pw, ph), Image.Resampling.BILINEAR).point(
+            lambda v: 255 if v > 128 else 0)
+    return grown
 
 
 def encode(image, fmt: str) -> bytes:

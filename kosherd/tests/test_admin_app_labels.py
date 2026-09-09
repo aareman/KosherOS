@@ -13,7 +13,7 @@ from pathlib import Path
 import pytest
 
 from kosherd.language import MODES as LANGUAGE_MODES
-from kosherd.policy import LAYOUTS, MEDIA_LEVELS, MODES, YOUTUBE_CATEGORIES
+from kosherd.policy import COVER_STYLES, LAYOUTS, MEDIA_LEVELS, MODES, YOUTUBE_CATEGORIES
 
 APP = Path(__file__).parents[2] / "admin-app/src/kosheradmin/app.py"
 
@@ -58,6 +58,13 @@ def test_every_desktop_layout_has_a_label_and_a_hint(constants):
     # for almost everyone.
     assert set(constants["LAYOUT_ORDER"]) == set(LAYOUTS)
     assert constants["LAYOUT_ORDER"][0] == "classic"
+
+
+def test_every_cover_style_has_a_label_and_a_hint(constants):
+    assert set(constants["COVER_LABELS"]) == set(COVER_STYLES)
+    assert set(constants["COVER_HINTS"]) == set(COVER_STYLES)
+    assert set(constants["COVER_ORDER"]) == set(COVER_STYLES)
+    assert constants["COVER_ORDER"][0] == "frost", "the default comes first"
 
 
 def test_the_youtube_restricted_mode_choices_match_the_daemon(constants):

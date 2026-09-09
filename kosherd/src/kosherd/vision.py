@@ -493,6 +493,31 @@ class NudeNetDetector:
         return found
 
 
+# The scheduling priority (nice) detection threads run at. Linux applies
+# nice per thread, so the proxy's network handling keeps its priority and
+# only the model's arithmetic yields to the browser.
+WORKER_NICE = 15
+
+
+def default_workers() -> int:
+    """How many pictures to judge at once: one on a two-core machine, so a
+    core is always left for the browser; two on anything larger. A third
+    never helped — the detector already uses more than one thread."""
+    import os
+
+    cpus = os.cpu_count() or 2
+    return 1 if cpus <= 2 else 2
+
+
+def _lower_priority() -> None:
+    import os
+
+    try:
+        os.setpriority(os.PRIO_PROCESS, 0, WORKER_NICE)  # 0: this thread
+    except (AttributeError, OSError):
+        pass
+
+
 class ImageFilter:
     """Detector, cache and a deadline, wired together.
 
@@ -504,13 +529,13 @@ class ImageFilter:
     """
 
     def __init__(self, detector=None, cache: VerdictCache | None = None,
-                 timeout: float = DETECT_TIMEOUT, workers: int = 2,
+                 timeout: float = DETECT_TIMEOUT, workers: int | None = None,
                  slow_ms: float = SLOW_DETECT_MS):
         self.detector = detector if detector is not None else NudeNetDetector()
         self.cache = cache if cache is not None else VerdictCache()
         self.timeout = timeout
         self._pool = None
-        self._workers = workers
+        self._workers = workers if workers is not None else default_workers()
         self._slow_ms = slow_ms
         self._recent: list[float] = []
         self._said_slow = False
@@ -586,9 +611,13 @@ class ImageFilter:
             from concurrent.futures import ThreadPoolExecutor
 
             # Small on purpose: this runs beside the browser on a machine
-            # that may have two cores.
+            # that may have two cores — and at low priority, so when the
+            # two compete for a core the browser wins. The person feels a
+            # slow picture as a picture that arrives late; they feel a slow
+            # browser as a slow computer.
             self._pool = ThreadPoolExecutor(max_workers=self._workers,
-                                            thread_name_prefix="kosher-vision")
+                                            thread_name_prefix="kosher-vision",
+                                            initializer=_lower_priority)
         return self._pool
 
     def _prejudge(self, image_bytes: bytes):

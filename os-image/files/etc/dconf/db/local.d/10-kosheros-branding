@@ -1,12 +1,12 @@
 # KosherOS desktop branding defaults (dconf; see also 10-kosheros-locks).
 [org/gnome/desktop/background]
-picture-uri='file:///usr/share/backgrounds/kosheros/kosheros.svg'
-picture-uri-dark='file:///usr/share/backgrounds/kosheros/kosheros.svg'
+picture-uri='file:///usr/share/backgrounds/kosheros/kosheros.png'
+picture-uri-dark='file:///usr/share/backgrounds/kosheros/kosheros.png'
 picture-options='zoom'
 primary-color='#0b1a33'
 
 [org/gnome/desktop/screensaver]
-picture-uri='file:///usr/share/backgrounds/kosheros/kosheros.svg'
+picture-uri='file:///usr/share/backgrounds/kosheros/kosheros.png'
 picture-options='zoom'
 primary-color='#0b1a33'
 

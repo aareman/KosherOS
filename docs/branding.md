@@ -4,11 +4,15 @@ Primary brand: **KosherOS**. Secondary attribution: **powered by Fedora** —
 this matches Fedora's trademark policy for derivatives ("Fedora Remix"), so
 Fedora references don't need scrubbing; only primary branding changes.
 
-**Status:** the pipeline is built and wired into the image; the artwork in
-`branding/` is a placeholder logomark and wallpaper. Dropping real artwork
-into `branding/kosheros-logo.svg` (256×256 viewBox) and
-`branding/wallpaper.svg` re-brands every surface below on the next build —
-no other changes needed.
+**Status:** the pipeline is built and wired into the image. The wallpaper
+is real artwork (`branding/wallpaper.png`, 4978×3340, light sepia — the
+reason the desktop, greeter and Noctalia all default to the light scheme;
+its GIMP source `wallpaper.xcf` stays in the repo and out of the image).
+The logomark in `branding/kosheros-logo.svg` (256×256 viewBox) is still a
+placeholder; replacing that file re-brands the boot splash, login screen and
+the classic desktop's start button on the next build — no other changes
+needed. `wallpaper.svg` is the earlier placeholder gradient, still
+installed for anything pointing at it.
 
 ## Surfaces, boot → desktop (in user-visible order)
 
@@ -19,7 +23,7 @@ no other changes needed.
 | GRUB menu (mostly hidden) | ✅ `GRUB_DISTRIBUTOR="KosherOS"` | no |
 | Login screen | ✅ GDM logo + banner via locked dconf keys | real logo |
 | First-boot welcome wizard (stage 5) | our own GTK app — brand it from day one | logo + wordmark |
-| Desktop defaults | ✅ dconf: wallpaper (unlocked), dark scheme, favourites incl. the Store | real wallpaper |
+| Desktop defaults | ✅ dconf: wallpaper (unlocked), light scheme, favourites incl. the Store, classic taskbar layout (see [desktop.md](desktop.md)) | ✅ `branding/wallpaper.png` (source: `wallpaper.xcf`, kept out of the image) |
 | Admin app / Store | GTK/libadwaita app icons (stock icons today) | app icons |
 | ISO installer | Anaconda branding: product name/version via `.buildstamp`, and a `product.img` overlaying the logo, sidebar and CSS in the installer's Anaconda theme | logo + wordmark |
 | Portal web UI (stage 5) | shared asset set | logo + wordmark |

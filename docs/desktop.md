@@ -9,7 +9,7 @@ and it takes effect at that account's next sign-in.
 
 | layout | what it is | who it is for |
 |---|---|---|
-| `classic` (default) | GNOME with a taskbar along the bottom (Dash to Panel), a KosherOS start button, tray icons, minimise/maximise buttons, one workspace, no hot corner, no Activities overview at sign-in | almost everyone |
+| `classic` (default) | GNOME with a taskbar along the bottom (Dash to Panel), an **Apps** button (ArcMenu: the KosherOS mark plus the word, on a filled pill, opening a Windows-style menu with pinned apps, an all-apps list and search), tray icons, minimise/maximise buttons, one workspace, no hot corner, no Activities overview at sign-in | almost everyone |
 | `tiling` | GNOME as GNOME ships it, plus PaperWM's scrolling tiling; same lock screen, GNOME Settings, portals and accessibility | keyboard-driven power users who still want a supported desktop |
 | `advanced` | a separate login-screen session: the niri compositor with the Noctalia shell (bar, launcher, notifications, lock screen, control centre, polkit agent), configured by text files the user owns | people who already run a tiling compositor and want theirs |
 
@@ -85,6 +85,22 @@ have nowhere to appear) and the KosherOS wallpaper.
   GNOME; the GNOME portal and gnome-keyring come with the workstation
   group). `gnome-classic-session` is removed so the login screen offers
   exactly two sessions.
+- ArcMenu is not packaged by Fedora either and needs `glib-compile-resources`
+  and gettext to build, so a builder stage (`gnome-ext-build`, pinned by
+  `ARCMENU_REF`) builds it and only the result is copied in. Its schema
+  installs into the shared schema directory, which the build recompiles. A
+  picture alone did not tell anyone where the apps were, so the button says
+  "Apps"; if a build ships without ArcMenu, Dash to Panel's own apps button
+  with the KosherOS mark is the fallback.
+- **Hebrew out of the box.** Every account gets English first and Hebrew
+  second (`30-kosheros-input`), the login screen the same (`gdm.d`), and the
+  advanced session reads `us,il` from the system keymap in
+  `/etc/X11/xorg.conf.d/00-keyboard.conf` via systemd-localed. Super+Space
+  and Alt+Shift both switch; the indicator appears in the panel, and in
+  Noctalia's bar as the `keyboard_layout` widget. The Culmus family, Noto
+  Sans/Serif/Rashi Hebrew, Ezra SIL, Alef and Plex Sans Hebrew are
+  installed. A default, not a lock: adding Yiddish or Russian in Settings
+  sticks.
 - PaperWM is not packaged by Fedora, so a pinned release (`PAPERWM_REF`) is
   cloned into `/usr/share/gnome-shell/extensions/paperwm@paperwm.github.com`
   and its schema compiled in place. As a system extension under `/usr` no

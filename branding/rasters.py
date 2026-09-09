@@ -126,6 +126,11 @@ def build(src_dir: Path, out: Path) -> list[Path]:
     save(fitted(logo, 256), "usr/share/plymouth/themes/kosheros/logo.png")
     save(fitted(logo, 256), "usr/share/pixmaps/kosheros-logo.png")
     save(lockup(logo), "usr/share/pixmaps/kosheros-logo-login.png")
+    # The admin app's icon is the KosherOS mark: it is the one app that IS
+    # the product. Named by app id, which is how GNOME finds an app's icon.
+    for size in (48, 128, 256, 512):
+        save(fitted(logo, size),
+             f"usr/share/icons/hicolor/{size}x{size}/apps/org.kosherlinux.Admin.png")
 
     wall = Image.open(src_dir / "wallpaper.png").convert("RGB")
     save(wall, "usr/share/backgrounds/kosheros/kosheros.png")

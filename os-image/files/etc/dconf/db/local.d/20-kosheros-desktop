@@ -10,7 +10,7 @@
 # in kosherd/layout.py and must not be locked here.
 
 [org/gnome/shell]
-enabled-extensions=['dash-to-panel@jderose9.github.com', 'appindicatorsupport@rgcjonas.gmail.com']
+enabled-extensions=['dash-to-panel@jderose9.github.com', 'arcmenu@arcmenu.com', 'appindicatorsupport@rgcjonas.gmail.com']
 # Extensions come with the image. Shell code fetched from the internet is
 # not something a family computer needs, and a broken one takes the whole
 # desktop down with it. Locked: the same answer for every account.
@@ -20,14 +20,34 @@ allow-extension-installation=false
 # GNOME opens the Activities overview on an empty session; a person who
 # just signed in should see their desktop, not a search box.
 hide-overview-on-startup=true
-# The start button is the KosherOS mark (scaled from branding/logo.png by
-# the Containerfile).
+# The start button is ArcMenu's (below), which takes the place of this
+# one when both are enabled. Should ArcMenu be missing from a build, this
+# is the fallback: the KosherOS mark on Dash to Panel's own apps button.
 show-apps-icon-file='/usr/share/pixmaps/kosheros-logo.png'
 show-apps-icon-side-padding=10
 # Group windows of one app under one icon and cycle them on click, the
 # way the Windows taskbar does; previews on hover so a group is legible.
 group-apps=true
 show-window-previews=true
+
+[org/gnome/shell/extensions/arcmenu]
+# The start menu. A picture alone does not say "this is where the apps
+# are" to someone who has never seen it, so the button is the KosherOS
+# mark AND the word "Apps", on a filled pill so it stands out from the
+# taskbar's other icons. The Windows-style layout: pinned apps, an
+# all-apps list, search — what most people's hands already know.
+menu-button-appearance='Icon_Text'
+menu-button-text='Apps'
+menu-button-icon='/usr/share/pixmaps/kosheros-logo.png'
+menu-button-icon-size=24
+menu-button-padding=8
+menu-button-bg-color=(true, 'rgba(59,110,200,0.92)')
+menu-button-hover-bg-color=(true, 'rgba(79,130,220,1.0)')
+menu-button-fg-color=(true, 'rgb(255,255,255)')
+menu-button-border-radius=(true, 10)
+menu-layout='windows'
+hide-overview-on-startup=true
+show-activities-button=false
 
 [org/gnome/desktop/wm/preferences]
 button-layout='appmenu:minimize,maximize,close'

@@ -12,8 +12,10 @@ The logo is `branding/logo.png` (1316×1088 with alpha, source `logo.xcf`).
 `branding/rasters.py`, run at image build, makes every raster from the two
 artwork files:
 
-- the boot-splash logo and the classic desktop's start button (256 px,
-  fitted in a square);
+- the boot-splash logo and the classic desktop's Apps button (256 px,
+  fitted in a square), and the admin app's icon in hicolor at 48–512 px,
+  named `org.kosherlinux.Admin` — the one app that IS the product carries
+  the mark; the Store and Setup keep stock icons until they get their own;
 - the **login-screen lockup**: the logo with "KosherOS" set beside it in an
   italic serif (Noto Serif in the image), because GDM's logo key is one
   image drawn at native size and the ellipse alone read as a faint blob;
@@ -40,7 +42,7 @@ pointing at it.
 | Login screen | ✅ GDM logo + banner via locked dconf keys | real logo |
 | First-boot welcome wizard (stage 5) | our own GTK app — brand it from day one | logo + wordmark |
 | Desktop defaults | ✅ dconf: wallpaper (unlocked), light scheme, favourites incl. the Store, classic taskbar layout (see [desktop.md](desktop.md)) | ✅ `branding/wallpaper.png` (source: `wallpaper.xcf`, kept out of the image) |
-| Admin app / Store | GTK/libadwaita app icons (stock icons today) | app icons |
+| Admin app / Store | ✅ Admin: the KosherOS mark (hicolor, from `rasters.py`); Store and Setup still stock icons | Store + Setup icons |
 | ISO installer | Anaconda branding: product name/version via `.buildstamp`, and a `product.img` overlaying the logo, sidebar and CSS in the installer's Anaconda theme | logo + wordmark |
 | Portal web UI (stage 5) | shared asset set | logo + wordmark |
 

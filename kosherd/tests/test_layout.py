@@ -147,10 +147,12 @@ def _enabled(layout: str) -> list[str]:
 
 def test_classic_is_a_taskbar_and_tiling_is_paperwm_never_both():
     assert layout_mod.EXT_DASH_TO_PANEL in _enabled("classic")
+    assert layout_mod.EXT_ARCMENU in _enabled("classic"), "the Apps button"
     assert layout_mod.EXT_PAPERWM not in _enabled("classic")
     assert layout_mod.EXT_PAPERWM in _enabled("tiling")
     assert layout_mod.EXT_DASH_TO_PANEL not in _enabled("tiling"), \
         "Dash to Panel and PaperWM fight over the screen"
+    assert layout_mod.EXT_ARCMENU not in _enabled("tiling")
     # Tray icons for everyone: Bluetooth, cloud clients and the like.
     for layout in ("classic", "tiling"):
         assert layout_mod.EXT_APPINDICATOR in _enabled(layout)
@@ -238,12 +240,31 @@ def test_the_machine_wide_default_is_the_classic_layout():
     assert cp["org/gnome/mutter"]["dynamic-workspaces"] == "false"
 
 
-def test_the_start_button_is_the_kosheros_mark():
+def test_the_start_button_is_the_kosheros_mark_and_says_apps():
     cp = _dconf(DESKTOP_DCONF)
-    icon = cp["org/gnome/shell/extensions/dash-to-panel"]["show-apps-icon-file"].strip("'")
-    # Produced at build by branding/rasters.py from the real logo.
-    assert icon.lstrip("/") in (ROOT / "branding/rasters.py").read_text()
+    arc = cp["org/gnome/shell/extensions/arcmenu"]
+    # A picture alone did not tell anyone where the apps were.
+    assert arc["menu-button-appearance"] == "'Icon_Text'"
+    assert arc["menu-button-text"] == "'Apps'"
+    # A filled button, so it stands out from the taskbar's other icons.
+    assert arc["menu-button-bg-color"].startswith("(true,")
+    assert arc["menu-layout"] == "'windows'"
+    for key in ("menu-button-icon",):
+        icon = arc[key].strip("'")
+        # Produced at build by branding/rasters.py from the real logo.
+        assert icon.lstrip("/") in (ROOT / "branding/rasters.py").read_text()
+    # And the fallback, should ArcMenu be missing from a build.
+    fallback = cp["org/gnome/shell/extensions/dash-to-panel"]["show-apps-icon-file"].strip("'")
+    assert fallback == arc["menu-button-icon"].strip("'")
     assert (ROOT / "branding/logo.png").exists()
+
+
+def test_the_image_builds_arcmenu_from_a_pinned_tag():
+    assert "ARG ARCMENU_REF=v" in CONTAINERFILE
+    assert "gitlab.com/arcmenu/ArcMenu" in CONTAINERFILE
+    assert "COPY --from=gnome-ext-build" in CONTAINERFILE
+    # Its schema installs into the shared directory, which must be recompiled.
+    assert "glib-compile-schemas /usr/share/glib-2.0/schemas" in CONTAINERFILE
 
 
 def test_the_keys_the_helper_writes_are_not_locked():

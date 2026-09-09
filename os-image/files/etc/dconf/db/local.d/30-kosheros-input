@@ -1,0 +1,19 @@
+# Keyboard: English first, Hebrew ready, for every account.
+#
+# A frum family types Hebrew. Out of the box the machine should have both
+# layouts set up — English as the default so nothing surprises a Windows
+# or Mac user, Hebrew one switch away — with the switcher visible in the
+# panel (GNOME shows its keyboard indicator whenever more than one source
+# is configured; Dash to Panel carries it in the classic layout's taskbar).
+# Super+Space switches, as on GNOME everywhere; Alt+Shift as well, because
+# that is what Windows users' hands already know.
+#
+# A default, not a lock: a family that also types Yiddish or Russian adds
+# a source in Settings and it stays. The login screen gets the same two
+# sources through the gdm profile (db/gdm.d/20-kosheros-input), and the
+# advanced (niri) desktop reads the system keymap set in
+# /etc/X11/xorg.conf.d/00-keyboard.conf, which says the same thing.
+
+[org/gnome/desktop/input-sources]
+sources=[('xkb', 'us'), ('xkb', 'il')]
+xkb-options=['grp:alt_shift_toggle']

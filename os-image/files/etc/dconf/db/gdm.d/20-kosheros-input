@@ -1,0 +1,6 @@
+# The login screen offers the same two keyboard layouts as the desktop
+# (see db/local.d/30-kosheros-input), so a Hebrew password can be typed
+# and the switcher is where the person will find it once signed in.
+[org/gnome/desktop/input-sources]
+sources=[('xkb', 'us'), ('xkb', 'il')]
+xkb-options=['grp:alt_shift_toggle']

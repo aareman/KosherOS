@@ -33,6 +33,11 @@ action = "lock"
 
 [bar.main]
 position = "top"
+# Noctalia's default end widgets plus the keyboard-layout switcher: the
+# machine has English and Hebrew set up, and the switch has to be visible.
+end = ["media", "tray", "keyboard_layout", "notifications", "clipboard",
+       "network", "bluetooth", "volume", "brightness", "battery",
+       "control-center", "session"]
 
 [dock]
 enabled = true

@@ -43,6 +43,9 @@ log = logging.getLogger("kosher-layout")
 # /usr/share/gnome-shell/extensions, so no account can remove them and every
 # account can be given them.
 EXT_DASH_TO_PANEL = "dash-to-panel@jderose9.github.com"
+# The start menu: a button that says "Apps", because the picture alone did
+# not tell anyone where the apps were.
+EXT_ARCMENU = "arcmenu@arcmenu.com"
 EXT_APPINDICATOR = "appindicatorsupport@rgcjonas.gmail.com"
 EXT_PAPERWM = "paperwm@paperwm.github.com"
 
@@ -64,7 +67,7 @@ PLANS: dict[str, list[tuple[str, str, str]]] = {
     # already knows.
     "classic": [
         ("org.gnome.shell", "enabled-extensions",
-         _gvariant_list([EXT_DASH_TO_PANEL, EXT_APPINDICATOR])),
+         _gvariant_list([EXT_DASH_TO_PANEL, EXT_ARCMENU, EXT_APPINDICATOR])),
         ("org.gnome.desktop.wm.preferences", "button-layout",
          "'appmenu:minimize,maximize,close'"),
         ("org.gnome.desktop.interface", "enable-hot-corners", "false"),

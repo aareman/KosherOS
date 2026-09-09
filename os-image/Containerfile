@@ -1,5 +1,21 @@
 # Kosher Linux OS image — a thin, locked-down layer over Fedora bootc.
 # Build:  just build      Fresh VM disk:  just vm      Update a RUNNING VM:  just vm-upgrade
+
+# --- Builder: GNOME Shell extensions Fedora does not package -------------------
+# ArcMenu is the classic layout's start menu (the button that says "Apps").
+# It needs glib-compile-resources and gettext to build, neither of which
+# belongs in the shipped image, so it is built here from a pinned tag and
+# only the result is copied over. A failed fetch leaves a marker rather than
+# failing the whole image; the final stage warns and ships without it.
+FROM quay.io/fedora/fedora:44 AS gnome-ext-build
+ARG ARCMENU_REF=v69.2
+RUN dnf -y install glib2-devel gettext make git-core && dnf clean all
+RUN mkdir -p /out && ( git clone --depth 1 --branch "${ARCMENU_REF}" \
+        https://gitlab.com/arcmenu/ArcMenu /tmp/arcmenu \
+    && make -C /tmp/arcmenu install DESTDIR=/out \
+    && grep -q '"50"' /out/usr/share/gnome-shell/extensions/arcmenu@arcmenu.com/metadata.json \
+    || { echo "WARNING: ArcMenu did not build"; rm -rf /out/usr; touch /out/FAILED; } )
+
 FROM quay.io/fedora/fedora-bootc:44
 
 # --- Packages ---------------------------------------------------------------
@@ -17,6 +33,15 @@ RUN dnf -y install dnsmasq nftables python3-gobject python3-jsonschema python3-p
         # backend Flatpak apps need outside GNOME.
         gnome-shell-extension-dash-to-panel gnome-shell-extension-appindicator \
         niri noctalia xdg-desktop-portal-gtk \
+        # Hebrew, properly: the Culmus family (David, Frank Ruehl, Hadasim,
+        # Miriam, Nachlieli, Taamey Frank with te'amim), Noto Sans/Serif
+        # Hebrew, Noto Rashi for sefarim, Ezra SIL for Tanach with
+        # cantillation, Alef and Plex Sans Hebrew for screen text. A machine
+        # for a family that types Hebrew ships the fonts; nobody should have
+        # to find them.
+        culmus-fonts-all google-noto-sans-hebrew-vf-fonts \
+        google-noto-serif-hebrew-vf-fonts google-noto-rashi-hebrew-vf-fonts \
+        sil-ezra-fonts alef-fonts ibm-plex-sans-hebrew-fonts \
         && dnf clean all \
     # The proxy runs unprivileged; kosherd hands it only the URL rules.
     && useradd -r -s /usr/sbin/nologin -d /var/lib/kosher-mitm kosher-mitm \
@@ -63,6 +88,16 @@ RUN d=/usr/share/gnome-shell/extensions/paperwm@paperwm.github.com \
     && glib-compile-schemas "$d/schemas" \
     && grep -q '"50"' "$d/metadata.json" \
     || echo "WARNING: PaperWM did not install; the tiling layout will be plain GNOME"
+# ArcMenu, from the builder stage above. Its schema lands in the shared
+# schema directory (that is how its Makefile installs system-wide), so the
+# compiled schema cache is refreshed for GNOME Shell to find it.
+COPY --from=gnome-ext-build /out/ /tmp/gnome-ext/
+RUN if [ -e /tmp/gnome-ext/FAILED ]; then \
+        echo "WARNING: no ArcMenu; the classic layout falls back to Dash to Panel's apps button"; \
+    else \
+        cp -a /tmp/gnome-ext/usr/. /usr/ \
+        && glib-compile-schemas /usr/share/glib-2.0/schemas; \
+    fi; rm -rf /tmp/gnome-ext
 
 # mitmproxy is not packaged for Fedora 44, so install it from PyPI (with its
 # dependencies — unlike our own packages, which are --no-deps).
@@ -161,7 +196,9 @@ COPY branding/ /usr/share/kosher/branding/
 # the boot-splash logo, the start button, the login-screen lockup with the
 # name beside the logo, the wallpaper and its per-screen-shape crops plus
 # the background XML that lets GNOME pick the right one. See the script.
-RUN python3 /usr/share/kosher/branding/rasters.py
+RUN python3 /usr/share/kosher/branding/rasters.py \
+    # The admin app's icon went into hicolor; refresh the cache GTK reads.
+    && gtk-update-icon-cache -f -t /usr/share/icons/hicolor
 RUN true \
     # The SVG is the older placeholder gradient, kept for anything still
     # pointing at it. The GIMP sources travel in the repo, not in the image.
@@ -179,9 +216,14 @@ RUN true \
     && printf 'GRUB_DISTRIBUTOR="KosherOS"\nGRUB_TIMEOUT=1\n' > /etc/default/grub \
     # systemd.show_status=auto surfaces "Starting ..." lines to Plymouth, so
     # the splash reports what a slow boot is waiting on instead of just
-    # sitting there looking hung.
+    # sitting there looking hung. The rest keep the text console blank:
+    # between the login screen and the desktop (and back, at sign-out) the
+    # display falls to the kernel console for a moment, and what it showed
+    # there was kernel and audit chatter with a blinking cursor. A quiet
+    # console at loglevel 3 and no cursor makes that moment a plain dark
+    # screen, which is the most a kernel console can be asked to be.
     && mkdir -p /usr/lib/bootc/kargs.d \
-    && printf 'kargs = ["systemd.show_status=auto"]\n' \
+    && printf 'kargs = ["quiet", "loglevel=3", "systemd.show_status=auto", "vt.global_cursor_default=0", "rd.udev.log_level=3", "udev.log_priority=3"]\n' \
          > /usr/lib/bootc/kargs.d/10-kosheros.toml \
     && dconf update
 

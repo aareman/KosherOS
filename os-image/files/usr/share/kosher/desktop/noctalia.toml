@@ -1,0 +1,40 @@
+# KosherOS seed for Noctalia, the shell of the advanced (niri) desktop.
+#
+# kosher-layout copies this to ~/.config/noctalia/config.toml the first time
+# an account signs in to the niri session, and never touches it again: from
+# then on it is the person's own. Noctalia reads only the user's
+# configuration, so there is no system-wide place to put these instead.
+#
+# Every key not listed here is Noctalia's own default. The two that matter:
+#   - the polkit agent, without which the admin app's password prompts have
+#     nowhere to appear in this session;
+#   - the KosherOS wallpaper, so the advanced desktop is still recognisably
+#     the same machine.
+
+[shell]
+polkit_agent = true
+telemetry_enabled = false
+
+[theme]
+# Light, to match the login screen and the classic desktop.
+mode = "light"
+
+[wallpaper]
+enabled = true
+directory = "/usr/share/backgrounds/kosheros"
+fill_mode = "crop"
+
+[lockscreen]
+enabled = true
+
+[idle.behavior.lock]
+enabled = true
+timeout = 600
+action = "lock"
+
+[bar.main]
+position = "top"
+
+[dock]
+enabled = true
+position = "bottom"

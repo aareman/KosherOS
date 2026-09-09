@@ -17,7 +17,7 @@ from gi.repository import Adw, Gio, GLib, Gtk  # noqa: E402
 
 from kosherd import profiles as profiles_mod  # noqa: E402
 from kosherd.client import DaemonClient  # noqa: E402
-from kosherd.policy import MEDIA_LEVELS, MODES, YOUTUBE_CATEGORIES  # noqa: E402
+from kosherd.policy import LAYOUTS, MEDIA_LEVELS, MODES, YOUTUBE_CATEGORIES  # noqa: E402
 
 APP_ID = "org.kosherlinux.Admin"
 
@@ -75,6 +75,28 @@ YOUTUBE_RESTRICT_LABELS = {
     "strict": "Strict",
 }
 YOUTUBE_RESTRICT_ORDER = ("none", "moderate", "strict")
+
+# How the desktop looks, in the order a parent would consider them. Not a
+# protection — the filter does not care which shell draws the windows — so
+# no guardian password, and it says so plainly.
+LAYOUT_LABELS = {
+    "classic": "Classic desktop",
+    "tiling": "Tiling desktop",
+    "advanced": "Advanced (niri)",
+}
+LAYOUT_HINTS = {
+    "classic": "A taskbar along the bottom, a start button, windows that "
+               "minimise. What a Windows, Mac or ChromeOS user already knows. "
+               "The right choice for almost everyone.",
+    "tiling": "Windows arrange themselves in a scrolling row and are "
+              "driven from the keyboard (PaperWM). Same lock screen, "
+              "settings and accessibility as the classic desktop.",
+    "advanced": "A separate session for power users, picked at the login "
+                "screen: the niri window manager with the Noctalia shell, "
+                "configured by text files. No GNOME Settings, and less "
+                "accessibility support. Filtering is unaffected.",
+}
+LAYOUT_ORDER = ("classic", "tiling", "advanced")
 
 PROFILE_CUSTOM = "Custom"
 
@@ -1496,6 +1518,7 @@ class UserDetailPage(Adw.NavigationPage):
 
         account = Adw.PreferencesPage()
         account.add(self._account_group(user))
+        account.add(self._desktop_group(user))
         account.add(self._danger_group(user))
         self.stack.add_titled_with_icon(account, "account", "Account",
                                         "system-users-symbolic")
@@ -1781,6 +1804,34 @@ class UserDetailPage(Adw.NavigationPage):
                 lambda: self.win.client.set_user_can_install(user["uid"], s.get_active()),
                 done_msg=f"App installs {'enabled' if s.get_active() else 'disabled'} for {user['username']}")))
         group.add(installs)
+        return group
+
+    def _desktop_group(self, user: dict) -> Adw.PreferencesGroup:
+        group = Adw.PreferencesGroup(
+            title="Desktop",
+            description="How this account's desktop looks. Takes effect the "
+                        "next time they sign in; filtering is the same "
+                        "whichever they use.")
+        layout_row = Adw.ComboRow(
+            title="Layout",
+            model=Gtk.StringList.new([LAYOUT_LABELS[k] for k in LAYOUT_ORDER]))
+        current = user.get("layout", "classic")
+        layout_row.set_selected(LAYOUT_ORDER.index(current)
+                                if current in LAYOUT_ORDER else 0)
+        layout_row.set_subtitle(LAYOUT_HINTS.get(current, ""))
+        layout_row.set_subtitle_lines(4)
+
+        def on_layout(combo, _p):
+            new_layout = LAYOUT_ORDER[combo.get_selected()]
+            if new_layout == user.get("layout", "classic"):
+                return
+            self.win.call(
+                lambda: self.win.client.set_layout(user["uid"], new_layout),
+                done_msg=f"{user['username']} → {LAYOUT_LABELS[new_layout]} "
+                         f"at their next sign-in")
+
+        layout_row.connect("notify::selected", on_layout)
+        group.add(layout_row)
         return group
 
     def _confirm_delete_preset(self, key: str) -> None:

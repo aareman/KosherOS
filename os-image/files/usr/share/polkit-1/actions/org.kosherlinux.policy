@@ -29,6 +29,19 @@
     </defaults>
   </action>
 
+  <!-- A setting about yourself that says nothing about how you are
+       filtered (the desktop layout, read by the sign-in helper). Every
+       active local user, no prompt. -->
+  <action id="org.kosherlinux.read-own-settings">
+    <description>Read your own desktop settings</description>
+    <message>Authentication is required to read your settings</message>
+    <defaults>
+      <allow_any>no</allow_any>
+      <allow_inactive>no</allow_inactive>
+      <allow_active>yes</allow_active>
+    </defaults>
+  </action>
+
   <action id="org.kosherlinux.manage-users">
     <description>Manage user accounts and profiles</description>
     <message>Authentication is required to manage user profiles</message>

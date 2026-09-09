@@ -120,6 +120,13 @@ class DaemonClient:
         self._call("Profiles", "SetUserAdmin", "(ibs)", uid, admin,
                    guardian_password)
 
+    def set_layout(self, uid: int, layout: str) -> None:
+        self._call("Profiles", "SetLayout", "(is)", uid, layout)
+
+    def my_layout(self) -> str:
+        """The calling user's own desktop layout (any active local user)."""
+        return self._call("Profiles", "GetMyLayout")[0]
+
     def apply_profile(self, uid: int, profile: str,
                       guardian_password: str = "") -> None:
         self._call("Profiles", "ApplyProfile", "(iss)", uid, profile,

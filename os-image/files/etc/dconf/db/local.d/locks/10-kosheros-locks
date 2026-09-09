@@ -1,3 +1,7 @@
 # The login-screen brand is part of the product identity, not a preference.
 # (Wallpaper is deliberately NOT locked — users may change their own.)
 /org/gnome/login-screen/logo
+# Shell extensions come with the image; none are fetched from the internet.
+# The set an account has ENABLED is not locked: kosher-layout writes it per
+# account at sign-in (see 20-kosheros-desktop), and dconf locks are global.
+/org/gnome/shell/allow-extension-installation

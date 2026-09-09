@@ -281,6 +281,16 @@ def cmd_media(args) -> int:
     return 0
 
 
+def cmd_layout(args) -> int:
+    from .policy import LAYOUT_LABELS
+
+    c = _client()
+    c.set_layout(args.uid, args.layout)
+    print(f"uid {args.uid}: desktop -> {LAYOUT_LABELS[args.layout]} "
+          f"(takes effect at their next sign-in)")
+    return 0
+
+
 def cmd_language(args) -> int:
     c = _client()
     c.set_language_filter(args.uid, args.setting, _guardian_pw(args))
@@ -775,6 +785,11 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("setting", choices=["off", "substitute", "block"])
     s.add_argument("--guardian-password")
     s.set_defaults(func=cmd_language)
+
+    s = sub.add_parser("layout", help="how a user's desktop is laid out")
+    s.add_argument("uid", type=int)
+    s.add_argument("layout", choices=list(policy_mod.LAYOUTS))
+    s.set_defaults(func=cmd_layout)
 
     s = sub.add_parser("youtube", help="YouTube limits for one user")
     s.add_argument("action", choices=["show", "categories", "restrict", "block",

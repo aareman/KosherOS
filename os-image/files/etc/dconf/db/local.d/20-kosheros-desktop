@@ -1,0 +1,41 @@
+# The classic desktop, as the machine-wide default (see also 10-kosheros-
+# branding and locks/10-kosheros-locks).
+#
+# These are what an account gets before kosher-layout has run for it and
+# what any account with no layout of its own gets: a taskbar along the
+# bottom with a start button, minimise buttons on windows, a single
+# workspace, no hot corner. What a Windows, Mac or ChromeOS user already
+# knows. kosher-layout writes the per-account variation (the tiling layout)
+# into the person's own settings at sign-in; the keys it writes are listed
+# in kosherd/layout.py and must not be locked here.
+
+[org/gnome/shell]
+enabled-extensions=['dash-to-panel@jderose9.github.com', 'appindicatorsupport@rgcjonas.gmail.com']
+# Extensions come with the image. Shell code fetched from the internet is
+# not something a family computer needs, and a broken one takes the whole
+# desktop down with it. Locked: the same answer for every account.
+allow-extension-installation=false
+
+[org/gnome/shell/extensions/dash-to-panel]
+# GNOME opens the Activities overview on an empty session; a person who
+# just signed in should see their desktop, not a search box.
+hide-overview-on-startup=true
+# The start button is the KosherOS mark.
+show-apps-icon-file='/usr/share/kosher/branding/kosheros-logo.svg'
+show-apps-icon-side-padding=10
+# Group windows of one app under one icon and cycle them on click, the
+# way the Windows taskbar does; previews on hover so a group is legible.
+group-apps=true
+show-window-previews=true
+
+[org/gnome/desktop/wm/preferences]
+button-layout='appmenu:minimize,maximize,close'
+num-workspaces=1
+
+[org/gnome/mutter]
+# One fixed workspace: a window cannot vanish onto another one.
+dynamic-workspaces=false
+edge-tiling=true
+
+[org/gnome/desktop/interface]
+enable-hot-corners=false

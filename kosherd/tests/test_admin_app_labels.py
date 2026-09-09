@@ -13,7 +13,7 @@ from pathlib import Path
 import pytest
 
 from kosherd.language import MODES as LANGUAGE_MODES
-from kosherd.policy import MEDIA_LEVELS, MODES, YOUTUBE_CATEGORIES
+from kosherd.policy import LAYOUTS, MEDIA_LEVELS, MODES, YOUTUBE_CATEGORIES
 
 APP = Path(__file__).parents[2] / "admin-app/src/kosheradmin/app.py"
 
@@ -48,6 +48,16 @@ def test_every_language_setting_has_a_label(constants):
     # The dropdown is built from the order tuple, so it must be complete
     # AND in a fixed order — the index is what selects the value.
     assert set(constants["LANGUAGE_ORDER"]) == set(LANGUAGE_MODES)
+
+
+def test_every_desktop_layout_has_a_label_and_a_hint(constants):
+    assert set(constants["LAYOUT_LABELS"]) == set(LAYOUTS)
+    assert set(constants["LAYOUT_HINTS"]) == set(LAYOUTS)
+    # The dropdown index selects the value, so the order tuple must be
+    # complete; and the classic layout is first because it is the answer
+    # for almost everyone.
+    assert set(constants["LAYOUT_ORDER"]) == set(LAYOUTS)
+    assert constants["LAYOUT_ORDER"][0] == "classic"
 
 
 def test_the_youtube_restricted_mode_choices_match_the_daemon(constants):

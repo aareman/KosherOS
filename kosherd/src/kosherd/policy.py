@@ -67,6 +67,24 @@ YOUTUBE_CATEGORIES = {
     "27": "Education", "28": "Science & Technology", "29": "Nonprofits",
 }
 
+# How the desktop is laid out for this account. A preference, not a
+# protection: the filter is per-uid at the network layer and does not care
+# which shell draws the windows. Applied at sign-in by kosher-layout.
+#   classic   a taskbar along the bottom, a start button, minimise buttons:
+#             what a Windows, Mac or ChromeOS user already knows (GNOME +
+#             Dash to Panel)
+#   tiling    GNOME with PaperWM's scrolling tiling, for keyboard-driven
+#             power users; same lock screen, settings and accessibility
+#   advanced  a separate niri + Noctalia session, chosen at the login screen;
+#             configured by text files the user owns
+LAYOUTS = ("classic", "tiling", "advanced")
+LAYOUT_LABELS = {
+    "classic": "Classic desktop",
+    "tiling": "Tiling desktop",
+    "advanced": "Advanced (niri)",
+}
+DEFAULT_LAYOUT = "classic"
+
 # What earlier policies called these modes.
 LEGACY_MODES = {"inspect": "filtered"}
 
@@ -113,6 +131,7 @@ class UserPolicy:
     media_level: str = DEFAULT_MEDIA_LEVEL
     youtube: dict = field(default_factory=dict)
     language_filter: str = "off"
+    layout: str = DEFAULT_LAYOUT
 
     def to_dict(self) -> dict:
         d: dict = {"uid": self.uid, "username": self.username, "mode": self.mode}
@@ -134,6 +153,8 @@ class UserPolicy:
             d["apps"] = self.apps
         if not self.can_install_apps:
             d["can_install_apps"] = False
+        if self.layout != DEFAULT_LAYOUT:
+            d["layout"] = self.layout
         return d
 
 
@@ -245,6 +266,7 @@ class Policy:
                     media_level=u.get("media_level", DEFAULT_MEDIA_LEVEL),
                     youtube=dict(u.get("youtube", {})),
                     language_filter=u.get("language_filter", "off"),
+                    layout=u.get("layout", DEFAULT_LAYOUT),
                 )
                 for u in doc["users"]
             ],

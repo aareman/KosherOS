@@ -1,0 +1,22 @@
+[Unit]
+Description=KosherOS: apply this account's desktop layout
+Documentation=file:///usr/share/doc/kosher/desktop.md
+# Runs once per graphical sign-in, as the person signing in. It asks
+# kosherd which layout is theirs and writes that layout's GNOME settings
+# into their own settings database (see kosherd/layout.py for why per-user
+# settings rather than machine-wide locks). Under niri it only seeds the
+# shell's configuration on the first sign-in.
+PartOf=graphical-session.target
+After=graphical-session-pre.target
+# Not for the system's service accounts, which never have a desktop.
+ConditionUser=!@system
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/kosher-layout
+# A sign-in must not hang on us: kosherd retries are bounded inside, and
+# this is the belt to those braces.
+TimeoutStartSec=30
+
+[Install]
+WantedBy=graphical-session.target

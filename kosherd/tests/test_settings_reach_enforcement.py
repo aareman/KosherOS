@@ -61,6 +61,11 @@ INERT = {
         "none": "no traffic leaves at all",
         "unfiltered": "an unfiltered account enforces nothing at all",
     },
+    # Not a network setting at all: which shell draws the windows is applied
+    # at sign-in by kosher-layout, and the filter is the same under any of
+    # them. Listed so the matrix says so rather than being silent about it.
+    "layout": {mode: "a desktop preference applied at sign-in, not a filter"
+               for mode in MODES},
 }
 
 EVERYTHING = {
@@ -70,6 +75,7 @@ EVERYTHING = {
     "media_level": "immodest",
     "language_filter": "substitute",
     "youtube": {"restrict": "strict", "blocked_categories": ["24"]},
+    "layout": "tiling",
 }
 
 
@@ -104,6 +110,7 @@ EVIDENCE = {
     "media_level": "immodest",
     "language_filter": "substitute",
     "youtube": '"restrict"',
+    "layout": "tiling",
 }
 
 

@@ -40,12 +40,12 @@ def test_every_method_has_an_action():
 
 READS = ["GetPolicy", "Status", "IsEnabled", "ListCatalog", "ListInstalled",
          "ListInstalledDetails", "SearchApps", "CheckUpdate", "Lock",
-         "VerifyGuardian", "PortalStatus", "SyncNow"]
+         "VerifyGuardian", "PortalStatus", "SyncNow", "GetMyLayout"]
 CHANGES = ["SetFilterMode", "SetWhitelist", "SetUrlRules", "CreateUser",
            "AdoptUser", "RemoveUser", "RemoveApp", "ApproveApp",
            "UnapproveApp", "SetUserApps", "SetUserCanInstall", "ApplyUpdate",
            "SetCaptiveMode", "SetGuardianPassword", "DisableGuardian",
-           "SetGuestConfig", "Enrol", "Unenrol"]
+           "SetGuestConfig", "Enrol", "Unenrol", "SetLayout"]
 
 
 @pytest.mark.parametrize("method", READS + CHANGES)
@@ -72,6 +72,23 @@ def test_store_actions_are_open_to_ordinary_users():
     # the action itself is granted to any active local user by polkit.
     for method in ("ListCatalog", "ListInstalled", "InstallApp"):
         assert ACTIONS[method] == access.ACTION_USE_STORE
+
+
+def test_reading_your_own_layout_is_open_to_ordinary_users():
+    # The sign-in helper runs as whoever signs in, admin or not, and the
+    # answer says nothing about how they are filtered. It must know WHO
+    # asked, and it must not be a filter action a child could otherwise use.
+    assert ACTIONS["GetMyLayout"] == access.ACTION_READ_OWN
+    assert "GetMyLayout" in access.UID_AWARE
+    assert access.ACTION_READ_OWN not in (access.ACTION_READ_CONFIG,
+                                          access.ACTION_MANAGE_FILTER)
+
+
+def test_choosing_a_layout_is_an_admin_action_without_the_guardian():
+    # A preference, not a protection: no second password to change how the
+    # desktop looks, but only an admin may change it for an account.
+    assert ACTIONS["SetLayout"] == access.ACTION_MANAGE_USERS
+    assert "SetLayout" not in GUARDIAN_GATED
 
 
 def test_removing_an_app_is_admin_only():

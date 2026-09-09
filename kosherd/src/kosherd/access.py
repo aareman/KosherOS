@@ -20,6 +20,10 @@ ACTION_READ_CONFIG = "org.kosherlinux.read-config"
 # Granted to every active local user: the catalog is the allowlist, so
 # installing from it is safe for supervised users too.
 ACTION_USE_STORE = "org.kosherlinux.use-store"
+# Granted to every active local user: reading a setting about YOURSELF that
+# says nothing about how you are filtered (today: the desktop layout, which
+# the sign-in helper applies).
+ACTION_READ_OWN = "org.kosherlinux.read-own-settings"
 ACTION_MANAGE_USERS = "org.kosherlinux.manage-users"
 ACTION_MANAGE_FILTER = "org.kosherlinux.manage-filter"
 ACTION_INSTALL_APPS = "org.kosherlinux.install-apps"
@@ -60,6 +64,11 @@ ACTIONS = {
     "SaveProfile": ACTION_MANAGE_FILTER,
     "DeleteProfile": ACTION_MANAGE_FILTER,
     "SetUserAdmin": ACTION_MANAGE_FILTER,
+    # The desktop layout is a preference, not a protection, so it is an
+    # account-management action with no guardian gate: the filter is
+    # per-uid at the network layer whatever draws the windows.
+    "SetLayout": ACTION_MANAGE_USERS,
+    "GetMyLayout": ACTION_READ_OWN,
     "ApproveRequest": ACTION_MANAGE_FILTER,
     "DismissRequest": ACTION_MANAGE_USERS,
     "ListRequests": ACTION_READ_CONFIG,
@@ -113,7 +122,8 @@ SETUP_METHODS = frozenset({"IsComplete", "AdminExists", "ExistingAccounts",
 SETUP_READS = frozenset({"IsComplete", "AdminExists"})
 
 # Methods that need to know which uid called them (session management).
-UID_AWARE = frozenset({"Unlock", "Lock", "Status", "VerifyGuardian", "InstallApp"})
+UID_AWARE = frozenset({"Unlock", "Lock", "Status", "VerifyGuardian", "InstallApp",
+                       "GetMyLayout"})
 
 SETUP_CLOSED = "initial setup is already complete"
 UNKNOWN_METHOD = "unknown method"

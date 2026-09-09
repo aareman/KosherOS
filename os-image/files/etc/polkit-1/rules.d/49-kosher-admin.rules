@@ -10,7 +10,8 @@ polkit.addRule(function(action, subject) {
         // action's own default, so these must be listed explicitly or they
         // would inherit the password prompt below.
         if (action.id === "org.kosherlinux.read-config" ||
-            action.id === "org.kosherlinux.use-store") {
+            action.id === "org.kosherlinux.use-store" ||
+            action.id === "org.kosherlinux.read-own-settings") {
             return polkit.Result.YES;
         }
         // Everything that CHANGES something: one prompt, then kosherd's

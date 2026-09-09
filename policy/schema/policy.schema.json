@@ -358,6 +358,15 @@
           ],
           "default": "off",
           "description": "Bad language: leave it, substitute a milder word, or block the page. Only enforced in filtered mode, which is the only mode that can read the page."
+        },
+        "layout": {
+          "enum": [
+            "classic",
+            "tiling",
+            "advanced"
+          ],
+          "default": "classic",
+          "description": "How this account's desktop is laid out: classic = a bottom taskbar and start button (GNOME + Dash to Panel), what a Windows, Mac or ChromeOS user knows; tiling = GNOME with PaperWM scrolling tiling; advanced = a separate niri + Noctalia session, picked at the login screen. A preference applied at sign-in by kosher-layout, not a protection: the filter is per-uid at the network layer whatever draws the windows. Deliberately not part of presets (a protection level does not imply a window manager) and not offered to the guest account, which always gets the classic desktop."
         }
       }
     }

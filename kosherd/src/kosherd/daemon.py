@@ -98,6 +98,13 @@ INTROSPECTION_XML = """
       <arg direction="in" type="b" name="admin"/>
       <arg direction="in" type="s" name="guardian_password"/>
     </method>
+    <method name="SetLayout">
+      <arg direction="in" type="i" name="uid"/>
+      <arg direction="in" type="s" name="layout"/>
+    </method>
+    <method name="GetMyLayout">
+      <arg direction="out" type="s" name="layout"/>
+    </method>
     <method name="ApplyProfile">
       <arg direction="in" type="i" name="uid"/>
       <arg direction="in" type="s" name="profile"/>
@@ -689,6 +696,44 @@ class Daemon:
         self._save_and_apply()
         return None
 
+    def impl_SetLayout(self, uid: int, layout: str):
+        """Choose how an account's desktop is laid out.
+
+        Not guardian-gated and saved without re-rendering enforcement: the
+        filter is per-uid at the network layer and does not care which
+        shell draws the windows. What does change is which session the
+        login screen offers first — the advanced layout is a separate
+        session — so the account's default session is updated alongside.
+        """
+        from .policy import LAYOUTS
+
+        if layout not in LAYOUTS:
+            raise PolicyError(f"unknown layout {layout!r}")
+        user = self._managed(uid)
+        previous = user.layout
+        user.layout = layout
+        try:
+            self._save_only()
+        except Exception:
+            user.layout = previous
+            raise
+        self._accounts_set_session(uid, layout)
+        log.info("uid %d desktop layout -> %s", uid, layout)
+        return None
+
+    def impl_GetMyLayout(self, _uid: int):
+        """The caller's own layout, for the sign-in helper.
+
+        Any active local user may ask; an unmanaged account gets the
+        default. The one setting a non-admin may read about themselves,
+        and it says nothing about how they are filtered.
+        """
+        from .policy import DEFAULT_LAYOUT
+
+        user = self.policy.user(_uid)
+        layout = user.layout if user is not None else DEFAULT_LAYOUT
+        return GLib.Variant("(s)", (layout,))
+
     def impl_ListProfiles(self):
         from . import profiles
 
@@ -1025,6 +1070,42 @@ class Daemon:
             GLib.Variant("(xb)", (uid, True)),
             None, Gio.DBusCallFlags.NONE, -1, None,
         )
+
+    # Which login-screen session each layout lives in. The classic and
+    # tiling layouts are both GNOME (the difference is applied inside the
+    # session by kosher-layout); the advanced layout is its own session.
+    LAYOUT_SESSIONS = {"classic": "gnome", "tiling": "gnome", "advanced": "niri"}
+
+    def _accounts_set_session(self, uid: int, layout: str) -> None:
+        """Make the login screen default this account to the right session.
+
+        GDM remembers a per-user session in accountsservice and preselects
+        it; without this the person who was given the advanced layout would
+        have to find the gear menu on the login screen and know what to pick.
+        A failure here is logged, not raised: the layout is saved already
+        and the session can still be picked by hand.
+        """
+        session = self.LAYOUT_SESSIONS[layout]
+        if self.connection is None:
+            return
+        try:
+            path = self.connection.call_sync(
+                "org.freedesktop.Accounts", "/org/freedesktop/Accounts",
+                "org.freedesktop.Accounts", "FindUserById",
+                GLib.Variant("(x)", (uid,)),
+                GLib.VariantType("(o)"), Gio.DBusCallFlags.NONE, -1, None,
+            )[0]
+            for method, value in (("SetSessionType", "wayland"),
+                                  ("SetSession", session)):
+                self.connection.call_sync(
+                    "org.freedesktop.Accounts", path,
+                    "org.freedesktop.Accounts.User", method,
+                    GLib.Variant("(s)", (value,)),
+                    None, Gio.DBusCallFlags.NONE, -1, None,
+                )
+        except GLib.Error as e:
+            log.warning("could not set uid %d's login session to %s: %s",
+                        uid, session, e.message)
 
     # ---- Apps ------------------------------------------------------------
 

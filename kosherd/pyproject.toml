@@ -20,6 +20,8 @@ dependencies = [
 [project.scripts]
 kosherd = "kosherd.daemon:main"
 kosherctl = "kosherd.cli:main"
+# Runs as the person signing in (a systemd user unit), not as root.
+kosher-layout = "kosherd.layout:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/kosherd"]

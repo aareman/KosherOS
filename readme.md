@@ -82,7 +82,8 @@ locked down when the user has sudo.
 8. ✅ **Real content filtering** — category lists, per-user profiles,
    page-content scoring, shop department rules, an image detector with
    region covering, YouTube limits enforced in the app rather than on the
-   page, and a request-and-approve path from the block page. See
+   page, a look inside video (a few sampled keyframes per clip, judged
+   like pictures), and a request-and-approve path from the block page. See
    [docs/content-filtering.md](docs/content-filtering.md) and
    [docs/media-filtering.md](docs/media-filtering.md). Still open: a tzniut
    classifier, so the `immodest` picture level is honestly weaker than the

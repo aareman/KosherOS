@@ -52,6 +52,9 @@ def env(tmp_path, monkeypatch):
     monkeypatch.setattr(apply_mod, "SAFESEARCH_PATH", tmp_path / "dnsmasq" / "safesearch.conf")
     monkeypatch.setattr(apply_mod, "CATEGORY_BLOCK_PATH",
                         tmp_path / "dnsmasq" / "categories.conf")
+    monkeypatch.setattr(apply_mod, "ADBLOCK_PATH", tmp_path / "dnsmasq" / "adblock.conf")
+    monkeypatch.setattr(apply_mod, "ADBLOCK_OPEN_PATH",
+                        tmp_path / "dnsmasq-open" / "adblock.conf")
     monkeypatch.setattr(apply_mod, "MITM_DIR", tmp_path / "mitm")
     monkeypatch.setattr(apply_mod, "MITM_RULES_PATH", tmp_path / "mitm" / "rules.json")
     monkeypatch.setattr(apply_mod, "SEARCH_DIR", tmp_path / "search")

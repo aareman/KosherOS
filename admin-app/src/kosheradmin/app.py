@@ -1093,7 +1093,17 @@ class ProfilesPage(Adw.PreferencesPage):
         create.connect("activated", lambda *_: self._user_dialog(adopt_mode=False))
         guardian = Adw.ButtonRow(title="Guardian Password…")
         guardian.connect("activated", lambda *_: self._guardian_dialog())
-        rows = [adopt, create, guardian]
+        # Machine-wide, like a Pi-hole: every account, every browser, every
+        # app, because all DNS on this machine goes through its resolvers.
+        self.adblock_row = Adw.SwitchRow(
+            title="Block ads and trackers everywhere",
+            subtitle="At this computer's own resolver, so it covers every "
+                     "account and every app, not one browser. On is the "
+                     "right answer for almost everyone.",
+            subtitle_lines=3,
+            active=self.win.policy.get("adblock", {}).get("enabled", True))
+        self.adblock_row.connect("notify::active", self._on_adblock)
+        rows = [adopt, create, guardian, self.adblock_row]
         # Machine-wide, not per account: a word is either bad language in
         # this house or it is not.
         for name, title, description, noun in EDITABLE_LISTS:
@@ -1107,6 +1117,19 @@ class ProfilesPage(Adw.PreferencesPage):
         self.actions_group = actions
         self.requests_group = None
         self.status_group = None
+
+    def _on_adblock(self, switch, _param) -> None:
+        wanted = switch.get_active()
+        if wanted == self.win.policy.get("adblock", {}).get("enabled", True):
+            return
+        if wanted:
+            self.win.call(lambda: self.win.client.set_adblock(True),
+                          done_msg="Ads and trackers are blocked for everyone")
+            return
+        # Switching OFF is the guardian-gated direction.
+        self.win.with_guardian(lambda pw: self.win.call(
+            lambda: self.win.client.set_adblock(False, pw),
+            done_msg="Ad blocking is off"))
 
     def refresh(self) -> None:
         if self.users_group is not None:

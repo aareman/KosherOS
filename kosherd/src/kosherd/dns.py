@@ -157,6 +157,10 @@ def render_category_blocks(policy: Policy, bundle) -> str:
     # - the rest are tens of thousands at most, which dnsmasq handles.
     upstream_covered = {"adult", "malware"}
     rendered = wanted - upstream_covered
+    if policy.adblock:
+        # Already in every resolver through the ad-blocking drop-in
+        # (render_adblock); listing it twice would double its memory.
+        rendered -= {ADBLOCK_CATEGORY}
 
     lines = [
         f"# Rendered by kosherd from policy revision {policy.revision}. DO NOT EDIT.",
@@ -175,4 +179,36 @@ def render_category_blocks(policy: Policy, bundle) -> str:
         # instead of retrying elsewhere.
         lines.append(f"address=/{domain}/0.0.0.0")
         lines.append(f"address=/{domain}/::")
+    return "\n".join(lines) + "\n"
+
+
+# -- ad blocking, for everyone ------------------------------------------------
+
+# Written into BOTH resolvers' drop-in directories: the family one that
+# answers filtered accounts and the plain one that answers unfiltered ones.
+# That is what makes this a Pi-hole rather than a browser extension — every
+# account, every browser, every app, because nftables forces all of the
+# machine's DNS through these two processes.
+ADBLOCK_CONF = "/etc/kosher/dnsmasq.d/adblock.conf"
+ADBLOCK_OPEN_CONF = "/etc/kosher/dnsmasq-open.d/adblock.conf"
+# The catalogue category that holds the ad and tracker domains. Fed at image
+# build by a Pi-hole grade list on top of the UT1 advertising lists.
+ADBLOCK_CATEGORY = "ads"
+
+
+def render_adblock(policy: Policy, bundle) -> str:
+    """dnsmasq entries that make every ad and tracker domain not exist.
+
+    One line per domain, NXDOMAIN (`address=/domain/` with no address): an
+    ad that does not resolve is an ad the page never waits for, and half
+    the lines of the 0.0.0.0 form the category blocks use — which matters at
+    a few hundred thousand domains on a machine with little memory.
+    """
+    lines = [f"# Rendered by kosherd from policy revision {policy.revision}. DO NOT EDIT."]
+    if not policy.adblock:
+        lines.append("# Ad blocking is switched off.")
+        return "\n".join(lines) + "\n"
+    domains = bundle.domains_in({ADBLOCK_CATEGORY})
+    lines.append(f"# {len(domains)} advertising and tracker domains, for every account.")
+    lines += [f"address=/{domain}/" for domain in domains]
     return "\n".join(lines) + "\n"

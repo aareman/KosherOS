@@ -91,6 +91,50 @@ MAPPING = {
 # allow-lists, "all"/"blacklists" are the whole corpus in one file, and the
 # vendor-specific bundles are the same data in another format.
 
+# Plain domain lists on top of UT1, per KosherOS category. The advertising
+# one is what makes "block ads everywhere" a Pi-hole rather than a gesture:
+# UT1's advertising lists are a few thousand domains, and Pi-hole's default
+# list — StevenBlack's unified hosts (MIT), adware and malware domains
+# merged from several reputable sources — is around seventy thousand.
+# Hosts-file or one-domain-per-line format; comments and the loopback
+# boilerplate are dropped.
+PLAIN_SOURCES = {
+    "ads": (
+        ("StevenBlack unified hosts (Pi-hole's default list)",
+         "https://raw.githubusercontent.com/StevenBlack/hosts/master/hosts"),
+    ),
+}
+# Names a hosts file carries that are not domains to block.
+HOSTS_NOISE = {"localhost", "localhost.localdomain", "local", "broadcasthost",
+               "ip6-localhost", "ip6-loopback", "ip6-localnet", "ip6-mcastprefix",
+               "ip6-allnodes", "ip6-allrouters", "ip6-allhosts", "0.0.0.0"}
+
+
+def plain_domains(text: str) -> list[str]:
+    """Domains from a hosts file or a one-per-line list."""
+    found = []
+    for raw in text.splitlines():
+        line = raw.split("#", 1)[0].strip().lower()
+        if not line:
+            continue
+        parts = line.split()
+        # "0.0.0.0 example.com" or "127.0.0.1 example.com" or bare "example.com".
+        domain = parts[-1] if len(parts) > 1 else parts[0]
+        if domain in HOSTS_NOISE or "." not in domain or "/" in domain:
+            continue
+        found.append(domain.strip("."))
+    return found
+
+
+def fetch_plain(url: str) -> str | None:
+    try:
+        with urllib.request.urlopen(url, timeout=120) as response:
+            return response.read().decode("utf-8", "ignore")
+    except Exception as e:  # noqa: BLE001 - one missing list must not stop the build
+        print(f"  ! {url}: {e}", file=sys.stderr)
+        return None
+
+
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS domains (
     domain   TEXT NOT NULL,
@@ -198,6 +242,22 @@ def build(out: Path, only: set[str] | None) -> int:
                 print(f"  ! {source_name}: {e}", file=sys.stderr)
             finally:
                 archive.unlink(missing_ok=True)
+
+    for category, sources in sorted(PLAIN_SOURCES.items()):
+        if only and category not in only:
+            continue
+        for label, url in sources:
+            print(f"  {label} -> {category}", flush=True)
+            text = fetch_plain(url)
+            if text is None:
+                continue
+            rows = [(d, category) for d in plain_domains(text)]
+            db.executemany(
+                "INSERT OR IGNORE INTO domains (domain, category) VALUES (?, ?)",
+                rows)
+            db.commit()
+            total += len(rows)
+            print(f"    {len(rows):,}")
 
     curated = curated_rows(only)
     if curated:

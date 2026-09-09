@@ -300,6 +300,14 @@ def cmd_cover(args) -> int:
     return 0
 
 
+def cmd_adblock(args) -> int:
+    c = _client()
+    on = args.state == "on"
+    c.set_adblock(on, _guardian_pw(args) if not on else "")
+    print(f"ad and tracker blocking {'on' if on else 'off'} for every account")
+    return 0
+
+
 def cmd_language(args) -> int:
     c = _client()
     c.set_language_filter(args.uid, args.setting, _guardian_pw(args))
@@ -794,6 +802,11 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("setting", choices=["off", "substitute", "block"])
     s.add_argument("--guardian-password")
     s.set_defaults(func=cmd_language)
+
+    s = sub.add_parser("adblock", help="block ads and trackers for every account (like a Pi-hole)")
+    s.add_argument("state", choices=["on", "off"])
+    s.add_argument("--guardian-password")
+    s.set_defaults(func=cmd_adblock)
 
     s = sub.add_parser("cover", help="how a user's covered pictures look")
     s.add_argument("uid", type=int)

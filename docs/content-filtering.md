@@ -355,6 +355,35 @@ video. Nothing is pruned for accounts that are not limited to a channel
 list; playback filtering already covers those, and rewriting a feed
 nobody needed rewritten is all risk and no benefit.
 
+## Ad blocking, for everyone
+
+Like a Pi-hole, and for the same reason: the machine already forces every
+account's DNS through its own two resolvers (the family one that answers
+filtered accounts, the plain one that answers unfiltered ones — see
+`kosherd/nft.py`), so a domain list rendered into both reaches every
+browser and every app on every account. A browser extension covers one
+browser for one account and can be switched off; this cannot be stepped
+around from inside a session, and Firefox is told (`DNSOverHTTPS` locked
+off) not to carry its DNS elsewhere.
+
+What is blocked is the catalogue's `ads` category, which at image build is
+UT1's advertising lists plus **StevenBlack's unified hosts** — Pi-hole's own
+default list, adware and tracker domains merged from several reputable
+sources, about seventy thousand domains, MIT-licensed. `kosherd/dns.py`
+`render_adblock` writes them as `address=/domain/` (NXDOMAIN: one line each,
+and an ad that does not resolve is an ad the page never waits for) into
+`/etc/kosher/dnsmasq.d/adblock.conf` and `/etc/kosher/dnsmasq-open.d/
+adblock.conf`. A dnsfilter account that also blocks the `ads` category is
+not given the list twice.
+
+Machine-wide, on by default. It is not content filtering, so it applies to
+unfiltered accounts too; switching it **off** is the guardian-gated act
+(`SetAdBlock`, the switch on the admin app's Profiles page, `kosherctl
+adblock off`), because an ad network is also where immodest imagery
+arrives uninvited. What it does not do: cosmetic filtering (an empty box
+where an ad was), first-party ads served from the site's own domain, and
+ads inside YouTube's own player, which the YouTube limits handle.
+
 ## Which settings act in which mode
 
 Twice the interesting bug has been a setting that quietly did nothing for

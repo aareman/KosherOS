@@ -106,6 +106,10 @@ INTROSPECTION_XML = """
       <arg direction="in" type="i" name="uid"/>
       <arg direction="in" type="s" name="style"/>
     </method>
+    <method name="SetAdBlock">
+      <arg direction="in" type="b" name="enabled"/>
+      <arg direction="in" type="s" name="guardian_password"/>
+    </method>
     <method name="GetMyLayout">
       <arg direction="out" type="s" name="layout"/>
     </method>
@@ -737,6 +741,18 @@ class Daemon:
         if style not in COVER_STYLES:
             raise PolicyError(f"unknown cover style {style!r}")
         self._managed(uid).cover_style = style
+        self._save_and_apply()
+        return None
+
+    def impl_SetAdBlock(self, enabled: bool, _guardian_pw: str):
+        """Ads and trackers blocked at the resolvers for every account.
+
+        Machine-wide, like a Pi-hole: all DNS on this machine is forced
+        through its own resolvers, so this reaches every browser and app.
+        Switching it OFF is what the guardian gate protects — an ad network
+        is also where immodest imagery arrives uninvited.
+        """
+        self.policy.adblock = bool(enabled)
         self._save_and_apply()
         return None
 

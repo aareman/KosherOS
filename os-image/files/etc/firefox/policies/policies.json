@@ -23,6 +23,10 @@
     "DisableFirefoxStudies": true,
     "Certificates": {
       "ImportEnterpriseRoots": true
+    },
+    "DNSOverHTTPS": {
+      "Enabled": false,
+      "Locked": true
     }
   }
 }

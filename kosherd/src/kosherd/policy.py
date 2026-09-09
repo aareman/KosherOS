@@ -222,6 +222,12 @@ class Policy:
     source: str = "local"
     users: list[UserPolicy] = field(default_factory=list)
     guardian_enabled: bool = False
+    # Ads and trackers blocked at the resolver for EVERY account, like a
+    # Pi-hole: the machine forces all DNS through its own resolvers, so this
+    # reaches every browser and every app, not one browser's extension. On
+    # by default; not content filtering, so it applies to unfiltered
+    # accounts too, and turning it off is the guardian-gated act.
+    adblock: bool = True
     system_whitelist: list[str] = field(default_factory=list)
     guest: GuestPolicy = field(default_factory=GuestPolicy)
     # A family's own presets, saved from a tuned account (see profiles.py).
@@ -256,6 +262,7 @@ class Policy:
             "source": self.source,
             "users": [u.to_dict() for u in self.users],
             "guardian": {"enabled": self.guardian_enabled},
+            "adblock": {"enabled": self.adblock},
             **({"custom_profiles": list(self.custom_profiles)}
                if self.custom_profiles else {}),
             "system_whitelist": self.system_whitelist,
@@ -290,6 +297,7 @@ class Policy:
                 for u in doc["users"]
             ],
             guardian_enabled=doc["guardian"]["enabled"],
+            adblock=bool(doc.get("adblock", {}).get("enabled", True)),
             custom_profiles=list(doc.get("custom_profiles") or []),
             system_whitelist=list(doc.get("system_whitelist", [])),
             guest=GuestPolicy(

@@ -73,6 +73,9 @@ ACTIONS = {
     # is judged and cannot be loosened here — so an account-management
     # action rather than a filter one, and no guardian gate.
     "SetCoverStyle": ACTION_MANAGE_USERS,
+    # Machine-wide ad and tracker blocking at the resolvers. Turning it off
+    # weakens what reaches the screen, so it is guardian-gated.
+    "SetAdBlock": ACTION_MANAGE_FILTER,
     "ApproveRequest": ACTION_MANAGE_FILTER,
     "DismissRequest": ACTION_MANAGE_USERS,
     "ListRequests": ACTION_READ_CONFIG,
@@ -117,6 +120,7 @@ GUARDIAN_GATED = frozenset({
     "SetMediaLevel",
     "SetLanguageFilter", "SetYouTube",
     "SetGuestConfig", "DisableGuardian", "Enrol", "Unenrol",
+    "SetAdBlock",
 })
 
 # First-boot only; closed forever once setup is stamped complete.

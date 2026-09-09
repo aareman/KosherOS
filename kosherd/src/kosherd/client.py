@@ -126,6 +126,10 @@ class DaemonClient:
     def set_cover_style(self, uid: int, style: str) -> None:
         self._call("Profiles", "SetCoverStyle", "(is)", uid, style)
 
+    def set_adblock(self, enabled: bool, guardian_password: str = "") -> None:
+        """Ads and trackers blocked at the resolvers, for every account."""
+        self._call("Profiles", "SetAdBlock", "(bs)", enabled, guardian_password)
+
     def my_layout(self) -> str:
         """The calling user's own desktop layout (any active local user)."""
         return self._call("Profiles", "GetMyLayout")[0]

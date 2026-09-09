@@ -31,6 +31,16 @@ section "Containment"
 check "user namespaces do not escape the filter" 1 \
     as nokid unshare -rn -- curl -sS --max-time 8 -o /dev/null https://example.com
 
+section "Ad blocking, for everyone"
+# Rendered into both resolvers, so the unfiltered account's plain resolver
+# blocks the same domains as the family one.
+check "the ad list is rendered for the family resolver" 0 \
+    grep -q '^address=/' /etc/kosher/dnsmasq.d/adblock.conf
+check "and identically for the plain resolver" 0 \
+    cmp -s /etc/kosher/dnsmasq.d/adblock.conf /etc/kosher/dnsmasq-open.d/adblock.conf
+check "a known ad domain does not resolve" 1 \
+    dig +short +time=3 @127.0.0.1 doubleclick.net A
+
 section "Captive portal"
 check "a temporary window can be opened" 0 kosherctl captive "$(id -u nokid)" 1
 check "the window lets that user out"    0 fetch_as nokid https://example.com

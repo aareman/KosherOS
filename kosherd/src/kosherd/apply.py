@@ -26,6 +26,8 @@ NFT_RULESET_PATH = Path("/etc/kosher/nft/kosher.nft")
 DNSMASQ_DROPIN_PATH = Path(dns.WHITELIST_CONF)
 SAFESEARCH_PATH = Path(dns.SAFESEARCH_CONF)
 CATEGORY_BLOCK_PATH = Path(dns.CATEGORY_BLOCK_CONF)
+ADBLOCK_PATH = Path(dns.ADBLOCK_CONF)
+ADBLOCK_OPEN_PATH = Path(dns.ADBLOCK_OPEN_CONF)
 DNS_SERVICE = "kosher-dns.service"
 # Only runs while somebody is unfiltered (see nft.OPEN_DNS_PORT).
 OPEN_DNS_SERVICE = "kosher-dns-open.service"
@@ -182,8 +184,13 @@ def apply_policy(policy: Policy) -> None:
 
     _write_atomic(DNSMASQ_DROPIN_PATH, dns.render(policy))
     _write_atomic(SAFESEARCH_PATH, dns.render_safesearch(policy))
-    _write_atomic(CATEGORY_BLOCK_PATH,
-                  dns.render_category_blocks(policy, categories_mod.load_any()))
+    bundle = categories_mod.load_any()
+    _write_atomic(CATEGORY_BLOCK_PATH, dns.render_category_blocks(policy, bundle))
+    # Ads and trackers, for every account: the same drop-in into both
+    # resolvers, so the unfiltered account's plain resolver blocks them too.
+    adblock = dns.render_adblock(policy, bundle)
+    _write_atomic(ADBLOCK_PATH, adblock)
+    _write_atomic(ADBLOCK_OPEN_PATH, adblock)
 
     # The plain resolver exists only for unfiltered users; running it when
     # nobody is unfiltered would just be an unfiltered resolver sitting on

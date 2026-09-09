@@ -208,6 +208,20 @@
         },
         "additionalProperties": false
       }
+    },
+    "adblock": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "enabled"
+      ],
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Block advertising and tracker domains at the machine's resolvers for every account, like a Pi-hole. Reaches every browser and app because all DNS is forced through the local resolvers. Absent means on."
+        }
+      }
     }
   },
   "$defs": {

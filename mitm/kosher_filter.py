@@ -1048,6 +1048,13 @@ class KosherFilter:
                      self._referring_page_level(flow))
             self._blank_image(flow)
             return True
+        # An animated picture (GIF, animated PNG or WebP) was judged on
+        # frames spread through it; a cover on one frame means nothing on
+        # the others, so it is hidden whole.
+        if imageedit_mod.is_animated(body):
+            log.info("hid an animated picture that reads as %s", verdict.level)
+            self._blank_image(flow)
+            return True
         # When the cover would take most of the picture, a frosted rectangle
         # in a frame of background helps nobody and costs a decode, a blur
         # and a re-encode. Hide it whole, instantly. (Not for the skin

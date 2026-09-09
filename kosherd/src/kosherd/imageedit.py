@@ -194,6 +194,19 @@ def content_type(data: bytes) -> str:
     return "image/png"
 
 
+def is_animated(image_bytes: bytes) -> bool:
+    """Does this picture move? Reads the header only. A cover placed on one
+    frame means nothing on the others, so an animation that must be
+    covered is hidden whole instead."""
+    try:
+        from PIL import Image
+
+        with Image.open(io.BytesIO(image_bytes)) as im:
+            return bool(getattr(im, "is_animated", False)) and getattr(im, "n_frames", 1) > 1
+    except Exception:  # noqa: BLE001
+        return False
+
+
 def dominant(image_bytes: bytes, regions, threshold: float = DOMINANT) -> bool:
     """Would covering `regions` (grown as cover() grows them) take most of
     the picture? Reads only the header, so it costs almost nothing."""

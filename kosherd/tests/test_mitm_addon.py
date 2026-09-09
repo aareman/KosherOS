@@ -1547,3 +1547,30 @@ def test_the_skin_style_does_not_hide_a_dominant_figure_whole(addon):
     asyncio.run(filt.response(flow))
     assert flow.response.content != addon.BLANK_PNG, "painted, not hidden whole"
     assert flow.response.headers["x-kosheros"] == "image-covered=nsfw"
+
+
+def test_an_animation_that_hides_is_hidden_whole_not_covered(addon):
+    from kosherd.vision import NSFW, ImageVerdict
+    from PIL import Image
+    import io
+
+    import random
+
+    rng = random.Random(1)
+    frames = []
+    for colour in ((10, 200, 10), (220, 20, 20)):
+        im = Image.new("RGB", (300, 300), colour)
+        px = im.load()
+        for _ in range(15_000):  # noise, so the GIF is a picture and not an icon
+            px[rng.randrange(300), rng.randrange(300)] = (rng.randrange(256),) * 3
+        frames.append(im)
+    out = io.BytesIO()
+    frames[0].save(out, "GIF", save_all=True, append_images=frames[1:], duration=100, loop=0)
+    body = out.getvalue()
+    assert len(body) > addon.MIN_IMAGE_BYTES
+    flow = _hflow("image/gif", body=body)
+    filt = _filt(addon, media="nsfw",
+                 vision=_async_vision(ImageVerdict(NSFW, ((20, 20, 60, 60),), True)))
+    asyncio.run(filt.response(flow))
+    assert flow.response.content == addon.BLANK_PNG
+    assert len(filt.covers) == 0

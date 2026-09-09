@@ -38,10 +38,10 @@ import time
 from .vision import (
     CLEAN,
     JUDGEMENT_VERSION,
-    SEVERITY,
     ImageFilter,
     ImageVerdict,
     VerdictCache,
+    combine,
 )
 
 log = logging.getLogger(__name__)
@@ -148,16 +148,6 @@ def sample_frames(data: bytes, max_frames: int = SAMPLE_FRAMES,
                 for frame in candidates[::step][:max_frames]:
                     keep(frame)
     return frames
-
-
-def combine(verdicts) -> ImageVerdict | None:
-    """One verdict for the clip: the strongest frame, and whether anyone was
-    in any of them. None if nothing could be judged."""
-    judged = [v for v in verdicts if v is not None]
-    if not judged:
-        return None
-    worst = max(judged, key=lambda v: SEVERITY[v.level])
-    return ImageVerdict(worst.level, (), any(v.has_person for v in judged))
 
 
 class VideoChecker:

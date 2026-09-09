@@ -276,6 +276,20 @@ Each stage only runs if the one before it could not settle the question:
 | on-disk cache by content hash | everything seen before |
 | the detector | only what is left |
 
+### Pictures that move
+
+A GIF, an animated PNG or an animated WebP is a short clip, and is treated
+as one: `vision.animation_frames` takes four frames spread through the
+animation and the strongest frame's verdict is the picture's. Before this,
+a GIF was always hidden — the detector's image reader (OpenCV) cannot open
+one, so every GIF was "could not judge" — and an animated PNG or WebP was
+judged on its first frame alone, so a clean opening frame let the rest
+through. Anything OpenCV cannot read (GIF, AVIF) is now handed to the
+detector as a JPEG (`vision.prepare`), so a still GIF is judged like any
+other picture. An animation that must be covered is hidden whole: a cover
+placed on one frame means nothing on the others. WebM is video and takes
+the video path.
+
 ### What is held and what streams
 
 The proxy used to buffer every response body before the filter ran —

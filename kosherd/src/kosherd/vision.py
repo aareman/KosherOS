@@ -392,6 +392,88 @@ def _unpack(text: str) -> tuple:
     return tuple(boxes)
 
 
+# What OpenCV (NudeNet's reader) can open on its own; anything else is
+# re-encoded to JPEG before detection.
+CV2_FORMATS = frozenset({"JPEG", "PNG", "WEBP", "BMP", "TIFF"})
+
+
+def prepare(image_bytes: bytes) -> tuple[bytes, float]:
+    """What the detector is handed, and the factor its boxes must be
+    divided by to land on the original picture.
+
+    Small pictures blind the model: on ~200px search thumbnails the
+    detector missed a swimsuit photo entirely — not even the face.
+    Upscaling to ~640 on the short side before detection restores most of
+    it, for a few milliseconds of Pillow. And NudeNet reads the file with
+    OpenCV, which cannot open a GIF or an AVIF at all: every GIF was "could
+    not judge" and hidden, static or not. Those become a JPEG of the
+    (first) frame. Anything else goes through untouched.
+    """
+    scale = 1.0
+    try:
+        import io
+
+        from PIL import Image
+
+        with Image.open(io.BytesIO(image_bytes)) as im:
+            short = min(im.size)
+            foreign = (im.format or "").upper() not in CV2_FORMATS
+            if 0 < short < 480:
+                scale = min(640 / short, 4.0)
+            if scale == 1.0 and not foreign:
+                return image_bytes, 1.0
+            frame = im.convert("RGB")
+            if scale != 1.0:
+                frame = frame.resize((int(im.width * scale), int(im.height * scale)),
+                                     Image.Resampling.LANCZOS)
+            out = io.BytesIO()
+            frame.save(out, "JPEG", quality=90)
+            return out.getvalue(), scale
+    except Exception:  # noqa: BLE001 - detection on the original instead
+        return image_bytes, 1.0
+# Frames judged from an animated picture, spread through it. A GIF or an
+# animated PNG/WebP is a short clip: a clean first frame says nothing about
+# the rest, so it is sampled like one.
+ANIMATION_FRAMES = 4
+
+
+def animation_frames(image_bytes: bytes, max_frames: int = ANIMATION_FRAMES):
+    """Up to `max_frames` frames of an animated picture as JPEGs, spread
+    through the animation; None for a still picture (or one PIL cannot
+    open, which the caller treats as a still and lets the detector refuse)."""
+    try:
+        import io
+
+        from PIL import Image
+
+        with Image.open(io.BytesIO(image_bytes)) as im:
+            count = getattr(im, "n_frames", 1)
+            if not getattr(im, "is_animated", False) or count < 2:
+                return None
+            picks = sorted({int(count * (i + 0.5) / max_frames) for i in range(max_frames)})
+            frames = []
+            for index in picks:
+                im.seek(min(index, count - 1))
+                out = io.BytesIO()
+                im.convert("RGB").save(out, "JPEG", quality=85)
+                frames.append(out.getvalue())
+            return frames
+    except Exception:  # noqa: BLE001 - not an animation we can read
+        return None
+
+
+def combine(verdicts) -> ImageVerdict | None:
+    """One verdict for a set of frames: the strongest, and whether anyone
+    was in any of them. Regions are dropped — a cover placed on one frame
+    of an animation means nothing on the others, so an animation that
+    hides is hidden whole. None if nothing could be judged."""
+    judged = [v for v in verdicts if v is not None]
+    if not judged:
+        return None
+    worst = max(judged, key=lambda v: SEVERITY[v.level])
+    return ImageVerdict(worst.level, (), any(v.has_person for v in judged))
+
+
 class NullDetector:
     """What runs when no model is installed.
 
@@ -449,24 +531,7 @@ class NudeNetDetector:
         # Upscaling to ~640 on the short side before detection restores
         # most of it, for a few milliseconds of Pillow. The BOXES scale
         # back down so covers land on the original image.
-        scale = 1.0
-        try:
-            import io as _io
-
-            from PIL import Image
-
-            with Image.open(_io.BytesIO(image_bytes)) as im:
-                short = min(im.size)
-                if 0 < short < 480:
-                    scale = min(640 / short, 4.0)
-                    resized = im.convert("RGB").resize(
-                        (int(im.width * scale), int(im.height * scale)),
-                        Image.Resampling.LANCZOS)
-                    out = _io.BytesIO()
-                    resized.save(out, "JPEG", quality=90)
-                    image_bytes = out.getvalue()
-        except Exception:  # noqa: BLE001 - detection on the original instead
-            scale = 1.0
+        image_bytes, scale = prepare(image_bytes)
 
         # NudeNet reads a path, not bytes.
         with tempfile.NamedTemporaryFile(suffix=".img") as handle:
@@ -646,7 +711,19 @@ class ImageFilter:
         cache. This is what the worker pool runs; a caller that gave up
         waiting still gets the verdict cached for the next time the same
         picture comes past, which on a slow machine is exactly when it
-        matters."""
+        matters. An animated picture is judged on frames spread through it
+        and gets one verdict for the lot."""
+        frames = animation_frames(image_bytes)
+        if frames:
+            verdict = combine(self._judge_one(frame) for frame in frames)
+        else:
+            verdict = self._judge_one(image_bytes)
+        if verdict is None:
+            return None
+        self.cache.put(sha or digest(image_bytes), verdict)
+        return verdict
+
+    def _judge_one(self, image_bytes: bytes) -> ImageVerdict | None:
         started = time.monotonic()
         try:
             detections = self.detector.detect(image_bytes)
@@ -658,9 +735,7 @@ class ImageFilter:
         if detections is None:
             return None
         verdict = judge(detections)
-        verdict = self._person_aware(image_bytes, detections, verdict)
-        self.cache.put(sha or digest(image_bytes), verdict)
-        return verdict
+        return self._person_aware(image_bytes, detections, verdict)
 
     def verdict(self, image_bytes: bytes) -> ImageVerdict | None:
         """Judge one picture, waiting up to the deadline. None means it

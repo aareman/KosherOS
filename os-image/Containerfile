@@ -109,6 +109,12 @@ RUN python3 -m pip install --prefix=/usr mitmproxy
 # what covers a detected region instead of blanking the whole picture.
 RUN python3 -m pip install --prefix=/usr nudenet onnxruntime pillow \
     || echo "WARNING: no image model; picture filtering will hide pictures"
+# PyAV: FFmpeg's libraries as a wheel, with the H.264, VP9 and AV1 decoders
+# that Fedora's own ffmpeg-free leaves out. The proxy samples a few
+# keyframes from a clip and judges them like pictures (kosherd/videocheck).
+# Without it, filtered accounts get no open-web video, as before.
+RUN python3 -m pip install --prefix=/usr av \
+    || echo "WARNING: no video decoder; filtered accounts will get no open-web video"
 # SearXNG is the metasearch engine behind our search page. It is a large
 # dependency and the only reason it is here is that scraping search
 # engines is the part that breaks constantly, and SearXNG is the project

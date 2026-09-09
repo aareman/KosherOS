@@ -38,6 +38,7 @@ try:
     from kosherd import search as search_mod
     from kosherd import siterules as siterules_mod
     from kosherd import suggest as suggest_mod
+    from kosherd import videocheck as videocheck_mod
     from kosherd import vision as vision_mod
     from kosherd.uidmap import UidLookup
     from kosherd.urlrules import BLOCK, decide, parse_rules
@@ -58,6 +59,7 @@ except ImportError:  # pragma: no cover - only when interpreters differ
     from kosherd import search as search_mod
     from kosherd import siterules as siterules_mod
     from kosherd import suggest as suggest_mod
+    from kosherd import videocheck as videocheck_mod
     from kosherd import vision as vision_mod
     from kosherd.uidmap import UidLookup
     from kosherd.urlrules import BLOCK, decide, parse_rules
@@ -315,16 +317,41 @@ BLANK_PNG = base64.b64decode(
 )
 
 IMAGE_TYPES = ("image/",)
-# Video is judged by where it comes from, not by what is in it. Decoding
-# frames would mean ffmpeg and a second or more per clip on a machine that
-# may have two cores, for a stream the person is already watching — so the
-# levers that work are the source (a blocked category), the page (scored by
-# its words), the thumbnail (an image, filtered like any other) and, for
-# YouTube, the category and channel limits above.
+# Video is judged by its source first (a blocked category, the mildest
+# lever) and then, for an account whose pictures are filtered, by a few of
+# its frames: kosherd/videocheck.py samples keyframes from a clip small
+# enough to hold and runs them through the picture detector, once per clip.
+# Playlists (HLS/DASH manifests) are text that points at segments; the
+# segments are the video and are judged one by one.
 VIDEO_TYPES = ("video/", "application/vnd.apple.mpegurl",
                "application/x-mpegurl", "application/dash+xml")
-# Levels that mean "no video from the open web".
-VIDEO_BLOCKED_LEVELS = ("all", "immodest", "suggestive")
+PLAYLIST_TYPES = ("application/vnd.apple.mpegurl", "application/x-mpegurl",
+                  "application/dash+xml")
+# Levels at which a clip is looked at. "all" needs no looking: no video.
+VIDEO_CHECKED_LEVELS = ("nsfw", "suggestive", "immodest")
+# Levels at which an UNCHECKABLE clip (no decoder, too big to hold, a
+# mid-stream range with no verdict yet) is refused rather than passed. The
+# mildest level keeps its old behaviour — video passed unchecked there
+# before this existed, and a decoder that is missing must not take it away.
+VIDEO_STRICT_LEVELS = ("all", "immodest", "suggestive")
+# Kept for callers that still read it: what "no open-web video" meant.
+VIDEO_BLOCKED_LEVELS = VIDEO_STRICT_LEVELS
+
+# Responses the filter never reads, so they need not be held in memory:
+# they go straight through as they arrive. Everything else was buffered
+# whole before the filter ran — including a 200 MB download and every
+# video, at every media level — which is the memory and the stall a person
+# felt as "the system is slow". Only the types the filter actually inspects
+# (HTML, pictures, clips it will sample, the JSON of a few known sites) are
+# held now.
+STREAM_TYPES = ("application/octet-stream", "application/zip", "application/gzip",
+                "application/x-tar", "application/x-7z-compressed",
+                "application/x-xz", "application/x-bzip2", "application/pdf",
+                "application/wasm", "application/vnd.debian.binary-package",
+                "application/x-rpm", "application/x-iso9660-image",
+                "font/", "audio/")
+# Anything this large that is not a page, a picture or a clip is a download.
+STREAM_LARGE_BYTES = 8 * 1024 * 1024
 # Below this, an image is an icon, a spacer or a tracking pixel: not worth
 # hiding and not worth a classifier's time.
 MIN_IMAGE_BYTES = 2500  # keep in step with kosherd.vision
@@ -356,6 +383,29 @@ def _is_image(flow) -> bool:
 def _is_video(flow) -> bool:
     content_type = (flow.response.headers.get("content-type") or "").lower()
     return content_type.startswith(VIDEO_TYPES)
+
+
+def _is_playlist(flow) -> bool:
+    content_type = (flow.response.headers.get("content-type") or "").lower()
+    return content_type.startswith(PLAYLIST_TYPES)
+
+
+def _content_length(flow) -> int | None:
+    try:
+        return int(flow.response.headers.get("content-length", ""))
+    except (TypeError, ValueError):
+        return None
+
+
+def _range_info(flow):
+    """(first byte, total size) of a partial response, from Content-Range;
+    (0, content-length) for a whole one. None where unknown."""
+    header = flow.response.headers.get("content-range") or ""
+    m = re.match(r"bytes (\d+)-(\d+)/(\d+|\*)", header)
+    if m:
+        total = int(m.group(3)) if m.group(3) != "*" else None
+        return int(m.group(1)), total
+    return 0, _content_length(flow)
 
 
 class YouTube:
@@ -530,6 +580,10 @@ class KosherFilter:
         self.scorer = content_mod.load()
         self.wordlist = language_mod.load()
         self.vision = vision_mod.ImageFilter()
+        self.videos = videocheck_mod.VideoChecker(self.vision)
+        # Recently covered pictures by content hash, so a reload or the
+        # same photo on the next page is not frosted and re-encoded again.
+        self.covers = imageedit_mod.CoverCache()
         self.siterules = siterules_mod.load()
         # What each page was judged to be, so the pictures ON it can be
         # judged in that light. Small and bounded: a browser fetches a
@@ -643,17 +697,63 @@ class KosherFilter:
 
 
 
-    def response(self, flow: http.HTTPFlow) -> None:
+    # ---- what to hold and what to let through as it arrives ----------------
+
+    def responseheaders(self, flow: http.HTTPFlow) -> None:
+        """Decide, from the headers alone, whether the body must be held.
+
+        mitmproxy buffers every response body before `response` runs unless
+        told otherwise here. The filter only ever reads pages, pictures and
+        the clips it samples; holding downloads and streams as well cost the
+        memory and the stall that made the machine feel slow. A clip that
+        must be refused is refused HERE, before a byte of it is fetched.
+        """
+        uid = flow.metadata.get("kosher_uid")
+        if uid is None:
+            # Not a filtered account's connection (see response): nothing
+            # to inspect, so nothing to hold.
+            flow.response.stream = True
+            return
+        content_type = (flow.response.headers.get("content-type") or "").lower()
+        if content_type.startswith(PLAYLIST_TYPES):
+            return  # small text; response() decides
+        if content_type.startswith(VIDEO_TYPES):
+            decision = self._video_decision(flow, uid)
+            if decision == "stream":
+                flow.response.stream = True
+            elif decision == "refuse":
+                self._refuse_video(flow, before_body=True)
+            return  # "hold": sampled in response()
+        if content_type.startswith(IMAGE_TYPES):
+            if self.policy.media_level_for(uid) == "none":
+                flow.response.stream = True
+            return
+        if "text/html" in content_type or YouTube.applies(flow.request.pretty_host) \
+                or self.siterules.is_suggestions(flow.request.pretty_url):
+            return
+        length = _content_length(flow)
+        if content_type.startswith(STREAM_TYPES) or (
+                length is not None and length > STREAM_LARGE_BYTES
+                and not content_type.startswith("text/")):
+            flow.response.stream = True
+
+    async def response(self, flow: http.HTTPFlow) -> None:
+        # Async so that a picture being judged, or a clip being sampled,
+        # waits on its own: the synchronous hook held the proxy's one event
+        # loop for up to the detection deadline per picture, and every other
+        # connection on the machine stood still with it.
         uid = flow.metadata.get("kosher_uid")
         if uid is None:
             return
+        if getattr(flow.response, "stream", False):
+            return  # let through as it arrived; there is no body to read
 
         if _is_image(flow):
-            self._filter_image(flow, uid)
+            await self._filter_image_async(flow, uid)
             return
 
         if _is_video(flow):
-            self._filter_video(flow, uid)
+            await self._filter_video_async(flow, uid)
             return
 
         if YouTube.applies(flow.request.pretty_host):
@@ -850,10 +950,14 @@ class KosherFilter:
         referer = flow.request.headers.get("referer") or ""
         return self.page_levels.get(referer, "")
 
-    def _filter_image(self, flow: http.HTTPFlow, uid: int) -> None:
-        level = self.policy.media_level_for(uid)
-        if level == "none":
-            return
+    # ---- pictures ----------------------------------------------------------
+    #
+    # The picture path is three steps so the same logic serves the proxy
+    # (async, off the event loop) and the tests (sync): the free decisions
+    # before the model, the decision after its verdict, and the cover.
+
+    def _image_prejudge(self, flow: http.HTTPFlow, uid: int, level: str) -> bool:
+        """The decisions that need no model. True when the response is settled."""
         body = flow.response.content or b""
 
         # "all" needs no judgement, which is why it is the only level that
@@ -862,10 +966,10 @@ class KosherFilter:
         # thumbnails fit comfortably under any byte floor.
         if level == "all":
             self._blank_image(flow)
-            return
+            return True
 
         if len(body) < MIN_IMAGE_BYTES:
-            return  # icons, spacers, tracking pixels
+            return True  # icons, spacers, tracking pixels
 
         # Source-based suppression costs nothing and covers the worst of the
         # web: if the page's own domain is in a category this user blocks,
@@ -875,7 +979,7 @@ class KosherFilter:
         if self.categories.blocked_categories_of(
                 host, self.policy.blocked_categories_for(uid)):
             self._blank_image(flow)
-            return
+            return True
 
         # And the catalogue's OWN judgement of the source, independent of
         # what this account blocks for browsing: a site classified adult or
@@ -895,9 +999,14 @@ class KosherFilter:
                              candidate,
                              ",".join(sorted(self.categories.categories_of(candidate) & sources)))
                     self._blank_image(flow)
-                    return
+                    return True
+        return False
 
-        verdict = self.vision.verdict(body)
+    def _image_settle(self, flow: http.HTTPFlow, uid: int, level: str,
+                      verdict) -> bool:
+        """After the verdict: True when the response is settled, False when
+        the picture is to be covered (verdict.regions say where)."""
+        body = flow.response.content or b""
         # Cheap: it only writes when the answer has changed.
         self.vision.write_status()
         if verdict is None:
@@ -906,7 +1015,7 @@ class KosherFilter:
             # account that asked for pictures to be checked should not
             # quietly get unchecked pictures.
             self._blank_image(flow)
-            return
+            return True
         # Image-search thumbnails are aggregated pictures of the whole web,
         # shrunk past what the detector can reliably judge — beach and
         # sheer-fabric shots sailed through at "immodest". At the modesty
@@ -916,7 +1025,7 @@ class KosherFilter:
                 and _is_search_thumb(flow.request.pretty_host or ""):
             log.info("hid a search thumbnail with a person for uid=%s", uid)
             self._blank_image(flow)
-            return
+            return True
         if not vision_mod.hides(level, verdict):
             # The immodest level is the weak one: the detector has no
             # label for a bare arm, so a clothed model in a lingerie
@@ -924,50 +1033,184 @@ class KosherFilter:
             # presence of a person together catch most of that.
             if not vision_mod.in_context(verdict, self._referring_page_level(flow),
                                          CONTENT_TOLERANCE.get(level, "nsfw")):
-                return
+                return True
             log.info("hid a picture on a page that reads as %s",
                      self._referring_page_level(flow))
             self._blank_image(flow)
-            return
+            return True
+        # When the cover would take most of the picture, a frosted rectangle
+        # in a frame of background helps nobody and costs a decode, a blur
+        # and a re-encode. Hide it whole, instantly.
+        if imageedit_mod.dominant(body, verdict.regions):
+            self._blank_image(flow)
+            return True
+        return False
 
+    def _cover(self, body: bytes, verdict) -> bytes | None:
+        """The covered picture, from the cache of recent covers when the
+        same picture came past a moment ago. CPU work: run on a worker."""
+        cache_key = vision_mod.digest(body) + "|" + ",".join(
+            "-".join(str(v) for v in box) for box in verdict.regions)
+        covered = self.covers.get(cache_key)
+        if covered is None:
+            covered = imageedit_mod.cover(body, verdict.regions)
+            if covered is not None:
+                self.covers.put(cache_key, covered)
+        return covered
+
+    def _apply_cover(self, flow: http.HTTPFlow, verdict, covered: bytes | None) -> None:
         # Cover only what was found, so the rest of the picture — and the
         # page's layout — survives. If that cannot be done, hide it all.
-        covered = imageedit_mod.cover(body, verdict.regions)
         if covered is None:
             self._blank_image(flow)
             return
         flow.response.content = covered
-        flow.response.headers["content-type"] = (
-            "image/jpeg" if covered[:2] == b"\xff\xd8" else "image/png")
+        flow.response.headers["content-type"] = imageedit_mod.content_type(covered)
         flow.response.headers["x-kosheros"] = f"image-covered={verdict.level}"
+        # The body changed; a length header on it would be a lie the
+        # browser enforces.
+        flow.response.headers.pop("content-length", None)
 
-    def _filter_video(self, flow: http.HTTPFlow, uid: int) -> None:
-        """Video, judged by its source rather than its frames.
+    def _filter_image(self, flow: http.HTTPFlow, uid: int) -> None:
+        """The picture path, synchronously (tests and tools)."""
+        level = self.policy.media_level_for(uid)
+        if level == "none" or self._image_prejudge(flow, uid, level):
+            return
+        body = flow.response.content or b""
+        verdict = self.vision.verdict(body)
+        if self._image_settle(flow, uid, level, verdict):
+            return
+        self._apply_cover(flow, verdict, self._cover(body, verdict))
+
+    async def _filter_image_async(self, flow: http.HTTPFlow, uid: int) -> None:
+        """The picture path as the proxy runs it: the model and the cover
+        both on a worker, the event loop free for everyone else meanwhile."""
+        level = self.policy.media_level_for(uid)
+        if level == "none" or self._image_prejudge(flow, uid, level):
+            return
+        body = flow.response.content or b""
+        verdict = await self.vision.verdict_async(body)
+        if self._image_settle(flow, uid, level, verdict):
+            return
+        covered = await self.vision.run_async(self._cover, body, verdict)
+        self._apply_cover(flow, verdict, covered)
+
+    # ---- video -------------------------------------------------------------
+
+    def _checker(self):
+        return getattr(self, "videos", None)
+
+    def _video_decision(self, flow: http.HTTPFlow, uid: int) -> str:
+        """From the headers: "stream" (let through), "refuse", or "hold"
+        (buffer the clip and sample it).
 
         YouTube is handled separately and precisely (categories and an
-        approved-channel list). This is everything else: a clip from a
-        site in a category this account blocks, or any clip at all for an
-        account whose pictures are filtered, since a video is pictures at
-        thirty a second and nothing here can look inside one in time.
+        approved-channel list). This is everything else.
         """
         level = self.policy.media_level_for(uid)
         if level == "none":
-            return
+            return "stream"
         host = flow.request.pretty_host or ""
-        from_blocked_source = bool(self.categories.blocked_categories_of(
-            host, self.policy.blocked_categories_for(uid)))
-        if level not in VIDEO_BLOCKED_LEVELS and not from_blocked_source:
+        if self.categories.blocked_categories_of(
+                host, self.policy.blocked_categories_for(uid)):
+            return "refuse"  # a clip from a site this account blocks
+        if level not in VIDEO_CHECKED_LEVELS:
+            return "refuse"  # "all": no video, as no pictures
+        checker = self._checker()
+        uncheckable = "refuse" if level in VIDEO_STRICT_LEVELS else "stream"
+        if checker is None or not checker.available:
+            return uncheckable
+        first, total = _range_info(flow)
+        cached = checker.cached(videocheck_mod.key(flow.request.pretty_url, total))
+        if cached is not None:
+            return "refuse" if vision_mod.hides(level, cached) else "stream"
+        if first:
+            # A range from the middle of a clip nobody has judged: there
+            # is no header to decode it from. The first request for a clip
+            # always starts at 0 and gets it judged.
+            return uncheckable
+        length = _content_length(flow)
+        if length is not None and length > videocheck_mod.VIDEO_MAX_BYTES:
+            return uncheckable  # too big to hold for sampling
+        return "hold"
+
+    def _refuse_video(self, flow: http.HTTPFlow, before_body: bool = False) -> None:
+        log.info("refused video %s", flow.request.pretty_url)
+        if before_body:
+            # Headers not yet sent: turn this response into the refusal and
+            # drop the body as it arrives instead of downloading it.
+            flow.response.status_code = 403
+            flow.response.headers.clear()
+            flow.response.headers["content-type"] = "text/plain"
+            flow.response.headers["x-kosheros"] = "video-blocked"
+            flow.response.stream = lambda chunk: b""
             return
-        log.info("blocked video uid=%s %s", uid, flow.request.pretty_url)
         flow.response = http.Response.make(
             403, b"", {"Content-Type": "text/plain",
                        "x-kosheros": "video-blocked"})
+
+    def _video_settle(self, flow: http.HTTPFlow, uid: int, level: str, verdict) -> None:
+        if verdict is None or vision_mod.hides(level, verdict):
+            # Could not look, or looked and saw. Refusing is the safe
+            # direction, as for pictures.
+            self._refuse_video(flow)
+            return
+        flow.response.headers["x-kosheros"] = f"video-checked={verdict.level}"
+
+    def _playlist_refused(self, flow: http.HTTPFlow, uid: int) -> bool:
+        """A manifest is text pointing at segments, and the segments are
+        what gets judged. Only a blocked source, and the levels with no
+        video at all, refuse the manifest itself."""
+        level = self.policy.media_level_for(uid)
+        if level == "none":
+            return False
+        if self.categories.blocked_categories_of(
+                flow.request.pretty_host or "",
+                self.policy.blocked_categories_for(uid)):
+            return True
+        return level not in VIDEO_CHECKED_LEVELS
+
+    def _filter_video(self, flow: http.HTTPFlow, uid: int) -> None:
+        """The video path, synchronously (tests and tools)."""
+        if _is_playlist(flow):
+            if self._playlist_refused(flow, uid):
+                self._refuse_video(flow)
+            return
+        decision = self._video_decision(flow, uid)
+        if decision == "stream":
+            return
+        if decision == "refuse":
+            self._refuse_video(flow)
+            return
+        level = self.policy.media_level_for(uid)
+        _first, total = _range_info(flow)
+        verdict = self._checker().verdict(
+            flow.response.content or b"", videocheck_mod.key(flow.request.pretty_url, total))
+        self._video_settle(flow, uid, level, verdict)
+
+    async def _filter_video_async(self, flow: http.HTTPFlow, uid: int) -> None:
+        if _is_playlist(flow):
+            if self._playlist_refused(flow, uid):
+                self._refuse_video(flow)
+            return
+        decision = self._video_decision(flow, uid)
+        if decision == "stream":
+            return
+        if decision == "refuse":
+            self._refuse_video(flow)
+            return
+        level = self.policy.media_level_for(uid)
+        _first, total = _range_info(flow)
+        verdict = await self._checker().verdict_async(
+            flow.response.content or b"", videocheck_mod.key(flow.request.pretty_url, total))
+        self._video_settle(flow, uid, level, verdict)
 
     @staticmethod
     def _blank_image(flow: http.HTTPFlow) -> None:
         flow.response.content = BLANK_PNG
         flow.response.headers["content-type"] = "image/png"
         flow.response.headers["x-kosheros"] = "image-hidden"
+        flow.response.headers.pop("content-length", None)
 
     def _filter_youtube(self, flow: http.HTTPFlow, uid: int) -> None:
         settings = self.policy.youtube_for(uid)

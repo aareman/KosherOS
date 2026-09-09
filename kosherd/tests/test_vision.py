@@ -220,8 +220,10 @@ def _slow_filter(tmp_path, ms, slow_ms=400):
 
     class Slow:
         available = True
+        calls = 0
 
         def detect(self, data):
+            Slow.calls += 1
             _t.sleep(ms / 1000)
             return []
 
@@ -245,12 +247,11 @@ def test_a_machine_that_cannot_keep_up_stops_trying(tmp_path):
     for i in range(vision.SLOW_WINDOW):
         f.verdict(b"x" * 10_000 + bytes([i % 251]))
     assert f.degraded
-    # And from then on it answers immediately with "could not judge",
-    # which the caller turns into a hidden picture.
-    import time as _t
-    started = _t.monotonic()
+    # And from then on it answers "could not judge" without consulting the
+    # detector at all, which the caller turns into a hidden picture.
+    before = f.detector.calls
     assert f.verdict(b"y" * 10_000) is None
-    assert _t.monotonic() - started < 0.02
+    assert f.detector.calls == before
 
 
 def test_a_verdict_already_reached_is_still_served_when_degraded(tmp_path):

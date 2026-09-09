@@ -289,6 +289,12 @@ CREATE TABLE IF NOT EXISTS images (
     seen    INTEGER NOT NULL,
     person  INTEGER NOT NULL DEFAULT 0
 );
+CREATE TABLE IF NOT EXISTS videos (
+    key     TEXT PRIMARY KEY,
+    level   TEXT NOT NULL,
+    seen    INTEGER NOT NULL,
+    person  INTEGER NOT NULL DEFAULT 0
+);
 """
 
 
@@ -339,6 +345,33 @@ class VerdictCache:
                 db.commit()
         except sqlite3.Error:
             log.debug("could not cache an image verdict", exc_info=True)
+
+    # Clips, by address (see videocheck.key): same shape, no regions.
+    def get_video(self, key: str) -> ImageVerdict | None:
+        try:
+            with self._lock:
+                row = self._conn().execute(
+                    "SELECT level, seen, person FROM videos WHERE key = ?",
+                    (key,)).fetchone()
+        except sqlite3.Error:
+            return None
+        if not row or time.time() - row[1] > self.ttl:
+            return None
+        return ImageVerdict(row[0], (), bool(row[2]))
+
+    def put_video(self, key: str, verdict: ImageVerdict) -> None:
+        try:
+            with self._lock:
+                db = self._conn()
+                db.execute(
+                    "INSERT INTO videos (key, level, seen, person) "
+                    "VALUES (?, ?, ?, ?) ON CONFLICT(key) DO UPDATE SET "
+                    "level=excluded.level, seen=excluded.seen, "
+                    "person=excluded.person",
+                    (key, verdict.level, int(time.time()), int(verdict.has_person)))
+                db.commit()
+        except sqlite3.Error:
+            log.debug("could not cache a video verdict", exc_info=True)
 
 
 def _pack(regions) -> str:
@@ -558,35 +591,97 @@ class ImageFilter:
                                             thread_name_prefix="kosher-vision")
         return self._pool
 
-    def verdict(self, image_bytes: bytes) -> ImageVerdict | None:
-        """Judge one picture. None means it could not be judged."""
+    def _prejudge(self, image_bytes: bytes):
+        """The free answers: too small, already known, machine too slow.
+
+        Returns (verdict_or_None, sha). A verdict means the answer is final
+        without the model; a None with a sha means the model must look.
+        None with no sha means the machine is degraded: could not judge.
+        """
         if len(image_bytes) < MIN_IMAGE_BYTES:
             # Icons, spacers and tracking pixels: not worth the model's
             # time and not worth hiding either.
-            return ImageVerdict(CLEAN, ())
+            return ImageVerdict(CLEAN, ()), None
         sha = digest(image_bytes)
         cached = self.cache.get(sha)
         if cached is not None:
             # Always served: a verdict already reached costs nothing and
             # is just as accurate on a slow machine as on a fast one.
-            return cached
+            return cached, None
         if self.degraded:
-            return None
+            return None, None
+        return None, sha
+
+    def judge_bytes(self, image_bytes: bytes, sha: str | None = None) -> ImageVerdict | None:
+        """The whole judgement, on the calling thread: detect, map, refine,
+        cache. This is what the worker pool runs; a caller that gave up
+        waiting still gets the verdict cached for the next time the same
+        picture comes past, which on a slow machine is exactly when it
+        matters."""
         started = time.monotonic()
-        future = self._executor().submit(self.detector.detect, image_bytes)
         try:
-            detections = future.result(timeout=self.timeout)
-        except Exception:  # noqa: BLE001 - includes the timeout
-            future.cancel()
-            self._record(self.timeout * 1000)
+            detections = self.detector.detect(image_bytes)
+        except Exception:  # noqa: BLE001 - a broken image is not a verdict
+            log.debug("detection failed", exc_info=True)
+            self._record((time.monotonic() - started) * 1000)
             return None
         self._record((time.monotonic() - started) * 1000)
         if detections is None:
             return None
         verdict = judge(detections)
         verdict = self._person_aware(image_bytes, detections, verdict)
-        self.cache.put(sha, verdict)
+        self.cache.put(sha or digest(image_bytes), verdict)
         return verdict
+
+    def verdict(self, image_bytes: bytes) -> ImageVerdict | None:
+        """Judge one picture, waiting up to the deadline. None means it
+        could not be judged (or not in time)."""
+        known, sha = self._prejudge(image_bytes)
+        if known is not None or sha is None:
+            return known
+        future = self._executor().submit(self.judge_bytes, image_bytes, sha)
+        try:
+            return future.result(timeout=self.timeout)
+        except Exception:  # noqa: BLE001 - includes the timeout
+            # The worker keeps going and caches its answer; the timeout is
+            # counted against the machine so a slow one degrades honestly.
+            self._record(self.timeout * 1000)
+            return None
+
+    async def verdict_async(self, image_bytes: bytes) -> ImageVerdict | None:
+        """The same judgement, without holding the caller's event loop.
+
+        The proxy runs its hooks on one asyncio loop. The synchronous
+        `verdict` waited on the worker from that loop, so every other
+        connection on the machine stood still for up to the deadline while
+        one picture was judged — a page with thirty photographs froze the
+        browser for the lot of them. Awaiting the worker instead lets the
+        other flows carry on; only the picture being judged waits.
+        """
+        import asyncio
+
+        known, sha = self._prejudge(image_bytes)
+        if known is not None or sha is None:
+            return known
+        loop = asyncio.get_running_loop()
+        future = loop.run_in_executor(self._executor(), self.judge_bytes,
+                                      image_bytes, sha)
+        try:
+            return await asyncio.wait_for(asyncio.shield(future), self.timeout)
+        except asyncio.TimeoutError:
+            self._record(self.timeout * 1000)
+            return None
+        except Exception:  # noqa: BLE001 - a broken picture is not a verdict
+            log.debug("judgement failed", exc_info=True)
+            return None
+
+    async def run_async(self, fn, *args):
+        """Run CPU work (covering a picture, sampling a video) on the same
+        small pool, off the event loop."""
+        import asyncio
+
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(self._executor(), fn, *args)
 
     @staticmethod
     def _person_aware(image_bytes, detections, verdict) -> ImageVerdict:

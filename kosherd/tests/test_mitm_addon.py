@@ -5,6 +5,7 @@ test the two pieces that carry the real risk — parsing /proc/net/tcp and
 reloading the policy — by loading the module with a stub in place.
 """
 
+import asyncio
 import importlib.util
 import json
 import sys
@@ -606,7 +607,7 @@ def test_autocomplete_entries_are_dropped_from_the_response(addon):
         {"value": "linen tablecloth"}]}).encode()
     flow = _suggestion_flow(
         "https://completion.amazon.com/api/2017/suggestions?prefix=li", body)
-    filt.response(flow)
+    asyncio.run(filt.response(flow))
     out = json.loads(flow.response.content)
     assert [s["value"] for s in out["suggestions"]] == ["light bulbs",
                                                         "linen tablecloth"]
@@ -621,7 +622,7 @@ def test_a_stale_content_length_is_not_left_behind(addon):
     flow = _suggestion_flow(
         "https://completion.amazon.com/api/2017/suggestions?prefix=l", body)
     flow.response.headers["content-length"] = str(len(body))
-    filt.response(flow)
+    asyncio.run(filt.response(flow))
     assert "content-length" not in flow.response.headers
 
 
@@ -632,7 +633,7 @@ def test_suggestions_are_left_alone_for_accounts_that_did_not_ask(addon):
     body = json.dumps(["lamp", "lingerie"]).encode()
     flow = _suggestion_flow(
         "https://completion.amazon.com/api/2017/suggestions?prefix=l", body)
-    filt.response(flow)
+    asyncio.run(filt.response(flow))
     assert json.loads(flow.response.content) == ["lamp", "lingerie"]
 
 
@@ -1256,3 +1257,263 @@ def test_an_allow_rule_beats_the_content_scorer(addon):
     blocked = []
     filt._filter_page(flow2, 1001)
     assert blocked, "without the rule the scorer must convict this page"
+
+
+# -- holding only what must be held ------------------------------------------
+
+def _hflow(content_type, uid=1001, length=None, url="https://example.com/a", status=200,
+           content_range=None, body=b"\x00" * 100):
+    headers = {"content-type": content_type}
+    if length is not None:
+        headers["content-length"] = str(length)
+    if content_range:
+        headers["content-range"] = content_range
+    from urllib.parse import urlsplit
+
+    resp = _Resp(body, headers)
+    resp.status_code = status
+    return types.SimpleNamespace(
+        metadata={"kosher_uid": uid},
+        request=types.SimpleNamespace(pretty_host=urlsplit(url).hostname, pretty_url=url,
+                                      headers={}),
+        response=resp)
+
+
+def _stub_videos(available=True, cached=None, verdict=None):
+    async def verdict_async(data, key):
+        return verdict
+
+    return type("VC", (), {
+        "available": available,
+        "cached": staticmethod(lambda key: cached),
+        "verdict": staticmethod(lambda data, key: verdict),
+        "verdict_async": staticmethod(verdict_async),
+    })()
+
+
+def _filt(addon, media="immodest", blocked=(), videos=None, vision=None):
+    filt = addon.KosherFilter.__new__(addon.KosherFilter)
+    filt.policy = _stub_policy(media=media, blocked=blocked)
+    filt.categories = _stub_categories()
+    filt.page_levels = {}
+    filt.siterules = type("S", (), {"is_suggestions": staticmethod(lambda url: False)})()
+    filt.videos = videos
+    filt.vision = vision
+    filt.covers = addon.imageedit_mod.CoverCache()
+    return filt
+
+
+def test_downloads_stream_through_instead_of_being_held(addon):
+    filt = _filt(addon)
+    for kind in ("application/octet-stream", "application/zip", "audio/mpeg", "font/woff2"):
+        flow = _hflow(kind)
+        filt.responseheaders(flow)
+        assert flow.response.stream is True, kind
+
+
+def test_a_large_unknown_body_streams_but_a_page_never_does(addon):
+    filt = _filt(addon)
+    big = _hflow("application/x-something", length=50_000_000)
+    filt.responseheaders(big)
+    assert big.response.stream is True
+    page = _hflow("text/html", length=50_000_000)
+    filt.responseheaders(page)
+    assert not getattr(page.response, "stream", False), "pages are read, so held"
+
+
+def test_pictures_are_held_only_when_they_will_be_looked_at(addon):
+    held = _hflow("image/jpeg")
+    _filt(addon, media="immodest").responseheaders(held)
+    assert not getattr(held.response, "stream", False)
+    passed = _hflow("image/jpeg")
+    _filt(addon, media="none").responseheaders(passed)
+    assert passed.response.stream is True
+
+
+def test_a_connection_that_is_nobodys_streams(addon):
+    flow = _hflow("text/html", uid=None)
+    _filt(addon).responseheaders(flow)
+    assert flow.response.stream is True
+
+
+def test_video_streams_at_the_level_that_does_not_filter_pictures(addon):
+    flow = _hflow("video/mp4", length=1000)
+    _filt(addon, media="none").responseheaders(flow)
+    assert flow.response.stream is True
+
+
+def test_video_is_refused_before_a_byte_is_fetched_when_it_cannot_be_checked(addon):
+    # No decoder on this machine: an account whose pictures are filtered
+    # gets no open-web video, as before — and does not download it first.
+    flow = _hflow("video/mp4", length=1000)
+    _filt(addon, media="immodest", videos=_stub_videos(available=False)).responseheaders(flow)
+    assert flow.response.status_code == 403
+    assert flow.response.headers["x-kosheros"] == "video-blocked"
+    assert callable(flow.response.stream), "the body is discarded as it arrives"
+    assert flow.response.stream(b"chunk") == b""
+
+
+def test_the_mildest_level_keeps_passing_video_it_cannot_check(addon):
+    # Video passed unchecked at "nsfw" before frame sampling existed; a
+    # missing decoder must not take that away.
+    flow = _hflow("video/mp4", length=1000)
+    _filt(addon, media="nsfw", videos=_stub_videos(available=False)).responseheaders(flow)
+    assert flow.response.stream is True
+
+
+def test_a_checkable_clip_is_held_for_sampling(addon):
+    flow = _hflow("video/mp4", length=5_000_000)
+    _filt(addon, media="immodest", videos=_stub_videos()).responseheaders(flow)
+    assert not getattr(flow.response, "stream", False)
+
+
+def test_a_clip_too_big_to_hold_is_refused_at_the_modesty_levels(addon):
+    flow = _hflow("video/mp4", length=addon.videocheck_mod.VIDEO_MAX_BYTES + 1)
+    _filt(addon, media="suggestive", videos=_stub_videos()).responseheaders(flow)
+    assert flow.response.status_code == 403
+
+
+def test_a_clip_already_judged_clean_streams_without_being_held(addon):
+    from kosherd.vision import CLEAN, NSFW, ImageVerdict
+
+    flow = _hflow("video/mp4", length=5_000_000)
+    _filt(addon, media="immodest",
+          videos=_stub_videos(cached=ImageVerdict(CLEAN, ()))).responseheaders(flow)
+    assert flow.response.stream is True
+    bad = _hflow("video/mp4", length=5_000_000)
+    _filt(addon, media="immodest",
+          videos=_stub_videos(cached=ImageVerdict(NSFW, ()))).responseheaders(bad)
+    assert bad.response.status_code == 403
+
+
+def test_a_range_from_the_middle_of_an_unjudged_clip_is_refused(addon):
+    flow = _hflow("video/mp4", status=206, content_range="bytes 500000-999999/2000000")
+    _filt(addon, media="immodest", videos=_stub_videos()).responseheaders(flow)
+    assert flow.response.status_code == 403
+
+
+def test_a_manifest_passes_where_its_segments_will_be_judged(addon):
+    flow = _hflow("application/vnd.apple.mpegurl", url="https://example.com/live.m3u8")
+    filt = _filt(addon, media="immodest", videos=_stub_videos())
+    filt.responseheaders(flow)
+    assert not getattr(flow.response, "stream", False)
+    before = flow.response
+    filt._filter_video(flow, 1001)
+    assert flow.response is before, "segments are judged, not the text that lists them"
+    # And where no video is allowed at all, neither is the manifest.
+    none = _hflow("application/vnd.apple.mpegurl", url="https://example.com/live.m3u8")
+    _filt(addon, media="all", videos=_stub_videos())._filter_video(none, 1001)
+    assert none.response.status_code == 403
+
+
+def test_a_held_clip_is_refused_or_passed_on_its_frames(addon):
+    from kosherd.vision import CLEAN, IMMODEST, ImageVerdict
+
+    clean = _hflow("video/mp4", length=1000)
+    filt = _filt(addon, media="immodest", videos=_stub_videos(verdict=ImageVerdict(CLEAN, ())))
+    filt._filter_video(clean, 1001)
+    assert clean.response.headers["x-kosheros"] == "video-checked=clean"
+    assert clean.response.status_code == 200
+
+    bad = _hflow("video/mp4", length=1000)
+    filt = _filt(addon, media="immodest",
+                 videos=_stub_videos(verdict=ImageVerdict(IMMODEST, (), True)))
+    filt._filter_video(bad, 1001)
+    assert bad.response.status_code == 403
+
+    unjudged = _hflow("video/mp4", length=1000)
+    filt = _filt(addon, media="nsfw", videos=_stub_videos(verdict=None))
+    filt._filter_video(unjudged, 1001)
+    assert unjudged.response.status_code == 403, "could not look: refuse, as for pictures"
+
+
+def test_the_async_video_path_agrees_with_the_sync_one(addon):
+    from kosherd.vision import IMMODEST, ImageVerdict
+
+    flow = _hflow("video/mp4", length=1000)
+    filt = _filt(addon, media="immodest",
+                 videos=_stub_videos(verdict=ImageVerdict(IMMODEST, (), True)))
+    asyncio.run(filt.response(flow))
+    assert flow.response.status_code == 403
+
+
+def test_a_streamed_response_is_not_read_again_in_response(addon):
+    flow = _hflow("video/mp4", length=1000)
+    flow.response.stream = True
+
+    class Never:
+        def verdict(self, *a):
+            raise AssertionError("there is no body to read")
+
+    filt = _filt(addon, media="none", videos=Never(), vision=Never())
+    asyncio.run(filt.response(flow))
+
+
+# -- the picture path, off the event loop --------------------------------------
+
+def _async_vision(verdict):
+    async def verdict_async(data):
+        return verdict
+
+    async def run_async(fn, *args):
+        return fn(*args)
+
+    return type("V", (), {
+        "verdict": staticmethod(lambda data: verdict),
+        "verdict_async": staticmethod(verdict_async),
+        "run_async": staticmethod(run_async),
+        "write_status": staticmethod(lambda *a, **k: None),
+    })()
+
+
+def _real_photo():
+    Image = pytest.importorskip("PIL.Image")
+    import io
+
+    image = Image.new("RGB", (300, 300), (10, 200, 10))
+    for x in range(100, 200):
+        for y in range(100, 200):
+            image.putpixel((x, y), (255, 0, 0) if (x + y) % 2 else (0, 0, 255))
+    out = io.BytesIO()
+    image.save(out, "JPEG", quality=95)
+    return out.getvalue()
+
+
+def test_the_async_picture_path_covers_a_region(addon):
+    from kosherd.vision import NSFW, ImageVerdict
+
+    body = _real_photo()
+    flow = _hflow("image/jpeg", body=body, length=len(body))
+    filt = _filt(addon, media="nsfw",
+                 vision=_async_vision(ImageVerdict(NSFW, ((120, 120, 40, 40),), True)))
+    asyncio.run(filt.response(flow))
+    assert flow.response.headers["x-kosheros"] == "image-covered=nsfw"
+    assert flow.response.headers["content-type"] == "image/jpeg"
+    assert "content-length" not in flow.response.headers
+    assert flow.response.content != body
+    # The covered picture is remembered, so the same picture again costs
+    # no decode: the cache holds exactly one entry for it.
+    assert len(filt.covers) == 1
+    again = _hflow("image/jpeg", body=body, length=len(body))
+    asyncio.run(filt.response(again))
+    assert again.response.content == flow.response.content
+
+
+def test_a_cover_that_would_take_most_of_the_picture_hides_it_whole(addon):
+    from kosherd.vision import NSFW, ImageVerdict
+
+    body = _real_photo()
+    flow = _hflow("image/jpeg", body=body)
+    filt = _filt(addon, media="nsfw",
+                 vision=_async_vision(ImageVerdict(NSFW, ((20, 20, 260, 260),), True)))
+    asyncio.run(filt.response(flow))
+    assert flow.response.content == addon.BLANK_PNG
+    assert len(filt.covers) == 0, "nothing was frosted"
+
+
+def test_hidden_pictures_drop_the_length_header(addon):
+    flow = _hflow("image/jpeg", body=b"x" * 20_000, length=20_000)
+    filt = _filt(addon, media="all", vision=_async_vision(None))
+    asyncio.run(filt.response(flow))
+    assert flow.response.content == addon.BLANK_PNG
+    assert "content-length" not in flow.response.headers

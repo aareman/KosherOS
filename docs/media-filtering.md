@@ -32,15 +32,24 @@ readable, and a person who needs a picture can ask for the page.
 this order, each stage running only because the one before it could not
 settle the question:
 
-1. **Size threshold (free).** Under 6 KB an image is an icon, a spacer or a
-   tracking pixel. It never reaches the model.
+1. **Size threshold (free).** Under 2.5 KB an image is an icon, a spacer or
+   a tracking pixel. It never reaches the model. (It was 6 KB; modern
+   WebP/AVIF thumbnails fit a lot of person into very few bytes.)
 2. **Source (free).** If the page's domain is in a category this account
    blocks, its imagery goes with it. No model, and no chance of a model
    being wrong.
 3. **Cache by content hash (~1 ms).** The same logo, banner and avatar come
    back on every page of a site, and a verdict is kept for a month.
 4. **The detector (tens of ms).** NudeNet's ONNX model, about 5 MB, on the
-   CPU, in a small thread pool with a 2 s deadline.
+   CPU, in a small thread pool with a 2 s deadline — and **awaited, not
+   waited for**. The proxy runs its hooks on one asyncio event loop; the
+   first version blocked that loop while a picture was judged, so every
+   other connection on the machine stood still for up to two seconds per
+   picture, and a page with thirty photographs froze the browser for the
+   lot of them. That was most of "the system seems slow". The response
+   hook is now `async`: the picture being judged waits on a worker, the
+   rest of the machine's traffic carries on, and a worker that outlives
+   the deadline still caches its verdict for the next time.
 
 The detector returns **labelled regions**, not one score, which is what
 makes the ladder meaningful: exposure maps to `nsfw`, covered-but-prominent
@@ -89,17 +98,51 @@ because of that is not a filter this project should ship.
 
 ## Video
 
-Judged by where it comes from, not by what is in it. Decoding frames means
-ffmpeg and a second or more per clip, for a stream the person is already
-watching, on a machine that may have two cores.
+Judged by its source first, then by a few of its frames.
 
-So the levers that actually work are used instead: the source (a blocked
-category), the page (scored by its words), the poster thumbnail (an image,
-filtered like any other), and for YouTube the per-category and
-approved-channel limits, which are precise because YouTube labels its own
-videos. Beyond that, an account at `suggestive` or stricter gets no
-open-web video at all — a video is pictures at thirty a second, and nothing
-here can look inside one in time.
+The cheap levers still come first: the source (a blocked category), the
+page (scored by its words), the poster thumbnail (an image, filtered like
+any other), and for YouTube the per-category and approved-channel limits,
+which are precise because YouTube labels its own videos.
+
+Then, for an account whose pictures are filtered, the clip itself
+(`kosherd/videocheck.py`). A video is pictures at thirty a second, and
+decoding all of them is out of the question on two cores — but it never
+needed all of them. Four keyframes spread through the clip, decoded small
+(480 px on the short side, which is what the detector wants anyway), go
+through the same detector and the same ladder as a photograph; the
+strongest frame is the clip's level. The verdict is cached by address and
+size for a month, so the cost — a decode plus four detections, one to two
+seconds on two cores — is paid once per clip, not once per view. Decoding
+is PyAV (FFmpeg's libraries as a wheel, with the H.264, VP9 and AV1
+decoders Fedora's own `ffmpeg-free` leaves out).
+
+The rules, in order, decided **from the headers before a byte of the body
+is fetched** (`responseheaders`):
+
+| situation | mildest level (`nsfw`) | modesty levels | `all` |
+|---|---|---|---|
+| source in a blocked category | refused | refused | refused |
+| verdict already cached | as it says | as it says | refused |
+| clip small enough to hold (≤ 40 MB), first request | held, sampled, then passed or refused | same | refused |
+| too big to hold, or a range from the middle with no verdict yet | passed (as before) | refused (as before) | refused |
+| no decoder on this machine | passed (as before) | refused (as before) | refused |
+| could not be read, or missed the 8 s deadline | refused | refused | refused |
+
+Two things to know. **Large files are not held.** Long-form video on the
+web is almost always segmented (HLS/DASH); the manifest is text that points
+at segments, and each segment is small and judged on its own, so a stream
+is checked piece by piece. A single progressive file over the cap cannot be
+sampled without holding it, so it keeps the old behaviour at each level.
+**Frames are sampled, not watched.** Four frames from a two-minute clip can
+miss a second of anything; this judges what a video is about. The guarantee
+is still `all`, and the mildest level still lets through what it cannot
+check, because it did before this existed and a missing decoder must not
+take video away from an account that never asked for it to be checked.
+
+A refused clip is a `403` with `x-kosheros: video-blocked`, sent in place
+of the headers so the body is never downloaded; a passed one carries
+`x-kosheros: video-checked=<level>`.
 
 ## Inpainting people out of images
 
@@ -125,12 +168,32 @@ mean shipping ~500 MB of model weights in the image.
    on capable hardware, or done ahead of time for a small set of frequently
    visited pages. Worth prototyping; not worth putting in the default path.
 
-**What shipped:** option 1. `kosherd/imageedit.py` pixelates the detected
-regions (grown by 12%, since a tight box leaves a fringe of exactly what it
-was meant to cover) and leaves the rest of the picture alone, so the page
-still works. If the picture cannot be edited — an unreadable format, no
-Pillow — the whole image is hidden rather than passed through, which is the
-one failure mode that would matter.
+**What shipped:** option 1, in `kosherd/imageedit.py`, shaped by four
+rounds of family feedback. Tight pixel blocks left a fringe; blocks plus
+static destroyed the content but shouted about it; a heavy blur with noise
+under a feathered edge sat quietly in the picture but — the fourth round —
+"blur is not so effective in blocking images": at any radius that keeps a
+page fast, a figure's silhouette and skin tone stayed readable. The cover
+now **frosts** the region: it is shrunk to a handful of cells, smoothed
+back up, pulled a third of the way toward its own average colour, given
+light noise (so it cannot be undone by deconvolution) and pasted through a
+feathered mask. The shape is gone in the first step; the rest is making it
+sit quietly. It is also cheaper than the blur it replaced, since the blur
+now runs on a thumbnail. Regions are grown by 60% (the detector's boxes
+are tight), and when the covered area would be most of the picture the
+picture is hidden whole instead — a frosted rectangle in a frame of
+background helps nobody and costs a decode and a re-encode.
+
+Two costs fell out at the same time. A covered WebP came back as PNG,
+five to ten times the bytes and a slow encode; each format now comes back
+as itself. And the covered pixels are remembered for a while (a small
+in-memory cache by content hash), so a reload or the same photo on the next
+page is not decoded, frosted and re-encoded again — the verdict cache on
+disk remembers the judgement; this only remembers the pixels.
+
+If the picture cannot be edited — an unreadable format, no Pillow — the
+whole image is hidden rather than passed through, which is the one failure
+mode that would matter.
 
 Inpainting stays where it belongs: an experiment on capable hardware with a
 measured verdict, not a promise in the default path.
@@ -213,12 +276,25 @@ Each stage only runs if the one before it could not settle the question:
 | on-disk cache by content hash | everything seen before |
 | the detector | only what is left |
 
+### What is held and what streams
+
+The proxy used to buffer every response body before the filter ran —
+including a 200 MB download and every video at every media level. Only what
+the filter reads is held now: pages, pictures for an account that filters
+them, the JSON of a few known sites, and clips small enough to sample.
+Downloads, archives, fonts, audio, anything large that is none of those,
+and a connection that belongs to no filtered account go straight through
+as they arrive. This is the other half of "the system seems slow": memory,
+and a download that only started reaching the browser once the proxy had
+all of it.
+
 ### Caching
 
 Keyed by the SHA-256 of the image bytes plus the model version, stored on
 disk and shared by every user on the machine. Repeat views cost nothing,
 which is most views. A weak machine benefits from this more than a fast
-one, so the cache is sized generously rather than kept small.
+one, so the cache is sized generously rather than kept small. Clip verdicts
+live in the same file, keyed by address and size.
 
 Deliberately no Redis on the device: another daemon holding RAM on a
 machine already short of it, to cache something SQLite handles.

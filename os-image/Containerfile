@@ -185,10 +185,15 @@ RUN true && \
 # --- Lockdown ----------------------------------------------------------------
 # Identity: KosherOS, powered by Fedora (Fedora Remix terms). ID stays
 # "fedora" — tooling keys off it; only the human-facing names change.
+# One version number for the whole product: the repo's VERSION file names
+# the release in os-release, in the installer's welcome screen, and in the
+# ISO's file name (scripts/brand-iso.py reads the same file).
+COPY VERSION /usr/share/kosher/VERSION
 RUN . /usr/lib/os-release \
+    && kosher_version="$(tr -d '[:space:]' < /usr/share/kosher/VERSION)" \
     && sed -i \
         -e 's/^NAME=.*/NAME="KosherOS"/' \
-        -e "s/^PRETTY_NAME=.*/PRETTY_NAME=\"KosherOS 0.1 (powered by Fedora ${VERSION_ID})\"/" \
+        -e "s/^PRETTY_NAME=.*/PRETTY_NAME=\"KosherOS ${kosher_version} (powered by Fedora ${VERSION_ID})\"/" \
         -e '/^VARIANT=/d' -e '/^VARIANT_ID=/d' \
         /usr/lib/os-release \
     && printf 'VARIANT="KosherOS"\nVARIANT_ID=kosheros\n' >> /usr/lib/os-release \

@@ -39,7 +39,9 @@ ROOT = Path(__file__).resolve().parents[1]
 BRANDING = ROOT / "branding"
 
 PRODUCT = "KosherOS"
-VERSION = "0.1"
+# One version for the whole product, from the VERSION file at the repo root;
+# the Containerfile puts the same number in os-release.
+VERSION = (ROOT / "VERSION").read_text().strip()
 BUG_URL = "https://github.com/aareman/KosherOS/issues"
 # The deep navy of the boot splash (plymouth kosheros.script), so the
 # installer, the splash and the login screen read as one product.
@@ -171,6 +173,30 @@ def product_img(dest: Path, src: Path = BRANDING, version: str = VERSION) -> Pat
     return dest
 
 
+def release_name(version: str = VERSION, now: float | None = None,
+                 arch: str | None = None) -> str:
+    """'KosherOS-0.1-20260910-x86_64.iso': what a person sees in Ventoy's
+    menu or a downloads folder, and enough to tell two builds apart."""
+    arch = arch or os.uname().machine
+    day = time.strftime("%Y%m%d", time.localtime(now if now is not None
+                                                  else time.time()))
+    return f"{PRODUCT}-{version}-{day}-{arch}.iso"
+
+
+def rename(iso: Path, version: str = VERSION) -> Path:
+    """Give the ISO its release name and leave `install.iso` as a link to
+    it, so the recipes that boot the ISO keep working unchanged."""
+    named = iso.with_name(release_name(version))
+    if named.exists():
+        named.unlink()
+    os.replace(iso, named)
+    link = iso
+    if link.is_symlink() or link.exists():
+        link.unlink()
+    link.symlink_to(named.name)
+    return named
+
+
 def inject(iso: Path, img: Path, xorriso: str = "xorriso") -> None:
     """Put product.img at images/product.img on the ISO, keeping it bootable.
 
@@ -215,7 +241,8 @@ def main(argv=None) -> int:
     print(f"product.img: {img}")
     if args.iso is not None:
         inject(args.iso, img)
-        print(f"branded: {args.iso}")
+        named = rename(args.iso, args.version)
+        print(f"ISO: {named}  ({args.iso.name} points at it)")
     return 0
 
 

@@ -53,7 +53,10 @@ branding, which broke the illusion at the very first thing a new owner
 sees. Anaconda has a hook for exactly this, and `just iso` now uses it:
 after bib writes `install.iso`, `scripts/brand-iso.py` builds a small
 `product.img` and puts it at `images/product.img` on the ISO with xorriso
-(boot records replayed, so it still boots on BIOS and UEFI).
+(boot records replayed, so it still boots on BIOS and UEFI), then names the
+result `KosherOS-<version>-<date>-<arch>.iso`, leaving `install.iso` as a
+link to it. The version comes from the `VERSION` file at the repo root,
+which the Containerfile also puts in os-release.
 
 How it takes effect, all of it stock Anaconda and verified against its
 source: the initramfs finds `images/product.img` on the install media and

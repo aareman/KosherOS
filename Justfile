@@ -254,8 +254,10 @@ _iso config: build
         --type anaconda-iso --rootfs ext4 {{image}}
     sudo chown -R "$USER:" build/bootiso
     # Brand the installer: product.img (name, stylesheet, logo) onto the ISO.
+    # Brand the installer (product.img onto the ISO) and give it its release
+    # name, KosherOS-<version>-<date>-<arch>.iso; install.iso links to it.
     python3 scripts/brand-iso.py build/bootiso/install.iso
-    @echo "ISO at build/bootiso/install.iso — write it to a USB stick, or: just boot-iso"
+    @echo "Copy the KosherOS-*.iso in build/bootiso onto a USB stick or Ventoy, or: just boot-iso"
 
 # Build a raw disk image to write to a USB stick, so KosherOS can be tried on
 # real hardware WITHOUT touching the machine's internal disk: the stick holds a

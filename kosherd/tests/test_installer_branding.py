@@ -61,7 +61,7 @@ def test_the_buildstamp_names_the_product(img, tmp_path):
     stamp = configparser.ConfigParser()
     stamp.read(tmp_path / ".buildstamp")
     assert stamp["Main"]["Product"] == "KosherOS"
-    assert stamp["Main"]["Version"] == "0.1"
+    assert stamp["Main"]["Version"] == (ROOT / "VERSION").read_text().strip()
     assert stamp["Main"]["IsFinal"] == "false"
     assert stamp["Main"]["BugURL"].startswith("https://github.com/aareman/KosherOS")
 
@@ -138,3 +138,36 @@ def test_the_command_line_builds_only_the_image_when_asked(tmp_path):
     dest = tmp_path / "out" / "product.img"
     assert brand.main(["--product-img", str(dest)]) == 0
     assert dest.is_file()
+
+
+def test_the_release_name_carries_version_date_and_arch():
+    name = brand.release_name("0.1", now=1_800_000_000, arch="x86_64")
+    import time
+
+    day = time.strftime("%Y%m%d", time.localtime(1_800_000_000))
+    assert name == f"KosherOS-0.1-{day}-x86_64.iso"
+
+
+def test_renaming_leaves_install_iso_pointing_at_the_release(tmp_path):
+    iso = tmp_path / "install.iso"
+    iso.write_bytes(b"iso")
+    named = brand.rename(iso, "0.1")
+    assert named.name.startswith("KosherOS-0.1-") and named.name.endswith(".iso")
+    assert iso.is_symlink() and iso.resolve() == named.resolve()
+    assert iso.read_bytes() == b"iso"
+    # A second build the same day replaces the release file cleanly.
+    iso.unlink()
+    iso.write_bytes(b"newer")
+    again = brand.rename(iso, "0.1")
+    assert again == named and iso.read_bytes() == b"newer"
+
+
+def test_one_version_number_for_the_whole_product():
+    # The VERSION file is the only place the number lives; the Containerfile
+    # copies it into os-release and the ISO name and .buildstamp read it.
+    version = (ROOT / "VERSION").read_text().strip()
+    assert version and version == brand.VERSION
+    containerfile = (ROOT / "os-image/Containerfile").read_text()
+    assert "COPY VERSION /usr/share/kosher/VERSION" in containerfile
+    assert "KosherOS 0.1" not in containerfile, "the version must not be hard-coded"
+

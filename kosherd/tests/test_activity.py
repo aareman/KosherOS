@@ -118,3 +118,103 @@ def test_day_start_is_local_midnight():
     local = time.localtime(start)
     assert (local.tm_hour, local.tm_min, local.tm_sec) == (0, 0, 0)
     assert 0 <= now - start < 86400 + 3600  # a DST day is an hour longer
+
+
+# -- the daemon's side ---------------------------------------------------------
+
+def _daemon(users, tmp_path, monkeypatch):
+    from kosherd import activity as activity_mod
+    from kosherd.daemon import Daemon
+    from kosherd.policy import Policy
+
+    monkeypatch.setattr(activity_mod, "SPOOL_DIR", tmp_path)
+    daemon = Daemon.__new__(Daemon)
+    daemon.policy = Policy(revision=1, users=users)
+    daemon._save_and_apply = lambda: None
+    return daemon
+
+
+def test_allowing_a_blocked_page_adds_an_allow_rule_ahead(tmp_path, monkeypatch):
+    from kosherd.policy import UserPolicy
+
+    user = UserPolicy(uid=1001, username="yosef", mode="filtered",
+                      rules=[{"action": "block", "pattern": "*"}])
+    daemon = _daemon([user], tmp_path, monkeypatch)
+    daemon.impl_AllowUrl(1001, "https://example.com/needed/page", False, "")
+    assert user.rules[0] == {"action": "allow", "pattern": "example.com/needed/page"}
+
+
+def test_allowing_a_whole_site_for_a_whitelist_account_adds_the_domain(tmp_path, monkeypatch):
+    from kosherd.policy import UserPolicy
+
+    user = UserPolicy(uid=1001, username="shmuli", mode="whitelist")
+    daemon = _daemon([user], tmp_path, monkeypatch)
+    daemon.impl_AllowUrl(1001, "https://chabad.org/x", True, "")
+    assert user.whitelist == ["chabad.org"]
+
+
+def test_allowing_for_an_unmanaged_account_is_refused(tmp_path, monkeypatch):
+    from kosherd.policy import PolicyError
+
+    daemon = _daemon([], tmp_path, monkeypatch)
+    with pytest.raises(PolicyError):
+        daemon.impl_AllowUrl(4242, "https://example.com/", False, "")
+
+
+def test_the_feed_names_the_people_in_it(tmp_path, monkeypatch):
+    from kosherd.policy import UserPolicy
+
+    daemon = _daemon([UserPolicy(uid=1001, username="yosef", mode="filtered"),
+                      UserPolicy(uid=1000, username="avi", mode="filtered", admin=True)],
+                     tmp_path, monkeypatch)
+    activity.record("proxy", activity.BLOCK, 1001, url="https://a/",
+                    why="category:video", spool=tmp_path)
+    activity.record("kosherd", activity.CHANGE, 1001, by=1000,
+                    method="SetFilterMode", args=[1001, "filtered"], spool=tmp_path)
+    activity.record("proxy", activity.BLOCK, 7777, url="https://gone/", spool=tmp_path)
+
+    found = json.loads(daemon.impl_ListActivity(0, -1).unpack()[0])
+    by_url = {d.get("url"): d for d in found}
+    assert by_url["https://a/"]["username"] == "yosef"
+    assert by_url["https://gone/"]["username"] == "?"
+    change = next(d for d in found if d["kind"] == "change")
+    assert change["by_username"] == "avi"
+
+    only = json.loads(daemon.impl_ListActivity(0, 1001).unpack()[0])
+    assert all(d["uid"] == 1001 for d in only) and len(only) == 2
+
+
+def test_the_summary_is_keyed_by_uid_for_the_cards(tmp_path, monkeypatch):
+    from kosherd.policy import UserPolicy
+
+    daemon = _daemon([UserPolicy(uid=1001, username="yosef", mode="filtered")],
+                     tmp_path, monkeypatch)
+    activity.record("proxy", activity.BLOCK, 1001, url="https://a/", spool=tmp_path)
+    activity.record("proxy", activity.PICTURES, 1001, url="https://b/", spool=tmp_path)
+    counts = json.loads(daemon.impl_ActivitySummary().unpack()[0])
+    assert counts["1001"]["blocked"] == 1
+    assert counts["1001"]["pictures"] == 1
+
+
+def test_a_change_is_written_with_who_made_it_and_no_password(tmp_path, monkeypatch):
+    from kosherd import access
+    from kosherd.policy import UserPolicy
+
+    daemon = _daemon([UserPolicy(uid=1001, username="yosef", mode="filtered")],
+                     tmp_path, monkeypatch)
+    daemon.policy.guardian_enabled = True
+    daemon._note_change("SetFilterMode", [1001, "dnsfilter", "s3cret"], by=1000)
+    daemon._note_change("SetGuardianPassword", ["old", "new"], by=1000)
+    daemon._note_change("SetAdBlock", [False, "s3cret"], by=1000)
+
+    found = activity.events(spool=tmp_path)
+    text = json.dumps(found)
+    assert "s3cret" not in text and "old" not in text
+    mode = next(d for d in found if d["method"] == "SetFilterMode")
+    assert mode["uid"] == 1001 and mode["by"] == 1000
+    assert mode["args"] == [1001, "dnsfilter"]
+    assert mode["guardian"] is True
+    adblock = next(d for d in found if d["method"] == "SetAdBlock")
+    assert adblock["uid"] == -1          # machine-wide, not about one account
+    assert adblock["args"] == [False]
+    assert all(m in access.ACTIONS for m in access.CHANGES)

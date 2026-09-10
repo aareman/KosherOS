@@ -210,3 +210,64 @@ def matching(user, custom=()) -> str | None:
                 and _field(user, "can_install_apps", True) == profile.can_install_apps):
             return profile.key
     return None
+
+
+# The settings a preset fixes, in the order a parent reads them.
+DIFF_FIELDS = ("blocked_categories", "media_level", "language_filter",
+               "youtube", "can_install_apps")
+
+
+def diff(user, custom=()) -> tuple[str | None, list[dict]]:
+    """The preset an account is closest to, and every way it departs.
+
+    `matching` says "Teenager" or nothing. Nothing is the truthful answer
+    and a useless one: an account one switch away from Teenager reads as
+    "Custom", and a parent cannot tell whether that is one deliberate
+    change or a stranger's configuration. This says "Teenager, with 1
+    change: Sports also blocked", and the admin app offers to put it back.
+
+    The nearest preset is the one in the same filter mode with the fewest
+    differing settings; ties go to the more protective (earlier) preset.
+    An account in a mode no preset uses has no nearest preset. Each change
+    is a dict the app turns into a sentence: {"field": ..., "from": ...,
+    "to": ...}, or for categories {"field": "blocked_categories",
+    "added": [...], "removed": [...]}.
+    """
+    mode = _field(user, "mode")
+    best: tuple[int, str, list[dict]] | None = None
+    for profile in all_profiles(custom):
+        if profile.mode != mode:
+            continue
+        changes = _changes(user, profile)
+        if best is None or len(changes) < best[0]:
+            best = (len(changes), profile.key, changes)
+        if not changes:
+            break
+    if best is None:
+        return None, []
+    return best[1], best[2]
+
+
+def _changes(user, profile: Profile) -> list[dict]:
+    changes: list[dict] = []
+    have = set(_field(user, "blocked_categories", []) or [])
+    want = set(profile.blocked_categories)
+    if have != want:
+        changes.append({"field": "blocked_categories",
+                        "added": sorted(have - want),
+                        "removed": sorted(want - have)})
+    for field_name, default in (("media_level", "none"),
+                                ("language_filter", "off"),
+                                ("can_install_apps", True)):
+        theirs = _field(user, field_name, default)
+        if theirs is None:
+            theirs = default
+        ours = getattr(profile, field_name)
+        if theirs != ours:
+            changes.append({"field": field_name, "from": ours, "to": theirs})
+    theirs = dict(_field(user, "youtube", {}) or {})
+    if theirs != dict(profile.youtube):
+        changes.append({"field": "youtube", "from": dict(profile.youtube),
+                        "to": theirs})
+    return changes
+

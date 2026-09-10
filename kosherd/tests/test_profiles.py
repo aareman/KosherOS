@@ -131,3 +131,74 @@ def test_a_bare_filter_mode_still_works():
     user = Daemon._new_user(1001, "someone", "dnsfilter")
     assert user.mode == "dnsfilter"
     assert user.media_level == "none"
+
+
+# -- how far an account has drifted from its preset -----------------------------
+
+def test_an_account_on_a_preset_has_no_drift():
+    from kosherd.profiles import diff
+
+    profile = get("child")
+    user = {"mode": profile.mode,
+            "blocked_categories": list(profile.blocked_categories),
+            "media_level": profile.media_level,
+            "language_filter": profile.language_filter,
+            "youtube": dict(profile.youtube),
+            "can_install_apps": profile.can_install_apps}
+    assert diff(user) == ("child", [])
+
+
+def test_one_extra_category_is_one_named_change_not_custom():
+    from kosherd.profiles import diff
+
+    profile = get("child")
+    user = {"mode": profile.mode,
+            "blocked_categories": [*profile.blocked_categories, "sports"],
+            "media_level": profile.media_level,
+            "language_filter": profile.language_filter,
+            "youtube": dict(profile.youtube),
+            "can_install_apps": profile.can_install_apps}
+    key, changes = diff(user)
+    assert key == "child"
+    assert changes == [{"field": "blocked_categories", "added": ["sports"],
+                        "removed": []}]
+
+
+def test_the_nearest_preset_wins_and_every_departure_is_listed():
+    from kosherd.profiles import diff
+
+    teen = get("teen")
+    user = {"mode": teen.mode,
+            "blocked_categories": list(teen.blocked_categories),
+            "media_level": "all",              # stricter than teen
+            "language_filter": teen.language_filter,
+            "youtube": {"restrict": "strict"},  # stricter than teen
+            "can_install_apps": teen.can_install_apps}
+    key, changes = diff(user)
+    assert key == "teen"
+    assert {c["field"] for c in changes} == {"media_level", "youtube"}
+    media = next(c for c in changes if c["field"] == "media_level")
+    assert (media["from"], media["to"]) == ("immodest", "all")
+
+
+def test_an_account_in_a_mode_no_preset_uses_has_no_nearest_preset():
+    from kosherd.profiles import diff
+
+    assert diff({"mode": "none", "blocked_categories": []}) == (None, [])
+
+
+def test_a_families_own_preset_can_be_the_nearest():
+    from kosherd.profiles import diff, from_user
+
+    base = get("teen")
+    tuned = {"mode": base.mode,
+             "blocked_categories": [*base.blocked_categories, "games", "sports"],
+             "media_level": base.media_level, "language_filter": "block",
+             "youtube": dict(base.youtube), "can_install_apps": False}
+    custom = [from_user(tuned, "Yeshiva bochur")]
+    assert diff(tuned, custom) == ("custom-yeshiva-bochur", [])
+    tuned["blocked_categories"].remove("games")
+    key, changes = diff(tuned, custom)
+    assert key == "custom-yeshiva-bochur"
+    assert changes[0]["removed"] == ["games"]
+

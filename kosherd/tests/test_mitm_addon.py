@@ -1574,3 +1574,96 @@ def test_an_animation_that_hides_is_hidden_whole_not_covered(addon):
     asyncio.run(filt.response(flow))
     assert flow.response.content == addon.BLANK_PNG
     assert len(filt.covers) == 0
+
+
+# ---- what the filter did is written down ---------------------------------
+
+def _activity_to(addon, tmp_path):
+    import functools
+
+    from kosherd import activity
+
+    addon.activity_mod.record = functools.partial(activity.record, spool=tmp_path)
+    return functools.partial(activity.events, spool=tmp_path)
+
+
+def test_a_department_block_is_written_to_the_activity_log(addon, tmp_path):
+    from pathlib import Path
+
+    from kosherd import siterules
+
+    events = _activity_to(addon, tmp_path)
+    filt = addon.KosherFilter.__new__(addon.KosherFilter)
+    filt.uids = type("U", (), {"uid_for_connection": staticmethod(lambda *a, **k: 1001)})()
+    filt.policy = _request_policy(blocked=["immodest"])
+    filt.categories = _stub_categories()
+    filt.siterules = siterules.load(
+        Path(__file__).parents[2] / "os-image/files/usr/share/kosher/site-rules.json")
+    filt.blocklist = _stub_blocklist()
+
+    flow = _request_flow("https://www.amazon.com/s?k=x&i=fashion-womens")
+    filt.request(flow)
+    found = events()
+    assert len(found) == 1
+    assert found[0]["kind"] == "block"
+    assert found[0]["uid"] == 1001
+    assert found[0]["url"].startswith("https://www.amazon.com/")
+    assert found[0]["why"].startswith("shop:")
+
+
+def test_the_block_page_carries_the_reason_into_a_request(addon, tmp_path):
+    from kosherd import accessreq
+
+    _activity_to(addon, tmp_path)
+    filt = addon.KosherFilter.__new__(addon.KosherFilter)
+    flow = _request_flow("https://example.com/x")
+    filt._block(flow, "https://example.com/x", " because it is video",
+                why="category:video")
+    body = flow.response.content.decode()
+    assert 'name="why" value="category:video"' in body
+
+    filt.uids = type("U", (), {"uid_for_connection": staticmethod(lambda *a, **k: 1001)})()
+    filt.policy = _request_policy()
+    filt.categories = _stub_categories()
+    filt.siterules = type("S", (), {
+        "reason": staticmethod(lambda u: None),
+        "blocked_search": staticmethod(lambda u: None),
+        "search_text": staticmethod(lambda u: None),
+    })()
+    filt.blocklist = _stub_blocklist()
+    ask = _request_flow("https://example.com" + addon.REQUEST_PATH)
+    ask.request.method = "POST"
+    ask.request.get_text = lambda strict=False: (
+        "url=https%3A%2F%2Fexample.com%2Fx&note=&why=category%3Avideo")
+    import functools
+    addon.accessreq_mod.submit = functools.partial(accessreq.submit, spool=tmp_path / "req")
+    (tmp_path / "req").mkdir()
+    filt.request(ask)
+    waiting = accessreq.pending(spool=tmp_path / "req")
+    assert waiting[0]["why"] == "category:video"
+
+
+def test_hidden_pictures_are_one_line_per_page_not_per_picture(addon, tmp_path):
+    events = _activity_to(addon, tmp_path)
+    filt = addon.KosherFilter.__new__(addon.KosherFilter)
+    for _ in range(5):
+        flow = _image_flow_sized(addon, 4000, referer="https://shop.example/dress")
+        flow.metadata = {"kosher_uid": 1001}
+        filt._blank_image(flow)
+    found = events()
+    assert len(found) == 1
+    assert found[0]["kind"] == "pictures"
+    assert found[0]["url"] == "https://shop.example/dress"
+
+    other = _image_flow_sized(addon, 4000, referer="https://shop.example/shoes")
+    other.metadata = {"kosher_uid": 1001}
+    filt._blank_image(other)
+    assert len(events()) == 2
+
+
+def test_a_failed_note_never_fails_the_block(addon, tmp_path):
+    addon.activity_mod.SPOOL_DIR = tmp_path / "nowhere"
+    filt = addon.KosherFilter.__new__(addon.KosherFilter)
+    flow = _request_flow("https://example.com/x")
+    filt._block(flow, "https://example.com/x", "", why="rule:example.com")
+    assert flow.response.status_code == 403

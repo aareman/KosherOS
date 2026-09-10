@@ -21,6 +21,9 @@ ReadWritePaths=/var/lib/kosher-search
 # request here, and the directory's own 0730 mode stops it
 # reading anyone else's.
 ReadWritePaths=-/var/lib/kosher-requests
+# Append-only for the same reason: what this service blocked, for the
+# admin app's activity view.
+ReadWritePaths=-/var/lib/kosher-activity
 PrivateTmp=yes
 NoNewPrivileges=yes
 ProtectHome=yes

@@ -38,6 +38,7 @@ SPOOL_DIR = Path("/var/lib/kosher-requests")
 
 MAX_URL = 2000
 MAX_NOTE = 500
+MAX_WHY = 300
 # A queue nobody empties should not be able to fill the disk.
 MAX_PENDING = 200
 
@@ -53,7 +54,7 @@ def _spool(spool) -> Path:
     return Path(spool) if spool is not None else SPOOL_DIR
 
 
-def submit(uid: int, url: str, note: str = "", *,
+def submit(uid: int, url: str, note: str = "", *, why: str = "",
            spool: Path | None = None) -> str:
     """Record a request for access. Returns its id.
 
@@ -75,6 +76,10 @@ def submit(uid: int, url: str, note: str = "", *,
         "uid": int(uid),
         "url": url,
         "note": (note or "").strip()[:MAX_NOTE],
+        # Why the filter refused it ("category:video"), so the admin sees
+        # the reason next to the request instead of guessing which of five
+        # settings was responsible.
+        "why": (why or "").strip()[:MAX_WHY],
         "asked": int(time.time()),
     }
     path = spool / f"{request_id}.json"

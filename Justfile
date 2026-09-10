@@ -253,9 +253,13 @@ _iso config: build
         quay.io/centos-bootc/bootc-image-builder:latest \
         --type anaconda-iso --rootfs ext4 {{image}}
     sudo chown -R "$USER:" build/bootiso
-    # Brand the installer: product.img (name, stylesheet, logo) onto the ISO.
-    # Brand the installer (product.img onto the ISO) and give it its release
-    # name, KosherOS-<version>-<date>-<arch>.iso; install.iso links to it.
+    just brand-iso
+
+# Brand the installer ISO bib already wrote (product.img with the name,
+# stylesheet and logo) and give it its release name,
+# KosherOS-<version>-<date>-<arch>.iso; install.iso links to it. `just iso`
+# runs this last; run it alone to redo the branding without rebuilding.
+brand-iso:
     python3 scripts/brand-iso.py build/bootiso/install.iso
     @echo "Copy the KosherOS-*.iso in build/bootiso onto a USB stick or Ventoy, or: just boot-iso"
 

@@ -171,3 +171,20 @@ def test_one_version_number_for_the_whole_product():
     assert "COPY VERSION /usr/share/kosher/VERSION" in containerfile
     assert "KosherOS 0.1" not in containerfile, "the version must not be hard-coded"
 
+
+def test_without_xorriso_or_nix_the_message_says_what_to_do(monkeypatch):
+    monkeypatch.setattr(brand.shutil, "which", lambda name: None)
+    with pytest.raises(SystemExit) as raised:
+        brand._xorriso_runner()
+    assert "devenv shell" in str(raised.value) and "just brand-iso" in str(raised.value)
+
+
+def test_a_stale_shell_falls_back_to_nix(monkeypatch):
+    monkeypatch.setattr(brand.shutil, "which",
+                        lambda name: "/nix/bin/nix" if name == "nix" else None)
+    calls = []
+    monkeypatch.setattr(brand.subprocess, "run",
+                        lambda args, **kw: calls.append(args) or None)
+    brand._xorriso_runner()(["-version"])
+    assert calls[0][:5] == ["nix", "shell", "nixpkgs#xorriso", "-c", "xorriso"]
+

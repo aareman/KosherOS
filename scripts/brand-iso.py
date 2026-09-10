@@ -197,6 +197,29 @@ def rename(iso: Path, version: str = VERSION) -> Path:
     return named
 
 
+def _xorriso_runner(xorriso: str = "xorriso"):
+    """How to call xorriso here.
+
+    It is in the devenv shell, but a shell opened before it was added does
+    not have it (which is exactly how the first branded build failed). With
+    nix on the path, fetch it for this one run rather than stop.
+    """
+    if shutil.which(xorriso) is not None:
+        prefix = [xorriso]
+    elif shutil.which("nix") is not None:
+        print("xorriso is not on the path; running it through nix "
+              "(re-enter `devenv shell` to have it permanently)", file=sys.stderr)
+        prefix = ["nix", "shell", "nixpkgs#xorriso", "-c", "xorriso"]
+    else:
+        raise SystemExit("xorriso is not installed: re-enter `devenv shell`, "
+                         "which now provides it, and run `just brand-iso`")
+
+    def run(args, **kwargs):
+        return subprocess.run(prefix + args, check=True, **kwargs)
+
+    return run
+
+
 def inject(iso: Path, img: Path, xorriso: str = "xorriso") -> None:
     """Put product.img at images/product.img on the ISO, keeping it bootable.
 
@@ -204,20 +227,16 @@ def inject(iso: Path, img: Path, xorriso: str = "xorriso") -> None:
     result still boots on BIOS and UEFI. Written beside the original and
     swapped in only when xorriso succeeded.
     """
-    if shutil.which(xorriso) is None:
-        raise SystemExit("xorriso is not installed; it is in the devenv shell")
+    run = _xorriso_runner(xorriso)
     branded = iso.with_suffix(".branded.iso")
-    subprocess.run(
-        [xorriso, "-indev", str(iso), "-outdev", str(branded),
+    run(["-indev", str(iso), "-outdev", str(branded),
          "-boot_image", "any", "replay",
          "-map", str(img), "/images/product.img",
-         "-end"],
-        check=True, stdout=subprocess.DEVNULL)
+         "-end"], stdout=subprocess.DEVNULL)
     # -ls rather than -find: -find swallows every following word as its
     # own option, -end included, and fails.
-    listing = subprocess.run(
-        [xorriso, "-indev", str(branded), "-ls", "/images", "-end"],
-        check=True, capture_output=True, text=True).stdout
+    listing = run(["-indev", str(branded), "-ls", "/images", "-end"],
+                  capture_output=True, text=True).stdout
     if "product.img" not in listing:
         branded.unlink(missing_ok=True)
         raise SystemExit("xorriso produced an ISO without images/product.img")

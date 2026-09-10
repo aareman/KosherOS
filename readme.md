@@ -103,3 +103,19 @@ locked down when the user has sudo.
     services running. Still needing a booted machine: the login path, the
     first-boot wizard, and how all of it behaves under GNOME. `just vm`
     needs sudo, so it is a person's job
+13. **"My Filter" — a read-only settings viewer on every account.** Any
+    user should be able to open one app and see what applies to their own
+    account: the mode (no internet, whitelist, filtered, DNS), and the
+    plain-language version of what that means. Deliberately basic, and
+    deliberately read-only — it changes nothing, needs no password, and
+    exists so that a filtered account is not a mystery to the person
+    using it. A child who can see the rules is far likelier to accept
+    them than one who just meets a blocked page. Reads the same
+    `FilterStatus` path `kosherctl status` already uses
+14. **Deployment** — signature verification, a release ISO pinned at the
+    public registry, update channels and rollback. See
+    [docs/deployment.md](docs/deployment.md); nothing is hosted yet
+15. **Licence and attribution** — `LICENSE` (AGPL-3.0-or-later) and
+    `CONTRIBUTING.md` still to add; see
+    [docs/licensing.md](docs/licensing.md) and
+    [THIRD-PARTY.md](THIRD-PARTY.md)

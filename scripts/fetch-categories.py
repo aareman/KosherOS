@@ -91,17 +91,68 @@ MAPPING = {
 # allow-lists, "all"/"blacklists" are the whole corpus in one file, and the
 # vendor-specific bundles are the same data in another format.
 
-# Plain domain lists on top of UT1, per KosherOS category. The advertising
-# one is what makes "block ads everywhere" a Pi-hole rather than a gesture:
-# UT1's advertising lists are a few thousand domains, and Pi-hole's default
-# list — StevenBlack's unified hosts (MIT), adware and malware domains
-# merged from several reputable sources — is around seventy thousand.
-# Hosts-file or one-domain-per-line format; comments and the loopback
-# boilerplate are dropped.
+# Plain domain lists on top of UT1, per KosherOS category. These are what
+# make "block ads everywhere" a Pi-hole rather than a gesture: UT1's own
+# advertising lists are a few thousand domains, and these add sixty-five
+# thousand more. Everything here lands in "ads", which dns.py turns into
+# NXDOMAIN for every account on the machine — so a scam or malware domain
+# in this set is blocked more thoroughly than one reached through a
+# per-user category. Hosts-file or one-domain-per-line format; comments and
+# the loopback boilerplate are dropped.
+#
+# These are fetched INDIVIDUALLY rather than through StevenBlack's merged
+# unified-hosts file, which is what this used to do, and the reason is
+# licensing. That file is an aggregate of sixteen lists; the MIT licence
+# covers Steven Black's own wrapper, not the merged content. Two of the
+# sixteen — MVPS (CC BY-NC-SA 4.0) and someonewhocares (non-commercial
+# with attribution) — forbid commercial use, and our category database is
+# an adaptation of UT1's CC BY-SA 4.0 data. ShareAlike forces the whole
+# database to be licensed BY-SA 4.0, which *permits* commercial use, so
+# nothing forbidding it can be inside. Merging those two produced a file
+# that could not be licensed at all. And once merged there is no way to
+# tell which domains came from where, so they could not be stripped later.
+#
+# Dropping them costs 18,986 domains (23.7% of the merged file) and is not
+# optional. Fetching the rest directly gains 4,770, because these are live
+# upstreams rather than a snapshot. Net: 79,962 -> 65,746.
+#
+# Every licence below is from the source's own update.json. Attribution is
+# required by several of them; see THIRD-PARTY.md.
 PLAIN_SOURCES = {
     "ads": (
-        ("StevenBlack unified hosts (Pi-hole's default list)",
-         "https://raw.githubusercontent.com/StevenBlack/hosts/master/hosts"),
+        ("Steven Black's ad-hoc list (MIT)",
+         "https://raw.githubusercontent.com/StevenBlack/hosts/master/data/StevenBlack/hosts"),
+        ("AdAway (CC BY 3.0)",
+         "https://raw.githubusercontent.com/AdAway/adaway.github.io/master/hosts.txt"),
+        ("add.2o7Net (MIT)",
+         "https://raw.githubusercontent.com/FadeMind/hosts.extras/master/add.2o7Net/hosts"),
+        ("add.Dead (MIT)",
+         "https://raw.githubusercontent.com/FadeMind/hosts.extras/master/add.Dead/hosts"),
+        ("add.Risk (MIT)",
+         "https://raw.githubusercontent.com/FadeMind/hosts.extras/master/add.Risk/hosts"),
+        ("add.Spam (MIT)",
+         "https://raw.githubusercontent.com/FadeMind/hosts.extras/master/add.Spam/hosts"),
+        ("UncheckyAds (MIT)",
+         "https://raw.githubusercontent.com/FadeMind/hosts.extras/master/UncheckyAds/hosts"),
+        ("Mitchell Krog's Badd Boyz Hosts (MIT)",
+         "https://raw.githubusercontent.com/mitchellkrogza/Badd-Boyz-Hosts/master/hosts"),
+        ("hostsVN (MIT)",
+         "https://raw.githubusercontent.com/bigdargon/hostsVN/master/option/hosts-VN"),
+        ("KADhosts (CC BY-SA 4.0)",
+         "https://raw.githubusercontent.com/FiltersHeroes/KADhosts/master/KADhosts.txt"),
+        ("minecraft-hosts (CC0-1.0)",
+         "https://raw.githubusercontent.com/jamiemansfield/minecraft-hosts/master/lists/tracking.txt"),
+        ("tiuxo hostlist - ads (CC BY 4.0)",
+         "https://raw.githubusercontent.com/tiuxo/hosts/master/ads"),
+        ("URLhaus (CC0)",
+         "https://urlhaus.abuse.ch/downloads/hostfile/"),
+        # No formal licence, but the author grants this use in as many
+        # words: "Feel free to combine this list with yours or lists from
+        # other sites and put it up on the web, though!" Nothing there
+        # restricts commercial use, so it can live in a BY-SA database.
+        ("Peter Lowe's list, yoyo.org (permission granted on the page)",
+         "https://pgl.yoyo.org/adservers/serverlist.php"
+         "?hostformat=hosts&mimetype=plaintext&useip=0.0.0.0"),
     ),
 }
 # Names a hosts file carries that are not domains to block.
@@ -273,8 +324,15 @@ def build(out: Path, only: set[str] | None) -> int:
 
     db.execute("INSERT OR REPLACE INTO meta VALUES ('version', ?)",
                (time.strftime("%Y-%m-%d"),))
+    # Attribution, not decoration: UT1 is CC BY-SA 4.0 and several of the
+    # advertising lists are CC BY, so naming them is a licence condition and
+    # this string is where the product does it. The admin app shows it.
     db.execute("INSERT OR REPLACE INTO meta VALUES ('source', ?)",
-               ("University of Toulouse (UT1) blacklists + KosherOS curated",))
+               ("University of Toulouse (UT1) blacklists, CC BY-SA 4.0; "
+                "advertising and tracker lists from AdAway, KADhosts, tiuxo, "
+                "hostsVN, Badd Boyz, FadeMind, minecraft-hosts, URLhaus, "
+                "yoyo.org and Steven Black; plus KosherOS curated. "
+                "See THIRD-PARTY.md",))
     db.commit()
 
     # Guard against shipping a catalogue with no version/source. This is not

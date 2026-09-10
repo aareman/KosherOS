@@ -100,16 +100,21 @@ What BY-SA requires:
 
 ### StevenBlack unified hosts — must be replaced
 
-`fetch-categories.py:103` describes the source as "(MIT)". That is true
-of Steven Black's own wrapper and scripts and false of the merged `hosts`
-file actually fetched, which aggregates sixteen upstream lists. Three
-cannot be used:
+The source used to be described as "(MIT)". That is true of Steven
+Black's own wrapper and scripts and false of the merged `hosts` file that
+was actually fetched, which aggregates sixteen upstream lists. Two cannot
+be used:
 
 | source | licence | problem |
 |---|---|---|
 | MVPS hosts | CC BY-NC-SA 4.0 | NonCommercial |
 | someonewhocares (Dan Pollock) | "non-commercial with attribution" | NonCommercial |
-| yoyo.org | not specified | unknown |
+
+A third, **yoyo.org**, has no formal licence but turned out to be usable:
+its page grants the use in as many words — "Feel free to combine this
+list with yours or lists from other sites and put it up on the web,
+though!" — and restricts nothing about commercial use, so it can live in
+a BY-SA database.
 
 **Why this is still a blocker even though KosherOS is free.** Not because
 of the NonCommercial terms themselves — a free distribution could
@@ -126,18 +131,33 @@ cost, or a shul buying hardware would all be grey areas; and the merged
 file gives no way to tell which domains came from which upstream, so the
 tainted rows cannot be stripped out later.
 
-**The fix.** Stop fetching the merged file; fetch the compatible
-upstreams directly. MIT: Steven Black's own list, hostsVN, Badd Boyz, the
-four FadeMind extras, UncheckyAds. CC0: minecraft-hosts, URLhaus.
-CC BY: AdAway, tiuxo. CC BY-SA: KADhosts. Three of sixteen dropped —
-MVPS in particular is small and old, so little coverage goes with them.
+**Done** (`fetch-categories.py`, `PLAIN_SOURCES`). The merged file is no
+longer fetched; the fourteen compatible upstreams are fetched
+individually instead. It was a data change rather than a code change —
+the loop already iterated several sources per category and inserts with
+`INSERT OR IGNORE`, so overlapping domains across fourteen lists
+deduplicate themselves.
 
-This is a data change, not a code change: the loop at
-`fetch-categories.py:249` already iterates several sources per category
-and inserts with `INSERT OR IGNORE`, so overlapping domains across
-eleven lists deduplicate themselves. `PLAIN_SOURCES` grows from one URL
-to eleven. The remaining work is recording eleven attributions, since
-most of those licences require it.
+**What it cost, measured rather than estimated:**
+
+| | domains |
+|---|---:|
+| merged file, before | 79,962 |
+| fourteen sources, after | 65,746 |
+| lost with MVPS and someonewhocares | 18,986 (23.7%) |
+| gained by fetching live upstreams | 4,770 |
+
+Nearly a quarter of the advertising coverage goes with those two lists,
+which is more than a rounding error and worth knowing plainly. It is
+also not a choice: an NC list inside a BY-SA database produces a file
+that cannot be licensed at all. Recovering some of that coverage from
+another compatible source — EasyList is CC BY-SA 3.0 and therefore
+compatible, though it is in adblock-filter syntax and would need a
+different parser — is worthwhile follow-up work.
+
+Attribution for all fourteen is recorded in
+[THIRD-PARTY.md](../THIRD-PARTY.md) and in the database's own `meta`
+`source` row, which the admin app displays.
 
 ## Other obligations already in the image
 

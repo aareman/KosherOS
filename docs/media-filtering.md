@@ -254,8 +254,8 @@ rolls, so a machine that was briefly busy recovers on its own.
 
 **And it says so.** The proxy publishes its state — `checking`, `too_slow`
 or `no_model` — and kosherd reports it, with which services should be
-running and are not, through `FilterStatus`. The admin app puts that at
-the top of the page under "Needs your attention", and `kosherctl status`
+running and are not, through `FilterStatus`. The admin app puts that in an
+amber banner across the top of its home screen, and `kosherctl status`
 prints it.
 
 This matters more than it looks. A filter that has quietly stopped doing

@@ -140,11 +140,29 @@ one is not how often it is wrong, it is what happens next. If the answer is
 settings caused it and type the address in by hand", the real answer is
 that the filter gets turned off.
 
-So the block page has a button. It records who asked, for what, and why;
-the admin app puts the queue at the top of the page with one button to
-allow it. A request carries no authority of its own — nothing changes
-until an admin says so — which is exactly what lets the asking be
-frictionless.
+So the block page has a button. It records who asked, for what, and why
+(the filter's own reason, "category:video", travels with the request, so
+the admin sees "blocked by Video and streaming" beside it instead of
+guessing which of five settings was responsible). The admin app shows the
+queue as a blue banner across the top of the home screen — "2 requests
+waiting for you" — and each request is answered with one button on its
+row. A request carries no authority of its own — nothing changes until an
+admin says so — which is exactly what lets the asking be frictionless.
+
+**Nobody has to ask first.** Everything the filter blocks, hides or
+refuses is written to an activity log (`kosherd/activity.py`; the proxy
+and the search service append to their own files under
+`/var/lib/kosher-activity`, the same 0730 root:kosher-spool arrangement as
+the request spool, and kosherd is the only reader). The admin app shows it
+as an Activity tab — the filter's diary, newest first, narrowable to one
+person — and on each person's own page as "Blocked today". A blocked page
+has an Allow button that does exactly what approving a request does
+(`AllowUrl`), so a parent who sees the block can fix it before the child
+comes to ask. It is a record of the filter, not of the person: what was
+allowed through is never written, so it cannot become a browsing history.
+Settings changes are in the same diary with the admin who made them, so a
+two-parent household can see who changed what. Everything is trimmed to a
+week.
 
 **Where the form posts.** To the blocked site's own origin, on a reserved
 path (`/__kosheros__/request`), which the proxy answers itself and never
@@ -198,8 +216,11 @@ the filter. A stale anchor (the CA regenerated without refreshing the
 trusted copy) gives the identical symptom and is harder to spot, so it is
 checked by comparing the two files rather than by their existence.
 
-All of it appears at the top of the admin app under "Needs your attention",
-and in `kosherctl status`; `kosherctl lists` prints what each list holds
+All of it appears in the admin app as an amber banner across the top of the
+home screen, with the full list behind its Details button — and when
+nothing is wrong the board says so ("Filter running · checked 10:42"),
+because a healthy machine that says nothing is indistinguishable from one
+that was never checked. `kosherctl status` prints the same; `kosherctl lists` prints what each list holds
 and where it came from.
 
 ## Where an admin override goes
@@ -378,8 +399,8 @@ not given the list twice.
 
 Machine-wide, on by default. It is not content filtering, so it applies to
 unfiltered accounts too; switching it **off** is the guardian-gated act
-(`SetAdBlock`, the switch on the admin app's Profiles page, `kosherctl
-adblock off`), because an ad network is also where immodest imagery
+(`SetAdBlock`, the "Ads and trackers" tile under "This computer" in the
+admin app, `kosherctl adblock off`), because an ad network is also where immodest imagery
 arrives uninvited. What it does not do: cosmetic filtering (an empty box
 where an ad was), first-party ads served from the site's own domain, and
 ads inside YouTube's own player, which the YouTube limits handle.

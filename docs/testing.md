@@ -124,8 +124,9 @@ runs here in regular mode instead.
 
 ## Admin app widget tests
 
-The admin app has 1,300 lines of GTK and, until now, no test that ran any
-of it — only tests that read the source with `ast`. Every UI bug this
+The admin app has a few thousand lines of GTK across `family.py` (the
+board), `feed.py` (the activity tab), `detail.py` (a person's page) and
+`dialogs.py`, and until the widget tests existed no test ran any of it — only tests that read the source with `ast`. Every UI bug this
 project has actually shipped was a widget that threw when it was
 constructed: a `GLib.Variant` unpacked the wrong way, a polkit action that
 prompted twice. Reading the source cannot see any of those.

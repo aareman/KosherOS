@@ -67,6 +67,9 @@ INTROSPECTION_XML = """
     <method name="FilterStatus">
       <arg direction="out" type="s" name="status_json"/>
     </method>
+    <method name="GetMySettings">
+      <arg direction="out" type="s" name="settings_json"/>
+    </method>
     <method name="ListRequests">
       <arg direction="out" type="s" name="requests_json"/>
     </method>
@@ -768,6 +771,55 @@ class Daemon:
         user = self.policy.user(_uid)
         layout = user.layout if user is not None else DEFAULT_LAYOUT
         return GLib.Variant("(s)", (layout,))
+
+    def impl_GetMySettings(self, _uid: int):
+        """What applies to the CALLER's own account, read-only.
+
+        The uid comes from the D-Bus connection, never from an argument, so
+        this cannot be pointed at somebody else's account. Nothing here
+        describes another user, the guardian, or the machine's current
+        health — only the rules this person is living under.
+
+        An unmanaged account (no policy entry) is reported honestly as
+        unmanaged rather than being given a fabricated default, because
+        "this account is not filtered" is exactly the thing someone needs
+        to be told plainly.
+        """
+        from . import categories
+
+        user = self.policy.user(_uid)
+        if user is None:
+            return GLib.Variant("(s)", (json.dumps({
+                "managed": False,
+                "adblock": self.policy.adblock,
+            }),))
+
+        settings = {
+            "managed": True,
+            "username": user.username,
+            "mode": user.mode,
+            "admin": user.admin,
+            "can_install_apps": user.can_install_apps,
+            "language_filter": user.language_filter,
+            "adblock": self.policy.adblock,
+            "blocked_categories": [
+                {"key": key, "label": categories.CATEGORY_LABELS[key]}
+                for key in user.blocked_categories
+                if key in categories.CATEGORY_LABELS
+            ],
+        }
+        # Only meaningful where pictures are actually judged; showing "all
+        # pictures allowed" to a whitelist account would be misleading,
+        # since the whitelist is what governs there.
+        if user.mode in INSPECTED_MODES:
+            settings["media_level"] = user.media_level
+            settings["youtube"] = user.youtube
+        if user.mode == "whitelist":
+            # The whitelist is already deliberately discoverable through
+            # KosherOS Search, so listing it here reveals nothing new and
+            # answers the question this app exists to answer.
+            settings["whitelist"] = sorted(user.whitelist)
+        return GLib.Variant("(s)", (json.dumps(settings),))
 
     def impl_ListProfiles(self):
         from . import profiles

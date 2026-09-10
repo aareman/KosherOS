@@ -132,9 +132,36 @@ fetch = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(fetch)
 
 
-def test_the_ads_category_is_fed_by_pi_holes_default_list():
-    labels = [label for label, _url in fetch.PLAIN_SOURCES["ads"]]
-    assert any("StevenBlack" in label for label in labels)
+def test_the_ads_category_is_fed_by_many_lists_not_one_merged_file():
+    # It used to fetch StevenBlack's merged unified-hosts file. That file
+    # aggregates sixteen lists, two of which forbid commercial use, and our
+    # category database is an adaptation of UT1's CC BY-SA 4.0 data —
+    # ShareAlike forces the whole database to permit commercial use, so
+    # nothing forbidding it can be inside. See docs/licensing.md.
+    sources = fetch.PLAIN_SOURCES["ads"]
+    assert len(sources) >= 10, "the ad coverage collapsed to a handful of lists"
+    urls = [url for _label, url in sources]
+    assert not any(url.rstrip("/").endswith("StevenBlack/hosts/master/hosts")
+                   for url in urls), \
+        "the merged unified-hosts file is back; it cannot be licensed"
+
+
+def test_no_noncommercial_ad_list_can_creep_back_in():
+    # Named explicitly rather than checked by licence string, because the
+    # failure mode is somebody re-adding one of these two by URL.
+    urls = " ".join(url for _label, url in fetch.PLAIN_SOURCES["ads"]).lower()
+    for forbidden in ("mvps.org", "someonewhocares.org"):
+        assert forbidden not in urls, \
+            f"{forbidden} is NonCommercial and conflicts with CC BY-SA"
+
+
+def test_every_ad_list_records_the_licence_it_is_used_under():
+    # Attribution is a condition of several of these licences, so the label
+    # is where the product carries it. A source with no licence in its
+    # label is a source nobody checked.
+    for label, _url in fetch.PLAIN_SOURCES["ads"]:
+        assert "(" in label and ")" in label, \
+            f"{label!r} does not say what licence it is used under"
 
 
 def test_a_hosts_file_parses_to_domains_and_nothing_else():

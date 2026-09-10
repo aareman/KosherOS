@@ -89,6 +89,10 @@ class DaemonClient:
     def filter_status(self) -> dict:
         return json.loads(self._call("Profiles", "FilterStatus")[0])
 
+    def get_my_settings(self) -> dict:
+        """The caller's own filter settings. No privilege, no password."""
+        return json.loads(self._call("Profiles", "GetMySettings")[0])
+
     def list_requests(self) -> list[dict]:
         return json.loads(self._call("Profiles", "ListRequests")[0])
 

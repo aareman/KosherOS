@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=My Filter
+Comment=See what applies to your account
+Exec=kosher-my-filter
+Icon=security-high
+Terminal=false
+Categories=System;Security;
+Keywords=filter;settings;rules;allowed;blocked;mine;

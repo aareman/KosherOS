@@ -22,6 +22,7 @@ See [docs/architecture.md](docs/architecture.md) for how it works, and
 | `kosherd/` | privileged daemon, policy engine, `kosherctl` CLI (Python) |
 | `admin-app/` | KosherOS Admin — profiles, filters, guest, updates (GTK4) |
 | `store-app/` | KosherOS Store — install approved apps (GTK4, open to all users) |
+| `myfilter-app/` | My Filter — read-only view of your own account's rules (GTK4, open to all users) |
 | `setup-app/` | KosherOS Setup — the first-boot wizard (GTK4) |
 | `branding/` | logo and wallpaper source art |
 | `policy/` | policy JSON schema + examples — the contract for device, admin app, and portal |
@@ -103,15 +104,22 @@ locked down when the user has sudo.
     services running. Still needing a booted machine: the login path, the
     first-boot wizard, and how all of it behaves under GNOME. `just vm`
     needs sudo, so it is a person's job
-13. **"My Filter" — a read-only settings viewer on every account.** Any
-    user should be able to open one app and see what applies to their own
-    account: the mode (no internet, whitelist, filtered, DNS), and the
-    plain-language version of what that means. Deliberately basic, and
-    deliberately read-only — it changes nothing, needs no password, and
-    exists so that a filtered account is not a mystery to the person
-    using it. A child who can see the rules is far likelier to accept
-    them than one who just meets a blocked page. Reads the same
-    `FilterStatus` path `kosherctl status` already uses
+13. ✅ **"My Filter" — a read-only settings viewer on every account.** Any
+    user can open one app and see what applies to their own account: the
+    mode (no internet, approved sites only, family filtering, filtered
+    browsing, unfiltered) in plain language, plus pictures, language,
+    YouTube, blocked subjects and the whitelist where there is one.
+    Deliberately basic and deliberately read-only — it changes nothing
+    and needs no password, so that a filtered account is not a mystery to
+    the person using it. A child who can see the rules is far likelier to
+    accept them than one who just meets a blocked page. New `GetMySettings`
+    on the daemon, gated by the existing
+    `org.kosherlinux.read-own-settings` that every active local user
+    already holds; the account comes from the D-Bus connection, so the
+    window can only ever describe whoever opened it. The filter's *health*
+    stays admin-only on purpose — "picture checking has backed off right
+    now" is a hint about when the machine is weakest. Seen rendering; not
+    yet on a booted machine
 14. **Deployment** — signature verification, a release ISO pinned at the
     public registry, update channels and rollback. See
     [docs/deployment.md](docs/deployment.md); nothing is hosted yet

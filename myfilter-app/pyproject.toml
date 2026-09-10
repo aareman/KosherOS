@@ -1,0 +1,18 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "koshermyfilter"
+version = "0.1.0"
+description = "My Filter — see what applies to your own account"
+readme = "README.md"
+requires-python = ">=3.11"
+license = "AGPL-3.0-or-later"
+dependencies = ["kosherd"]
+
+[project.scripts]
+kosher-my-filter = "koshermyfilter.app:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/koshermyfilter"]

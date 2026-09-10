@@ -69,6 +69,17 @@ ACTIONS = {
     # per-uid at the network layer whatever draws the windows.
     "SetLayout": ACTION_MANAGE_USERS,
     "GetMyLayout": ACTION_READ_OWN,
+    # Your own filter settings, read-only, no password: what applies to
+    # THIS account and nothing about any other. A filtered account should
+    # not be a mystery to the person using it — someone who can see the
+    # rules is likelier to accept them than someone who only ever meets a
+    # blocked page. Reading this reveals nothing that helps evade it: the
+    # mode is already obvious from using the machine, and the whitelist is
+    # deliberately discoverable through search. Deliberately NOT included
+    # is anything about the filter's current health (FilterStatus stays
+    # ACTION_READ_CONFIG), because "picture checking has backed off right
+    # now" is a hint about when the machine is weakest.
+    "GetMySettings": ACTION_READ_OWN,
     # How a covered picture looks. Cosmetic — the media level decides what
     # is judged and cannot be loosened here — so an account-management
     # action rather than a filter one, and no guardian gate.
@@ -131,7 +142,7 @@ SETUP_READS = frozenset({"IsComplete", "AdminExists"})
 
 # Methods that need to know which uid called them (session management).
 UID_AWARE = frozenset({"Unlock", "Lock", "Status", "VerifyGuardian", "InstallApp",
-                       "GetMyLayout"})
+                       "GetMyLayout", "GetMySettings"})
 
 SETUP_CLOSED = "initial setup is already complete"
 UNKNOWN_METHOD = "unknown method"

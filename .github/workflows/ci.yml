@@ -46,7 +46,8 @@ jobs:
         # here rather than in a VM.
         run: |
           python -m compileall -q \
-            kosherd/src admin-app/src store-app/src setup-app/src portal/src mitm
+            kosherd/src admin-app/src store-app/src setup-app/src \
+            myfilter-app/src portal/src mitm
 
   shell:
     name: Shell scripts

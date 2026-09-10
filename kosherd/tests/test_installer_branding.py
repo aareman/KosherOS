@@ -1,0 +1,140 @@
+"""The installer wears the brand: product.img, built here, over Anaconda.
+
+Anaconda unpacks images/product.img from the install media over its own
+root before it starts, so a small archive can rename the product, point
+the UI at our stylesheet and supply the logo without rebuilding anything.
+These tests build that archive and read it back with the system's cpio,
+which is what the initramfs does.
+"""
+
+import configparser
+import gzip
+import importlib.util
+import shutil
+import subprocess
+import sys
+from pathlib import Path
+
+import pytest
+
+ROOT = Path(__file__).parents[2]
+SCRIPT = ROOT / "scripts/brand-iso.py"
+
+pytest.importorskip("PIL")
+
+spec = importlib.util.spec_from_file_location("brand_iso", SCRIPT)
+brand = importlib.util.module_from_spec(spec)
+sys.modules["brand_iso"] = brand
+spec.loader.exec_module(brand)
+
+
+def _listing(img: Path) -> list[str]:
+    if shutil.which("cpio") is None:
+        pytest.skip("cpio not installed")
+    result = subprocess.run(["cpio", "-it", "--quiet"], input=gzip.decompress(img.read_bytes()),
+                            capture_output=True, check=True)
+    return result.stdout.decode().split()
+
+
+def _extract(img: Path, into: Path) -> None:
+    subprocess.run(["cpio", "-id", "--quiet"], input=gzip.decompress(img.read_bytes()),
+                   cwd=into, check=True, capture_output=True)
+
+
+@pytest.fixture(scope="module")
+def img(tmp_path_factory):
+    dest = tmp_path_factory.mktemp("iso") / "product.img"
+    return brand.product_img(dest)
+
+
+def test_the_archive_is_a_cpio_the_initramfs_can_unpack(img):
+    names = _listing(img)
+    assert ".buildstamp" in names
+    assert "etc/anaconda/conf.d/90-kosheros.conf" in names
+    assert "usr/share/anaconda/pixmaps/kosheros/kosheros.css" in names
+    assert "usr/share/anaconda/pixmaps/kosheros/sidebar-logo.png" in names
+    assert "TRAILER!!!" not in names
+
+
+def test_the_buildstamp_names_the_product(img, tmp_path):
+    _extract(img, tmp_path)
+    stamp = configparser.ConfigParser()
+    stamp.read(tmp_path / ".buildstamp")
+    assert stamp["Main"]["Product"] == "KosherOS"
+    assert stamp["Main"]["Version"] == "0.1"
+    assert stamp["Main"]["IsFinal"] == "false"
+    assert stamp["Main"]["BugURL"].startswith("https://github.com/aareman/KosherOS")
+
+
+def test_the_dropin_points_anaconda_at_our_stylesheet(img, tmp_path):
+    _extract(img, tmp_path)
+    conf = configparser.ConfigParser()
+    conf.read(tmp_path / "etc/anaconda/conf.d/90-kosheros.conf")
+    sheet = conf["User Interface"]["custom_stylesheet"]
+    assert sheet == "/usr/share/anaconda/pixmaps/kosheros/kosheros.css"
+    assert (tmp_path / sheet.lstrip("/")).is_file()
+
+
+def test_the_stylesheet_only_references_files_in_the_archive(img, tmp_path):
+    import re
+
+    _extract(img, tmp_path)
+    css = (tmp_path / "usr/share/anaconda/pixmaps/kosheros/kosheros.css").read_text()
+    urls = re.findall(r"url\('([^']+)'\)", css)
+    assert urls, "the sidebar logo is drawn from the stylesheet"
+    for url in urls:
+        assert (tmp_path / url.lstrip("/")).is_file(), url
+    # Fedora's own stylesheet path is overwritten with the same file, so
+    # the branding holds even if the drop-in were not read.
+    assert (tmp_path / "usr/share/anaconda/pixmaps/fedora.css").read_text() == css
+
+
+def test_the_sidebar_logo_is_the_real_mark_fitted_square(img, tmp_path):
+    from PIL import Image
+
+    _extract(img, tmp_path)
+    logo = Image.open(tmp_path / "usr/share/anaconda/pixmaps/kosheros/sidebar-logo.png")
+    assert logo.size == (brand.LOGO_SIZE, brand.LOGO_SIZE)
+    assert logo.mode == "RGBA"
+
+
+def test_files_in_the_archive_belong_to_root(img):
+    # An installer root file owned by uid 1000 would be wrong, and the
+    # header carries uid/gid explicitly.
+    raw = gzip.decompress(img.read_bytes())
+    for offset in range(0, len(raw) - 110):
+        if raw[offset:offset + 6] == b"070701":
+            uid = raw[offset + 22:offset + 30]
+            gid = raw[offset + 30:offset + 38]
+            assert uid == b"00000000" and gid == b"00000000"
+            break
+    else:
+        pytest.fail("no newc header found")
+
+
+def test_the_whole_archive_is_small(img):
+    # It rides on every ISO and is unpacked into RAM; a logo and two text
+    # files should stay well under a megabyte.
+    assert img.stat().st_size < 400_000
+
+
+@pytest.mark.skipif(shutil.which("xorriso") is None, reason="xorriso not installed")
+def test_injecting_into_an_iso_keeps_it_bootable_shaped(img, tmp_path):
+    # A tiny ISO stands in for the installer: after injection it must carry
+    # images/product.img and still be a readable ISO 9660 image.
+    tree = tmp_path / "tree" / "images"
+    tree.mkdir(parents=True)
+    (tree / "install.img").write_bytes(b"not really a squashfs")
+    iso = tmp_path / "install.iso"
+    subprocess.run(["xorriso", "-as", "mkisofs", "-o", str(iso), "-J", "-R",
+                    str(tmp_path / "tree")], check=True, capture_output=True)
+    brand.inject(iso, img)
+    listing = subprocess.run(["xorriso", "-indev", str(iso), "-ls", "/images", "-end"],
+                             check=True, capture_output=True, text=True).stdout
+    assert "product.img" in listing and "install.img" in listing
+
+
+def test_the_command_line_builds_only_the_image_when_asked(tmp_path):
+    dest = tmp_path / "out" / "product.img"
+    assert brand.main(["--product-img", str(dest)]) == 0
+    assert dest.is_file()

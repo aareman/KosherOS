@@ -327,7 +327,7 @@ as "built and tested", not "proven in a home".
 - [x] **Rollback**: `kosherctl system rollback`, "Go back to the previous version" in the admin app, greenboot returning to the last good image on its own
 - [ ] **A tzniut classifier**, so the *immodest* picture level is as strong as the two above it
 - [ ] **A live "try it" ISO** that boots to the desktop and offers Install
-- [ ] **Anaconda installer branding**, waiting on the real artwork
+- [x] **Anaconda installer branding**: `just iso` puts a KosherOS `product.img` on the ISO, so the installer says KosherOS and wears the mark; not yet seen on a booted installer
 - [ ] **Deployment**: signature verification on the machine, a release ISO pinned at a public registry, update channels ([docs/deployment.md](docs/deployment.md))
 - [ ] **A long session on a booted machine** with the whole family flow, under GNOME
 - [ ] **Licence and contribution files**: `LICENSE` and `CONTRIBUTING.md` ([docs/licensing.md](docs/licensing.md))

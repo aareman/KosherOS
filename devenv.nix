@@ -61,6 +61,9 @@ in
     pkgs.cloud-utils # cloud-localds for the cloud-init seed
     # OS image builds
     pkgs.podman
+    # `just iso` puts the KosherOS product.img on the installer ISO after
+    # bootc-image-builder has made it (scripts/brand-iso.py).
+    pkgs.xorriso
   ];
 
   enterShell = ''

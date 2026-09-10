@@ -137,3 +137,43 @@ def test_the_diagnostic_records_whether_stdin_is_a_tty(monkeypatch, caplog):
     with caplog.at_level(logging.INFO, logger="kosherd.cli"):
         cli._Console()
     assert any("isatty" in r.message for r in caplog.records)
+
+
+def test_the_activity_command_prints_the_filters_diary(monkeypatch, capsys):
+    import time
+
+    from kosherd import cli
+
+    now = int(time.time())
+
+    class Client:
+        def get_policy(self):
+            return {"users": [{"uid": 1001, "username": "yosef"}]}
+
+        def list_activity(self, since, uid):
+            assert uid == 1001
+            return [{"t": now - 60, "kind": "block", "uid": 1001, "username": "yosef",
+                     "url": "https://roblox.com/", "why": "category:games"},
+                    {"t": now - 120, "kind": "change", "uid": 1001, "username": "yosef",
+                     "by": 1000, "by_username": "avi", "method": "SetFilterMode",
+                     "args": [1001, "filtered"], "guardian": True}]
+
+    monkeypatch.setattr(cli, "_client", lambda: Client())
+    args = type("A", (), {"user": "yosef", "days": 1})()
+    assert cli.cmd_activity(args) == 0
+    out = capsys.readouterr().out
+    assert "roblox.com" in out and "category:games" in out
+    assert "avi changed yosef: SetFilterMode  (guardian)" in out
+
+
+def test_the_activity_command_refuses_an_unknown_account(monkeypatch, capsys):
+    from kosherd import cli
+
+    class Client:
+        def get_policy(self):
+            return {"users": []}
+
+    monkeypatch.setattr(cli, "_client", lambda: Client())
+    args = type("A", (), {"user": "nobody", "days": 1})()
+    assert cli.cmd_activity(args) == 1
+    assert "nobody" in capsys.readouterr().err

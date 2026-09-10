@@ -15,7 +15,7 @@ import pytest
 from kosherd.language import MODES as LANGUAGE_MODES
 from kosherd.policy import COVER_STYLES, LAYOUTS, MEDIA_LEVELS, MODES, YOUTUBE_CATEGORIES
 
-APP = Path(__file__).parents[2] / "admin-app/src/kosheradmin/app.py"
+APP = Path(__file__).parents[2] / "admin-app/src/kosheradmin/labels.py"
 
 
 @pytest.fixture(scope="module")

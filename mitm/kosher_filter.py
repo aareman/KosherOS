@@ -27,6 +27,7 @@ from urllib.parse import urlencode, urlsplit
 from mitmproxy import http
 
 import sys
+import time
 
 try:
     from kosherd import categories as categories_mod
@@ -35,6 +36,7 @@ try:
     from kosherd import imageedit as imageedit_mod
     from kosherd import language as language_mod
     from kosherd import accessreq as accessreq_mod
+    from kosherd import activity as activity_mod
     from kosherd import search as search_mod
     from kosherd import siterules as siterules_mod
     from kosherd import suggest as suggest_mod
@@ -56,6 +58,7 @@ except ImportError:  # pragma: no cover - only when interpreters differ
     from kosherd import imageedit as imageedit_mod
     from kosherd import language as language_mod
     from kosherd import accessreq as accessreq_mod
+    from kosherd import activity as activity_mod
     from kosherd import search as search_mod
     from kosherd import siterules as siterules_mod
     from kosherd import suggest as suggest_mod
@@ -102,6 +105,7 @@ BLOCK_PAGE = """<!doctype html>
      computer for it. Nothing changes until they say yes.</p>
   <form method="post" action="{request_path}">
     <input type="hidden" name="url" value="{url}">
+    <input type="hidden" name="why" value="{why}">
     <input type="text" name="note" maxlength="200"
            placeholder="Why do you need it? (optional)">
     <button type="submit">Ask for this page</button>
@@ -681,7 +685,7 @@ class KosherFilter:
         action, pattern = decide(rules, url)
         if action == BLOCK:
             log.info("blocked uid=%s %s (rule: %s)", uid, url, pattern)
-            self._block(flow, url, "")
+            self._block(flow, url, "", why=f"rule:{pattern}")
             return
 
         # An explicit allow rule beats the category lists, so an admin can
@@ -693,7 +697,8 @@ class KosherFilter:
             if hit:
                 names = ", ".join(sorted(hit))
                 log.info("blocked uid=%s %s (category: %s)", uid, url, names)
-                self._block(flow, url, f" because it is {names}")
+                self._block(flow, url, f" because it is {names}",
+                            why="category:" + ",".join(sorted(hit)))
                 return
 
             # A department on a shop the family uses. Read from the
@@ -703,7 +708,8 @@ class KosherFilter:
                 why = self.siterules.reason(url) or self._blocked_shop_search(url)
                 if why:
                     log.info("blocked uid=%s %s (%s)", uid, url, why)
-                    self._block(flow, url, f" because it is {why}")
+                    self._block(flow, url, f" because it is {why}",
+                                why=f"shop:{why}")
 
 
 
@@ -914,7 +920,7 @@ class KosherFilter:
         if language_filter != "off" and self.wordlist.contains_any(text):
             if language_filter == "block":
                 self._block(flow, flow.request.pretty_url,
-                            " because of the language on it")
+                            " because of the language on it", why="language")
                 return
             cleaned, count = language_mod.clean_html(body, self.wordlist)
             if count:
@@ -943,7 +949,8 @@ class KosherFilter:
                      uid, flow.request.pretty_url, verdict.level,
                      verdict.points, ", ".join(verdict.hits))
             self._block(flow, flow.request.pretty_url,
-                        f" because the page reads as {verdict.level}")
+                        f" because the page reads as {verdict.level}",
+                        why=f"content:{verdict.level}")
 
     MAX_REMEMBERED_PAGES = 64
 
@@ -1161,6 +1168,11 @@ class KosherFilter:
 
     def _refuse_video(self, flow: http.HTTPFlow, before_body: bool = False) -> None:
         log.info("refused video %s", flow.request.pretty_url)
+        try:
+            page = self._page_of(flow)
+        except Exception:  # noqa: BLE001 - the log is a convenience
+            page = ""
+        self._note(activity_mod.VIDEO, flow, url=page)
         if before_body:
             # Headers not yet sent: turn this response into the refusal and
             # drop the body as it arrives instead of downloading it.
@@ -1230,12 +1242,35 @@ class KosherFilter:
             flow.response.content or b"", videocheck_mod.key(flow.request.pretty_url, total))
         self._video_settle(flow, uid, level, verdict)
 
-    @staticmethod
-    def _blank_image(flow: http.HTTPFlow) -> None:
+    def _blank_image(self, flow: http.HTTPFlow) -> None:
         flow.response.content = BLANK_PNG
         flow.response.headers["content-type"] = "image/png"
         flow.response.headers["x-kosheros"] = "image-hidden"
         flow.response.headers.pop("content-length", None)
+        self._note_picture(flow)
+
+    def _note_picture(self, flow: http.HTTPFlow) -> None:
+        """Write down that pictures were hidden on the page this one is on."""
+        try:
+            page = self._page_of(flow)
+            uid = flow.metadata.get("kosher_uid")
+            now = time.monotonic()
+            notes = self.__dict__.setdefault("_picture_notes", {})
+            last = notes.get((uid, page))
+            if last is not None and now - last < self.PICTURE_NOTE_SECONDS:
+                return
+            notes[(uid, page)] = now
+            while len(notes) > self.MAX_PICTURE_NOTES:
+                notes.pop(next(iter(notes)))
+        except Exception:  # noqa: BLE001 - the log is a convenience
+            return
+        self._note(activity_mod.PICTURES, flow, url=page)
+
+    @staticmethod
+    def _page_of(flow: http.HTTPFlow) -> str:
+        """The page a picture or video was on, as far as the browser says."""
+        referer = flow.request.headers.get("referer") or ""
+        return (referer or flow.request.pretty_url).split("#", 1)[0]
 
     def _filter_youtube(self, flow: http.HTTPFlow, uid: int) -> None:
         settings = self.policy.youtube_for(uid)
@@ -1260,7 +1295,9 @@ class KosherFilter:
         body = flow.response.get_text(strict=False) or ""
         why = self._youtube_verdict(body, allowed, blocked)
         if why:
-            self._block(flow, flow.request.pretty_url, why)
+            self._block(flow, flow.request.pretty_url, why,
+                        why="youtube:" + ("channel" if "channels" in why
+                                          else "category"))
 
     @staticmethod
     def _youtube_verdict(body: str, allowed: list, blocked: list) -> str | None:
@@ -1320,14 +1357,41 @@ class KosherFilter:
         flow.response.headers["x-kosheros"] = "youtube-blocked"
         flow.response.headers.pop("content-length", None)
 
-    def _block(self, flow: http.HTTPFlow, url: str, because: str) -> None:
+    def _block(self, flow: http.HTTPFlow, url: str, because: str,
+               why: str = "") -> None:
+        """Refuse a page, tell the person, and write it down.
+
+        `because` is the sentence on the block page; `why` is the same
+        fact for machines ("category:video"), which the activity log keeps
+        so the admin app can show the parent what was blocked and offer to
+        allow it, and which rides along with a request so the parent sees
+        why the page was refused when deciding.
+        """
         flow.response = http.Response.make(
             403,
             BLOCK_PAGE.format(style=BLOCK_STYLE, url=_escape(url),
-                              because=_escape(because),
+                              because=_escape(because), why=_escape(why),
                               request_path=REQUEST_PATH).encode(),
             {"Content-Type": "text/html; charset=utf-8"},
         )
+        self._note(activity_mod.BLOCK, flow, url=url, why=why)
+
+    def _note(self, kind: str, flow: http.HTTPFlow, **fields) -> None:
+        """One line in the activity log. Never lets a logging problem
+        become a filtering problem."""
+        try:
+            metadata = getattr(flow, "metadata", None) or {}
+            activity_mod.record("proxy", kind, metadata.get("kosher_uid"),
+                                **fields)
+        except Exception:  # noqa: BLE001 - the log is a convenience
+            log.debug("could not record activity", exc_info=True)
+
+    # A page's hidden pictures are one line, not one per picture: a shop
+    # page with forty thumbnails would otherwise write forty lines that all
+    # say the same thing. Re-noted after ten minutes so a page someone keeps
+    # coming back to still shows up.
+    PICTURE_NOTE_SECONDS = 600
+    MAX_PICTURE_NOTES = 256
 
     def _handle_request_form(self, flow: http.HTTPFlow, uid) -> None:
         """Take a request for access off the block page.
@@ -1342,9 +1406,10 @@ class KosherFilter:
             form = parse_qs(flow.request.get_text(strict=False) or "")
             url = (form.get("url") or [""])[0]
             note = (form.get("note") or [""])[0]
+            why = (form.get("why") or [""])[0]
             if uid is None:
                 raise accessreq_mod.RequestError("could not tell who is asking")
-            accessreq_mod.submit(uid, url, note)
+            accessreq_mod.submit(uid, url, note, why=why)
         except accessreq_mod.RequestError as e:
             message = _escape(str(e))
         except Exception:  # noqa: BLE001 - a failed ask is not a crash

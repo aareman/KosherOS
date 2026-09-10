@@ -90,6 +90,11 @@ ACTIONS = {
     "ApproveRequest": ACTION_MANAGE_FILTER,
     "DismissRequest": ACTION_MANAGE_USERS,
     "ListRequests": ACTION_READ_CONFIG,
+    # Allowing a blocked page from the activity view is the same grant as
+    # approving a request for it.
+    "AllowUrl": ACTION_MANAGE_FILTER,
+    "ListActivity": ACTION_READ_CONFIG,
+    "ActivitySummary": ACTION_READ_CONFIG,
     "SetMediaLevel": ACTION_MANAGE_FILTER,
     "SetLanguageFilter": ACTION_MANAGE_FILTER,
     "SetYouTube": ACTION_MANAGE_FILTER,
@@ -126,7 +131,7 @@ ACTIONS = {
 
 # Methods that can weaken the filter: guardian password required when enabled.
 GUARDIAN_GATED = frozenset({
-    "SetFilterMode", "SetWhitelist", "SetUrlRules", "SetBlockedCategories", "ApplyProfile", "SaveProfile", "DeleteProfile", "ApproveRequest", "EditList",
+    "SetFilterMode", "SetWhitelist", "SetUrlRules", "SetBlockedCategories", "ApplyProfile", "SaveProfile", "DeleteProfile", "ApproveRequest", "AllowUrl", "EditList",
     "SetUserAdmin",
     "SetMediaLevel",
     "SetLanguageFilter", "SetYouTube",
@@ -143,6 +148,33 @@ SETUP_READS = frozenset({"IsComplete", "AdminExists"})
 # Methods that need to know which uid called them (session management).
 UID_AWARE = frozenset({"Unlock", "Lock", "Status", "VerifyGuardian", "InstallApp",
                        "GetMyLayout", "GetMySettings"})
+
+# Calls that change how the machine is set up, written to the activity log
+# with the admin who made them so "who changed this?" has an answer. Reads,
+# session calls and the store's own installs are not changes to the family's
+# settings and are not logged.
+CHANGES = frozenset({
+    "SetFilterMode", "SetWhitelist", "SetUrlRules", "SetBlockedCategories",
+    "ApplyProfile", "SaveProfile", "DeleteProfile", "ApproveRequest",
+    "DismissRequest", "AllowUrl", "EditList", "SetMediaLevel",
+    "SetLanguageFilter", "SetYouTube", "SetUserAdmin", "SetLayout",
+    "SetCoverStyle", "SetAdBlock", "SetGuestConfig", "CreateUser",
+    "AdoptUser", "RemoveUser", "SetUserApps", "RemoveApp", "ApproveApp",
+    "UnapproveApp", "SetUserCanInstall", "SetCaptiveMode",
+    "SetGuardianPassword", "DisableGuardian", "Enrol", "Unenrol",
+})
+# Changes whose first argument is the account they are about.
+PER_USER = frozenset({
+    "SetFilterMode", "SetWhitelist", "SetUrlRules", "SetBlockedCategories",
+    "ApplyProfile", "SaveProfile", "AllowUrl", "SetMediaLevel",
+    "SetLanguageFilter", "SetYouTube", "SetUserAdmin", "SetLayout",
+    "SetCoverStyle", "RemoveUser", "SetUserApps", "SetUserCanInstall",
+    "SetCaptiveMode",
+})
+# Changes whose arguments are secrets or too big to be worth keeping.
+NO_ARGS_LOGGED = frozenset({"SetGuardianPassword", "DisableGuardian",
+                            "Enrol", "EditList", "SetWhitelist",
+                            "SetUrlRules"})
 
 SETUP_CLOSED = "initial setup is already complete"
 UNKNOWN_METHOD = "unknown method"

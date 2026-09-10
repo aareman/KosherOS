@@ -81,6 +81,20 @@ INTROSPECTION_XML = """
     <method name="DismissRequest">
       <arg direction="in" type="s" name="request_id"/>
     </method>
+    <method name="AllowUrl">
+      <arg direction="in" type="i" name="uid"/>
+      <arg direction="in" type="s" name="url"/>
+      <arg direction="in" type="b" name="whole_site"/>
+      <arg direction="in" type="s" name="guardian_password"/>
+    </method>
+    <method name="ListActivity">
+      <arg direction="in" type="i" name="since"/>
+      <arg direction="in" type="i" name="uid"/>
+      <arg direction="out" type="s" name="events_json"/>
+    </method>
+    <method name="ActivitySummary">
+      <arg direction="out" type="s" name="summary_json"/>
+    </method>
     <method name="SetMediaLevel">
       <arg direction="in" type="i" name="uid"/>
       <arg direction="in" type="s" name="level"/>
@@ -435,6 +449,8 @@ class Daemon:
                 if method in UID_AWARE else getattr(self, f"impl_{method}")(*args)
             invocation.return_value(result)
             log.info("%s by %s (uid %s): ok", method, sender, uid)
+            if method in access.CHANGES:
+                self._note_change(method, args, by=uid)
         except (auth.NotAuthorized, GuardianError, PolicyError, AppError, KeyError, ValueError) as e:
             log.warning("%s by %s refused: %s", method, sender, e)
             invocation.return_dbus_error(ERROR_NAME, str(e))
@@ -446,6 +462,31 @@ class Daemon:
         except Exception as e:  # noqa: BLE001 - daemon must not crash on a bad call
             log.exception("%s failed", method)
             invocation.return_dbus_error(ERROR_NAME, f"internal error: {e}")
+
+    def _note_change(self, method: str, args: list, *, by: int) -> None:
+        """One line in the activity log saying who changed what.
+
+        In a household with two admins and a guardian password, "who set
+        this?" is a real question. Passwords never go in: the trailing
+        guardian argument of a gated method is dropped, and the guardian
+        methods log no arguments at all.
+        """
+        from . import activity
+
+        try:
+            kept = list(args)
+            if method in access.GUARDIAN_GATED and kept:
+                kept = kept[:-1]
+            if method in access.NO_ARGS_LOGGED:
+                kept = []
+            target = kept[0] if kept and isinstance(kept[0], int) \
+                and not isinstance(kept[0], bool) and method in access.PER_USER else -1
+            activity.record("kosherd", activity.CHANGE, target, by=by,
+                            method=method, args=kept,
+                            guardian=self.policy.guardian_enabled
+                            and method in access.GUARDIAN_GATED)
+        except Exception:  # noqa: BLE001 - the log is a convenience
+            log.debug("could not record a change", exc_info=True)
 
     def _save_and_apply(self) -> None:
         policy_mod.save(self.policy)
@@ -637,8 +678,28 @@ class Daemon:
         user = self.policy.user(document["uid"])
         if user is None:
             raise PolicyError("that account is no longer managed")
+        host = self._grant(user, document["url"], whole_site)
+        log.info("approved access for uid %d to %s", user.uid, host)
+        return None
 
-        parts = urlsplit(document["url"])
+    def impl_AllowUrl(self, uid: int, url: str, whole_site: bool,
+                      _guardian_pw: str):
+        """Allow a page the filter blocked, straight from the activity
+        view — the same grant as approving a request, without waiting for
+        the person to ask."""
+        user = self.policy.user(uid)
+        if user is None:
+            raise PolicyError(f"uid {uid} is not managed")
+        host = self._grant(user, url, whole_site)
+        log.info("allowed uid %d to %s from the activity log", uid, host)
+        return None
+
+    def _grant(self, user, url: str, whole_site: bool) -> str:
+        """Open one page or one site for an account, in the terms of its
+        mode: a whitelist entry, or an allow rule ahead of the rest."""
+        from urllib.parse import urlsplit
+
+        parts = urlsplit(url)
         host = (parts.hostname or "").lower().strip(".")
         if not host:
             raise PolicyError("that request has no address")
@@ -647,7 +708,7 @@ class Daemon:
             if host not in user.whitelist:
                 user.whitelist = sorted({*user.whitelist, host})
         else:
-            pattern = host if whole_site else _url_pattern(document["url"])
+            pattern = host if whole_site else _url_pattern(url)
             if not any(r.get("pattern") == pattern and r.get("action") == "allow"
                        for r in user.rules):
                 # Ahead of the existing rules: a rule added after the one
@@ -655,8 +716,52 @@ class Daemon:
                 user.rules = [{"action": "allow", "pattern": pattern},
                               *user.rules]
         self._save_and_apply()
-        log.info("approved access for uid %d to %s", user.uid, host)
-        return None
+        return host
+
+    def impl_ListActivity(self, since: int, uid: int):
+        """What the filter did, newest first. uid -1 means everyone.
+
+        Usernames ride along so the app never has to join; an account that
+        has since been removed shows as "?" rather than vanishing, because
+        what was blocked for it still happened.
+        """
+        from . import activity
+
+        self._trim_activity()
+        names = {u.uid: u.username for u in self.policy.users}
+        guest_uid = getattr(self.policy.guest, "uid", None)
+        if guest_uid is not None:
+            names.setdefault(guest_uid, "Guest")
+        found = []
+        for document in activity.events(since, None if uid < 0 else uid):
+            entry = dict(document)
+            entry["username"] = names.get(document["uid"], "?")
+            if document["kind"] == activity.CHANGE:
+                entry["by_username"] = names.get(document.get("by"), "?")
+            found.append(entry)
+        return GLib.Variant("(s)", (json.dumps(found),))
+
+    def impl_ActivitySummary(self):
+        """Today's counts per account, for the cards on the family board."""
+        from . import activity
+
+        found = activity.events(activity.day_start())
+        counts = {str(uid): entry
+                  for uid, entry in activity.summary(found).items()}
+        return GLib.Variant("(s)", (json.dumps(counts),))
+
+    _activity_trimmed_at = 0.0
+
+    def _trim_activity(self) -> None:
+        import time
+
+        from . import activity
+
+        now = time.monotonic()
+        if now - self._activity_trimmed_at < 3600:
+            return
+        self._activity_trimmed_at = now
+        activity.trim()
 
     def impl_DismissRequest(self, request_id: str):
         from . import accessreq

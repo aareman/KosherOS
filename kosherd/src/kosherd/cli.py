@@ -249,6 +249,49 @@ def cmd_profile(args) -> int:
     return 0
 
 
+def cmd_activity(args) -> int:
+    """The filter's diary: blocks, hidden pictures, refused searches, and
+    settings changes, each with who and why."""
+    import time
+
+    from . import activity as activity_mod
+
+    c = _client()
+    if args.days <= 1:
+        since = activity_mod.day_start()
+    else:
+        since = int(time.time()) - args.days * 86400
+    uid = -1
+    if args.user:
+        uid = next((u["uid"] for u in c.get_policy()["users"]
+                    if u["username"] == args.user), None)
+        if uid is None:
+            print(f"no managed account called {args.user!r}", file=sys.stderr)
+            return 1
+    found = c.list_activity(since, uid)
+    if not found:
+        print("nothing recorded")
+        return 0
+    for e in found:
+        when = time.strftime("%a %H:%M", time.localtime(e["t"]))
+        who = e.get("username", "?")
+        kind = e["kind"]
+        if kind == "change":
+            what = f"{e.get('by_username', '?')} changed {who}: {e.get('method')}"
+            if e.get("guardian"):
+                what += "  (guardian)"
+        elif kind == "block":
+            what = f"{who:<12} blocked   {e.get('url', '')}  [{e.get('why', '')}]"
+        elif kind == "pictures":
+            what = f"{who:<12} pictures  {e.get('url', '')}"
+        elif kind == "video":
+            what = f"{who:<12} video     {e.get('url', '')}"
+        else:
+            what = f"{who:<12} search    {e.get('text', '')!r}  [{e.get('why', '')}]"
+        print(f"  {when}  {what}")
+    return 0
+
+
 def cmd_requests(args) -> int:
     c = _client()
     waiting = c.list_requests()
@@ -782,6 +825,11 @@ def main(argv: list[str] | None = None) -> int:
 
     s = sub.add_parser("lists", help="what the filter is actually holding")
     s.set_defaults(func=cmd_lists)
+
+    s = sub.add_parser("activity", help="what the filter did, newest first")
+    s.add_argument("--user", help="only this account")
+    s.add_argument("--days", type=int, default=1, help="how far back (default: today)")
+    s.set_defaults(func=cmd_activity)
 
     s = sub.add_parser("requests", help="pages users have asked for")
     s.add_argument("action", choices=["list", "allow", "dismiss"])

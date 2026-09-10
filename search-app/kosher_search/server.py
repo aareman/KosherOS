@@ -27,6 +27,7 @@ import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from kosherd import accessreq
+from kosherd import activity
 from kosherd import search as search_mod
 from kosherd.uidmap import UidLookup
 
@@ -288,6 +289,11 @@ class Handler(BaseHTTPRequestHandler):
 
         refusal = self.result_filter.query_reason(uid, query)
         if refusal:
+            try:
+                activity.record("search", activity.SEARCH, uid, text=query[:200],
+                                why=refusal)
+            except Exception:  # noqa: BLE001 - the log is a convenience
+                log.debug("could not record activity", exc_info=True)
             return self._page(
                 '<div class="note"><strong>This search is blocked.</strong>'
                 f"<p>KosherOS did not run it because {esc(refusal)}.</p>"

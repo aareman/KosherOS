@@ -25,7 +25,7 @@ want() {  # want <label> <expected> <actual>
 
 # --- search: front end over SearXNG -----------------------------------------
 echo "search:"
-install -d -m 0755 /var/lib/kosher-search /var/lib/kosher-requests
+install -d -m 0755 /var/lib/kosher-search /var/lib/kosher-requests /var/lib/kosher-activity
 cat > /var/lib/kosher-search/policy.json <<EOF
 {"$(id -u)": {"mode": "filtered", "blocked_categories": ["adult", "immodest"],
               "media_level": "none", "whitelist": [], "rules": [],

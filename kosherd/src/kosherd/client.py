@@ -104,6 +104,19 @@ class DaemonClient:
     def dismiss_request(self, request_id: str) -> None:
         self._call("Profiles", "DismissRequest", "(s)", request_id)
 
+    def allow_url(self, uid: int, url: str, whole_site: bool = False,
+                  guardian_password: str = "") -> None:
+        self._call("Profiles", "AllowUrl", "(isbs)", uid, url, whole_site,
+                   guardian_password)
+
+    def list_activity(self, since: int = 0, uid: int = -1) -> list[dict]:
+        return json.loads(self._call("Profiles", "ListActivity", "(ii)",
+                                     since, uid)[0])
+
+    def activity_summary(self) -> dict:
+        """Today's counts, keyed by uid as a string (JSON keys)."""
+        return json.loads(self._call("Profiles", "ActivitySummary")[0])
+
     def set_media_level(self, uid: int, level: str,
                         guardian_password: str = "") -> None:
         self._call("Profiles", "SetMediaLevel", "(iss)", uid, level,

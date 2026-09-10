@@ -35,6 +35,16 @@ single largest hosting subsidy the project gets. Gating distribution
 would mean per-device tokens, a self-hosted registry, and a bandwidth
 bill.
 
+**Zero marginal cost per device is a requirement, not a preference.** The
+whole point of the project is filtered computers for families who should
+not have to pay hundreds of dollars per device per year, which is what
+the existing offerings charge. So any design that puts a per-family cost
+in the update path — metered egress, hosting that scales with installs, a
+subscription choke point — contradicts the reason the thing exists. Every
+choice below is made against that constraint, and it is why the pieces
+that carry real bytes are deliberately placed on free, hash-verified,
+CDN-backed hosting rather than on a VPS whose bill grows with adoption.
+
 **Hosting is GitHub-first, chosen to keep costs down.** ghcr.io for the
 image, GitHub Releases for the ISO, GitHub Pages for the marketing site,
 GitHub Actions for CI, and one small VPS alongside for the always-on
@@ -117,6 +127,11 @@ public key pinned into the image at build time) and the **per-family
 portal** (enrolment, policy, remote support). Same codebase, two
 deployments.
 
+This is the central promise rather than a convenience. A device that has
+never been enrolled, never registered and never paid for anything still
+gets current filter lists forever. Anything less recreates the
+per-device subscription this project exists to replace.
+
 **6. The list build belongs in CI, not the image build.**
 `os-image/Containerfile:146` runs `fetch-categories.py` with
 `|| echo "WARNING: category import failed"`, so one bad upstream day
@@ -132,12 +147,26 @@ genuinely the last thing that has to be right.
 
 ## Costs
 
-Near zero, by construction. ghcr is free for public images with no
-meaningful egress cap, and bootc pulls only changed layers. GitHub Pages
-and Releases are free. The recurring bill is one small VPS for the portal
-and update service, and a CDN for the 190 MB database if VPS egress
-turns out to matter — since it is hash-verified, that CDN needs no trust
-and can be the cheapest one available.
+Near zero, by construction, and it has to stay that way as adoption
+grows.
+
+ghcr is free for public images with no meaningful egress cap, and bootc
+pulls only changed layers. GitHub Pages and Releases are free.
+
+**The 190 MB category database should be a GitHub Release asset**, not a
+file on the VPS. This falls out of `catalogsync.py`'s design rather than
+being a trick: the portal signs a manifest carrying the URL and the
+SHA-256, and the device verifies the hash before the database goes near
+the filter — so the download itself needs no trust and can come from
+anywhere. GitHub Releases are free, CDN-backed, need no authentication
+for a public repository, and take files far larger than this. The nightly
+job that rebuilds the database publishes it as a release asset and hands
+the portal a manifest pointing at it.
+
+That leaves the VPS serving only the signed manifest and the policy
+endpoints — kilobytes per device per day. The recurring bill is one small
+VPS regardless of whether ten families or ten thousand are running
+KosherOS, which is the property the project needs.
 
 The number worth measuring before committing to anything: the compressed
 size of the image itself. The qcow2 is 4.77 GB, so a few GB compressed is

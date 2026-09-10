@@ -38,13 +38,45 @@ pointing at it.
 |---|---|---|
 | OS identity (About dialog, `hostnamectl`, portal/device lists) | ✅ `/usr/lib/os-release` NAME/PRETTY_NAME/VARIANT | no |
 | Boot splash | ✅ Plymouth script theme `kosheros` (navy gradient, pulsing logo, LUKS prompt) | real logo |
-| GRUB menu (mostly hidden) | ✅ `GRUB_DISTRIBUTOR="KosherOS"` | no |
+| GRUB menu (one second, every boot) | ✅ a GRUB theme: navy, the mark and name, the entries, a countdown bar (see below) | no |
 | Login screen | ✅ GDM logo + banner via locked dconf keys | real logo |
 | First-boot welcome wizard (stage 5) | our own GTK app — brand it from day one | logo + wordmark |
 | Desktop defaults | ✅ dconf: wallpaper (unlocked), light scheme, favourites incl. the Store, classic taskbar layout (see [desktop.md](desktop.md)) | ✅ `branding/wallpaper.png` (source: `wallpaper.xcf`, kept out of the image) |
 | Admin app / Store | ✅ Admin: the KosherOS mark (hicolor, from `rasters.py`); Store and Setup still stock icons | Store + Setup icons |
 | ISO installer | ✅ `product.img` injected by `just iso`: `.buildstamp`, a conf.d drop-in, our stylesheet and logo (see below) | wordmark for the top bar, eventually |
 | Portal web UI (stage 5) | shared asset set | logo + wordmark |
+
+## The GRUB menu
+
+bootupd shows GRUB's menu for one second on every boot (`timeout_style=menu`
+in its static config), which is long enough to notice white-on-black text
+listing "KosherOS 0.1 (powered by Fedora 44) (ostree:0)". So the menu is
+drawn from a theme: `branding/rasters.py` writes `theme.txt` and a navy
+1920×1080 background with the lockup, and
+`os-image/files/usr/lib/bootupd/grub2-static/configs.d/09_kosheros_theme.cfg`
+— concatenated into grub.cfg by bootupd at install — loads the font, switches
+to `gfxterm` and sets `theme`.
+
+The theme has to be readable before the OS is up, and that differs by
+firmware, so it is written twice:
+
+- **UEFI**: under `/usr/lib/efi/kosheros-grub-theme/<version>/EFI/fedora/kosheros/`,
+  with its own copy of `unicode.pf2`. bootupd treats every
+  `/usr/lib/efi/<component>/<version>/EFI` tree as a component and copies it
+  onto the EFI system partition; the Containerfile re-runs
+  `bootupctl backend generate-update-metadata` so it is listed. GRUB finds
+  it as `${cmdpath}/kosheros/`.
+- **BIOS**: under `/usr/share/grub/themes/starfield/`. grub2-install copies
+  exactly one theme directory onto the boot partition and by default it is
+  the one named `starfield`; Fedora ships none, so the KosherOS theme takes
+  the name. GRUB finds it as `${prefix}/themes/starfield/`, and the font at
+  `${prefix}/fonts/unicode.pf2`, which grub2-install also copies.
+
+If neither the theme nor a font is found the snippet changes nothing and
+the plain menu is shown. Under Secure Boot GRUB will not load modules from
+disk, but `gfxterm`, `png` and `all_video` are built into Fedora's signed
+`grubx64.efi`, so the theme works there too. **Not yet seen on a booted
+machine.**
 
 ## Anaconda installer
 

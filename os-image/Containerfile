@@ -215,7 +215,15 @@ COPY branding/ /usr/share/kosher/branding/
 # the background XML that lets GNOME pick the right one. See the script.
 RUN python3 /usr/share/kosher/branding/rasters.py \
     # The admin app's icon went into hicolor; refresh the cache GTK reads.
-    && gtk-update-icon-cache -f -t /usr/share/icons/hicolor
+    && gtk-update-icon-cache -f -t /usr/share/icons/hicolor \
+    # The GRUB theme rasters.py wrote under /usr/lib/efi is a bootupd
+    # component: regenerate bootupd's EFI manifest so it is carried onto
+    # the EFI system partition at install, and assert it was picked up —
+    # a theme that quietly never reaches the disk is a plain menu with no
+    # error anywhere.
+    && bootupctl backend generate-update-metadata \
+    && grep -q kosheros-grub-theme /usr/lib/bootupd/updates/EFI.json \
+    && test -f /usr/share/grub/themes/starfield/theme.txt
 RUN true \
     # The SVG is the older placeholder gradient, kept for anything still
     # pointing at it. The GIMP sources travel in the repo, not in the image.

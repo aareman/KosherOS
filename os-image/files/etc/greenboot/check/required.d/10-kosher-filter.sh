@@ -16,15 +16,39 @@
 # up", not "is the house online".
 #
 # Exit 0 = healthy, anything else = roll me back.
+#
+# And it WAITS. greenboot runs this early in boot, and the first time it
+# ran it caught kosherd still starting and the resolver mid-restart (kosherd
+# restarts kosher-dns on its first policy apply), called the boot red, and
+# rebooted a perfectly good fresh install — twice. A check that asks "is it
+# up right now" at second nine is a race, not a health check. Each
+# assertion below is given up to WAIT_SECONDS to come true; a service that
+# genuinely failed stays failed for all of it and is still caught. The unit
+# drop-in in usr/lib/systemd/system/greenboot-healthcheck.service.d orders
+# the check after the filter's units as well; the waits are the belt to
+# that brace.
 set -uo pipefail
 
+WAIT_SECONDS=${KOSHER_CHECK_WAIT:-120}
 fail=0
 say() { printf 'kosher-filter-check: %-34s %s\n' "$1" "$2"; }
+
+# Retry a test every two seconds until it passes or the time is up.
+wait_for() {
+    local deadline=$((SECONDS + WAIT_SECONDS))
+    until "$@"; do
+        if [ "$SECONDS" -ge "$deadline" ]; then
+            return 1
+        fi
+        sleep 2
+    done
+}
+
 require_active() {
-    if systemctl is-active --quiet "$1"; then
+    if wait_for systemctl is-active --quiet "$1"; then
         say "$1" "active"
     else
-        say "$1" "NOT active"
+        say "$1" "NOT active after ${WAIT_SECONDS}s"
         fail=1
     fi
 }
@@ -39,19 +63,21 @@ require_active kosher-dns.service
 # The firewall is a one-shot: "active" is wrong for it, so ask whether the
 # ruleset it installs is actually loaded. This is the assertion that a
 # filtered account cannot reach the network directly.
-if nft list table inet kosher >/dev/null 2>&1; then
+nft_loaded() { nft list table inet kosher >/dev/null 2>&1; }
+if wait_for nft_loaded; then
     say "nftables table inet kosher" "loaded"
 else
-    say "nftables table inet kosher" "MISSING"
+    say "nftables table inet kosher" "MISSING after ${WAIT_SECONDS}s"
     fail=1
 fi
 
 # The resolver has to answer, not merely be running. A dnsmasq that started
 # and then failed to read its config is the exact failure this catches.
-if timeout 5 getent hosts localhost >/dev/null 2>&1; then
+resolver_answers() { timeout 5 getent hosts localhost >/dev/null 2>&1; }
+if wait_for resolver_answers; then
     say "resolver answers on loopback" "yes"
 else
-    say "resolver answers on loopback" "NO"
+    say "resolver answers on loopback" "NO after ${WAIT_SECONDS}s"
     fail=1
 fi
 

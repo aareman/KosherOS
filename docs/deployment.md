@@ -68,8 +68,9 @@ update can be published without it.
 | piece | state |
 |---|---|
 | image build, push, cosign signature | `.github/workflows/ci.yml` — builds on push to master, pushes `:latest` and `:<sha>` to ghcr, signs both keyless |
-| automatic update polling | `bootc-fetch-apply-updates.timer` enabled (`os-image/Containerfile:243`) |
-| `bootc upgrade` from the daemon | `kosherd/src/kosherd/daemon.py:1227` — `--check` and apply |
+| automatic update polling | `bootc-fetch-apply-updates.timer` enabled (`os-image/Containerfile`) |
+| updates and rollback from the daemon | `CheckUpdate`, `ApplyUpdate`, `DeploymentStatus`, `Rollback` in `kosherd/src/kosherd/daemon.py` |
+| self-healing updates | greenboot, with a required check that the filter is enforcing (`os-image/files/etc/greenboot/check/required.d/`) |
 | signed policy sync | `sync.py` + portal `/api/v1/devices/{id}/policy`, Ed25519, replay-proof by revision |
 | signed list bundle | portal `/api/v1/devices/{id}/lists`, installed by `lists.install_portal_lists` |
 | hash-verified category database | `catalogsync.py` — atomic replace, and only after the new database opens and answers a query |
@@ -79,12 +80,12 @@ update can be published without it.
 
 In the order it blocks daily-driving the thing.
 
-**1. Signature verification is a TODO.** `os-image/Containerfile:246`
-says so in as many words. CI *signs* images; the fielded machine verifies
-nothing and will boot whatever sits at the ref. This is the
-tamper-resistance story of the whole product and it must land before real
-hardware exists. Needs `/etc/containers/policy.json` plus
-`registries.d/`.
+**1. Signature verification is a TODO.** `os-image/Containerfile` says so
+in as many words — grep for `TODO(stage 2)` above the kosherd layers. CI
+*signs* images; the fielded machine verifies nothing and will boot
+whatever sits at the ref. This is the tamper-resistance story of the whole
+product and it must land before real hardware exists. Needs
+`/etc/containers/policy.json` plus `registries.d/`.
 
 Sign with **our own cosign keypair**, not keyless. Keyless pins trust to
 a GitHub OIDC identity, so renaming the repo or restructuring the
@@ -106,15 +107,18 @@ build. Plus immutable `:YYYY.MM.DD-<sha>` tags so a rollback has
 something to name. `kosherctl channel` (admin + guardian gated) wrapping
 `bootc switch`.
 
-**4. Rollback — mostly built.** ✅ The daemon now exposes
-`DeploymentStatus` (which image is booted, and what "go back" would return
-to) and `Rollback`, with `kosherctl system status|check|update|rollback`
-over them. `Rollback` needs the update right but **not** the guardian
-password: the image is one this machine already ran, and greenboot has to
-be able to do the same thing with no password at all, so gating it would
-mainly risk a machine nobody present can repair. Going *backwards* is
-written to the activity log even though going forwards is not, because a
-rollback can restore an older filter.
+**4. Rollback — built.** ✅ The daemon exposes `DeploymentStatus` (which
+image is booted, and what "go back" would return to) and `Rollback`, with
+`kosherctl system status|check|update|rollback` over them and a **"Go back
+to the previous version"** control on the admin app's Updates page, which
+names the version it would return to and is disabled with a reason when
+there is nothing to go back to. `Rollback` needs the update right but
+**not** the guardian password: the image is one this machine already ran,
+and greenboot has to be able to do the same thing with no password at all,
+so gating it would mainly risk a machine nobody present can repair.
+Changing which image the machine runs is written to the activity log in
+both directions — a rollback especially, since it can restore an older
+filter.
 
 ✅ **And the machine puts itself back.** greenboot is installed and
 `greenboot-healthcheck.service` enabled (its own `[Install]` carries
@@ -134,10 +138,12 @@ test whether the internet works: a family's router being off would
 otherwise roll the operating system back, which is both useless and
 alarming. There is a test asserting the script reaches no network.
 
-Still open here: surfacing "go back to the previous version" in the admin
-app (the CLI has it), and a decision on what the auto-update timer does —
-staging silently and taking effect at the next natural reboot is the
-recommendation, rather than nagging a parent.
+Still open here: a decision on what the auto-update timer does — staging
+silently and taking effect at the next natural reboot is the
+recommendation, rather than nagging a parent. And greenboot has never
+actually fired: the unit name is verified and the check is unit-tested,
+but watching a deliberately broken image roll itself back needs a VM
+boot, which needs sudo and is a person's job.
 
 **5. List updates must not require enrolment.** Today the only path to
 fresh lists is a family enrolling in a portal. For a shipped product the

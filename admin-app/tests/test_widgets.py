@@ -75,6 +75,17 @@ class FakeClient:
     def list_installed(self):
         return []
 
+    def deployment_status(self):
+        return self._overrides.get("deployment", {
+            "booted": {"image": "ghcr.io/x/kosheros:stable", "version": "2026.09.10",
+                       "timestamp": 1},
+            "rollback": {"image": "ghcr.io/x/kosheros:stable", "version": "2026.09.03",
+                         "timestamp": 0},
+            "staged": None, "rollback_queued": False})
+
+    def check_update(self):
+        return "Up to date"
+
 
 class FakeWindow(Gtk.Window):
     """Enough of Window for a page to be built, driven and presented.
@@ -923,3 +934,68 @@ def test_relative_times_read_naturally():
 
 def test_the_window_module_still_exports_the_list_table():
     assert admin.EDITABLE_LISTS is labels.EDITABLE_LISTS
+
+
+# -- going back to the previous version --------------------------------------------
+
+def test_the_updates_page_names_the_version_it_would_go_back_to():
+    win = FakeWindow()
+    win.policy = {"revision": 1, "users": [], "guardian": {"enabled": False},
+                  "guest": {"enabled": False}}
+    page = family.UpdatesPage(win)
+    drain()
+    assert "2026.09.10" in page.version_row.get_subtitle()
+    assert "Would return to version 2026.09.03" in page.back_row.get_subtitle()
+    assert page.back_button.get_sensitive()
+
+
+def test_without_a_previous_version_the_button_is_off_and_says_why():
+    win = FakeWindow(FakeClient(deployment={"booted": {"version": "1"}, "rollback": None,
+                                            "staged": None, "rollback_queued": False}))
+    win.policy = {"revision": 1, "users": [], "guardian": {"enabled": False},
+                  "guest": {"enabled": False}}
+    page = family.UpdatesPage(win)
+    drain()
+    assert not page.back_button.get_sensitive()
+    assert "no previous version" in page.back_row.get_subtitle()
+
+
+def test_a_queued_rollback_is_not_offered_twice():
+    win = FakeWindow(FakeClient(deployment={"booted": {"version": "2"},
+                                            "rollback": {"version": "1"},
+                                            "staged": None, "rollback_queued": True}))
+    win.policy = {"revision": 1, "users": [], "guardian": {"enabled": False},
+                  "guest": {"enabled": False}}
+    page = family.UpdatesPage(win)
+    drain()
+    assert not page.back_button.get_sensitive()
+    assert "Already going back" in page.back_row.get_subtitle()
+
+
+def test_a_status_with_every_key_missing_still_renders():
+    win = FakeWindow(FakeClient(deployment={}))
+    win.policy = {"revision": 1, "users": [], "guardian": {"enabled": False},
+                  "guest": {"enabled": False}}
+    page = family.UpdatesPage(win)
+    drain()
+    assert page.version_row.get_subtitle() == "unknown"
+    assert not page.back_button.get_sensitive()
+
+
+def test_going_back_asks_first_and_then_calls_the_daemon():
+    called = []
+
+    class Recording(FakeClient):
+        def rollback(self):
+            called.append(True)
+
+    win = FakeWindow(Recording())
+    win.policy = {"revision": 1, "users": [], "guardian": {"enabled": False},
+                  "guest": {"enabled": False}}
+    page = family.UpdatesPage(win)
+    drain()
+    page._confirm_rollback()
+    drain()
+    # Presenting the confirmation must not roll anything back on its own.
+    assert called == []
+

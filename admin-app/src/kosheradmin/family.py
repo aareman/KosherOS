@@ -22,7 +22,7 @@ from gi.repository import Adw, GLib, Gtk  # noqa: E402
 from kosherd import profiles as profiles_mod  # noqa: E402
 
 from . import labels  # noqa: E402
-from .common import avatar, clear, error_text, icon_line, run_async, tag  # noqa: E402
+from .common import avatar, clear, confirm, error_text, icon_line, run_async, tag  # noqa: E402
 from .dialogs import (HealthDialog, ListEditDialog, RequestsDialog,  # noqa: E402
                       WhitelistDialog, guardian_dialog)
 
@@ -393,6 +393,71 @@ class UpdatesPage(_Page):
         group.add(self.status_row)
         self.prefs.add(group)
 
+        # Going back. Shown with the version it would return to, never as
+        # a bare button: a "Roll back" with no target is the control that
+        # gets clicked by accident.
+        back = Adw.PreferencesGroup(
+            title="If an update went wrong",
+            description="The previous version stays on disk. Going back to it "
+                        "takes effect at the next restart and keeps every "
+                        "setting and file.")
+        self.version_row = Adw.ActionRow(title="Running now", subtitle="Checking…")
+        back.add(self.version_row)
+        self.back_row = Adw.ActionRow(title="Go back to the previous version",
+                                      subtitle="Checking…", subtitle_lines=3)
+        self.back_button = Gtk.Button(label="Go back", valign=Gtk.Align.CENTER,
+                                      sensitive=False)
+        self.back_button.connect("clicked", lambda _b: self._confirm_rollback())
+        self.back_row.add_suffix(self.back_button)
+        back.add(self.back_row)
+        self.prefs.add(back)
+        self.rollback_target: dict | None = None
+        self._load_deployment()
+
+    def _load_deployment(self) -> None:
+        def on_done(status):
+            self.show_deployment(status)
+
+        run_async(self.win.client.deployment_status, on_done,
+                  lambda e: self.show_deployment({"error": error_text(e)}))
+
+    def show_deployment(self, status: dict) -> None:
+        """Fill the version rows from a DeploymentStatus answer.
+
+        Every key can be missing or None — bootc's JSON has moved between
+        releases and the daemon degrades rather than raises — so this reads
+        defensively and says "unknown" instead of crashing.
+        """
+        status = status or {}
+        if status.get("error"):
+            self.version_row.set_subtitle(f"Could not read: {status['error']}")
+        else:
+            self.version_row.set_subtitle(_deployment_words(status.get("booted")))
+        target = status.get("rollback") or None
+        self.rollback_target = target
+        if status.get("rollback_queued"):
+            self.back_row.set_subtitle("Already going back at the next restart.")
+            self.back_button.set_sensitive(False)
+        elif target:
+            self.back_row.set_subtitle("Would return to " + _deployment_words(target) + ".")
+            self.back_button.set_sensitive(True)
+        else:
+            self.back_row.set_subtitle("There is no previous version to go back to.")
+            self.back_button.set_sensitive(False)
+
+    def _confirm_rollback(self) -> None:
+        target = self.rollback_target or {}
+        version = target.get("version") or "the previous version"
+        confirm(self.win, f"Go back to {version}?",
+                "This computer will start the previous version of KosherOS at "
+                "its next restart. Settings and files are kept. Do this if an "
+                "update broke something.", "Go back",
+                lambda: self.win.call(
+                    self.win.client.rollback, refresh=False,
+                    done_msg=f"Going back to {version} at the next restart",
+                    on_done=self._load_deployment),
+                destructive=False)
+
     def _check(self, _b) -> None:
         self.status_row.set_subtitle("Checking…")
 
@@ -581,3 +646,16 @@ class AppsPage(_Page):
         row = Adw.ActionRow(title=text)
         row.set_sensitive(False)
         self.results_box.append(row)
+
+
+def _deployment_words(entry: dict | None) -> str:
+    """'version 2026.09.08 (ghcr.io/…/kosheros:stable)' from one deployment
+    record, or 'unknown' when bootc did not say."""
+    if not entry:
+        return "unknown"
+    version = entry.get("version")
+    image = entry.get("image")
+    if version and image:
+        return f"version {version} ({image})"
+    return f"version {version}" if version else (image or "unknown")
+

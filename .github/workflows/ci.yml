@@ -58,7 +58,11 @@ jobs:
         run: |
           sudo apt-get install -y shellcheck
           # SC1091: lib.sh is sourced at runtime inside the VM.
-          shellcheck -e SC1091 scripts/*.sh scripts/vm-tests/*.sh
+          # The greenboot health check decides whether a booted image is
+          # kept or rolled back, so it is exactly the script that must not
+          # have a shell bug in it.
+          shellcheck -e SC1091 scripts/*.sh scripts/vm-tests/*.sh \
+            os-image/files/etc/greenboot/check/required.d/*.sh
 
   image:
     name: Build OS image

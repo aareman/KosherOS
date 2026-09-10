@@ -466,6 +466,52 @@ def cmd_portal(args) -> int:
     return 1
 
 
+def _deployment_line(label: str, entry) -> str:
+    if not entry:
+        return f"  {label:<10} none"
+    version = entry.get("version") or "unknown version"
+    image = entry.get("image") or "unknown image"
+    return f"  {label:<10} {version}\n             {image}"
+
+
+def cmd_system(args) -> int:
+    c = _client()
+    if args.action == "status":
+        st = c.deployment_status()
+        if st.get("error"):
+            print(f"could not read the system version: {st['error']}",
+                  file=sys.stderr)
+            return 1
+        print("system version:")
+        print(_deployment_line("booted", st.get("booted")))
+        if st.get("staged"):
+            print(_deployment_line("staged", st["staged"]))
+            print("             takes effect at the next restart")
+        print(_deployment_line("go back to", st.get("rollback")))
+        if st.get("rollback_queued"):
+            print("  a rollback is already queued for the next restart")
+        return 0
+    if args.action == "check":
+        print(c.check_update().strip() or "no update information")
+        return 0
+    if args.action == "update":
+        c.apply_update()
+        print("update staged; it takes effect at the next restart")
+        return 0
+    if args.action == "rollback":
+        st = c.deployment_status()
+        target = st.get("rollback")
+        if not target:
+            print("there is no previous version to go back to",
+                  file=sys.stderr)
+            return 1
+        c.rollback()
+        print(f"going back to {target.get('version') or 'the previous version'}"
+              " at the next restart")
+        return 0
+    return 1
+
+
 def cmd_sync(args) -> int:
     try:
         updated = _client().sync_now()
@@ -888,6 +934,11 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("--code", help="one-time enrolment code")
     s.add_argument("--guardian-password")
     s.set_defaults(func=cmd_portal)
+
+    s = sub.add_parser("system",
+                       help="which system version is running, and going back")
+    s.add_argument("action", choices=["status", "check", "update", "rollback"])
+    s.set_defaults(func=cmd_system)
 
     s = sub.add_parser("sync", help="pull policy from the portal now")
     s.add_argument("--quiet", action="store_true",

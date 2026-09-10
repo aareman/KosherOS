@@ -120,8 +120,13 @@ locked down when the user has sudo.
     stays admin-only on purpose — "picture checking has backed off right
     now" is a hint about when the machine is weakest. Seen rendering; not
     yet on a booted machine
-14. **Deployment** — signature verification, a release ISO pinned at the
-    public registry, update channels and rollback. See
+14. **Deployment** — ✅ **rollback**: `kosherctl system
+    status|check|update|rollback`, and greenboot puts the machine back by
+    itself if a new image boots without the filter enforcing (a locked
+    machine has no sudo, so the update path needs a floor that does not
+    depend on anyone noticing). Still open: signature verification — CI
+    signs images but the fielded machine verifies nothing yet — a release
+    ISO pinned at the public registry, and update channels. See
     [docs/deployment.md](docs/deployment.md); nothing is hosted yet
 15. **Licence and attribution** — `LICENSE` (AGPL-3.0-or-later) and
     `CONTRIBUTING.md` still to add; see

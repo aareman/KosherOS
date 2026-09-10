@@ -106,15 +106,38 @@ build. Plus immutable `:YYYY.MM.DD-<sha>` tags so a rollback has
 something to name. `kosherctl channel` (admin + guardian gated) wrapping
 `bootc switch`.
 
-**4. Rollback, and a reboot policy a family tolerates.** bootc keeps the
-previous deployment but nothing surfaces it: the daemon only exposes
-`upgrade --check` and `upgrade`. Needs a "go back to the previous
-version" path in the admin app, and a decision on what the timer does —
-stage silently and take effect at the next natural reboot is the
-recommendation, rather than nagging a parent. Worth wiring `selfcheck.py`
-into a boot-time check that rolls back automatically if the filter does
-not come up, because a locked-down machine that fails to boot is a family
-with no computer and no way to fix it.
+**4. Rollback — mostly built.** ✅ The daemon now exposes
+`DeploymentStatus` (which image is booted, and what "go back" would return
+to) and `Rollback`, with `kosherctl system status|check|update|rollback`
+over them. `Rollback` needs the update right but **not** the guardian
+password: the image is one this machine already ran, and greenboot has to
+be able to do the same thing with no password at all, so gating it would
+mainly risk a machine nobody present can repair. Going *backwards* is
+written to the activity log even though going forwards is not, because a
+rollback can restore an older filter.
+
+✅ **And the machine puts itself back.** greenboot is installed and
+`greenboot-healthcheck.service` enabled (its own `[Install]` carries
+`Also=greenboot-set-rollback-trigger.service`, so enabling one arms both —
+verified against the unit in `fedora-bootc:44`, and the build now asserts
+`is-enabled` for both so a rename fails the build rather than shipping a
+machine with no floor). The required check at
+`os-image/files/etc/greenboot/check/required.d/10-kosher-filter.sh` asserts
+kosherd is up, the resolver is up and answering on loopback, the
+`inet kosher` nftables table is loaded, and — only where somebody is
+actually in `filtered` mode — that the proxy is running. If a newly staged
+image fails that, the boot counter runs down and the machine returns to
+the deployment it came from.
+
+Every assertion in that check is deliberately **local**. It must never
+test whether the internet works: a family's router being off would
+otherwise roll the operating system back, which is both useless and
+alarming. There is a test asserting the script reaches no network.
+
+Still open here: surfacing "go back to the previous version" in the admin
+app (the CLI has it), and a decision on what the auto-update timer does —
+staging silently and taking effect at the next natural reboot is the
+recommendation, rather than nagging a parent.
 
 **5. List updates must not require enrolment.** Today the only path to
 fresh lists is a family enrolling in a portal. For a shipped product the

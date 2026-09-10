@@ -233,6 +233,10 @@ INTROSPECTION_XML = """
       <arg direction="out" type="s" name="status"/>
     </method>
     <method name="ApplyUpdate"/>
+    <method name="DeploymentStatus">
+      <arg direction="out" type="s" name="status_json"/>
+    </method>
+    <method name="Rollback"/>
   </interface>
   <interface name="org.kosherlinux.Daemon1.Network">
     <method name="SetCaptiveMode">
@@ -1388,6 +1392,65 @@ class Daemon:
         res = subprocess.run(["bootc", "upgrade"], capture_output=True, text=True)
         if res.returncode != 0:
             raise PolicyError(f"bootc upgrade failed: {res.stderr.strip()}")
+        return None
+
+    def impl_DeploymentStatus(self):
+        """Which image is booted, and which one "go back" would return to.
+
+        Read defensively: bootc's JSON has moved between releases and this
+        must degrade to "unknown" rather than raise, because the one moment
+        somebody needs this screen is when the machine is already unwell.
+        """
+        res = subprocess.run(["bootc", "status", "--json"],
+                             capture_output=True, text=True)
+        status: dict = {"booted": None, "rollback": None,
+                        "rollback_queued": False, "staged": None}
+        if res.returncode != 0:
+            status["error"] = (res.stderr or res.stdout).strip()
+            return GLib.Variant("(s)", (json.dumps(status),))
+
+        def describe(entry) -> dict | None:
+            if not isinstance(entry, dict):
+                return None
+            image = entry.get("image")
+            image = image.get("image") if isinstance(image, dict) else None
+            ref = image.get("image") if isinstance(image, dict) else None
+            outer = entry.get("image")
+            version = outer.get("version") if isinstance(outer, dict) else None
+            stamp = outer.get("timestamp") if isinstance(outer, dict) else None
+            return {"image": ref, "version": version, "timestamp": stamp}
+
+        try:
+            doc = json.loads(res.stdout)["status"]
+        except (ValueError, KeyError, TypeError) as e:
+            status["error"] = f"could not read bootc status: {e}"
+            return GLib.Variant("(s)", (json.dumps(status),))
+
+        status["booted"] = describe(doc.get("booted"))
+        status["rollback"] = describe(doc.get("rollback"))
+        status["staged"] = describe(doc.get("staged"))
+        status["rollback_queued"] = bool(doc.get("rollbackQueued", False))
+        return GLib.Variant("(s)", (json.dumps(status),))
+
+    def impl_Rollback(self):
+        """Go back to the deployment this machine booted before.
+
+        Deliberately NOT guardian-gated, unlike the calls that weaken the
+        filter. Two reasons. The image being returned to is one this
+        machine already ran and already trusted, so this is not a way to
+        reach anything new. And greenboot has to be able to do this with no
+        password at all when a new image fails to bring the filter up — so
+        gating the manual path would buy very little while risking the
+        thing this exists to prevent: a family with a broken computer and
+        nobody home who can fix it.
+        """
+        res = subprocess.run(["bootc", "rollback"], capture_output=True,
+                             text=True)
+        if res.returncode != 0:
+            raise PolicyError(f"bootc rollback failed: {res.stderr.strip()}")
+        # The dispatcher writes the activity entry, because Rollback is in
+        # access.CHANGES — "who put this machine back?" deserves an answer
+        # in the same log as every other change.
         return None
 
     # ---- Network ---------------------------------------------------------

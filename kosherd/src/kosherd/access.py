@@ -123,6 +123,13 @@ ACTIONS = {
     "UnapproveApp": ACTION_INSTALL_APPS,
     "CheckUpdate": ACTION_READ_CONFIG,
     "ApplyUpdate": ACTION_APPLY_UPDATES,
+    "DeploymentStatus": ACTION_READ_CONFIG,
+    # Going back to the previously booted image. Not guardian-gated: the
+    # image is one this machine already ran, and greenboot must be able to
+    # do the same thing with no password when a new image fails to bring
+    # the filter up. Gating it would mainly risk a broken machine nobody
+    # present can repair. See impl_Rollback.
+    "Rollback": ACTION_APPLY_UPDATES,
     "SetCaptiveMode": ACTION_MANAGE_NETWORK,
     "IsEnabled": ACTION_READ_CONFIG,
     "SetGuardianPassword": ACTION_MANAGE_GUARDIAN,
@@ -162,6 +169,10 @@ CHANGES = frozenset({
     "AdoptUser", "RemoveUser", "SetUserApps", "RemoveApp", "ApproveApp",
     "UnapproveApp", "SetUserCanInstall", "SetCaptiveMode",
     "SetGuardianPassword", "DisableGuardian", "Enrol", "Unenrol",
+    # Moving the system BACKWARDS is logged where moving it forwards is
+    # not: a rollback can restore an older filter, so "who put this machine
+    # back, and when?" is a question a parent may need answered.
+    "Rollback",
 })
 # Changes whose first argument is the account they are about.
 PER_USER = frozenset({

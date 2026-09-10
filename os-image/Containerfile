@@ -26,6 +26,12 @@ RUN dnf -y install --exclude=toolbox --exclude=podman @workstation-product-envir
 RUN dnf -y install dnsmasq nftables python3-gobject python3-jsonschema python3-pip \
         malcontent malcontent-tools flatpak accountsservice cage \
         ca-certificates \
+        # greenboot: if a new image boots without the filter coming up, the
+        # machine puts ITSELF back. A locked-down computer that fails to
+        # boot properly is a family with no computer and no way in, so the
+        # update path needs a floor that does not depend on anyone being
+        # around to notice. See files/etc/greenboot/check/required.d/.
+        greenboot \
         # The desktop layouts (docs/desktop.md). Classic: GNOME with a
         # taskbar (Dash to Panel) and tray icons; tiling adds PaperWM, which
         # Fedora does not package, so it is fetched below. Advanced: a
@@ -241,6 +247,16 @@ RUN passwd -l root \
     && systemctl enable sshd.service \
     && systemctl enable kosherd.service kosher-firewall.service kosher-dns.service \
     && systemctl enable bootc-fetch-apply-updates.timer \
+    # An update that boots without the filter puts itself back. greenboot's
+    # own [Install] carries Also=greenboot-set-rollback-trigger.service, so
+    # enabling the health check arms the rollback too — verified against
+    # the unit in fedora-bootc:44 rather than assumed. is-enabled is the
+    # assertion: if a future greenboot renames these, the BUILD fails
+    # rather than a machine shipping with no floor under its updates.
+    && chmod 0755 /etc/greenboot/check/required.d/10-kosher-filter.sh \
+    && systemctl enable greenboot-healthcheck.service \
+    && systemctl is-enabled greenboot-healthcheck.service \
+    && systemctl is-enabled greenboot-set-rollback-trigger.service \
     && rm -f /etc/flatpak/remotes.d/*.flatpakrepo
 
 # Only images signed for our registry may be switched/updated to.

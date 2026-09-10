@@ -238,6 +238,13 @@ class DaemonClient:
     def apply_update(self) -> None:
         self._call("System", "ApplyUpdate")
 
+    def deployment_status(self) -> dict:
+        """Which image is booted, and what a rollback would return to."""
+        return json.loads(self._call("System", "DeploymentStatus")[0])
+
+    def rollback(self) -> None:
+        self._call("System", "Rollback")
+
     # Network
     def set_captive_mode(self, uid: int, minutes: int) -> None:
         self._call("Network", "SetCaptiveMode", "(ii)", uid, minutes)

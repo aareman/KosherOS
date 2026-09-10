@@ -140,7 +140,8 @@ def icon_line(icon_name: str, text: str) -> Gtk.Box:
     image = Gtk.Image(icon_name=icon_name, pixel_size=14)
     image.add_css_class("dim-label")
     box.append(image)
-    label = Gtk.Label(label=text, xalign=0, ellipsize=3, hexpand=True)  # END
+    label = Gtk.Label(label=text, xalign=0, ellipsize=3, hexpand=True,  # END
+                      max_width_chars=30)
     label.add_css_class("card-line")
     box.append(label)
     return box

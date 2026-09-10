@@ -148,8 +148,7 @@ def _rows(widget, found=None):
     found = [] if found is None else found
     child = widget.get_first_child()
     while child is not None:
-        if isinstance(child, (Adw.ActionRow, Adw.ComboRow, Adw.SwitchRow,
-                              Adw.ButtonRow)):
+        if isinstance(child, Adw.PreferencesRow):
             found.append(child)
         _rows(child, found)
         child = child.get_next_sibling()

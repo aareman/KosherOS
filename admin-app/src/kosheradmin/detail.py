@@ -35,6 +35,21 @@ TABS = (("overview", "Overview", "view-list-symbolic"),
         ("account", "Account", "system-users-symbolic"))
 
 
+def hint_under(group: Adw.PreferencesGroup, text: str) -> Gtk.Label:
+    """A caption beneath a group's rows.
+
+    Combo rows with long subtitles squeeze their selected value into
+    "Filtered int…", because the subtitle takes the width first. So the
+    explanation lives under the list instead, and updates with the choice.
+    """
+    label = Gtk.Label(label=text, xalign=0, wrap=True, margin_top=6, margin_start=6,
+                      margin_end=6)
+    label.add_css_class("dim-label")
+    label.add_css_class("caption")
+    group.add(label)
+    return label
+
+
 def every_preset_blocks() -> set[str]:
     """Categories every built-in preset that blocks anything blocks. Labelled
     on the grid so a parent knows those are not the ones to think about."""
@@ -240,10 +255,9 @@ class UserDetailPage(Adw.NavigationPage):
                 [p.label + (" (yours)" if p.key.startswith(profiles_mod.CUSTOM_PREFIX) else "")
                  for p in profiles] + [labels.PROFILE_CUSTOM]))
         profile_row.set_selected(keys.index(current) if current else len(keys))
-        profile_row.set_subtitle(
-            profiles_mod.get(current, custom).description if current
-            else "These settings do not match any preset exactly; the changes "
-                 "are listed on the Overview tab.")
+        profile_hint = (profiles_mod.get(current, custom).description if current
+                        else "These settings do not match any preset exactly; the "
+                             "changes are listed on the Overview tab.")
 
         def on_profile(combo, _p):
             index = combo.get_selected()
@@ -267,8 +281,6 @@ class UserDetailPage(Adw.NavigationPage):
         mode_row = Adw.ComboRow(title="Filter mode",
                                 model=Gtk.StringList.new([labels.MODE_LABELS[m] for m in MODES]))
         mode_row.set_selected(MODES.index(user["mode"]))
-        mode_row.set_subtitle(labels.MODE_HINTS.get(user["mode"], ""))
-        mode_row.set_subtitle_lines(4)
 
         def on_mode(combo, _p):
             new_mode = MODES[combo.get_selected()]
@@ -279,6 +291,8 @@ class UserDetailPage(Adw.NavigationPage):
 
         mode_row.connect("notify::selected", on_mode)
         group.add(mode_row)
+        hint_under(group, profile_hint)
+        hint_under(group, "Filter mode: " + labels.MODE_HINTS.get(user["mode"], ""))
         return group
 
     def _categories_group(self, user: dict) -> Adw.PreferencesGroup:
@@ -446,12 +460,11 @@ class UserDetailPage(Adw.NavigationPage):
             description="How much of the web's imagery and language this "
                         "account sees.")
         media_row = Adw.ComboRow(
-            title="Pictures and video",
+            title="Pictures and video", use_subtitle=True,
             model=Gtk.StringList.new([labels.MEDIA_LABELS[m] for m in MEDIA_LEVELS]))
         level = user.get("media_level", "none")
         media_row.set_selected(MEDIA_LEVELS.index(level) if level in MEDIA_LEVELS else 0)
-        media_row.set_subtitle(labels.MEDIA_HINTS.get(level, ""))
-        media_row.set_subtitle_lines(4)
+        media_hint = labels.MEDIA_HINTS.get(level, "")
 
         def on_media(combo, _p):
             new_level = MEDIA_LEVELS[combo.get_selected()]
@@ -466,22 +479,22 @@ class UserDetailPage(Adw.NavigationPage):
         # Disabling a control that still acts is worse than a wordy subtitle.
         if user["mode"] in ("none", "unfiltered"):
             media_row.set_sensitive(False)
+            media_row.set_use_subtitle(False)
             media_row.set_subtitle(labels.MODE_NOTHING_APPLIES[user["mode"]])
+            media_hint = ""
         elif user["mode"] != "filtered":
-            media_row.set_subtitle(
-                "Pictures on pages are not checked in this mode — only "
-                "“Filtered internet” can see them. This still decides "
-                "whether image search results are shown.")
+            media_hint = ("Pictures on pages are not checked in this mode — only "
+                          "“Filtered internet” can see them. This still decides "
+                          "whether image search results are shown.")
         group.add(media_row)
 
         cover_row = Adw.ComboRow(
-            title="Covered pictures look like",
+            title="Covered pictures look like", use_subtitle=True,
             model=Gtk.StringList.new([labels.COVER_LABELS[k] for k in labels.COVER_ORDER]))
         style = user.get("cover_style", "frost")
         cover_row.set_selected(labels.COVER_ORDER.index(style)
                                if style in labels.COVER_ORDER else 0)
-        cover_row.set_subtitle(labels.COVER_HINTS.get(style, ""))
-        cover_row.set_subtitle_lines(4)
+        cover_hint = labels.COVER_HINTS.get(style, "")
 
         def on_cover(combo, _p):
             new_style = labels.COVER_ORDER[combo.get_selected()]
@@ -494,20 +507,20 @@ class UserDetailPage(Adw.NavigationPage):
         cover_row.connect("notify::selected", on_cover)
         if user["mode"] in ("none", "unfiltered") or level in ("none", "all"):
             cover_row.set_sensitive(False)
+            cover_row.set_use_subtitle(False)
             cover_row.set_subtitle("Only matters when pictures are checked and "
                                    "partly covered.")
+            cover_hint = ""
         group.add(cover_row)
 
         language_row = Adw.ComboRow(
-            title="Bad language",
+            title="Bad language", use_subtitle=True,
             model=Gtk.StringList.new([labels.LANGUAGE_LABELS[m] for m in labels.LANGUAGE_ORDER]))
         setting = user.get("language_filter", "off")
         language_row.set_selected(labels.LANGUAGE_ORDER.index(setting)
                                   if setting in labels.LANGUAGE_ORDER else 0)
-        language_row.set_subtitle(
-            "Replacing reads better than blocking: a page that reads "
-            "normally minus the language beats one that refuses to load.")
-        language_row.set_subtitle_lines(3)
+        language_hint = ("Replacing reads better than blocking: a page that reads "
+                         "normally minus the language beats one that refuses to load.")
 
         def on_language(combo, _p):
             new_setting = labels.LANGUAGE_ORDER[combo.get_selected()]
@@ -519,13 +532,19 @@ class UserDetailPage(Adw.NavigationPage):
         language_row.connect("notify::selected", on_language)
         if user["mode"] in ("none", "unfiltered"):
             language_row.set_sensitive(False)
+            language_row.set_use_subtitle(False)
             language_row.set_subtitle(labels.MODE_NOTHING_APPLIES[user["mode"]])
+            language_hint = ""
         elif user["mode"] != "filtered":
-            language_row.set_subtitle(
-                "Pages are not rewritten in this mode — only “Filtered "
-                "internet” can read them. This still blocks searches "
-                "containing bad language.")
+            language_hint = ("Pages are not rewritten in this mode — only “Filtered "
+                             "internet” can read them. This still blocks searches "
+                             "containing bad language.")
         group.add(language_row)
+        for title, hint in (("Pictures and video", media_hint),
+                            ("Covered pictures", cover_hint),
+                            ("Bad language", language_hint)):
+            if hint:
+                hint_under(group, f"{title}: {hint}")
         return [group]
 
     # -- youtube -------------------------------------------------------------------
@@ -827,8 +846,6 @@ class UserDetailPage(Adw.NavigationPage):
         current = user.get("layout", "classic")
         layout_row.set_selected(labels.LAYOUT_ORDER.index(current)
                                 if current in labels.LAYOUT_ORDER else 0)
-        layout_row.set_subtitle(labels.LAYOUT_HINTS.get(current, ""))
-        layout_row.set_subtitle_lines(4)
 
         def on_layout(combo, _p):
             new_layout = labels.LAYOUT_ORDER[combo.get_selected()]
@@ -841,6 +858,7 @@ class UserDetailPage(Adw.NavigationPage):
 
         layout_row.connect("notify::selected", on_layout)
         desktop.add(layout_row)
+        hint_under(desktop, labels.LAYOUT_HINTS.get(current, ""))
 
         danger = Adw.PreferencesGroup()
         remove = Adw.ButtonRow(title="Remove This Account…")

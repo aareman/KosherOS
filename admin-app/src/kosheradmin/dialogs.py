@@ -466,7 +466,7 @@ class SavePresetDialog(Adw.Dialog):
 
 
 class RequestsDialog(Adw.Dialog):
-    """Pages people have asked for, each with its answer inline.
+    """Pages people have asked for, each with its answers beneath it.
 
     Every filter is wrong sometimes. What decides whether a family keeps
     using one is how easily a wrong call gets fixed — so each request shows
@@ -476,7 +476,7 @@ class RequestsDialog(Adw.Dialog):
     """
 
     def __init__(self, win, requests: list[dict]):
-        super().__init__(title="Waiting for you", content_width=620,
+        super().__init__(title="Waiting for you", content_width=680,
                          content_height=560)
         self.win = win
         self.requests = list(requests)
@@ -491,7 +491,7 @@ class RequestsDialog(Adw.Dialog):
         box.append(header)
         box.append(page)
         self.set_child(box)
-        self.rows: list[Adw.ActionRow] = []
+        self.rows: list[Gtk.ListBoxRow] = []
         self._rebuild()
 
     def _rebuild(self) -> None:
@@ -516,59 +516,85 @@ class RequestsDialog(Adw.Dialog):
             GLib.timeout_add(600, lambda: (self.close(), False)[1])
 
 
-def request_row(win, request: dict, on_answered=None) -> Adw.ActionRow:
-    """One waiting request with its three answers on the row."""
-    host = labels.host_of(request["url"])
-    when = labels.when_text(request.get("asked", 0))
-    title = f"{request.get('username', '?')} asked for {host}, {when}"
-    parts = [labels.short_url(request["url"])]
-    why = labels.why_text(request.get("why", ""))
-    if why:
-        parts.append(f"blocked by {why}")
-    note = (request.get("note") or "").strip()
-    if note:
-        parts.append(f"“{note}”")
-    row = Adw.ActionRow(title=title, subtitle=" · ".join(parts), subtitle_lines=3,
-                        use_markup=False)
-    row.add_prefix(avatar(request.get("username", "?"), 32))
+class RequestRow(Adw.PreferencesRow):
+    """One waiting request: who, when, what, why, and the answers beneath.
 
-    def done(what: str):
-        win.toast(what)
-        if on_answered:
-            on_answered(request)
+    The answers sit under the text rather than beside it, so a long
+    address and three buttons do not fight over one line.
+    """
 
-    def grant(whole: bool):
-        win.with_guardian(lambda pw: win.call(
-            lambda: win.client.approve_request(request["id"], whole, pw),
-            done_msg=None,
-            on_done=lambda: done(f"Allowed {'all of ' if whole else ''}{host} "
-                                 f"for {request.get('username', '?')}")))
+    def __init__(self, win, request: dict, on_answered=None):
+        super().__init__(activatable=False)
+        self.request = request
+        host = labels.host_of(request["url"])
+        when = labels.when_text(request.get("asked", 0))
+        who = request.get("username", "?")
+        title = f"{who} asked for {host}, {when}"
+        self.set_title(title)
+        parts = [labels.short_url(request["url"])]
+        why = labels.why_text(request.get("why", ""))
+        if why:
+            parts.append(f"blocked by {why}")
+        note = (request.get("note") or "").strip()
+        if note:
+            parts.append(f"“{note}”")
+        self._subtitle = " · ".join(parts)
 
-    def refuse():
-        win.call(lambda: win.client.dismiss_request(request["id"]),
-                 done_msg=None, on_done=lambda: done("Request turned down"))
+        outer = Gtk.Box(spacing=12, margin_top=10, margin_bottom=10, margin_start=12,
+                        margin_end=12)
+        outer.append(avatar(who, 32))
+        body = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=3, hexpand=True)
+        heading = Gtk.Label(label=title, xalign=0, wrap=True)
+        body.append(heading)
+        sub = Gtk.Label(label=self._subtitle, xalign=0, wrap=True)
+        sub.add_css_class("dim-label")
+        sub.add_css_class("caption")
+        body.append(sub)
 
-    box = Gtk.Box(spacing=6, valign=Gtk.Align.CENTER)
-    if request.get("mode") == "whitelist":
-        # A whitelist account can only be granted a whole site: its
-        # traffic never reaches the proxy, so there is no page-level
-        # rule to apply. Say so rather than offering a choice that
-        # would not do what it says.
-        allow = small_button(f"Allow {host}", "suggested-action")
-        allow.connect("clicked", lambda _b: grant(True))
-        box.append(allow)
-    else:
-        page = small_button("Just this page", "suggested-action")
-        page.connect("clicked", lambda _b: grant(False))
-        site = small_button(f"All of {host}")
-        site.connect("clicked", lambda _b: grant(True))
-        box.append(page)
-        box.append(site)
-    no = small_button("No", "flat")
-    no.connect("clicked", lambda _b: refuse())
-    box.append(no)
-    row.add_suffix(box)
-    return row
+        def done(what: str):
+            win.toast(what)
+            if on_answered:
+                on_answered(request)
+
+        def grant(whole: bool):
+            win.with_guardian(lambda pw: win.call(
+                lambda: win.client.approve_request(request["id"], whole, pw),
+                done_msg=None,
+                on_done=lambda: done(f"Allowed {'all of ' if whole else ''}{host} for {who}")))
+
+        def refuse():
+            win.call(lambda: win.client.dismiss_request(request["id"]),
+                     done_msg=None, on_done=lambda: done("Request turned down"))
+
+        buttons = Gtk.Box(spacing=6, margin_top=6)
+        if request.get("mode") == "whitelist":
+            # A whitelist account can only be granted a whole site: its
+            # traffic never reaches the proxy, so there is no page-level
+            # rule to apply. Say so rather than offering a choice that
+            # would not do what it says.
+            allow = small_button(f"Allow {host}", "suggested-action")
+            allow.connect("clicked", lambda _b: grant(True))
+            buttons.append(allow)
+        else:
+            page = small_button("Just this page", "suggested-action")
+            page.connect("clicked", lambda _b: grant(False))
+            site = small_button(f"All of {host}")
+            site.connect("clicked", lambda _b: grant(True))
+            buttons.append(page)
+            buttons.append(site)
+        no = small_button("No", "flat")
+        no.connect("clicked", lambda _b: refuse())
+        buttons.append(no)
+        body.append(buttons)
+        outer.append(body)
+        self.set_child(outer)
+
+    def get_subtitle(self) -> str:
+        return self._subtitle
+
+
+def request_row(win, request: dict, on_answered=None) -> RequestRow:
+    return RequestRow(win, request, on_answered)
 
 
 class HealthDialog(Adw.Dialog):
@@ -753,5 +779,5 @@ def allow_menu(win, uid: int, username: str, url: str, on_done=None) -> Gtk.Menu
 
 
 __all__ = ["WhitelistDialog", "RulesDialog", "ListEditDialog", "SavePresetDialog",
-           "RequestsDialog", "HealthDialog", "guardian_dialog", "add_person_dialog",
+           "RequestsDialog", "RequestRow", "HealthDialog", "guardian_dialog", "add_person_dialog",
            "confirm_remove_user", "request_row", "allow_menu", "tag"]

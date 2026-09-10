@@ -83,8 +83,17 @@ class FamilyPage(Gtk.Box):
         self.health_banner.connect("button-clicked", lambda _b: self.open_health())
         self.append(self.health_banner)
 
-        self.page = Adw.PreferencesPage(vexpand=True)
-        self.append(self.page)
+        # Not an Adw.PreferencesPage: its clamp is 600px, which is one card
+        # wide. The board wants three across, so it gets its own clamp.
+        self.body = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=28,
+                            margin_top=22, margin_bottom=28, margin_start=18,
+                            margin_end=18)
+        clamp = Adw.Clamp(maximum_size=1080, tightening_threshold=900)
+        clamp.set_child(self.body)
+        self.scroller = Gtk.ScrolledWindow(vexpand=True,
+                                           hscrollbar_policy=Gtk.PolicyType.NEVER)
+        self.scroller.set_child(clamp)
+        self.append(self.scroller)
 
         self.family_group = Adw.PreferencesGroup(title="The family")
         self.health_tag = tag("", "ok")
@@ -95,7 +104,7 @@ class FamilyPage(Gtk.Box):
                                  activate_on_single_click=True)
         self.cards.connect("child-activated", self._on_card)
         self.family_group.add(self.cards)
-        self.page.add(self.family_group)
+        self.body.append(self.family_group)
 
         self.computer_group = Adw.PreferencesGroup(
             title="This computer",
@@ -106,7 +115,11 @@ class FamilyPage(Gtk.Box):
                                  activate_on_single_click=True)
         self.tiles.connect("child-activated", self._on_tile)
         self.computer_group.add(self.tiles)
-        self.page.add(self.computer_group)
+        self.body.append(self.computer_group)
+
+    def scroller_to_end(self) -> None:
+        adjustment = self.scroller.get_vadjustment()
+        adjustment.set_value(adjustment.get_upper())
 
     # -- data -> widgets ------------------------------------------------------------
 
@@ -193,17 +206,21 @@ class FamilyPage(Gtk.Box):
         elif key == "updates":
             self.win.push(UpdatesPage(self.win))
 
-    def open_requests(self) -> None:
-        RequestsDialog(self.win, self.win.requests).present(self.win)
+    def open_requests(self) -> RequestsDialog:
+        dialog = RequestsDialog(self.win, self.win.requests)
+        dialog.present(self.win)
+        return dialog
 
-    def open_health(self) -> None:
-        HealthDialog(self.win, health_rows(self.win.status)).present(self.win)
+    def open_health(self) -> HealthDialog:
+        dialog = HealthDialog(self.win, health_rows(self.win.status))
+        dialog.present(self.win)
+        return dialog
 
 
 # -- cards ---------------------------------------------------------------------------------
 
 def person_card(user: dict, counts: dict | None, waiting: int, custom=()) -> Gtk.Box:
-    box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
+    box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10, width_request=240)
     box.add_css_class("card")
     box.add_css_class("person-card")
 

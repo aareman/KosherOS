@@ -28,7 +28,7 @@ See [docs/architecture.md](docs/architecture.md) for how it works, and
 | `os-image/` | the distro: Containerfile + system config for the bootc image |
 | `scripts/dev-install.sh` | install the filter stack on a stock Fedora VM (stage-1 testing) |
 | `portal/` | self-hostable portal: signed policy sync for enrolled devices |
-| `docs/` | architecture |
+| `docs/` | architecture, filtering, desktop, branding, [deployment](docs/deployment.md), [licensing](docs/licensing.md) |
 | `legacy/` | retired e2guardian/Ubuntu prototype, kept for reference |
 
 ## Development

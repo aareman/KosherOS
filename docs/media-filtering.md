@@ -264,6 +264,44 @@ relying on it. And the version of this feature that says nothing teaches
 people that blank pictures mean the computer is broken — which is how a
 filter ends up switched off.
 
+### Would another language be faster? Mostly no
+
+Asked seriously, and the table above answers it. Judging a page costs
+about 20 ms of Python across scoring, profanity and element stripping.
+Judging one picture costs 440 ms. So the entire Python text path is under
+5% of the cost of a *single* image, and a page with a dozen pictures
+makes it a rounding error.
+
+The expensive parts are already not Python. Detection is ONNX Runtime,
+which is C++; the category database is SQLite, which is C, and answers in
+0.004 ms; image decoding and covering are Pillow, which is C. Rewriting
+the parts that *are* Python — `content`, `language`, `elementfilter` — in
+Rust or Go might recover 15 ms per page and would cost the property that
+makes this project maintainable by one person with occasional
+contributors.
+
+Where the wins actually are, in order:
+
+1. **The model.** Input resolution, int8 quantisation, and a smaller or
+   better architecture all move the 440 ms. Nothing else does.
+2. **Not running it.** The staged design, the content-hash cache and the
+   `too_slow` fallback are all worth more than any language change.
+3. **Algorithms inside Python.** The profanity scan above went from 40 ms
+   to 4 ms by removing named capture groups — a ten-fold win from
+   measuring, not from a rewrite. If the text path ever does need to be
+   faster, C-extension libraries get most of it without leaving Python:
+   `pyahocorasick` for multi-word matching, `selectolax` or `lxml` in
+   place of `html.parser`.
+
+The one honest candidate for another language is not per-operation
+latency at all. It is **proxy throughput under concurrency** — mitmproxy
+is async Python, and a browser opens many connections at once, which is a
+different measurement from the ones in the table and has not been taken
+yet. Take it before considering a rewrite; and the other reason to want a
+compiled component, a single static binary for the standalone package in
+[standalone.md](standalone.md), is a distribution argument rather than a
+performance one.
+
 ### Cheapest thing that can decide, first
 
 Each stage only runs if the one before it could not settle the question:

@@ -169,10 +169,12 @@ CHANGES = frozenset({
     "AdoptUser", "RemoveUser", "SetUserApps", "RemoveApp", "ApproveApp",
     "UnapproveApp", "SetUserCanInstall", "SetCaptiveMode",
     "SetGuardianPassword", "DisableGuardian", "Enrol", "Unenrol",
-    # Moving the system BACKWARDS is logged where moving it forwards is
-    # not: a rollback can restore an older filter, so "who put this machine
-    # back, and when?" is a question a parent may need answered.
-    "Rollback",
+    # Moving the system in either direction. The log answers "who changed
+    # this machine, and when", and changing which OS image it runs is
+    # exactly that — a rollback especially, since it can restore an older
+    # filter. Neither takes arguments, so only the actor and the time are
+    # recorded.
+    "ApplyUpdate", "Rollback",
 })
 # Changes whose first argument is the account they are about.
 PER_USER = frozenset({

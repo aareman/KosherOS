@@ -59,11 +59,16 @@ def test_rollback_needs_the_update_right_and_not_the_guardian():
     assert "Rollback" not in GUARDIAN_GATED
 
 
-def test_going_backwards_is_logged_even_though_going_forwards_is_not():
-    # A rollback can restore an older filter, so "who put this machine
-    # back?" is a question a parent may need answered.
+def test_changing_which_image_the_machine_runs_is_logged_either_way():
+    # The log answers "who changed this machine, and when", and changing
+    # the OS image is exactly that — a rollback especially, since it can
+    # restore an older filter. Neither call takes arguments, so only the
+    # actor and the time are kept.
     assert "Rollback" in CHANGES
-    assert "ApplyUpdate" not in CHANGES
+    assert "ApplyUpdate" in CHANGES
+    for method in ("Rollback", "ApplyUpdate"):
+        assert method not in access.PER_USER, \
+            f"{method} has no uid argument; logging one would misattribute it"
 
 
 def test_reading_the_deployment_is_not_an_admin_write():

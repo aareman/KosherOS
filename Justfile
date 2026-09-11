@@ -182,7 +182,10 @@ deploy-kosherd VM="kosher-fedora":
         os-image/files/usr/share/polkit-1/actions/org.kosherlinux.policy \
         os-image/files/etc/polkit-1/rules.d/49-kosher-admin.rules \
         {{VM}}:/tmp/kosherd-src/
+    # On a bootc VM /usr is read-only; usr-overlay makes it writable until
+    # the next reboot, which is exactly the lifetime a dev push should have.
     {{vmssh}} {{VM}} "S=\$([ \$(id -u) = 0 ] || echo sudo); \
+        (\$S bootc usr-overlay >/dev/null 2>&1 || true); \
         \$S install -m644 /tmp/kosherd-src/policy.schema.json /usr/share/kosher/policy.schema.json \
         && \$S install -m644 /tmp/kosherd-src/org.kosherlinux.policy /usr/share/polkit-1/actions/ \
         && \$S install -m644 /tmp/kosherd-src/49-kosher-admin.rules /etc/polkit-1/rules.d/ \
@@ -194,6 +197,7 @@ deploy-kosherd VM="kosher-fedora":
 deploy-admin VM="kosher-gui":
     rsync -a -e "{{vmssh}}" admin-app/src/kosheradmin/ {{VM}}:/tmp/kosheradmin-src/
     {{vmssh}} {{VM}} "S=\$([ \$(id -u) = 0 ] || echo sudo); \
+        (\$S bootc usr-overlay >/dev/null 2>&1 || true); \
         \$S rsync -a /tmp/kosheradmin-src/ \$(\$S python3 -c 'import kosheradmin,os;print(os.path.dirname(kosheradmin.__file__))')/"
 
 # --- OS image (stage 2) -------------------------------------------------------

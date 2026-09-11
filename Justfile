@@ -10,6 +10,19 @@
 image := env_var_or_default("KOSHER_IMAGE", "localhost/kosher-linux:dev")
 vmssh := "ssh -F build/vm/ssh_config"
 
+# The QEMU that draws a window. The dev shell's nix-built QEMU cannot get an
+# OpenGL context on a non-NixOS host (epoxy aborts: no GLX/EGL context), so
+# it can only offer a plain framebuffer — which GNOME accepts and niri does
+# not ("software EGL renderers are skipped"), so the advanced layout never
+# came up in the VM. When the host has its own QEMU it can do virgl, so it
+# is used for the windowed recipes; otherwise the nix one, without GL.
+# Nothing is installed on the host for this; it is used only if present.
+qemu_gui := if path_exists("/usr/bin/qemu-system-x86_64") == "true" {
+    "/usr/bin/qemu-system-x86_64 -device virtio-gpu-gl -display gtk,gl=on"
+} else {
+    "qemu-system-x86_64 -device virtio-vga -display gtk"
+}
+
 # Run the unit test suites (pure logic — no root, no D-Bus, no VM needed).
 test *ARGS:
     cd kosherd && python3 -m pytest tests/ -q {{ARGS}}
@@ -299,10 +312,10 @@ usb-image: build
 try DISK="build/qcow2/disk.qcow2":
     @mkdir -p build/try
     qemu-img create -q -f qcow2 -b "$PWD/{{DISK}}" -F qcow2 build/try/overlay.qcow2 40G
-    qemu-system-x86_64 -enable-kvm -cpu host -m 4096 -smp 4 \
+    {{qemu_gui}} -enable-kvm -cpu host -m 4096 -smp 4 \
         -drive file=build/try/overlay.qcow2,if=virtio \
         -netdev user,id=n0,hostfwd=tcp:127.0.0.1:2223-:22 \
-        -device virtio-net-pci,netdev=n0 -device virtio-gpu-gl -display gtk,gl=on
+        -device virtio-net-pci,netdev=n0
     rm -f build/try/overlay.qcow2
 
 # Same, but headless with the console in this terminal: no video device, so
@@ -335,18 +348,16 @@ test-boot DISK="build/qcow2/disk.qcow2":
 # first boot only, so the reboot lands on the freshly installed disk.
 boot-iso:
     [ -f build/test-install.qcow2 ] || qemu-img create -f qcow2 build/test-install.qcow2 40G
-    qemu-system-x86_64 -enable-kvm -cpu host -m 4096 -smp 4 \
+    {{qemu_gui}} -enable-kvm -cpu host -m 4096 -smp 4 \
         -drive file=build/test-install.qcow2,if=virtio \
         -cdrom build/bootiso/install.iso -boot once=d \
-        -netdev user,id=n0 -device virtio-net-pci,netdev=n0 \
-        -device virtio-gpu-gl -display gtk,gl=on
+        -netdev user,id=n0 -device virtio-net-pci,netdev=n0
 
 # Boot the machine installed by `just boot-iso` (first boot runs the wizard).
 boot-installed:
-    qemu-system-x86_64 -enable-kvm -cpu host -m 4096 -smp 4 \
+    {{qemu_gui}} -enable-kvm -cpu host -m 4096 -smp 4 \
         -drive file=build/test-install.qcow2,if=virtio \
-        -netdev user,id=n0 -device virtio-net-pci,netdev=n0 \
-        -device virtio-gpu-gl -display gtk,gl=on
+        -netdev user,id=n0 -device virtio-net-pci,netdev=n0
 
 # Boot the built qcow2 (headless, ssh on localhost:2223 if the image has sshd).
 # Interactive TEXT setup in your own terminal — the proven path (the boot
@@ -361,10 +372,10 @@ boot-image-text:
         -vga none -nographic
 
 boot-image:
-    qemu-system-x86_64 -enable-kvm -cpu host -m 4096 -smp 4 \
+    {{qemu_gui}} -enable-kvm -cpu host -m 4096 -smp 4 \
         -drive file=build/qcow2/disk.qcow2,if=virtio \
         -netdev user,id=n0,hostfwd=tcp:127.0.0.1:2223-:22 -device virtio-net-pci,netdev=n0 \
-        -device virtio-gpu-gl -display gtk,gl=on -serial file:build/qcow2/console.log
+        -serial file:build/qcow2/console.log
 
 # Update the RUNNING dev VM (started with `just boot-image`) to the image
 # just built — WITHOUT rebuilding the disk. Only changed layers transfer,

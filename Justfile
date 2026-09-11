@@ -10,20 +10,18 @@
 image := env_var_or_default("KOSHER_IMAGE", "localhost/kosher-linux:dev")
 vmssh := "ssh -F build/vm/ssh_config"
 
-# The QEMU that draws a window. The dev shell's nix-built QEMU cannot get an
-# OpenGL context on a non-NixOS host (epoxy aborts: no GLX/EGL context), so
-# it can only offer a plain framebuffer — which GNOME accepts and niri does
-# not ("software EGL renderers are skipped"), so the advanced layout never
-# came up in the VM. When the host has its own QEMU it can do virgl, so it
-# is used for the windowed recipes; otherwise the nix one, without GL.
-# Nothing is installed on the host for this; it is used only if present.
-# virtio-vga-gl rather than virtio-gpu-gl: the -vga- variant keeps VGA
-# compatibility, so the firmware, GRUB's menu and Plymouth all draw before
-# the kernel's driver loads. Without it the window stays black until the
-# desktop and the boot looks broken. KOSHER_DISPLAY=sdl swaps the window
-# toolkit if GTK's OpenGL output misbehaves on a host.
+# The QEMU that draws a window. Plain framebuffer by default: it is stable
+# and GNOME is happy with it. KOSHER_GL=1 asks for a virgl GPU through the
+# host's own QEMU instead — the only way niri (the advanced layout) gets a
+# renderer it accepts in a VM, since it refuses software rendering and the
+# dev shell's nix-built QEMU cannot get an OpenGL context on a non-NixOS
+# host. Opt-in because the host virgl path crashed (SIGABRT in QEMU 8.2 with
+# virglrenderer 1.0) the first time a niri session leaned on it; when it
+# works it is the fast path, when it does not it takes the VM down. Real
+# hardware is where the advanced layout is properly tested (just usb-image).
+# KOSHER_DISPLAY=sdl swaps the window toolkit.
 display := env_var_or_default("KOSHER_DISPLAY", "gtk")
-qemu_gui := if path_exists("/usr/bin/qemu-system-x86_64") == "true" {
+qemu_gui := if env_var_or_default("KOSHER_GL", "") != "" {
     "/usr/bin/qemu-system-x86_64 -device virtio-vga-gl -display " + display + ",gl=on"
 } else {
     "qemu-system-x86_64 -device virtio-vga -display " + display

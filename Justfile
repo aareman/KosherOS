@@ -17,10 +17,16 @@ vmssh := "ssh -F build/vm/ssh_config"
 # came up in the VM. When the host has its own QEMU it can do virgl, so it
 # is used for the windowed recipes; otherwise the nix one, without GL.
 # Nothing is installed on the host for this; it is used only if present.
+# virtio-vga-gl rather than virtio-gpu-gl: the -vga- variant keeps VGA
+# compatibility, so the firmware, GRUB's menu and Plymouth all draw before
+# the kernel's driver loads. Without it the window stays black until the
+# desktop and the boot looks broken. KOSHER_DISPLAY=sdl swaps the window
+# toolkit if GTK's OpenGL output misbehaves on a host.
+display := env_var_or_default("KOSHER_DISPLAY", "gtk")
 qemu_gui := if path_exists("/usr/bin/qemu-system-x86_64") == "true" {
-    "/usr/bin/qemu-system-x86_64 -device virtio-gpu-gl -display gtk,gl=on"
+    "/usr/bin/qemu-system-x86_64 -device virtio-vga-gl -display " + display + ",gl=on"
 } else {
-    "qemu-system-x86_64 -device virtio-vga -display gtk"
+    "qemu-system-x86_64 -device virtio-vga -display " + display
 }
 
 # Run the unit test suites (pure logic — no root, no D-Bus, no VM needed).

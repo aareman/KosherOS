@@ -168,3 +168,21 @@ def test_a_guest_with_no_settings_reads_as_unfiltered_pictures():
     assert guest.language_filter == "off"
     # ...and an untouched guest does not bloat the saved policy.
     assert set(policy.to_dict()["guest"]) == {"enabled", "uid"}
+
+
+def test_usernames_may_have_capitals_and_dots_like_useradd_allows():
+    # "Elisha" was created by accountsservice and then refused by the
+    # schema, which left a half-made account. The rule is now what the OS
+    # accepts.
+    from kosherd import policy as policy_mod
+
+    for name in ("elisha", "Elisha", "elisha.b", "_svc", "chaya-sara"):
+        pol = Policy(users=[UserPolicy(uid=1000, username=name, mode="filtered")])
+        policy_mod.validate(pol.to_dict())
+    import pytest
+
+    for name in ("9lives", "eli sha", ""):
+        pol = Policy(users=[UserPolicy(uid=1000, username=name, mode="filtered")])
+        with pytest.raises(Exception):
+            policy_mod.validate(pol.to_dict())
+

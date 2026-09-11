@@ -686,10 +686,31 @@ def add_person_dialog(win, adopt_mode: bool) -> Adw.AlertDialog | None:
                                 model=Gtk.StringList.new(candidates))
         group.add(name_row)
     else:
-        name = Adw.EntryRow(title="Username")
+        # Full name first; the username is suggested from it and can be
+        # edited. The rule is shown as the person types, so "Elisha" is
+        # never refused by the daemon after the account was already made.
         full = Adw.EntryRow(title="Full name")
-        group.add(name)
+        name = Adw.EntryRow(title="Username")
         group.add(full)
+        group.add(name)
+        state = {"typed": False}
+
+        def on_full(_e):
+            if not state["typed"]:
+                name.set_text(suggest_username(full.get_text()))
+
+        def on_name(_e):
+            state["typed"] = bool(name.get_text().strip()) and \
+                name.get_text() != suggest_username(full.get_text())
+            valid = username_ok(name.get_text())
+            if valid or not name.get_text():
+                name.remove_css_class("error")
+            else:
+                name.add_css_class("error")
+            dialog.set_response_enabled("ok", valid)
+
+        full.connect("changed", on_full)
+        name.connect("changed", on_name)
 
     # A profile, not a bare filter mode: an account created with a mode
     # and nothing else has to be configured eight more times, which is
@@ -712,6 +733,8 @@ def add_person_dialog(win, adopt_mode: bool) -> Adw.AlertDialog | None:
     dialog.add_response("cancel", "Cancel")
     dialog.add_response("ok", title.split()[0])
     dialog.set_response_appearance("ok", Adw.ResponseAppearance.SUGGESTED)
+    if not adopt_mode:
+        dialog.set_response_enabled("ok", False)
 
     def on_response(_d, response):
         if response != "ok":
@@ -730,6 +753,32 @@ def add_person_dialog(win, adopt_mode: bool) -> Adw.AlertDialog | None:
     dialog.connect("response", on_response)
     dialog.present(win)
     return dialog
+
+
+USERNAME_PATTERN = r"^[A-Za-z_][A-Za-z0-9_.-]*$"
+
+
+def username_ok(text: str) -> bool:
+    import re
+
+    return bool(re.fullmatch(USERNAME_PATTERN, text or ""))
+
+
+def suggest_username(full_name: str) -> str:
+    """'Elisha Ben-David' -> 'elisha': the first name, lowercased, letters
+    and digits only. Short and memorable, which is what a login name is
+    for; the person can type something else."""
+    import re
+    import unicodedata
+
+    first = (full_name or "").strip().split()
+    if not first:
+        return ""
+    plain = unicodedata.normalize("NFKD", first[0]).encode("ascii", "ignore").decode()
+    slug = re.sub(r"[^A-Za-z0-9]", "", plain).lower()
+    if slug and not slug[0].isalpha():
+        slug = "u" + slug
+    return slug
 
 
 def confirm_remove_user(win, user: dict) -> None:

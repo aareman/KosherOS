@@ -298,7 +298,7 @@ try DISK="build/qcow2/disk.qcow2":
     qemu-system-x86_64 -enable-kvm -cpu host -m 4096 -smp 4 \
         -drive file=build/try/overlay.qcow2,if=virtio \
         -netdev user,id=n0,hostfwd=tcp:127.0.0.1:2223-:22 \
-        -device virtio-net-pci,netdev=n0 -display gtk
+        -device virtio-net-pci,netdev=n0 -device virtio-gpu-gl -display gtk,gl=on
     rm -f build/try/overlay.qcow2
 
 # Same, but headless with the console in this terminal: no video device, so
@@ -335,14 +335,14 @@ boot-iso:
         -drive file=build/test-install.qcow2,if=virtio \
         -cdrom build/bootiso/install.iso -boot once=d \
         -netdev user,id=n0 -device virtio-net-pci,netdev=n0 \
-        -display gtk
+        -device virtio-gpu-gl -display gtk,gl=on
 
 # Boot the machine installed by `just boot-iso` (first boot runs the wizard).
 boot-installed:
     qemu-system-x86_64 -enable-kvm -cpu host -m 4096 -smp 4 \
         -drive file=build/test-install.qcow2,if=virtio \
         -netdev user,id=n0 -device virtio-net-pci,netdev=n0 \
-        -display gtk
+        -device virtio-gpu-gl -display gtk,gl=on
 
 # Boot the built qcow2 (headless, ssh on localhost:2223 if the image has sshd).
 # Interactive TEXT setup in your own terminal — the proven path (the boot
@@ -360,7 +360,7 @@ boot-image:
     qemu-system-x86_64 -enable-kvm -cpu host -m 4096 -smp 4 \
         -drive file=build/qcow2/disk.qcow2,if=virtio \
         -netdev user,id=n0,hostfwd=tcp:127.0.0.1:2223-:22 -device virtio-net-pci,netdev=n0 \
-        -device virtio-vga -display gtk -serial file:build/qcow2/console.log
+        -device virtio-gpu-gl -display gtk,gl=on -serial file:build/qcow2/console.log
 
 # Update the RUNNING dev VM (started with `just boot-image`) to the image
 # just built — WITHOUT rebuilding the disk. Only changed layers transfer,

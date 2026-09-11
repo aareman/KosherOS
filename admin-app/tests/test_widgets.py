@@ -455,7 +455,10 @@ def test_switching_ad_blocking_off_goes_through_the_guardian():
     assert asked == [False]
 
 
-def test_the_guest_can_be_set_up_from_a_profile():
+def test_the_guest_is_set_up_by_kind_of_internet_not_preset():
+    # Nobody knows who the guest is, so "Child" or "Teenager" is the wrong
+    # question; the kind of internet is the right one, and each kind still
+    # carries sensible content settings through the preset it maps to.
     sent = {}
 
     class Recording(FakeClient):
@@ -466,10 +469,33 @@ def test_the_guest_can_be_set_up_from_a_profile():
     win.policy = {"revision": 1, "users": [], "guardian": {"enabled": False},
                   "guest": {"enabled": True, "mode": "whitelist", "whitelist": []}}
     page = family.GuestPage(win)
-    combo = _row_named(page, "Set the guest up as")
-    combo.set_selected(1)  # the second preset
+    combo = _row_named(page, "Internet for the guest")
+    options = [combo.get_model().get_string(i) for i in range(combo.get_model().get_n_items())]
+    assert options == [labels.MODE_LABELS[m] for m in ("none", "whitelist", "dnsfilter",
+                                                        "filtered", "unfiltered")]
+    assert options[combo.get_selected()] == "Whitelist only"
+    combo.set_selected(options.index("Filtered internet"))
     drain()
-    assert sent["enabled"] is True and sent["mode"]
+    assert sent == {"enabled": True, "mode": "child"}
+
+
+def test_the_guest_card_fills_its_cell_like_the_others():
+    card = family.guest_card({"enabled": False})
+    assert card.get_valign() == Gtk.Align.FILL
+    assert card.get_halign() == Gtk.Align.FILL
+    person = family.person_card(a_user(), None, 0)
+    assert card.get_size_request()[0] == person.get_size_request()[0]
+
+
+def test_a_username_is_suggested_from_the_full_name_and_checked():
+    assert dialogs.suggest_username("Elisha Ben-David") == "elisha"
+    assert dialogs.suggest_username("  Chaya   Sara ") == "chaya"
+    assert dialogs.suggest_username("Élodie") == "elodie"
+    assert dialogs.suggest_username("123") == "u123"
+    assert dialogs.suggest_username("") == ""
+    assert dialogs.username_ok("Elisha") and dialogs.username_ok("elisha.b")
+    assert not dialogs.username_ok("eli sha") and not dialogs.username_ok("9lives")
+    assert not dialogs.username_ok("")
 
 
 # -- the activity feed -----------------------------------------------------------

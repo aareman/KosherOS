@@ -177,6 +177,13 @@ class UserPolicy:
 
 
 GUEST_USERNAME = "kosher-guest"
+# What a username may look like: what Fedora's useradd accepts, which
+# includes capitals and dots. The rule used to insist on lowercase, and an
+# admin who typed "Elisha" had the account created by accountsservice and
+# then refused by the policy, leaving a half-made user nobody could manage.
+USERNAME_PATTERN = r"^[A-Za-z_][A-Za-z0-9_.-]*$"
+USERNAME_RULE = ("a username starts with a letter and uses only letters, "
+                 "digits, dots, dashes and underscores")
 
 
 @dataclass

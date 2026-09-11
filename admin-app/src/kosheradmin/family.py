@@ -261,13 +261,16 @@ def person_card(user: dict, counts: dict | None, waiting: int, custom=()) -> Gtk
 
 
 def guest_card(guest: dict, custom=()) -> Gtk.Box:
+    # The same size as every other card: the box fills its cell and the
+    # content is centred inside it, instead of the box shrinking to fit.
     box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8,
-                  valign=Gtk.Align.CENTER, halign=Gtk.Align.FILL)
+                  valign=Gtk.Align.FILL, halign=Gtk.Align.FILL, width_request=240)
     box.add_css_class("card")
     box.add_css_class("person-card")
     enabled = guest.get("enabled", False)
     if not enabled:
         box.add_css_class("guest-off")
+    box.append(Gtk.Box(vexpand=True))
     box.append(avatar("Guest", 36))
     name = Gtk.Label(label="Guest", halign=Gtk.Align.CENTER)
     name.add_css_class("heading")
@@ -287,6 +290,7 @@ def guest_card(guest: dict, custom=()) -> Gtk.Box:
     hint.add_css_class("accent")
     hint.add_css_class("caption")
     box.append(hint)
+    box.append(Gtk.Box(vexpand=True))
     return box
 
 
@@ -476,6 +480,26 @@ class UpdatesPage(_Page):
                       done_msg="Update staged — reboot to apply")
 
 
+# The guest's kinds of internet, each with the preset whose content settings
+# go with it. Filtered means the Child preset: a guest is a stranger to the
+# filter, and the strict answer is the one that is right without knowing them.
+GUEST_KINDS = {
+    "none": "none",
+    "whitelist": "young_child",
+    "dnsfilter": "dns_only",
+    "filtered": "child",
+    "unfiltered": "unfiltered",
+}
+GUEST_KIND_HINTS = {
+    "none": "No web at all for whoever signs in as the guest.",
+    "whitelist": "Only the approved sites below, no pictures from the web, no YouTube.",
+    "dnsfilter": "Known bad sites blocked and safe search forced; pages and pictures not checked.",
+    "filtered": "Filtered like a child's account: adult, gambling, social and video "
+                "blocked, immodest pictures hidden, bad language replaced.",
+    "unfiltered": "Nothing filtered for the guest.",
+}
+
+
 class GuestPage(_Page):
     """The guest is an account like the others: a preset, and for the
     whitelist preset, its own list. Passwordless, and wiped at sign-out."""
@@ -501,25 +525,26 @@ class GuestPage(_Page):
                        push(s.get_active(), mode, wl_domains))
         group.add(switch)
 
-        custom = win.policy.get("custom_profiles", [])
-        keys = [p.key for p in profiles_mod.PROFILES]
-        current = profiles_mod.matching(guest)
+        # The guest is set up by the KIND of internet it gets, not by a
+        # preset: nobody knows who the guest is, so "Child" or "Teenager"
+        # is the wrong question. Each kind maps to the preset that carries
+        # sensible content settings for it (GUEST_KINDS), so a filtered
+        # guest still gets pictures, language and YouTube handled.
+        kinds = list(GUEST_KINDS)
         mode_row = Adw.ComboRow(
-            title="Set the guest up as",
-            model=Gtk.StringList.new(
-                [p.label for p in profiles_mod.PROFILES] + [labels.PROFILE_CUSTOM]))
-        mode_row.set_selected(keys.index(current) if current else len(keys))
-        mode_row.set_subtitle(
-            profiles_mod.get(current).description if current
-            else labels.MODE_HINTS.get(mode, ""))
+            title="Internet for the guest",
+            model=Gtk.StringList.new([labels.MODE_LABELS[m] for m in kinds]))
+        mode_row.set_selected(kinds.index(mode) if mode in kinds else 0)
+        mode_row.set_subtitle(GUEST_KIND_HINTS.get(mode, labels.MODE_HINTS.get(mode, "")))
+        mode_row.set_subtitle_lines(3)
 
-        def on_guest_profile(combo, _p):
-            index = combo.get_selected()
-            if index >= len(keys) or keys[index] == current:
+        def on_guest_kind(combo, _p):
+            new_mode = kinds[combo.get_selected()]
+            if new_mode == mode:
                 return
-            push(guest["enabled"], keys[index], wl_domains)
+            push(guest["enabled"], GUEST_KINDS[new_mode], wl_domains)
 
-        mode_row.connect("notify::selected", on_guest_profile)
+        mode_row.connect("notify::selected", on_guest_kind)
         group.add(mode_row)
 
         wl_row = Adw.ActionRow(
@@ -534,7 +559,6 @@ class GuestPage(_Page):
             wl_row.set_subtitle("Only used in Whitelist only mode")
         group.add(wl_row)
         self.prefs.add(group)
-        del custom
 
 
 class AppsPage(_Page):

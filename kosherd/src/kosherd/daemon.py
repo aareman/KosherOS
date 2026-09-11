@@ -9,9 +9,11 @@ agent are all just D-Bus clients of it.
 
 from __future__ import annotations
 
+import copy
 import errno
 import json
 import logging
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -430,6 +432,13 @@ class Daemon:
     # ---- dispatch --------------------------------------------------------
 
     def _handle_call(self, connection, sender, path, iface, method, params, invocation) -> None:
+        # The policy as it was before this call. A method that changes the
+        # in-memory policy and then fails (a save refused by the schema, a
+        # service that would not restart) must not leave the change behind:
+        # it did once, and every later call failed on the same stale user
+        # until the daemon was restarted. On any error the snapshot is put
+        # back, so a failed call is a call that did not happen.
+        snapshot = None
         try:
             uid = auth.caller_uid(connection, sender)
             requirement = access.evaluate(
@@ -449,6 +458,7 @@ class Daemon:
                 if not self.guardian.verify(args[-1]):
                     raise GuardianError("guardian password incorrect")
                 self.sessions.grant_guardian(uid)
+            snapshot = copy.deepcopy(self.policy)
             result = getattr(self, f"impl_{method}")(*args, _uid=uid) \
                 if method in UID_AWARE else getattr(self, f"impl_{method}")(*args)
             invocation.return_value(result)
@@ -456,16 +466,26 @@ class Daemon:
             if method in access.CHANGES:
                 self._note_change(method, args, by=uid)
         except (auth.NotAuthorized, GuardianError, PolicyError, AppError, KeyError, ValueError) as e:
+            self._roll_back(snapshot, method)
             log.warning("%s by %s refused: %s", method, sender, e)
             invocation.return_dbus_error(ERROR_NAME, str(e))
         except GLib.Error as e:
             # A system service we called (accountsservice, polkit, ...) said no —
             # pass its message through instead of masking it as 'internal error'.
+            self._roll_back(snapshot, method)
             log.warning("%s by %s failed downstream: %s", method, sender, e.message)
             invocation.return_dbus_error(ERROR_NAME, e.message)
         except Exception as e:  # noqa: BLE001 - daemon must not crash on a bad call
+            self._roll_back(snapshot, method)
             log.exception("%s failed", method)
             invocation.return_dbus_error(ERROR_NAME, f"internal error: {e}")
+
+    def _roll_back(self, snapshot, method: str) -> None:
+        """Put the in-memory policy back to what it was before a failed call."""
+        if snapshot is None or snapshot == self.policy:
+            return
+        self.policy = snapshot
+        log.warning("%s failed part-way; the policy was put back", method)
 
     def _note_change(self, method: str, args: list, *, by: int) -> None:
         """One line in the activity log saying who changed what.
@@ -1100,6 +1120,11 @@ class Daemon:
         if mode not in MODES and mode not in {
                 p.key for p in profiles_mod.all_profiles(self.policy.custom_profiles)}:
             raise PolicyError(f"unknown mode or profile {mode!r}")
+        # Everything that can be checked is checked BEFORE the account exists.
+        # The account used to be created first and refused by the policy
+        # afterwards, which left a user on the machine that nothing managed.
+        if not re.fullmatch(policy_mod.USERNAME_PATTERN, username or ""):
+            raise PolicyError(f"'{username}' is not a valid username: {policy_mod.USERNAME_RULE}")
         try:
             existing_uid = pwd.getpwnam(username).pw_uid
         except KeyError:
@@ -1111,8 +1136,19 @@ class Daemon:
                 f"'{username}' already exists — use Adopt Existing User to manage it"
             )
         uid = self._accounts_create_user(username, full_name)
-        self.policy.users.append(self._new_user(uid, username, mode, self.policy.custom_profiles))
-        self._save_and_apply()
+        try:
+            self.policy.users.append(
+                self._new_user(uid, username, mode, self.policy.custom_profiles))
+            self._save_and_apply()
+        except Exception:
+            # The policy would not take the account: undo the half we did,
+            # so the machine is exactly as it was before the click.
+            log.warning("could not manage new account %s; removing it again", username)
+            try:
+                self._accounts_delete_user(uid)
+            except Exception:  # noqa: BLE001 - report the original failure
+                log.exception("could not remove the half-created account %s", username)
+            raise
         return GLib.Variant("(i)", (uid,))
 
     def impl_SetGuestConfig(self, enabled: bool, mode: str, whitelist: list[str], _guardian_pw: str):

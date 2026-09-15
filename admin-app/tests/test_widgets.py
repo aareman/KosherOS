@@ -29,7 +29,8 @@ if not Gtk.init_check():  # pragma: no cover - no display
 Adw.init()
 
 from kosheradmin import app as admin  # noqa: E402
-from kosheradmin import detail, dialogs, family, feed, labels, schedule  # noqa: E402
+from kosheradmin import (computer, detail, dialogs, family, feed,  # noqa: E402
+                         labels, schedule, sidebar)
 
 
 class FakeClient:
@@ -116,6 +117,8 @@ class FakeWindow(Gtk.Window):
         self.update_state = None
         self.pushed = []
         self.shown_activity = []
+        self.went_to = []
+        self.destination = "family"
 
     def toast(self, text):
         self.toasts.append(text)
@@ -135,6 +138,16 @@ class FakeWindow(Gtk.Window):
 
     def push(self, page):
         self.pushed.append(page)
+
+    def go_to(self, key):
+        self.went_to.append(key)
+        self.destination = key
+
+    def pop_to_root(self):
+        self.went_to.append("root")
+
+    def lock(self):
+        self.went_to.append("lock")
 
     def open_user_detail(self, user):
         self.pushed.append(("detail", user["uid"]))
@@ -485,17 +498,55 @@ def test_every_reportable_problem_produces_a_row():
     assert "620" in rows[0][1]
 
 
-def test_the_computer_tiles_open_their_pages():
-    win, page = a_board([a_user()], catalog_count=23)
-    tiles = _children(page.tiles)
-    assert [t.key for t in tiles] == ["apps", "lists", "ads", "guardian", "updates"]
-    assert "23 apps approved" in _texts(tiles[0])
-    assert "Blocked for everyone" in _texts(tiles[2])
-    for tile in (tiles[1], tiles[2], tiles[4]):
-        page._on_tile(page.tiles, tile)
+def test_the_sidebar_lists_the_people_and_the_computer_and_says_how_each_is():
+    win = FakeWindow(FakeClient(), catalog_count=23)
+    win.policy = {"revision": 1, "users": [a_user(), a_user(uid=1002, username="rivky")],
+                  "guardian": {"enabled": False}, "adblock": {"enabled": True},
+                  "guest": {"enabled": False}}
+    win.requests = [{"id": "a" * 32, "uid": 1001, "username": "yosef", "mode": "filtered",
+                     "url": "https://x.test/a", "asked": 0}]
+    rail = sidebar.Sidebar(win)
+    rail.refresh()
     drain()
-    assert [type(p).__name__ for p in win.pushed] == ["WordListsPage", "AdsPage",
-                                                       "UpdatesPage"]
+    assert [key for key, _t, _i, _s in sidebar.DESTINATIONS] == \
+        ["family", "activity", "protection", "apps", "updates"]
+    sections = [s for _k, _t, _i, s in sidebar.DESTINATIONS if s]
+    assert sections == ["The family", "This computer"]
+    assert rail.rows["family"].status.get_label() == "2 people"
+    assert rail.rows["family"].badge.get_label() == "1"      # one request waiting
+    assert rail.rows["apps"].status.get_label() == "23 apps"
+    assert rail.rows["protection"].status.get_label() == "Running"
+    # Clicking a row takes the window there.
+    rail.list.select_row(rail.rows["updates"])
+    drain()
+    assert win.went_to == ["updates"]
+
+
+def test_the_sidebar_shows_a_filter_problem_as_an_amber_badge():
+    win = FakeWindow(FakeClient(), status={"pictures": "no_model", "detect_ms": None,
+                                           "degraded": ["kosher-dns.service"],
+                                           "problems": [], "services": {}})
+    rail = sidebar.Sidebar(win)
+    rail.refresh()
+    drain()
+    assert rail.rows["protection"].badge.get_visible()
+    assert rail.rows["protection"].badge.get_label() == "2 problems"
+    assert "warn" in rail.rows["protection"].badge.get_css_classes()
+
+
+def test_protection_is_one_page_with_the_health_the_ads_and_the_guardian():
+    win = FakeWindow(FakeClient())
+    win.policy = {"revision": 1, "users": [a_user()], "guardian": {"enabled": True},
+                  "adblock": {"enabled": True}, "guest": {"enabled": False}}
+    page = computer.ProtectionPage(win)
+    drain()
+    titles = [r.get_title() for r in _rows(page)]
+    assert "The filter is running" in titles            # the health, not behind a dialog
+    assert "Block ads and trackers" in titles
+    for _n, list_title, _d, _u in labels.EDITABLE_LISTS:  # the word lists, inline
+        assert list_title in titles
+    guardian = _row_named(page, "Guardian password")
+    assert guardian.get_subtitle().startswith("On.")
 
 
 def test_switching_ad_blocking_off_goes_through_the_guardian():
@@ -508,8 +559,8 @@ def test_switching_ad_blocking_off_goes_through_the_guardian():
     win = FakeWindow(Recording())
     win.policy = {"revision": 1, "users": [], "guardian": {"enabled": False},
                   "adblock": {"enabled": True}, "guest": {"enabled": False}}
-    page = family.AdsPage(win)
-    page.row.set_active(False)
+    page = computer.ProtectionPage(win)
+    page.ads_row.set_active(False)
     drain()
     assert asked == [False]
 
@@ -1070,7 +1121,7 @@ def test_the_updates_page_names_the_version_it_would_go_back_to():
     win = FakeWindow()
     win.policy = {"revision": 1, "users": [], "guardian": {"enabled": False},
                   "guest": {"enabled": False}}
-    page = family.UpdatesPage(win)
+    page = computer.UpdatesPage(win)
     drain()
     assert "2026.09.10" in page.version_row.get_subtitle()
     assert "Would return to version 2026.09.03" in page.back_row.get_subtitle()
@@ -1082,7 +1133,7 @@ def test_without_a_previous_version_the_button_is_off_and_says_why():
                                             "staged": None, "rollback_queued": False}))
     win.policy = {"revision": 1, "users": [], "guardian": {"enabled": False},
                   "guest": {"enabled": False}}
-    page = family.UpdatesPage(win)
+    page = computer.UpdatesPage(win)
     drain()
     assert not page.back_button.get_sensitive()
     assert "no previous version" in page.back_row.get_subtitle()
@@ -1094,7 +1145,7 @@ def test_a_queued_rollback_is_not_offered_twice():
                                             "staged": None, "rollback_queued": True}))
     win.policy = {"revision": 1, "users": [], "guardian": {"enabled": False},
                   "guest": {"enabled": False}}
-    page = family.UpdatesPage(win)
+    page = computer.UpdatesPage(win)
     drain()
     assert not page.back_button.get_sensitive()
     assert "Already going back" in page.back_row.get_subtitle()
@@ -1104,7 +1155,7 @@ def test_a_status_with_every_key_missing_still_renders():
     win = FakeWindow(FakeClient(deployment={}))
     win.policy = {"revision": 1, "users": [], "guardian": {"enabled": False},
                   "guest": {"enabled": False}}
-    page = family.UpdatesPage(win)
+    page = computer.UpdatesPage(win)
     drain()
     assert page.version_row.get_subtitle() == "unknown"
     assert not page.back_button.get_sensitive()
@@ -1120,7 +1171,7 @@ def test_going_back_asks_first_and_then_calls_the_daemon():
     win = FakeWindow(Recording())
     win.policy = {"revision": 1, "users": [], "guardian": {"enabled": False},
                   "guest": {"enabled": False}}
-    page = family.UpdatesPage(win)
+    page = computer.UpdatesPage(win)
     drain()
     page._confirm_rollback()
     drain()
@@ -1178,10 +1229,12 @@ def test_the_demo_family_drives_every_screen():
 
 # -- the cursor says what can be clicked ----------------------------------------------
 
-def test_cards_tiles_and_acting_rows_get_the_hand_cursor():
+def test_cards_sidebar_rows_and_acting_rows_get_the_hand_cursor():
     win, page = a_board([a_user()])
-    for child in _children(page.cards) + _children(page.tiles):
+    for child in _children(page.cards):
         assert child.get_cursor() is not None and child.get_cursor().get_name() == "pointer"
+    for row in sidebar.Sidebar(win).rows.values():
+        assert row.get_cursor().get_name() == "pointer"
     detail_page, _w, _u = _detail()
     acting = [r for r in _rows(detail_page)
               if isinstance(r, Adw.ActionRow) and r.get_activatable()]

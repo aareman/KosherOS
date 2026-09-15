@@ -29,27 +29,36 @@ WEEK = 7 * 86400
 
 
 class ActivityPage(Gtk.Box):
-    """Rail of people on the left, the feed on the right."""
+    """The feed, the full width of the page.
+
+    Who and when are chosen from the header bar rather than from a rail
+    down the left: the app already has a sidebar there, and two navigation
+    columns for one page is one too many.
+    """
 
     def __init__(self, win):
-        super().__init__(orientation=Gtk.Orientation.HORIZONTAL)
+        super().__init__(orientation=Gtk.Orientation.VERTICAL)
         self.win = win
         self.uid = EVERYONE
         self.since_days = 1
         self.events: list[dict] = []
         self.requests: list[dict] = []
 
-        # -- rail --
-        rail = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, width_request=200)
-        rail.add_css_class("sidebar-pane" if hasattr(Adw, "NavigationSplitView") else "")
+        # -- the filters, which the window hands to the header bar --
         self.people = Gtk.ListBox(selection_mode=Gtk.SelectionMode.SINGLE,
-                                  margin_top=8, margin_start=8, margin_end=8)
+                                  margin_top=4, margin_bottom=4)
         self.people.add_css_class("navigation-sidebar")
         self.people.connect("row-selected", self._on_person)
-        rail.append(self._rail_label("Show"))
-        rail.append(self.people)
-        rail.append(Gtk.Separator(margin_top=8, margin_bottom=8))
-        self.range = Gtk.Box(spacing=0, margin_start=12, margin_end=12, halign=Gtk.Align.CENTER)
+        people_scroller = Gtk.ScrolledWindow(hscrollbar_policy=Gtk.PolicyType.NEVER,
+                                             propagate_natural_height=True,
+                                             max_content_height=420,
+                                             width_request=220)
+        people_scroller.set_child(self.people)
+        self.who = Gtk.MenuButton(label="Everyone", always_show_arrow=True,
+                                  popover=Gtk.Popover(child=people_scroller))
+        self.who.add_css_class("flat")
+
+        self.range = Gtk.Box(spacing=0)
         self.range.add_css_class("linked")
         self.today_btn = Gtk.ToggleButton(label="Today", active=True)
         self.week_btn = Gtk.ToggleButton(label="This week", group=self.today_btn)
@@ -57,29 +66,18 @@ class ActivityPage(Gtk.Box):
         self.week_btn.connect("toggled", lambda b: b.get_active() and self._set_range(7))
         self.range.append(self.today_btn)
         self.range.append(self.week_btn)
-        rail.append(self.range)
-        self.append(rail)
-        self.append(Gtk.Separator(orientation=Gtk.Orientation.VERTICAL))
 
         # -- feed --
         self.feed = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=18,
                             margin_top=18, margin_bottom=24, margin_start=12,
                             margin_end=12)
-        clamp = Adw.Clamp(maximum_size=760, tightening_threshold=500)
+        clamp = Adw.Clamp(maximum_size=820, tightening_threshold=560)
         clamp.set_child(self.feed)
         scroller = Gtk.ScrolledWindow(hexpand=True, vexpand=True,
                                       hscrollbar_policy=Gtk.PolicyType.NEVER)
         scroller.set_child(clamp)
         self.append(scroller)
         self._rebuild_rail()
-
-    @staticmethod
-    def _rail_label(text: str) -> Gtk.Label:
-        label = Gtk.Label(label=text.upper(), xalign=0, margin_start=20,
-                          margin_top=14, margin_bottom=2)
-        label.add_css_class("caption-heading")
-        label.add_css_class("dim-label")
-        return label
 
     # -- state ------------------------------------------------------------------
 
@@ -97,6 +95,10 @@ class ActivityPage(Gtk.Box):
     def _on_person(self, _list, row) -> None:
         if row is None:
             return
+        self.who.set_label(getattr(row, "person", "Everyone"))
+        popover = self.who.get_popover()
+        if popover is not None:
+            popover.popdown()
         uid = getattr(row, "uid", EVERYONE)
         if uid != self.uid:
             self.uid = uid
@@ -122,7 +124,7 @@ class ActivityPage(Gtk.Box):
 
         run_async(load, on_done, lambda e: self.win.toast(error_text(e)))
 
-    # -- rail -------------------------------------------------------------------
+    # -- who the feed is about ---------------------------------------------------
 
     def _rebuild_rail(self) -> None:
         selected = self.uid
@@ -146,6 +148,7 @@ class ActivityPage(Gtk.Box):
     def _person_row(name: str, uid: int, waiting: int, icon: str | None = None) -> Gtk.ListBoxRow:
         row = Gtk.ListBoxRow()
         row.uid = uid
+        row.person = name
         box = Gtk.Box(spacing=8, margin_top=4, margin_bottom=4)
         if icon:
             box.append(Gtk.Image(icon_name=icon, pixel_size=16, margin_start=4, margin_end=4))

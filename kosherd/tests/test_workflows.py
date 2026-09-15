@@ -66,9 +66,11 @@ def test_every_version_that_passes_gets_a_release():
 
 
 def test_the_release_says_when_there_is_no_new_image():
+    # The wording lives in scripts/release-notes.py now; the workflow only
+    # tells it which case this is (see test_release_notes.py).
     ci = (ROOT / ".github/workflows/ci.yml").read_text()
-    assert "No new OS image" in ci
-    assert "machines stay on the image from the previous version" in ci
+    assert "scripts/release-notes.py" in ci
+    assert "--built" in ci and "--image-failed" in ci
 
 
 def test_the_image_job_still_tags_and_signs_the_version():
@@ -116,5 +118,7 @@ def test_the_release_tells_the_truth_about_the_image():
     """
     ci = (ROOT / ".github/workflows/ci.yml").read_text()
     assert "needs.image.result == 'success'" in ci, "the note keys off the result"
-    assert "No OS image: the build failed" in ci
-    assert "No new OS image" in ci, "and the skipped-on-purpose case still reads well"
+    assert '[ "${{ needs.image.result }}" = "failure" ] && failed=--image-failed' in ci
+    notes = (ROOT / "scripts/release-notes.py").read_text()
+    assert "No image for this version" in notes
+    assert "No new image" in notes, "and the skipped-on-purpose case still reads well"

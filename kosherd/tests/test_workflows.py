@@ -122,3 +122,31 @@ def test_the_release_tells_the_truth_about_the_image():
     notes = (ROOT / "scripts/release-notes.py").read_text()
     assert "No image for this version" in notes
     assert "No new image" in notes, "and the skipped-on-purpose case still reads well"
+
+
+def test_the_docs_are_rebuilt_in_the_same_run_as_the_release():
+    """A release made by CI cannot trigger another workflow.
+
+    GitHub deliberately does not start workflow runs from events its own
+    token created, so a separate docs workflow listening for `release:`
+    never fired and the published Releases page sat several versions
+    behind with nothing looking broken. The docs build is a job in this
+    run, after the release.
+    """
+    document = yaml.safe_load((ROOT / ".github/workflows/ci.yml").read_text())
+    docs = document["jobs"]["docs"]
+    assert docs["needs"] == ["release"]
+    assert "always()" in docs["if"], "a skipped release must not skip the docs"
+    steps = " ".join(str(step) for step in docs["steps"])
+    assert "actions/deploy-pages" in steps and "build-docs.py" in steps
+    assert not (ROOT / ".github/workflows/docs.yml").exists(), \
+        "two workflows deploying Pages race each other"
+
+
+def test_nothing_waits_for_an_event_its_own_token_cannot_fire():
+    for path in WORKFLOWS:
+        document = yaml.safe_load(path.read_text())
+        triggers = document.get(True) or document.get("on") or {}
+        if isinstance(triggers, dict):
+            assert "release" not in triggers, \
+                f"{path.name}: a CI-made release does not fire this"

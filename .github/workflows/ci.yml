@@ -9,6 +9,12 @@ on:
     branches: [master]
   pull_request:
 
+concurrency:
+  # One Pages deployment at a time; a second push while one is publishing
+  # waits rather than racing it.
+  group: pages-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   unit:
     name: Unit tests
@@ -216,3 +222,36 @@ jobs:
           gh release create "$tag" $prerelease --target "$GITHUB_SHA" \
             --title "KosherOS $version" --notes-file release-notes.md
 
+  docs:
+    name: Docs site
+    # In the same run as the release, and after it, so the Releases page
+    # includes the release this run just made. It cannot be its own
+    # workflow listening for `release:`: a release created by CI with the
+    # default token deliberately does not trigger other workflows, so that
+    # page sat several versions behind without anything looking broken.
+    needs: [release]
+    if: always() && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - run: pip install mkdocs-material
+      - name: Assemble and build
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 scripts/build-docs.py --build
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+      - id: deployment
+        uses: actions/deploy-pages@v4

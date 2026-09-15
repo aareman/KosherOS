@@ -137,7 +137,9 @@ case "${1:-}" in
     status) running && echo "running (pid $(cat "$pidfile"))" || echo "stopped" ;;
     down) running && kill "$(cat "$pidfile")" && echo stopped || echo "not running" ;;
     destroy)
-        running && kill "$(cat "$pidfile")" 2>/dev/null || true
+        if running; then
+            kill "$(cat "$pidfile")" 2>/dev/null || true
+        fi
         rm -f "$disk" "$seed" "$vm_dir/user-data" "$vm_dir/meta-data" "$pidfile"
         echo "VM deleted (base image kept at $base_img)" ;;
     *) grep '^#   ' "$0" | sed 's/^#   //'; exit 1 ;;

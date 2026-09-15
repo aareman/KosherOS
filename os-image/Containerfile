@@ -7,7 +7,9 @@
 # belongs in the shipped image, so it is built here from a pinned tag and
 # only the result is copied over. A failed fetch leaves a marker rather than
 # failing the whole image; the final stage warns and ships without it.
-FROM quay.io/fedora/fedora:44 AS gnome-ext-build
+# Lowercase "as": the podman on GitHub's Ubuntu runners (4.9) rejects "AS"
+# with "FROM requires either one argument, or three".
+FROM quay.io/fedora/fedora:44 as gnome-ext-build
 ARG ARCMENU_REF=v69.2
 RUN dnf -y install glib2-devel gettext make git-core && dnf clean all
 RUN mkdir -p /out && ( git clone --depth 1 --branch "${ARCMENU_REF}" \

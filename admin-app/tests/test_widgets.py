@@ -520,6 +520,16 @@ def test_the_guest_card_fills_its_cell_like_the_others():
     assert card.get_size_request()[0] == person.get_size_request()[0]
 
 
+def test_every_card_on_the_board_shares_one_height():
+    win, page = a_board([a_user(), a_user(uid=1002, username="rivky")])
+    cards = [c.get_child() for c in _children(page.cards)]
+    grouped = list(page.card_heights.get_widgets())
+    assert len(grouped) == len(cards) == 3
+    assert page.card_heights.get_mode() == Gtk.SizeGroupMode.VERTICAL
+    heights = {c.measure(Gtk.Orientation.VERTICAL, 260)[0] for c in cards}
+    assert len(heights) == 1, heights
+
+
 def test_a_username_is_suggested_from_the_full_name_and_checked():
     assert dialogs.suggest_username("Elisha Ben-David") == "elisha"
     assert dialogs.suggest_username("  Chaya   Sara ") == "chaya"

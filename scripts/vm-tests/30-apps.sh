@@ -48,7 +48,7 @@ if [ -z "$target" ]; then
 else
     out=$(as wlkid flatpak install --system -y flathub "$target" 2>&1)
     case "$out" in
-        *"not allowed"*|*"Deploy not allowed"*)
+        *"not allowed"*)
             ok "a user cannot install system-wide ($target)" ;;
         *) bad "system install was not refused: $(printf '%s' "$out" | tail -1)" ;;
     esac

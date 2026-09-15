@@ -102,8 +102,12 @@ three things:
 - `/etc/anaconda/conf.d/90-kosheros.conf` — a drop-in loaded after the
   Fedora profile (`set_from_files`), pointing `custom_stylesheet` at ours
   and hiding every hub spoke the kickstart already answers (keyboard,
-  language, time zone, network, source, software), so the installer is one
-  question — which disk — and a Begin Installation button. The first real
+  language, time zone, network, source, software). The disk question
+  answers itself when it can: a `%pre` script in `os-image/iso-config.toml`
+  picks the disk when the machine has exactly one internal drive that is not
+  the installer stick, so the hub arrives complete and the install is a
+  Begin Installation button; with two or more candidate disks it writes
+  nothing and Anaconda asks, so a second drive is never wiped unseen. The first real
   install found the stock hub "non-linear and quite complex"; this is the
   fix that stays inside Anaconda;
 - `/usr/share/anaconda/pixmaps/kosheros/` — the stylesheet (navy sidebar

@@ -67,9 +67,11 @@ cat > /tmp/policy.json <<EOF
  ]}
 EOF
 kosherctl render-nft /tmp/policy.json > /tmp/kosher.nft
-grep -q "meta skuid $FILTERED tcp dport { 80, 443 } redirect to :$PORT" /tmp/kosher.nft \
-    && say "the filtered user is redirected to their own port" "ok" \
-    || { say "the filtered user is redirected to their own port" "FAILED"; fail=1; }
+if grep -q "meta skuid $FILTERED tcp dport { 80, 443 } redirect to :$PORT" /tmp/kosher.nft; then
+    say "the filtered user is redirected to their own port" "ok"
+else
+    say "the filtered user is redirected to their own port" "FAILED"; fail=1
+fi
 nft -f /tmp/kosher.nft || { echo "  the ruleset does not load"; exit 1; }
 
 # Our block page is unmistakable, so seeing it proves the whole chain:

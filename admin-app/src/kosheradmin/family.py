@@ -150,15 +150,23 @@ class FamilyPage(Gtk.Box):
         for request in waiting:
             by_uid[request["uid"]] = by_uid.get(request["uid"], 0) + 1
         custom = win.policy.get("custom_profiles", [])
+        # One height for every card, the guest's included. A homogeneous
+        # FlowBox gives every child the same cell, but a card that asks for
+        # less did not fill it; a vertical size group makes them all ask
+        # for the tallest one's height.
+        self.card_heights = Gtk.SizeGroup(mode=Gtk.SizeGroupMode.VERTICAL)
         for user in win.policy.get("users", []):
             counts = (win.summary or {}).get(str(user["uid"]))
             card = person_card(user, counts, by_uid.get(user["uid"], 0), custom)
+            self.card_heights.add_widget(card)
             child = Gtk.FlowBoxChild()
             child.set_child(card)
             child.user = user
             self.cards.append(child)
+        guest_box = guest_card(win.policy.get("guest") or {"enabled": False}, custom)
+        self.card_heights.add_widget(guest_box)
         guest = Gtk.FlowBoxChild()
-        guest.set_child(guest_card(win.policy.get("guest") or {"enabled": False}, custom))
+        guest.set_child(guest_box)
         guest.user = None
         self.cards.append(guest)
 

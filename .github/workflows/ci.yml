@@ -14,38 +14,38 @@ jobs:
     name: Unit tests
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-      - run: pip install pytest pytest-cov jsonschema cryptography fastapi httpx
-      - name: Install nftables
-        # test_nft.py syntax-checks the rendered ruleset with the real
-        # parser; it skips itself if the runner forbids user namespaces.
-        run: sudo apt-get install -y nftables
+      - uses: actions/checkout@v5
+      - name: Python with GObject
+        # The daemon imports gi at module level, so every test that touches
+        # it needs PyGObject. The distro's python3-gi is the dependable way
+        # to get it (pip would build it from source); the runner's system
+        # Python is 3.12, the same as the dev shell. nftables: test_nft.py
+        # syntax-checks the rendered ruleset with the real parser.
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y python3-gi gir1.2-glib-2.0 python3-pip nftables
+          python3 -m pip install --break-system-packages \
+            pytest pytest-cov jsonschema cryptography fastapi httpx pillow
       - name: Device tests with coverage
         run: |
           cd kosherd
-          python -m pytest tests/ -q \
+          python3 -m pytest tests/ -q \
             --cov=kosherd --cov-report=term-missing:skip-covered \
             --cov-fail-under=85
       - name: Portal tests
-        run: cd portal && PYTHONPATH=src:../kosherd/src python -m pytest tests/ -q
+        run: cd portal && PYTHONPATH=src:../kosherd/src python3 -m pytest tests/ -q
 
   compile:
     name: Apps compile
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
+      - uses: actions/checkout@v5
       - name: Byte-compile every app
         # The GTK apps and the daemon need GObject typelibs to RUN, which
         # CI has no reason to install — but a syntax error must still fail
         # here rather than in a VM.
         run: |
-          python -m compileall -q \
+          python3 -m compileall -q \
             kosherd/src admin-app/src store-app/src setup-app/src \
             myfilter-app/src portal/src mitm
 
@@ -53,7 +53,7 @@ jobs:
     name: Shell scripts
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: shellcheck
         run: |
           sudo apt-get install -y shellcheck
@@ -69,13 +69,13 @@ jobs:
     needs: [unit, compile, shell]
     runs-on: ubuntu-latest
     permissions:
-      contents: read
+      contents: write # the version tag and its GitHub release
       packages: write
       id-token: write # cosign keyless signing
     env:
       IMAGE: ghcr.io/${{ github.repository_owner }}/kosher-linux
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Build image
         run: podman build -t "$IMAGE:${GITHUB_SHA::12}" -t "$IMAGE:latest" -f os-image/Containerfile .
@@ -94,3 +94,34 @@ jobs:
         run: |
           cosign sign --yes "$IMAGE:${GITHUB_SHA::12}"
           cosign sign --yes "$IMAGE:latest"
+
+      - name: Release this version
+        # Every commit carries its own pre-release version (VERSION, ticked
+        # by the dev shell's git hook). Once the image for it is pushed and
+        # signed, the same version becomes an image tag, a git tag and a
+        # GitHub pre-release, so a build a family is running can be traced
+        # to the commit it came from. A commit that did not tick VERSION
+        # (a merge) finds its release already made and leaves it alone.
+        if: github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version="$(tr -d '[:space:]' < VERSION)"
+          tag="v$version"
+          podman tag "$IMAGE:${GITHUB_SHA::12}" "$IMAGE:$tag"
+          podman push "$IMAGE:$tag"
+          cosign sign --yes "$IMAGE:$tag"
+          if gh release view "$tag" >/dev/null 2>&1; then
+            echo "release $tag already exists; leaving it"
+            exit 0
+          fi
+          prerelease=""
+          case "$version" in *-pre.*) prerelease="--prerelease" ;; esac
+          notes="$(printf '%s\n\n%s\n\n%s\n%s\n\n%s\n' \
+            "$(git log -1 --format='%s' "$GITHUB_SHA")" \
+            "OS image: \`$IMAGE:$tag\` (also \`$IMAGE:${GITHUB_SHA::12}\`), signed with cosign keyless." \
+            "A running KosherOS machine moves to it with:" \
+            "    bootc switch $IMAGE:$tag" \
+            "An installer ISO is built locally with \`just iso\` from this commit and is named after this version.")"
+          gh release create "$tag" $prerelease --target "$GITHUB_SHA" \
+            --title "KosherOS $version" --notes "$notes"

@@ -52,8 +52,11 @@ want "asking for a page works" "Your request was sent" \
 if [ "${OFFLINE:-0}" != "1" ]; then
     n=$(curl -s --max-time 45 'http://127.0.0.1:8888/search?q=kosher+recipes' \
         | grep -oE 'class="result"' | wc -l)
-    [ "$n" -gt 0 ] && say "a live search returns results" "ok ($n)" \
-        || { say "a live search returns results" "FAILED (none)"; fail=1; }
+    if [ "$n" -gt 0 ]; then
+        say "a live search returns results" "ok ($n)"
+    else
+        say "a live search returns results" "FAILED (none)"; fail=1
+    fi
 fi
 
 want "every filter list loaded" "none" \

@@ -3,20 +3,73 @@
 # No users and no passwords are baked in: the installed machine runs the
 # KosherOS first-boot wizard, which creates the administrator account.
 #
-# Deliberately NO clearpart/autopart here. Anaconda shows its Installation
-# Destination screen so whoever is installing picks the disk and sees what
-# will be erased. An automatic wipe of every attached disk is fine for a
-# throwaway VM and unacceptable on a laptop with a second drive.
-# For repeat VM rehearsals use os-image/iso-config-unattended.toml
-# (just iso-unattended).
+# The disk question answers itself when it can. A %pre script looks at the
+# machine: if there is exactly one internal, non-removable disk that is not
+# the stick the installer booted from, it writes clearpart/autopart for that
+# disk, and the installer's hub arrives with every step already done — one
+# "Begin Installation" button, which is still a person's click, never
+# automatic. If there are two or more candidate disks (a laptop with a
+# second drive, a desktop), it writes nothing, Anaconda shows Installation
+# Destination, and whoever is installing picks the disk and sees what will
+# be erased. An automatic wipe of every attached disk is fine for a
+# throwaway VM and unacceptable on a machine with a second drive; for repeat
+# VM rehearsals use os-image/iso-config-unattended.toml (just iso-unattended).
+#
+# Language, keyboard and time zone are answered here; the spokes for them
+# (and for network, source and software, which an offline bootc install
+# never needs) are hidden by the product.img drop-in scripts/brand-iso.py
+# puts on the ISO, so the hub is the disk and the button.
 
 [customizations.installer.kickstart]
-contents = """
+contents = '''
 timezone America/New_York --utc
 keyboard us
 lang en_US.UTF-8
 reboot --eject
-"""
+
+%pre --interpreter=/bin/bash --log=/tmp/kosher-pre.log
+# Pick the disk when there is only one to pick.
+set -u
+out=/tmp/kosher-disk.ks
+: > "$out"
+
+# The device the installer itself is running from must never be a target.
+media=""
+src=$(findmnt -n -o SOURCE /run/install/repo 2>/dev/null || true)
+if [ -n "$src" ]; then
+    media=$(lsblk -n -o PKNAME "$src" 2>/dev/null | head -1)
+    [ -n "$media" ] || media=$(basename "$src")
+fi
+
+candidates=()
+for path in /sys/block/*; do
+    name=$(basename "$path")
+    case "$name" in
+        loop*|zram*|ram*|sr*|dm-*|md*) continue ;;
+    esac
+    [ "$(cat "$path/removable" 2>/dev/null)" = "0" ] || continue
+    [ "$name" = "$media" ] && continue
+    size=$(cat "$path/size" 2>/dev/null || echo 0)   # 512-byte sectors
+    [ "$size" -ge 41943040 ] || continue              # at least 20 GiB
+    candidates+=("$name")
+done
+
+echo "install medium: ${media:-unknown}; candidate disks: ${candidates[*]:-none}"
+if [ "${#candidates[@]}" -eq 1 ]; then
+    disk="${candidates[0]}"
+    {
+        echo "ignoredisk --only-use=$disk"
+        echo "zerombr"
+        echo "clearpart --all --initlabel --disklabel=gpt --drives=$disk"
+        echo "autopart --type=plain --fstype=ext4 --nohome --noswap"
+    } > "$out"
+    echo "one internal disk ($disk): the destination is chosen"
+else
+    echo "not exactly one internal disk: Anaconda will ask"
+fi
+%end
+%include /tmp/kosher-disk.ks
+'''
 
 [customizations.installer.modules]
 # Trim the installer to what KosherOS needs: no user creation (the wizard

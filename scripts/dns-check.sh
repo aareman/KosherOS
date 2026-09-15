@@ -79,9 +79,11 @@ server=127.0.0.1#5355
 conf-dir=/etc/kosher/dnsmasq.d,*.conf
 EOF
 
-dnsmasq --test --conf-file=/tmp/kosher-dns.conf 2>&1 | grep -q "syntax check OK" \
-    && say "the rendered config passes dnsmasq's own check" "ok" \
-    || { say "the rendered config passes dnsmasq's own check" "FAILED"; fail=1; }
+if dnsmasq --test --conf-file=/tmp/kosher-dns.conf 2>&1 | grep -q "syntax check OK"; then
+    say "the rendered config passes dnsmasq's own check" "ok"
+else
+    say "the rendered config passes dnsmasq's own check" "FAILED"; fail=1
+fi
 
 # The firewall's sets must exist before dnsmasq can populate them.
 nft add table inet kosher 2>/dev/null

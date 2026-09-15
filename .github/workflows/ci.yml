@@ -77,15 +77,21 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
+      # Two channels. Every push to master becomes :edge — the maintainer's
+      # own daily driver, where every pre-release lands first — plus the
+      # commit's sha tag and its version tag. :stable (and :latest, which
+      # follows it) is never built here: release-stable.yml promotes an
+      # existing signed version by hand, so what families run is a build
+      # somebody chose, not the newest commit.
       - name: Build image
-        run: podman build -t "$IMAGE:${GITHUB_SHA::12}" -t "$IMAGE:latest" -f os-image/Containerfile .
+        run: podman build -t "$IMAGE:${GITHUB_SHA::12}" -t "$IMAGE:edge" -f os-image/Containerfile .
 
       - name: Push
         if: github.event_name == 'push'
         run: |
           podman login ghcr.io -u "$GITHUB_ACTOR" -p "${{ secrets.GITHUB_TOKEN }}"
           podman push "$IMAGE:${GITHUB_SHA::12}"
-          podman push "$IMAGE:latest"
+          podman push "$IMAGE:edge"
 
       - name: Sign (cosign keyless)
         if: github.event_name == 'push'
@@ -96,7 +102,7 @@ jobs:
           # so it needs its own login to push signatures to ghcr.
           cosign login ghcr.io -u "$GITHUB_ACTOR" -p "${{ secrets.GITHUB_TOKEN }}"
           cosign sign --yes "$IMAGE:${GITHUB_SHA::12}"
-          cosign sign --yes "$IMAGE:latest"
+          cosign sign --yes "$IMAGE:edge"
 
       - name: Release this version
         # Every commit carries its own pre-release version (VERSION, ticked
@@ -122,9 +128,9 @@ jobs:
           case "$version" in *-pre.*) prerelease="--prerelease" ;; esac
           notes="$(printf '%s\n\n%s\n\n%s\n%s\n\n%s\n' \
             "$(git log -1 --format='%s' "$GITHUB_SHA")" \
-            "OS image: \`$IMAGE:$tag\` (also \`$IMAGE:${GITHUB_SHA::12}\`), signed with cosign keyless." \
-            "A running KosherOS machine moves to it with:" \
-            "    bootc switch $IMAGE:$tag" \
-            "An installer ISO is built locally with \`just iso\` from this commit and is named after this version.")"
+            "OS image: \`$IMAGE:$tag\` (also \`$IMAGE:${GITHUB_SHA::12}\`; this is the current \`:edge\`), signed with cosign keyless." \
+            "Machines on the edge channel pick it up on their next update. To make it the stable release, run the Promote to stable workflow with:" \
+            "    version: $tag" \
+            "A release ISO is built locally with \`just release-iso\` and installs machines that follow the stable channel.")"
           gh release create "$tag" $prerelease --target "$GITHUB_SHA" \
             --title "KosherOS $version" --notes "$notes"

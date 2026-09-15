@@ -1,0 +1,64 @@
+name: Promote to stable
+
+# The stable channel is never built by a push. Somebody looks at what has
+# been running on :edge, decides it is good, and runs this with the version
+# to promote. It does not rebuild: it copies the exact image CI built and
+# signed for that version to :stable (and :latest, which follows stable),
+# after checking the signature came from this repository's CI. Machines
+# installed from a release ISO follow :stable and pick it up on their next
+# update check.
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "The version to promote, as its tag (for example v0.1.0-pre.9)"
+        required: true
+        type: string
+
+jobs:
+  promote:
+    name: Promote ${{ inputs.version }} to stable
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # the release is marked as the stable one
+      packages: write
+      id-token: write
+    env:
+      IMAGE: ghcr.io/${{ github.repository_owner }}/kosher-linux
+      VERSION_TAG: ${{ inputs.version }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: The version must exist as a release and an image
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          case "$VERSION_TAG" in v[0-9]*) ;; *) echo "version must look like v0.1.0-pre.9"; exit 1 ;; esac
+          gh release view "$VERSION_TAG" >/dev/null
+          sudo apt-get update && sudo apt-get install -y skopeo
+          skopeo login ghcr.io -u "$GITHUB_ACTOR" -p "${{ secrets.GITHUB_TOKEN }}"
+          skopeo inspect "docker://$IMAGE:$VERSION_TAG" --format '{{.Digest}}' | tee digest.txt
+
+      - uses: sigstore/cosign-installer@v3
+      - name: Only an image this repository's CI signed may become stable
+        run: |
+          cosign verify "$IMAGE:$VERSION_TAG" \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+            --certificate-identity-regexp "^https://github.com/${{ github.repository }}/" \
+            >/dev/null
+
+      - name: Copy the same image to :stable and :latest
+        run: |
+          skopeo copy --all "docker://$IMAGE:$VERSION_TAG" "docker://$IMAGE:stable"
+          skopeo copy --all "docker://$IMAGE:$VERSION_TAG" "docker://$IMAGE:latest"
+          echo "stable is now $VERSION_TAG ($(cat digest.txt))"
+
+      - name: Mark the release as the stable one
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release edit "$VERSION_TAG" --latest --prerelease=false \
+            --notes-file <(gh release view "$VERSION_TAG" --json body --jq .body; \
+                           printf '\n\n**Promoted to the stable channel on %s.** Machines following `%s:stable` update to this build.\n' \
+                             "$(date -u +%Y-%m-%d)" "$IMAGE")

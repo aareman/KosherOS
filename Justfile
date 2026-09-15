@@ -261,18 +261,39 @@ iso: (_iso "os-image/iso-config.toml")
 # rehearsal needs no clicking. Never give this one to anyone.
 iso-unattended: (_iso "os-image/iso-config-unattended.toml")
 
+# The ISO people install from, built from a CHANNEL on the public registry
+# rather than the local build, so the installed machine's bootc origin is
+# ghcr.io/…:stable (or :edge) and `bootc upgrade` — and the timer that runs
+# it — follow that channel. A disk built from localhost/kosher-linux:dev
+# records THAT as its origin and never finds an update again; every
+# machine installed so far is in that state. Needs sudo like `just iso`.
+release-iso CHANNEL="stable":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    ref="ghcr.io/aareman/kosher-linux:{{CHANNEL}}"
+    podman pull "$ref"
+    version="$(podman run --rm "$ref" cat /usr/share/kosher/VERSION | tr -d '[:space:]')"
+    echo "release ISO from $ref (KosherOS $version)"
+    KOSHER_IMAGE="$ref" just _iso_from "$ref" os-image/iso-config.toml
+    python3 scripts/brand-iso.py build/bootiso/install.iso --version "$version"
+    echo "Copy the KosherOS-*.iso in build/bootiso onto a USB stick or Ventoy. Machines installed from it follow the {{CHANNEL}} channel."
+
 _iso config: build
+    just _iso_from {{image}} {{config}}
+    just brand-iso
+
+_iso_from ref config:
     mkdir -p build/podman-home/.config/containers
     printf '{"default":[{"type":"insecureAcceptAnything"}]}' > build/podman-home/.config/containers/policy.json
     sudo env HOME="$PWD/build/podman-home" "$(command -v podman)" pull \
-        "containers-storage:[overlay@{{env_var("HOME")}}/.local/share/containers/storage]{{image}}"
+        "containers-storage:[overlay@{{env_var("HOME")}}/.local/share/containers/storage]{{ref}}"
     sudo env HOME="$PWD/build/podman-home" "$(command -v podman)" run --rm -i --privileged \
         --security-opt label=type:unconfined_t \
         -v ./build:/output \
         -v ./{{config}}:/config.toml:ro \
         -v /var/lib/containers/storage:/var/lib/containers/storage \
         quay.io/centos-bootc/bootc-image-builder:latest \
-        --type anaconda-iso --rootfs ext4 {{image}}
+        --type anaconda-iso --rootfs ext4 {{ref}}
     sudo chown -R "$USER:" build/bootiso
     just brand-iso
 

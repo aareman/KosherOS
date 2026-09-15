@@ -94,18 +94,29 @@ containers-policy's keyless identity matching is the fussier path. Keep
 the keyless signature too if it is free; verify against a key we control
 and can rotate deliberately.
 
-**2. An installed machine must point at the public registry.** A disk
-built from `localhost/kosher-linux:dev` records that as its bootc origin
-and will never find an update again. The release ISO has to be built
-against `ghcr.io/<owner>/kosher-linux:stable`, which means a
-`just release-iso` distinct from today's dev `just iso` — and then
-confirming with `bootc status` on the actual machine, not in a VM.
+**2. An installed machine must point at the public registry — built.** ✅
+A disk built from `localhost/kosher-linux:dev` records that as its bootc
+origin and never finds an update again; every machine installed before
+this existed is in that state and needs a reinstall to get onto the update
+path. `just release-iso [CHANNEL]` pulls `ghcr.io/aareman/kosher-linux:stable`
+(or `:edge`) and builds the ISO from it, so the installed machine's origin
+is the channel and `bootc upgrade` — and the timer that runs it — follow
+it. The ISO is named after the version inside the image. Still to confirm:
+`bootc status` on the actual machine, not in a VM.
 
-**3. Channels.** `:testing` under the maintainer's own daily driver,
-`:stable` under everyone else, or the first bad build is everyone's bad
-build. Plus immutable `:YYYY.MM.DD-<sha>` tags so a rollback has
-something to name. `kosherctl channel` (admin + guardian gated) wrapping
-`bootc switch`.
+**3. Channels — built.** ✅ Two channels, decided by the user: **`:edge`**
+is published by CI on every push to master (with the commit-sha tag and
+the `v<VERSION>` tag, plus a GitHub pre-release), and is the maintainer's
+own daily driver where every pre-release lands first. **`:stable`** is
+never built by a push: the "Promote to stable" workflow
+(`.github/workflows/release-stable.yml`, run by hand with a version tag)
+copies the exact signed image for that version to `:stable` and `:latest`,
+after verifying its cosign signature came from this repository's CI, and
+marks the GitHub release as the stable one. So what families run is a
+build somebody chose. The immutable per-version tags are what a rollback
+names. Still open: `kosherctl channel` (admin + guardian gated) wrapping
+`bootc switch`, so a machine can be moved between channels without a root
+shell.
 
 **4. Rollback — built.** ✅ The daemon exposes `DeploymentStatus` (which
 image is booted, and what "go back" would return to) and `Rollback`, with

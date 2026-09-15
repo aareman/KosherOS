@@ -172,6 +172,9 @@
             "type": "string",
             "pattern": "^[a-z][a-z0-9-]*$"
           }
+        },
+        "time": {
+          "$ref": "#/$defs/time"
         }
       }
     },
@@ -411,6 +414,34 @@
             "type": "string",
             "pattern": "^[a-z][a-z0-9-]*$"
           }
+        },
+        "time": {
+          "$ref": "#/$defs/time"
+        }
+      }
+    },
+    "time": {
+      "type": "object",
+      "additionalProperties": false,
+      "default": {},
+      "description": "How long, and when, this account may be signed in. Absent or empty means no daily limit and always allowed, so a family that never opens the Time tab sees no change. Enforced by kosherd for every mode: it counts active (non-idle) signed-in minutes per day, warns at 15 and 5 minutes, then locks and ends the session, and renders /etc/security/time.conf so pam_time refuses new sign-ins. Never applied to administrators.",
+      "properties": {
+        "daily_minutes": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1440,
+          "default": 0,
+          "description": "Minutes of active use allowed per local day; 0 means no limit. Idle time (logind IdleHint) does not count."
+        },
+        "allowed": {
+          "type": "array",
+          "minItems": 7,
+          "maxItems": 7,
+          "items": {
+            "type": "string",
+            "pattern": "^[01]{24}$"
+          },
+          "description": "Seven strings of 24 characters, Monday first, one character per hour of the day starting at midnight: 1 = may be signed in, 0 = may not. Absent means always allowed."
         }
       }
     }

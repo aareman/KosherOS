@@ -37,7 +37,8 @@ PICTURES = "pictures"    # pictures hidden on a page (once per page, per window)
 VIDEO = "video"          # a video refused after being looked at
 SEARCH = "search"        # a search that would not run
 CHANGE = "change"        # an admin changed a setting
-KINDS = frozenset({BLOCK, PICTURES, VIDEO, SEARCH, CHANGE})
+TIME = "time"            # a session ended, or a sign-in refused, for time reasons
+KINDS = frozenset({BLOCK, PICTURES, VIDEO, SEARCH, CHANGE, TIME})
 
 # How the log says why a page was blocked. Kept machine-readable so the
 # admin app can turn "category:video" into "Video and streaming" in the
@@ -50,6 +51,7 @@ WHY_CONTENT = "content"     # content:nsfw
 WHY_LANGUAGE = "language"   # language
 WHY_SHOP = "shop"           # shop:<department>
 WHY_YOUTUBE = "youtube"     # youtube:channel | youtube:category
+WHY_TIME = "time"           # time:limit | time:schedule | time:login (timelimits.py)
 
 KEEP_SECONDS = 7 * 24 * 3600
 MAX_LINE = 4000

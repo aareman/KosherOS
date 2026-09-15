@@ -43,9 +43,18 @@ def parse(text: str) -> tuple[int, int, int, int | None]:
     raise ValueError(f"VERSION {text!r} is neither X.Y.Z nor X.Y.Z-pre.N")
 
 
+# The counter is zero-padded to three digits, and that is not cosmetic:
+# GitHub orders releases by comparing the pre-release identifier as TEXT, so
+# "pre.9" sorted above "pre.13" and the releases page read out of order.
+# Padded, text order and number order agree. (Strict semver would call a
+# numeric identifier with leading zeros invalid; it is a valid alphanumeric
+# identifier, which is what makes it sort the way a person expects.)
+PRE_WIDTH = 3
+
+
 def fmt(major: int, minor: int, patch: int, pre: int | None) -> str:
     base = f"{major}.{minor}.{patch}"
-    return base if pre is None else f"{base}-pre.{pre}"
+    return base if pre is None else f"{base}-pre.{pre:0{PRE_WIDTH}d}"
 
 
 def next_version(text: str) -> str:

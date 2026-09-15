@@ -41,9 +41,10 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: python3 scripts/build-docs.py --build
+      # Pages is enabled on the repository already (build_type: workflow);
+      # asking the action to enable it needs a token with admin rights,
+      # which GITHUB_TOKEN does not have, and that failed the first build.
       - uses: actions/configure-pages@v5
-        with:
-          enablement: true
       - uses: actions/upload-pages-artifact@v3
         with:
           path: site

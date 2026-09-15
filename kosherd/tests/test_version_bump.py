@@ -23,11 +23,13 @@ spec.loader.exec_module(vt)
 
 
 @pytest.mark.parametrize("current,expected", [
-    ("0.1.0-pre.1", "0.1.0-pre.2"),
+    ("0.1.0-pre.1", "0.1.0-pre.002"),
+    ("0.1.0-pre.009", "0.1.0-pre.010"),
     ("0.1.0-pre.99", "0.1.0-pre.100"),
-    ("0.1.0", "0.1.1-pre.1"),     # a release: the next patch starts developing
-    ("1.0", "1.0.1-pre.1"),        # the old two-part form is read as X.Y.0
-    ("2.3.7\n", "2.3.8-pre.1"),
+    ("0.1.0-pre.999", "0.1.0-pre.1000"),   # past three digits it simply grows
+    ("0.1.0", "0.1.1-pre.001"),   # a release: the next patch starts developing
+    ("1.0", "1.0.1-pre.001"),      # the old two-part form is read as X.Y.0
+    ("2.3.7\n", "2.3.8-pre.001"),
 ])
 def test_the_next_version(current, expected):
     assert vt.next_version(current) == expected
@@ -59,8 +61,8 @@ def _repo(tmp_path: Path) -> Path:
 def test_bump_writes_and_stages_the_new_version(tmp_path, monkeypatch):
     repo = _repo(tmp_path)
     monkeypatch.delenv("KOSHER_NO_BUMP", raising=False)
-    assert vt.bump(repo / "VERSION") == "0.1.0-pre.5"
-    assert (repo / "VERSION").read_text() == "0.1.0-pre.5\n"
+    assert vt.bump(repo / "VERSION") == "0.1.0-pre.005"
+    assert (repo / "VERSION").read_text() == "0.1.0-pre.005\n"
     staged = subprocess.run(["git", "-C", str(repo), "diff", "--cached", "--name-only"],
                             capture_output=True, text=True, check=True).stdout.split()
     assert staged == ["VERSION"], "the bump must land in the commit being made"
@@ -95,3 +97,16 @@ def test_the_command_line(tmp_path, monkeypatch, capsys):
     out = capsys.readouterr().out.split()
     assert out == ["0.1.0-pre.7", "0.1.0-pre.8"]
     assert vt.main(["nonsense"]) == 2
+
+
+def test_versions_sort_the_same_way_as_text_and_as_numbers():
+    # GitHub orders releases by comparing the tag as text, which put
+    # "pre.9" above "pre.13". Padded, the two orders agree.
+    made = []
+    version = "0.1.0-pre.1"
+    for _ in range(20):
+        version = vt.next_version(version)
+        made.append(version)
+    assert made == sorted(made), "text order must match the order they were made in"
+    assert "0.1.0-pre.009" in made and "0.1.0-pre.010" in made
+

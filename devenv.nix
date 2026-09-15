@@ -48,6 +48,7 @@ in
       ps.pillow # covering regions of a picture (imageedit.py)
       ps.mkdocs # the docs site (just docs), as CI builds it
       ps.mkdocs-material
+      ps.pyyaml # parsing the GitHub workflows in the tests
     ]))
     pkgs.just
     # GTK4 + libadwaita so the admin app's widgets can actually be built in

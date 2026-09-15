@@ -18,6 +18,31 @@ from . import profiles
 now = int(time.time())
 
 
+def _shipped_catalog() -> list[dict]:
+    """The approved apps the image ships (os-image/files/etc/kosher/catalog.json).
+
+    Read from the repository when running from a checkout, from the
+    installed copy on a machine, and falling back to one entry if neither
+    is there — the demo exists for looking at the UI and must not fail
+    because a file moved.
+    """
+    import json
+    from pathlib import Path
+
+    here = Path(__file__).resolve()
+    candidates = [Path("/etc/kosher/catalog.json")]
+    candidates += [p / "os-image/files/etc/kosher/catalog.json" for p in here.parents]
+    for path in candidates:
+        try:
+            apps = json.loads(path.read_text())["apps"]
+        except (OSError, ValueError, KeyError):
+            continue
+        if apps:
+            return apps
+    return [{"ref": "org.mozilla.firefox", "name": "Firefox",
+             "summary": "Browse the web", "categories": ["Network", "WebBrowser"]}]
+
+
 def _user(uid, name, key, admin=False, **kw):
     p = profiles.get(key)
     u = {"uid": uid, "username": name, "mode": p.mode, "admin": admin, "whitelist": [],
@@ -86,60 +111,10 @@ class DemoClient:
             {"ref": "org.mozilla.firefox", "icon_name": "firefox", "name": "Firefox", "installed_by": "avi",
              "approved": True},
         ]
-        # A believable shelf of approved apps: real app ids, so their
-        # icons come from the machine's own theme where they exist, and
-        # real categories, so the Store's shelves fill the way they will.
-        self.catalog = [
-            {"ref": "org.mozilla.firefox", "icon_name": "firefox", "name": "Firefox",
-             "summary": "Browse the web", "categories": ["Network", "WebBrowser"]},
-            {"ref": "org.gnome.Epiphany", "icon_name": "web-browser", "name": "GNOME Web",
-             "summary": "A simple, clean browser", "categories": ["Network", "WebBrowser"]},
-            {"ref": "org.libreoffice.LibreOffice", "icon_name": "x-office-document", "name": "LibreOffice",
-             "summary": "Documents, spreadsheets and presentations",
-             "categories": ["Office", "WordProcessor"]},
-            {"ref": "org.gnome.Calendar", "icon_name": "x-office-calendar", "name": "Calendar",
-             "summary": "Keep track of the week", "categories": ["Office", "Calendar"]},
-            {"ref": "org.gnome.Calculator", "icon_name": "accessories-calculator", "name": "Calculator",
-             "summary": "Work out sums", "categories": ["Utility", "Science"]},
-            {"ref": "org.gimp.GIMP", "icon_name": "gimp", "name": "GIMP",
-             "summary": "Edit and touch up pictures",
-             "categories": ["Graphics", "RasterGraphics"]},
-            {"ref": "org.inkscape.Inkscape", "icon_name": "inkscape", "name": "Inkscape",
-             "summary": "Draw with vectors", "categories": ["Graphics", "VectorGraphics"]},
-            {"ref": "org.gnome.Loupe", "icon_name": "image-x-generic", "name": "Image Viewer",
-             "summary": "Look at pictures", "categories": ["Graphics", "Viewer"]},
-            {"ref": "org.videolan.VLC", "icon_name": "vlc", "name": "VLC",
-             "summary": "Play video and audio", "categories": ["AudioVideo", "Player"]},
-            {"ref": "org.gnome.Rhythmbox3", "icon_name": "multimedia-player", "name": "Rhythmbox",
-             "summary": "Play and organise music", "categories": ["Audio", "Player"]},
-            {"ref": "org.audacityteam.Audacity", "icon_name": "audacity", "name": "Audacity",
-             "summary": "Record and edit sound", "categories": ["Audio", "Recorder"]},
-            {"ref": "org.gnome.Chess", "icon_name": "applications-games", "name": "Chess",
-             "summary": "Play chess against the computer",
-             "categories": ["Game", "BoardGame"]},
-            {"ref": "org.gnome.SudokuSolver", "icon_name": "applications-games", "name": "Sudoku",
-             "summary": "Fill in the grid", "categories": ["Game", "LogicGame"]},
-            {"ref": "org.gnome.TextEditor", "icon_name": "accessories-text-editor", "name": "Text Editor",
-             "summary": "Write plain text", "categories": ["Utility", "TextEditor"]},
-            {"ref": "org.gnome.Builder", "icon_name": "applications-engineering", "name": "Builder",
-             "summary": "Write and build software", "categories": ["Development", "IDE"]},
-            {"ref": "com.visualstudio.code", "icon_name": "text-x-script", "name": "Visual Studio Code",
-             "summary": "A code editor", "categories": ["Development", "IDE"]},
-            {"ref": "org.gnome.Console", "icon_name": "utilities-terminal", "name": "Console",
-             "summary": "A terminal", "categories": ["System", "TerminalEmulator"]},
-            {"ref": "org.gnome.FileRoller", "icon_name": "package-x-generic", "name": "Archive Manager",
-             "summary": "Open and make archives", "categories": ["Utility", "Archiving"]},
-            {"ref": "org.gnome.Maps", "icon_name": "applications-internet", "name": "Maps",
-             "summary": "Find your way", "categories": ["Education", "Geography"]},
-            {"ref": "org.kde.kstars", "icon_name": "applications-science", "name": "KStars",
-             "summary": "The night sky, explained", "categories": ["Education", "Astronomy"]},
-            {"ref": "org.gnome.Dictionary", "icon_name": "accessories-dictionary", "name": "Dictionary",
-             "summary": "Look up a word", "categories": ["Education", "Languages"]},
-            {"ref": "org.gnome.Weather", "icon_name": "weather-few-clouds", "name": "Weather",
-             "summary": "The forecast where you are", "categories": ["Network"]},
-            {"ref": "com.github.tchx84.Portfolio", "icon_name": "system-file-manager", "name": "Portfolio",
-             "summary": "A file manager", "categories": ["Utility", "FileTools"]},
-        ]
+        # The shelf a real machine ships with, read from the image's own
+        # catalogue so the demo cannot drift from what a family sees.
+        self.catalog = _shipped_catalog()
+
         self._on_progress = self._on_finished = None
         self.status = {"pictures": "no_model", "detect_ms": None, "degraded": [],
                        "problems": [],

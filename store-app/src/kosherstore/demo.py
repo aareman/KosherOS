@@ -1,14 +1,14 @@
-"""Run the admin app against a pretend daemon, to look at the UI.
+"""Run the Store against a pretend daemon, to look at the UI.
 
-    just admin-demo          (or: python3 -m kosheradmin.demo)
+    just store-demo          (or: python3 -m kosherstore.demo)
 
-No kosherd, no D-Bus, no polkit: the window opens unlocked on a sample
-family, and every control works on the sample data. See kosherd.demo.
+Twenty-odd approved apps, two of them installed; installing one plays out
+with progress over a second. Nothing touches the machine. See kosherd.demo.
 """
 
 from __future__ import annotations
 
-from kosherd.demo import DemoClient  # noqa: F401 - re-exported for the tests
+from kosherd.demo import DemoClient
 
 
 def main() -> int:
@@ -21,15 +21,14 @@ def main() -> int:
     from . import app as app_mod
 
     app_mod.DaemonClient = DemoClient
-    app_mod.Window._not_an_admin = lambda self: False
 
     class DemoApp(Adw.Application):
         def __init__(self):
-            super().__init__(application_id="org.kosherlinux.AdminDemo")
+            super().__init__(application_id="org.kosherlinux.StoreDemo")
 
         def do_activate(self):
             win = self.get_active_window() or app_mod.Window(application=self)
-            win.set_title("KosherOS Admin (demo: nothing here is real)")
+            win.set_title("KosherOS Store (demo: nothing here is real)")
             win.present()
 
     return DemoApp().run(None)

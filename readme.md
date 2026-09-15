@@ -21,7 +21,7 @@ with a content filter that lives on the machine itself and a parent in charge wi
 
 *Powered by Fedora.*
 
-[Read the docs](docs/architecture.md) · [Report a bug][issues-url] · [Request a feature][issues-url]
+[Read the docs](https://aareman.github.io/KosherOS/) · [What works](https://aareman.github.io/KosherOS/supported/) · [Releases](https://aareman.github.io/KosherOS/releases/) · [Report a bug][issues-url]
 
 </div>
 

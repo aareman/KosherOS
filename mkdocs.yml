@@ -1,0 +1,59 @@
+site_name: KosherOS
+site_description: A family computer that is filtered, locked down, and still a real computer.
+site_url: https://aareman.github.io/KosherOS/
+repo_url: https://github.com/aareman/KosherOS
+repo_name: aareman/KosherOS
+edit_uri: edit/master/docs/
+docs_dir: docs
+site_dir: site
+strict: false
+
+theme:
+  name: material
+  logo: images/logo.png
+  favicon: images/logo.png
+  palette:
+    - scheme: default
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-7
+        name: Dark
+    - scheme: slate
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-4
+        name: Light
+  features:
+    - navigation.sections
+    - navigation.top
+    - content.code.copy
+    - search.suggest
+
+nav:
+  - Start here: index.md
+  - Releases: releases.md
+  - What works: supported.md
+  - How it is built:
+      - Architecture: architecture.md
+      - Content filtering: content-filtering.md
+      - Media filtering: media-filtering.md
+      - Search: search.md
+      - Desktop: desktop.md
+      - Branding: branding.md
+  - Shipping:
+      - Deployment and updates: deployment.md
+      - Licensing: licensing.md
+      - Third-party notices: third-party.md
+      - Testing: testing.md
+  - Notes:
+      - A standalone filter?: standalone.md
+
+markdown_extensions:
+  - admonition
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.superfences
+  - pymdownx.highlight

@@ -176,19 +176,22 @@ class Window(Adw.ApplicationWindow):
         self.toasts.add_toast(Adw.Toast(title=text, timeout=4))
 
     def call(self, work, refresh: bool = True, done_msg: str | None = None,
-             on_done=None) -> None:
+             on_done=None, after_reload=None) -> None:
         def finished(_result):
             if done_msg:
                 self.toast(done_msg)
             if on_done:
                 on_done()
             if refresh:
-                self.reload()
+                self.reload(after_reload)
+            elif after_reload:
+                after_reload()
 
         run_async(work, finished, lambda e: self.toast(error_text(e)))
 
-    def reload(self) -> None:
-        """Everything the home screen shows, in one trip off the main loop."""
+    def reload(self, then=None) -> None:
+        """Everything the home screen shows, in one trip off the main loop.
+        `then` runs once the new policy is on screen."""
 
         def load():
             client = self.client
@@ -205,6 +208,8 @@ class Window(Adw.ApplicationWindow):
             if self.stack.get_visible_child_name() == "activity":
                 self.activity_page.refresh()
             self.refresh_open_detail()
+            if then:
+                then()
 
         run_async(load, on_done, lambda e: self.toast(error_text(e)))
 

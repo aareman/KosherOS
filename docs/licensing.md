@@ -156,7 +156,7 @@ compatible, though it is in adblock-filter syntax and would need a
 different parser — is worthwhile follow-up work.
 
 Attribution for all fourteen is recorded in
-[THIRD-PARTY.md](../THIRD-PARTY.md) and in the database's own `meta`
+[THIRD-PARTY.md](third-party.md) and in the database's own `meta`
 `source` row, which the admin app displays.
 
 ## Other obligations already in the image

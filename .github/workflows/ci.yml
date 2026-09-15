@@ -116,6 +116,8 @@ jobs:
       IMAGE: ghcr.io/${{ github.repository_owner }}/kosher-linux
     steps:
       - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0 # the release notes list the commits since the previous version tag
 
       # Two channels. Every push to master becomes :edge — the maintainer's
       # own daily driver, where every pre-release lands first — plus the
@@ -166,11 +168,34 @@ jobs:
           fi
           prerelease=""
           case "$version" in *-pre.*) prerelease="--prerelease" ;; esac
-          notes="$(printf '%s\n\n%s\n\n%s\n%s\n\n%s\n' \
-            "$(git log -1 --format='%s' "$GITHUB_SHA")" \
-            "OS image: \`$IMAGE:$tag\` (also \`$IMAGE:${GITHUB_SHA::12}\`; this is the current \`:edge\`), signed with cosign keyless." \
-            "Machines on the edge channel pick it up on their next update. To make it the stable release, run the Promote to stable workflow with:" \
-            "    version: $tag" \
-            "A release ISO is built locally with \`just release-iso\` and installs machines that follow the stable channel.")"
+          git fetch --tags --quiet origin
+          # The previous version tag, so the notes say what changed since it:
+          # every commit subject in between, which this repository writes as
+          # a full sentence about the change.
+          previous="$(git tag --list 'v*' --sort=-creatordate | grep -v "^$tag\$" | head -1 || true)"
+          if [ -n "$previous" ]; then
+            changes="$(git log --format='- %s' "$previous..$GITHUB_SHA" -- . ':!VERSION' | grep -v -- '- Bump\|- bump' || true)"
+            since="since $previous"
+          else
+            changes="$(git log --format='- %s' -20 "$GITHUB_SHA")"
+            since="(first release; the last twenty commits)"
+          fi
+          [ -n "$changes" ] || changes="- No changes recorded between $previous and this build."
+          notes="$(cat <<NOTES
+## What changed $since
+
+$changes
+
+## What this build is
+
+- OS image \`$IMAGE:$tag\` (also \`$IMAGE:${GITHUB_SHA::12}\`), signed with cosign keyless. It is the current \`:edge\`.
+- Machines on the edge channel pick it up on their next update. Stable machines are unaffected until a person promotes a version with the **Promote to stable** workflow (\`version: $tag\`).
+- An installer ISO for this channel is built locally with \`just release-iso edge\`; families install from \`just release-iso\` (stable).
+
+## What is supported
+
+Browsers, Flatpak apps, and the developer tools npm, yarn, pnpm, bun, pip, uv, gem, cargo, deno, go and git all work on a filtered account; presets, hardware and the update channels are listed on the docs site: https://aareman.github.io/KosherOS/supported/
+NOTES
+)"
           gh release create "$tag" $prerelease --target "$GITHUB_SHA" \
             --title "KosherOS $version" --notes "$notes"

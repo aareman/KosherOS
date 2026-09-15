@@ -111,10 +111,12 @@ class FakeWindow(Gtk.Window):
     def toast(self, text):
         self.toasts.append(text)
 
-    def call(self, work, refresh=True, done_msg=None, on_done=None):
+    def call(self, work, refresh=True, done_msg=None, on_done=None, after_reload=None):
         work()
         if on_done:
             on_done()
+        if after_reload:
+            after_reload()
 
     def with_guardian(self, then):
         then("")
@@ -469,7 +471,7 @@ def test_the_guest_is_set_up_by_kind_of_internet_not_preset():
     win.policy = {"revision": 1, "users": [], "guardian": {"enabled": False},
                   "guest": {"enabled": True, "mode": "whitelist", "whitelist": []}}
     page = family.GuestPage(win)
-    combo = _row_named(page, "Internet for the guest")
+    combo = _row_named(page, "Start the guest off with")
     options = [combo.get_model().get_string(i) for i in range(combo.get_model().get_n_items())]
     assert options == [labels.MODE_LABELS[m] for m in ("none", "whitelist", "dnsfilter",
                                                         "filtered", "unfiltered")]
@@ -1077,7 +1079,7 @@ def test_the_demo_client_answers_everything_the_real_client_does():
     import inspect
 
     from kosherd.client import DaemonClient
-    from kosheradmin.demo import DemoClient
+    from kosherd.demo import DemoClient
 
     real = {n for n, _ in inspect.getmembers(DaemonClient, inspect.isfunction)
             if not n.startswith("_")}
@@ -1087,7 +1089,7 @@ def test_the_demo_client_answers_everything_the_real_client_does():
 
 
 def test_the_demo_family_drives_every_screen():
-    from kosheradmin.demo import DemoClient
+    from kosherd.demo import DemoClient
 
     client = DemoClient()
     win = FakeWindow(client)
@@ -1112,4 +1114,41 @@ def test_the_demo_family_drives_every_screen():
     client.set_media_level(1002, "all", "")
     assert client.list_activity()[0]["method"] == "SetMediaLevel"
     assert client.get_policy()["users"][2]["media_level"] == "all"
+
+
+
+# -- the cursor says what can be clicked ----------------------------------------------
+
+def test_cards_tiles_and_acting_rows_get_the_hand_cursor():
+    win, page = a_board([a_user()])
+    for child in _children(page.cards) + _children(page.tiles):
+        assert child.get_cursor() is not None and child.get_cursor().get_name() == "pointer"
+    detail_page, _w, _u = _detail()
+    acting = [r for r in _rows(detail_page)
+              if isinstance(r, Adw.ActionRow) and r.get_activatable()]
+    assert acting, "the person's page has rows that act"
+    for row in acting:
+        assert row.get_cursor().get_name() == "pointer", row.get_title()
+    # A row that only displays keeps the arrow.
+    display_only = [r for r in _rows(detail_page)
+                    if isinstance(r, Adw.ActionRow) and not r.get_activatable()]
+    assert display_only and all(r.get_cursor() is None for r in display_only)
+    for button in _buttons(detail_page)[:5]:
+        assert button.get_cursor().get_name() == "pointer"
+
+
+def test_turning_the_guest_on_opens_its_page():
+    class Recording(FakeClient):
+        def set_guest_config(self, enabled, mode, whitelist, pw):
+            win.policy["guest"] = {"enabled": enabled, "uid": 1010, "mode": "whitelist",
+                                   "whitelist": list(whitelist)}
+
+    win = FakeWindow(Recording())
+    win.policy = {"revision": 1, "users": [], "guardian": {"enabled": False},
+                  "guest": {"enabled": False, "mode": "whitelist", "whitelist": []}}
+    win.nav = type("Nav", (), {"pop_to_tag": lambda self, tag: None})()
+    page = family.GuestPage(win)
+    _row_named(page, "Guest account").set_active(True)
+    drain()
+    assert win.pushed[-1] == ("detail", 1010)
 

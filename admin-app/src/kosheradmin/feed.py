@@ -21,7 +21,7 @@ from gi.repository import Adw, Gtk  # noqa: E402
 from kosherd import activity as activity_mod  # noqa: E402
 
 from . import labels  # noqa: E402
-from .common import avatar, clear, error_text, run_async, tag  # noqa: E402
+from .common import avatar, clear, error_text, pointer_cursors, run_async, tag  # noqa: E402
 from .dialogs import allow_menu  # noqa: E402
 
 EVERYONE = -1
@@ -195,6 +195,7 @@ class ActivityPage(Gtk.Box):
                 group = Adw.PreferencesGroup(title=day)
                 self.feed.append(group)
             group.add(self._event_row(event))
+        pointer_cursors(self)
 
     def _event_row(self, event: dict) -> Adw.ActionRow:
         kind = event["kind"]

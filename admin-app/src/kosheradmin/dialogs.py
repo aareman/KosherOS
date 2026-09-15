@@ -12,7 +12,7 @@ from gi.repository import Adw, GLib, Gtk  # noqa: E402
 from kosherd import profiles as profiles_mod  # noqa: E402
 
 from . import labels  # noqa: E402
-from .common import avatar, clear, error_text, run_async, small_button, tag  # noqa: E402
+from .common import avatar, clear, error_text, pointer_cursors, run_async, small_button, tag  # noqa: E402
 
 
 class WhitelistDialog(Adw.Dialog):
@@ -57,6 +57,7 @@ class WhitelistDialog(Adw.Dialog):
         box.append(self.search)
         box.append(scroller)
         self.set_child(box)
+        self.connect("map", lambda _d: pointer_cursors(self))
         self._rebuild()
 
     def _add(self) -> None:
@@ -149,6 +150,7 @@ class RulesDialog(Adw.Dialog):
         box.append(hint)
         box.append(scroller)
         self.set_child(box)
+        self.connect("map", lambda _d: pointer_cursors(self))
         self._rebuild()
 
     def _add(self, action: str) -> None:
@@ -264,6 +266,7 @@ class ListEditDialog(Adw.Dialog):
         box.append(header)
         box.append(page)
         self.set_child(box)
+        self.connect("map", lambda _d: pointer_cursors(self))
         self._load()
 
     # -- data -----------------------------------------------------------------
@@ -451,6 +454,7 @@ class SavePresetDialog(Adw.Dialog):
         box.append(header)
         box.append(page)
         self.set_child(box)
+        self.connect("map", lambda _d: pointer_cursors(self))
 
     def _save(self) -> None:
         label = self.name.get_text().strip()
@@ -491,6 +495,7 @@ class RequestsDialog(Adw.Dialog):
         box.append(header)
         box.append(page)
         self.set_child(box)
+        self.connect("map", lambda _d: pointer_cursors(self))
         self.rows: list[Gtk.ListBoxRow] = []
         self._rebuild()
 
@@ -619,6 +624,7 @@ class HealthDialog(Adw.Dialog):
         box.append(header)
         box.append(page)
         self.set_child(box)
+        self.connect("map", lambda _d: pointer_cursors(self))
 
 
 def guardian_dialog(win) -> Adw.AlertDialog:

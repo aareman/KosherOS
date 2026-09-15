@@ -33,6 +33,21 @@ qemu_gui := if env_var_or_default("KOSHER_GL", "") != "" {
 admin-demo:
     env PYTHONPATH=kosherd/src:admin-app/src python3 -m kosheradmin.demo
 
+# The same for the Store: approved apps, two installed, installs that play
+# out with progress.
+store-demo:
+    env PYTHONPATH=kosherd/src:store-app/src python3 -m kosherstore.demo
+
+# The docs site as GitHub Pages publishes it (https://aareman.github.io/KosherOS/):
+# the readme as the front page, docs/*.md, and a Releases page from GitHub.
+docs:
+    python3 scripts/build-docs.py --build
+    @echo "built into site/ — open site/index.html"
+
+# ...served locally with live reload.
+docs-serve:
+    python3 scripts/build-docs.py --serve
+
 # Run the unit test suites (pure logic — no root, no D-Bus, no VM needed).
 test *ARGS:
     cd kosherd && python3 -m pytest tests/ -q {{ARGS}}

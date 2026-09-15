@@ -158,6 +158,43 @@ def small_button(label: str, *classes: str) -> Gtk.Button:
     return button
 
 
+CLICKABLE = ("Gtk.Button", "Gtk.MenuButton", "Gtk.Switch", "Gtk.CheckButton",
+             "Gtk.ToggleButton", "Gtk.LinkButton", "Gtk.FlowBoxChild", "Adw.ButtonRow",
+             "Adw.ComboRow", "Adw.SwitchRow", "Adw.ExpanderRow")
+
+
+def pointer_cursors(root: Gtk.Widget) -> int:
+    """Give everything clickable under `root` the hand cursor, like the web.
+
+    GTK's convention is an arrow everywhere; the user asked for the cursor
+    to say what can be clicked. GTK CSS has no `cursor` property, so it is
+    set on the widgets: buttons, switches, checks, combos, list rows that
+    act, and the cards and tiles on the board. Rows that only display keep
+    the arrow. Returns how many widgets were marked.
+    """
+    marked = 0
+    child = root.get_first_child()
+    while child is not None:
+        if _clickable(child):
+            child.set_cursor_from_name("pointer")
+            marked += 1
+        marked += pointer_cursors(child)
+        child = child.get_next_sibling()
+    return marked
+
+
+def _clickable(widget: Gtk.Widget) -> bool:
+    if isinstance(widget, Adw.ActionRow):
+        return bool(widget.get_activatable()) and not isinstance(widget, Adw.EntryRow)
+    if isinstance(widget, Gtk.ListBoxRow) and not isinstance(widget, Adw.PreferencesRow):
+        # The people rail on the activity tab, and any plain list of choices.
+        return widget.get_activatable() or widget.get_selectable()
+    name = type(widget).__name__
+    module = type(widget).__module__.split(".")[-1]
+    return f"{module}.{name}" in CLICKABLE or (
+        isinstance(widget, (Gtk.Button, Gtk.Switch, Gtk.CheckButton, Gtk.FlowBoxChild)))
+
+
 def confirm(parent, heading: str, body: str, verb: str, on_yes,
             destructive: bool = True) -> Adw.AlertDialog:
     dialog = Adw.AlertDialog(heading=heading, body=body)

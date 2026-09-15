@@ -22,7 +22,8 @@ from gi.repository import Adw, GLib, Gtk  # noqa: E402
 from kosherd import profiles as profiles_mod  # noqa: E402
 
 from . import labels  # noqa: E402
-from .common import avatar, clear, confirm, error_text, icon_line, run_async, tag  # noqa: E402
+from .common import (avatar, clear, confirm, error_text, icon_line,  # noqa: E402
+                     pointer_cursors, run_async, tag)
 from .dialogs import (HealthDialog, ListEditDialog, RequestsDialog,  # noqa: E402
                       WhitelistDialog, guardian_dialog)
 
@@ -176,6 +177,7 @@ class FamilyPage(Gtk.Box):
             child.set_child(tile(title, value))
             child.key = key
             self.tiles.append(child)
+        pointer_cursors(self)
 
     def _tile_values(self) -> list[tuple[str, str, str]]:
         win = self.win
@@ -353,6 +355,9 @@ class _Page(Adw.NavigationPage):
         view.add_top_bar(Adw.HeaderBar())
         view.set_content(self.prefs)
         self.set_child(view)
+        # Subclasses fill self.prefs in their __init__; the hand cursor is
+        # applied once the page is shown, when the rows exist.
+        self.connect("shown", lambda _p: pointer_cursors(self))
 
 
 class WordListsPage(_Page):
@@ -541,17 +546,30 @@ class GuestPage(_Page):
         guest = win.policy.get("guest", {"enabled": False})
         group = Adw.PreferencesGroup(
             title="Guest account",
-            description="Passwordless account; all guest data is erased at sign-out.")
+            description="Anyone can sign in as the guest without a password, and "
+                        "everything they did is erased at sign-out. Turn it on and "
+                        "it gets a page like every other account: filter mode, "
+                        "blocked kinds of sites, pictures, language, YouTube.")
 
         mode = guest.get("mode", "whitelist")
         wl_domains = guest.get("whitelist", [])
 
+        def open_guest_page():
+            fresh = guest_user(win.policy)
+            if fresh is not None:
+                win.nav.pop_to_tag("root")
+                win.open_user_detail(fresh)
+
         def push(enabled, new_mode, domains):
             win.with_guardian(lambda pw: win.call(
                 lambda: win.client.set_guest_config(enabled, new_mode, domains, pw),
-                done_msg="Guest settings saved"))
+                done_msg="Guest account is on" if enabled else "Guest settings saved",
+                after_reload=open_guest_page if enabled else None))
 
-        switch = Adw.SwitchRow(title="Enable guest account", active=guest["enabled"])
+        switch = Adw.SwitchRow(
+            title="Guest account",
+            subtitle="Turning it on opens its page, where everything can be set.",
+            active=guest["enabled"])
         switch.connect("notify::active",
                        lambda s, _p: s.get_active() != guest["enabled"] and
                        push(s.get_active(), mode, wl_domains))
@@ -564,7 +582,7 @@ class GuestPage(_Page):
         # guest still gets pictures, language and YouTube handled.
         kinds = list(GUEST_KINDS)
         mode_row = Adw.ComboRow(
-            title="Internet for the guest",
+            title="Start the guest off with",
             model=Gtk.StringList.new([labels.MODE_LABELS[m] for m in kinds]))
         mode_row.set_selected(kinds.index(mode) if mode in kinds else 0)
         mode_row.set_subtitle(GUEST_KIND_HINTS.get(mode, labels.MODE_HINTS.get(mode, "")))

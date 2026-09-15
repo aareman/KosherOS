@@ -22,7 +22,8 @@ from kosherd import profiles as profiles_mod  # noqa: E402
 from kosherd.policy import MEDIA_LEVELS, MODES, YOUTUBE_CATEGORIES  # noqa: E402
 
 from . import labels  # noqa: E402
-from .common import avatar, chip, clear, confirm, error_text, run_async, small_button, tag  # noqa: E402
+from .common import (avatar, chip, clear, confirm, error_text, pointer_cursors,  # noqa: E402
+                     run_async, small_button, tag)
 from .dialogs import (RulesDialog, SavePresetDialog, WhitelistDialog, allow_menu,  # noqa: E402
                       confirm_remove_user, request_row)
 from .feed import fold  # noqa: E402
@@ -105,6 +106,7 @@ class UserDetailPage(Adw.NavigationPage):
         view.add_top_bar(switcher)
         view.set_content(self.stack)
         self.set_child(view)
+        pointer_cursors(self)
 
     def _gated(self, work, done_msg: str) -> None:
         self.win.with_guardian(lambda pw: self.win.call(lambda: work(pw), done_msg=done_msg))
@@ -210,6 +212,7 @@ class UserDetailPage(Adw.NavigationPage):
                 row = Adw.ActionRow(title=what, subtitle=detail, use_markup=False)
                 row.add_prefix(avatar(event.get("by_username") or "?", 24))
                 changes_group.add(row)
+            pointer_cursors(blocked_group)
 
         run_async(lambda: self.win.client.list_activity(since, user["uid"]),
                   on_done, lambda e: self.win.toast(error_text(e)))
@@ -381,6 +384,7 @@ class UserDetailPage(Adw.NavigationPage):
                 f"{info['domains']:,} sites are classified. Sites not on the list are "
                 "judged by the other settings, so this is a floor, not a guarantee.")
             self._building = False
+            pointer_cursors(grid)
 
         run_async(self.win.client.list_categories, on_done,
                   lambda e: self.win.toast(error_text(e)))
@@ -758,6 +762,7 @@ class UserDetailPage(Adw.NavigationPage):
                 return
             for app in details:
                 apps_list.append(self._app_row(user, app, details))
+            pointer_cursors(apps_list)
 
         run_async(self.win.client.list_installed_details, on_done,
                   lambda e: self.win.toast(error_text(e)))

@@ -29,6 +29,8 @@ jobs:
       VERSION_TAG: ${{ inputs.version }}
     steps:
       - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0 # the promotion note lists every change since the previous stable
 
       - name: The version must exist as a release and an image
         env:
@@ -58,7 +60,19 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release edit "$VERSION_TAG" --latest --prerelease=false \
-            --notes-file <(gh release view "$VERSION_TAG" --json body --jq .body; \
-                           printf '\n\n**Promoted to the stable channel on %s.** Machines following `%s:stable` update to this build.\n' \
-                             "$(date -u +%Y-%m-%d)" "$IMAGE")
+          git fetch --tags --quiet origin
+          # The previous stable is the release currently marked latest, if any.
+          previous="$(gh release list --json tagName,isLatest --jq '.[] | select(.isLatest) | .tagName' | head -1 || true)"
+          if [ -n "$previous" ] && [ "$previous" != "$VERSION_TAG" ]; then
+            changes="$(git log --format='- %s' "$previous..$VERSION_TAG" -- . ':!VERSION' || true)"
+            heading="## Everything that changed since the previous stable ($previous)"
+          else
+            changes="- This is the first stable release."
+            heading="## Everything that changed"
+          fi
+          {
+            gh release view "$VERSION_TAG" --json body --jq .body
+            printf '\n\n**Promoted to the stable channel on %s.** Machines following `%s:stable` update to this build.\n\n%s\n\n%s\n' \
+              "$(date -u +%Y-%m-%d)" "$IMAGE" "$heading" "$changes"
+          } > notes.md
+          gh release edit "$VERSION_TAG" --latest --prerelease=false --notes-file notes.md

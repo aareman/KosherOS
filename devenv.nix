@@ -46,6 +46,8 @@ in
       ps.uvicorn
       ps.httpx # portal tests + the device-side sync client
       ps.pillow # covering regions of a picture (imageedit.py)
+      ps.mkdocs # the docs site (just docs), as CI builds it
+      ps.mkdocs-material
     ]))
     pkgs.just
     # GTK4 + libadwaita so the admin app's widgets can actually be built in

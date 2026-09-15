@@ -269,23 +269,35 @@ def _cached_icon(component) -> str:
     return best
 
 
+# Where an app's icon can be on a KosherOS machine, in the order they are
+# worth trying. The appstream cache is what flatpak downloads beside the
+# remote's catalogue; the exports tree is what an installed app writes.
+ICON_SIZES = ("128x128", "64x64", "48x48", "scalable")
+
+
 def icon_file(entry: dict, size: int = 128) -> str:
     """Where an approved app's icon actually is on this machine, or "".
 
-    Looks beside the appstream catalogue flatpak already downloaded; the
-    Store draws from there. An app with no cached icon falls back in the UI
-    to its own themed icon (installed apps export one) and then to a
-    generic one, so a missing file is never an error.
+    Tries the file name the catalogue recorded, then the app id — which is
+    what Flathub names nearly every cached icon, and what an installed app
+    exports — because an entry that came from the shipped catalogue rather
+    than the admin's search has no file name recorded. A missing icon is
+    never an error: the Store falls back to a lettered tile.
     """
-    name = entry.get("icon") or ""
-    if not name:
+    ref = entry.get("ref") or ""
+    names = [n for n in (entry.get("icon") or "", f"{ref}.png", f"{ref}.svg") if n]
+    if not names:
         return ""
-    base = Path(f"/var/lib/flatpak/appstream/{REMOTE}/{_arch()}/active/icons")
-    sizes = [f"{size}x{size}", "128x128", "64x64"]
-    for folder in dict.fromkeys(sizes):
-        candidate = base / folder / name
-        if candidate.exists():
-            return str(candidate)
+    wanted = [f"{size}x{size}", *ICON_SIZES]
+    roots = [Path(f"/var/lib/flatpak/appstream/{REMOTE}/{_arch()}/active/icons"),
+             Path("/var/lib/flatpak/exports/share/icons/hicolor"),
+             Path("/usr/share/icons/hicolor")]
+    for root in roots:
+        for folder in dict.fromkeys(wanted):
+            for name in names:
+                for candidate in (root / folder / name, root / folder / "apps" / name):
+                    if candidate.exists():
+                        return str(candidate)
     return ""
 
 

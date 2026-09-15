@@ -1200,3 +1200,89 @@ def test_turning_the_guest_on_opens_its_page():
     drain()
     assert win.pushed[-1] == ("detail", 1010)
 
+
+
+# -- Enter submits, everywhere a password or a name is typed -------------------------
+
+def _entries(widget, found=None):
+    found = [] if found is None else found
+    child = widget.get_first_child()
+    while child is not None:
+        if isinstance(child, (Gtk.Entry, Gtk.PasswordEntry, Adw.EntryRow)):
+            found.append(child)
+        _entries(child, found)
+        child = child.get_next_sibling()
+    return found
+
+
+def test_enter_in_the_guardian_password_dialog_sets_it():
+    # Reaching for the mouse to press Continue is exactly the friction that
+    # makes a second password annoying enough to switch off.
+    set_to = []
+
+    class Recording(FakeClient):
+        def set_guardian_password(self, old, new):
+            set_to.append((old, new))
+
+    win = FakeWindow(Recording())
+    win.policy = {"revision": 1, "users": [], "guardian": {"enabled": False},
+                  "guest": {"enabled": False}}
+    dialog = dialogs.guardian_dialog(win)
+    drain()
+    entries = _entries(dialog)
+    assert entries, "the dialog has a field to type into"
+    entries[-1].set_text("a secret")
+    entries[-1].emit("activate")
+    drain()
+    assert set_to == [("", "a secret")]
+
+
+def test_every_password_and_name_dialog_submits_on_enter():
+    import inspect
+
+    from kosheradmin import common, detail as detail_mod, dialogs as dialogs_mod
+
+    # One helper does it, and every dialog that takes typed text uses it.
+    assert "activates-default" in inspect.getsource(common.submit_on_enter)
+    for module in (admin, dialogs_mod, detail_mod):
+        source = inspect.getsource(module)
+        for marker in ("add_response(", ):
+            pass
+        if "submit_on_enter(" in source:
+            assert "set_default_response(" in source, module.__name__
+    guardian = inspect.getsource(dialogs_mod.guardian_dialog)
+    assert 'submit_on_enter(dialog, "ok", old, new)' in guardian
+    unlock = inspect.getsource(admin.Window.with_guardian)
+    assert 'submit_on_enter(dialog, "ok", entry)' in unlock
+    assert "entry.grab_focus()" in unlock
+
+
+def test_the_helper_answers_the_dialog_and_closes_it():
+    from kosheradmin.common import submit_on_enter
+
+    dialog = Adw.AlertDialog(heading="Guardian password")
+    dialog.add_response("cancel", "Cancel")
+    dialog.add_response("ok", "Continue")
+    answers = []
+    dialog.connect("response", lambda _d, r: answers.append(r))
+    entry = Gtk.PasswordEntry()
+    submit_on_enter(dialog, "ok", entry)
+    assert entry.get_property("activates-default")
+    entry.emit("activate")
+    drain()
+    assert answers == ["ok"]
+
+
+def test_the_persons_header_carries_only_the_name():
+    # The subtitle under the name repeated what the page says directly
+    # below, in a space too narrow for it, and crowded the tabs.
+    page, _w, user = _detail()
+    titles = [w for w in _walk(page) if isinstance(w, Adw.WindowTitle)]
+    assert titles and titles[0].get_title() == user["username"]
+    assert titles[0].get_subtitle() == ""
+    # ...and the mode sits beside the name on the page itself.
+    badge = next(w for w in _walk(page) if w.has_css_class("mode-badge"))
+    row = badge.get_parent()
+    assert any(isinstance(w, Gtk.Label) and w.has_css_class("title-2")
+               for w in _walk(row)), "the name and the mode share a line"
+

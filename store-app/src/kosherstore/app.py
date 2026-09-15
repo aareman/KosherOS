@@ -20,7 +20,8 @@ import gi
 
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
-from gi.repository import Adw, Gdk, Gio, GLib, Gtk  # noqa: E402
+gi.require_version("Pango", "1.0")
+from gi.repository import Adw, Gdk, Gio, GLib, Gtk, Pango  # noqa: E402
 
 from kosherd.client import DaemonClient  # noqa: E402
 
@@ -50,9 +51,16 @@ SHELVES = (
 )
 ICON_SIZE = 48
 FALLBACK_ICON = "application-x-executable"
-# When an app has no icon of its own on this machine, draw the one that says
-# what KIND of app it is rather than the same grey box twenty times. Tried in
-# order against the icon theme.
+# When an app has no icon on this machine at all — a fresh install whose
+# flatpak metadata has not been fetched yet, or an app whose publisher
+# shipped none — draw a lettered tile in its category's colour rather than
+# the same grey box forty times. It is distinct per app, instant, and looks
+# deliberate instead of broken.
+SHELF_TINTS = {
+    "internet": "#3584e4", "work": "#9141ac", "learning": "#1c71d8",
+    "pictures": "#c64600", "music": "#e5a50a", "games": "#2ec27e",
+    "develop": "#613583", "utilities": "#5e5c64", "other": "#5e5c64",
+}
 SHELF_ICONS = {
     "internet": ("web-browser", "applications-internet"),
     "work": ("x-office-document", "applications-office"),
@@ -65,11 +73,19 @@ SHELF_ICONS = {
     "other": (FALLBACK_ICON,),
 }
 
+def _tint_css() -> bytes:
+    rules = [".app-letter { border-radius: 12px; font-weight: 800; color: #ffffff; }"]
+    for shelf, colour in SHELF_TINTS.items():
+        rules.append(f".app-letter.{shelf} {{ background-color: {colour}; }}")
+    return "\n".join(rules).encode()
+
+
 CSS = b"""
 .app-card { padding: 12px 14px; }
 .app-card button.pill { min-height: 26px; padding: 2px 16px; font-size: 0.92em; }
 .app-card:hover { background-color: alpha(currentColor, 0.04); }
 .shelf-tile { padding: 8px; }
+.app-letter { border-radius: 12px; }
 .shelf-tile:hover { background-color: alpha(currentColor, 0.05); }
 """
 
@@ -117,27 +133,44 @@ def icon_candidates(app: dict) -> list[str]:
     return [n for n in dict.fromkeys(names) if n]
 
 
+def letter_tile(app: dict, size: int = ICON_SIZE) -> Gtk.Label:
+    """The app's initial on a tile in its category's colour.
+
+    What is drawn when the machine has no icon for an app: distinct per
+    app, and it reads as a choice rather than a missing file.
+    """
+    name = (app.get("name") or app["ref"].rsplit(".", 1)[-1]).strip()
+    letter = next((c for c in name if c.isalnum()), "?").upper()
+    label = Gtk.Label(label=letter, width_request=size, height_request=size,
+                      valign=Gtk.Align.CENTER, halign=Gtk.Align.CENTER)
+    label.add_css_class("app-letter")
+    label.add_css_class(shelf_of(app))
+    # Sized to the tile rather than to the theme, so it matches a real icon.
+    attrs = Pango.AttrList()
+    attrs.insert(Pango.attr_scale_new(size / 24))
+    label.set_attributes(attrs)
+    return label
+
+
 def app_icon(app: dict, size: int = ICON_SIZE) -> Gtk.Widget:
-    """The app's icon: the file flatpak cached, else a themed icon, else the
-    one for its shelf. Never a network fetch, never an error."""
+    """The app's icon: the file flatpak cached or the app exported, else a
+    themed icon, else a lettered tile. Never a network fetch, never an
+    error, and never an empty space."""
     from kosherd import apps as apps_mod
 
-    image = Gtk.Image(pixel_size=size)
     try:
         path = apps_mod.icon_file(app, size)
     except Exception:  # noqa: BLE001 - an icon is never worth a failure
         path = ""
     if path:
-        image.set_from_file(path)
-        return image
+        return Gtk.Image(pixel_size=size, file=path)
     display = Gdk.Display.get_default()
     theme = Gtk.IconTheme.get_for_display(display) if display is not None else None
-    for name in icon_candidates(app):
-        if theme is None or theme.has_icon(name):
-            image.set_from_icon_name(name)
-            return image
-    image.set_from_icon_name(FALLBACK_ICON)
-    return image
+    if theme is not None:
+        for name in icon_candidates(app):
+            if name != FALLBACK_ICON and theme.has_icon(name):
+                return Gtk.Image(pixel_size=size, icon_name=name)
+    return letter_tile(app, size)
 
 
 class AppCard(Gtk.Box):
@@ -337,7 +370,7 @@ class Window(Adw.ApplicationWindow):
         if display is None:
             return
         provider = Gtk.CssProvider()
-        provider.load_from_data(CSS)
+        provider.load_from_data(CSS + b"\n" + _tint_css())
         Gtk.StyleContext.add_provider_for_display(
             display, provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
 

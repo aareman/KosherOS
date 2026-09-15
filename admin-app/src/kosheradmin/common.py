@@ -226,6 +226,28 @@ def _clickable(widget: Gtk.Widget) -> bool:
         isinstance(widget, (Gtk.Button, Gtk.Switch, Gtk.CheckButton, Gtk.FlowBoxChild)))
 
 
+def submit_on_enter(dialog: Adw.AlertDialog, response: str, *entries) -> None:
+    """Enter in any of these fields answers the dialog.
+
+    Typing a password and pressing Enter has to work: reaching for the
+    mouse to press Continue is exactly the friction that makes a
+    dual-password design annoying enough to switch off. libadwaita does
+    not wire Enter to the default response for an embedded entry, and this
+    version of AdwAlertDialog has no response() method, so the signal is
+    emitted and the dialog closed by hand — the same path the button takes.
+    """
+    def submit(*_args):
+        dialog.emit("response", response)
+        dialog.close()
+
+    for entry in entries:
+        entry.set_property("activates-default", True)
+        # Gtk.Entry and Gtk.PasswordEntry emit "activate"; Adw.EntryRow and
+        # Adw.PasswordEntryRow emit "entry-activated".
+        signal = "entry-activated" if isinstance(entry, Adw.EntryRow) else "activate"
+        entry.connect(signal, submit)
+
+
 def confirm(parent, heading: str, body: str, verb: str, on_yes,
             destructive: bool = True) -> Adw.AlertDialog:
     dialog = Adw.AlertDialog(heading=heading, body=body)

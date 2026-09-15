@@ -20,7 +20,7 @@ from gi.repository import Adw, Gio, GLib, Gtk  # noqa: E402
 from kosherd.client import DaemonClient  # noqa: E402
 
 from . import labels  # noqa: E402
-from .common import error_text, load_css, run_async  # noqa: E402
+from .common import error_text, load_css, run_async, submit_on_enter  # noqa: E402
 from .detail import UserDetailPage  # noqa: E402
 from .dialogs import add_person_dialog  # noqa: E402
 from .family import FamilyPage  # noqa: E402
@@ -236,6 +236,8 @@ class Window(Adw.ApplicationWindow):
         dialog.add_response("ok", "Continue")
         dialog.set_response_appearance("ok", Adw.ResponseAppearance.SUGGESTED)
         dialog.set_default_response("ok")
+        dialog.set_close_response("cancel")
+        submit_on_enter(dialog, "ok", entry)
 
         def on_response(_d, response):
             if response == "ok":
@@ -243,6 +245,7 @@ class Window(Adw.ApplicationWindow):
 
         dialog.connect("response", on_response)
         dialog.present(self)
+        entry.grab_focus()
 
 
 def _quiet(work, default):

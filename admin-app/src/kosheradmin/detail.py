@@ -23,7 +23,7 @@ from kosherd.policy import MEDIA_LEVELS, MODES, YOUTUBE_CATEGORIES  # noqa: E402
 
 from . import labels  # noqa: E402
 from .common import (avatar, chip, clear, confirm, error_text, mode_badge,  # noqa: E402
-                     pointer_cursors, run_async, small_button, tag)
+                     pointer_cursors, run_async, small_button, submit_on_enter, tag)
 from .dialogs import (RulesDialog, SavePresetDialog, WhitelistDialog, allow_menu,  # noqa: E402
                       confirm_remove_user, request_row)
 from .feed import fold  # noqa: E402
@@ -95,10 +95,11 @@ class UserDetailPage(Adw.NavigationPage):
                 page.add(group)
             self.stack.add_titled_with_icon(page, name, title, icon)
 
-        header = Adw.HeaderBar(title_widget=Adw.WindowTitle(
-            title=user["username"],
-            subtitle=labels.setup_sentence(self.preset_key, self.drift, custom)
-            + " · " + labels.MODE_LABELS.get(user["mode"], user["mode"])))
+        # Just the name up here. The line that used to sit under it ("Child,
+        # with 2 changes · Filtered internet") repeated what the page says
+        # directly below, in a space too narrow for it, and crowded the tabs.
+        header = Adw.HeaderBar(title_widget=Adw.WindowTitle(title=user["username"],
+                                                            subtitle=""))
         switcher = Adw.ViewSwitcher(stack=self.stack, policy=Adw.ViewSwitcherPolicy.WIDE,
                                     halign=Gtk.Align.CENTER, margin_top=6, margin_bottom=6)
         view = Adw.ToolbarView()
@@ -123,19 +124,21 @@ class UserDetailPage(Adw.NavigationPage):
 
         who = Gtk.Box(spacing=14)
         who.append(avatar(user["username"], 56))
-        names = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, valign=Gtk.Align.CENTER)
+        names = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, valign=Gtk.Align.CENTER,
+                        spacing=4)
+        # Name and mode on one line: what this account is called, and what it
+        # is allowed to reach, which is the first question a parent has.
+        title_row = Gtk.Box(spacing=12)
         name = Gtk.Label(label=user["username"], xalign=0)
         name.add_css_class("title-2")
-        names.append(name)
+        title_row.append(name)
+        text, protects = labels.mode_badge(user)
+        title_row.append(mode_badge(text, protects, big=True))
+        names.append(title_row)
         setup = Gtk.Label(label="Set up as " + labels.setup_sentence(
             self.preset_key, self.drift, custom), xalign=0, wrap=True)
         setup.add_css_class("dim-label")
         names.append(setup)
-        # The mode, large and coloured, next to the name: what this account
-        # is allowed to reach is the first question, so it is the first
-        # thing on the page.
-        text, protects = labels.mode_badge(user)
-        names.append(mode_badge(text, protects, big=True))
         who.append(names)
         actions = Gtk.Box(spacing=6, halign=Gtk.Align.END, hexpand=True,
                           valign=Gtk.Align.CENTER)
@@ -694,6 +697,9 @@ class UserDetailPage(Adw.NavigationPage):
         dialog.add_response("cancel", "Cancel")
         dialog.add_response("add", "Add")
         dialog.set_response_appearance("add", Adw.ResponseAppearance.SUGGESTED)
+        dialog.set_default_response("add")
+        dialog.set_close_response("cancel")
+        submit_on_enter(dialog, "add", entry)
 
         def on_response(_d, response):
             value = entry.get_text().strip()

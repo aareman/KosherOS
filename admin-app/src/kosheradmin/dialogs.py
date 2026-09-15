@@ -12,7 +12,8 @@ from gi.repository import Adw, GLib, Gtk  # noqa: E402
 from kosherd import profiles as profiles_mod  # noqa: E402
 
 from . import labels  # noqa: E402
-from .common import avatar, clear, error_text, pointer_cursors, run_async, small_button, tag  # noqa: E402
+from .common import (avatar, clear, error_text, pointer_cursors,  # noqa: E402
+                     run_async, small_button, submit_on_enter, tag)
 
 
 class WhitelistDialog(Adw.Dialog):
@@ -354,6 +355,9 @@ class ListEditDialog(Adw.Dialog):
         dialog.add_response("cancel", "Cancel")
         dialog.add_response("add", "Add")
         dialog.set_response_appearance("add", Adw.ResponseAppearance.SUGGESTED)
+        dialog.set_default_response("add")
+        dialog.set_close_response("cancel")
+        submit_on_enter(dialog, "add", entry, *( [replacement] if replacement else []))
 
         def on_response(_d, response):
             term = entry.get_text().strip().lower()
@@ -391,6 +395,9 @@ class ListEditDialog(Adw.Dialog):
         dialog.set_extra_child(entry)
         dialog.add_response("cancel", "Cancel")
         dialog.add_response("remove", "Switch off")
+        dialog.set_default_response("remove")
+        dialog.set_close_response("cancel")
+        submit_on_enter(dialog, "remove", entry)
         dialog.set_response_appearance("remove",
                                        Adw.ResponseAppearance.DESTRUCTIVE)
 
@@ -648,6 +655,10 @@ def guardian_dialog(win) -> Adw.AlertDialog:
         dialog.set_response_appearance("disable", Adw.ResponseAppearance.DESTRUCTIVE)
     dialog.add_response("ok", "Set Password")
     dialog.set_response_appearance("ok", Adw.ResponseAppearance.SUGGESTED)
+    dialog.set_default_response("ok")
+    dialog.set_close_response("cancel")
+    # Enter from either field sets the password; Tab walks between them.
+    submit_on_enter(dialog, "ok", old, new)
 
     def on_response(_d, response):
         if response == "ok":
@@ -659,6 +670,7 @@ def guardian_dialog(win) -> Adw.AlertDialog:
 
     dialog.connect("response", on_response)
     dialog.present(win)
+    (old if enabled else new).grab_focus()
     return dialog
 
 
@@ -739,8 +751,11 @@ def add_person_dialog(win, adopt_mode: bool) -> Adw.AlertDialog | None:
     dialog.add_response("cancel", "Cancel")
     dialog.add_response("ok", title.split()[0])
     dialog.set_response_appearance("ok", Adw.ResponseAppearance.SUGGESTED)
+    dialog.set_default_response("ok")
+    dialog.set_close_response("cancel")
     if not adopt_mode:
         dialog.set_response_enabled("ok", False)
+        submit_on_enter(dialog, "ok", full, name)
 
     def on_response(_d, response):
         if response != "ok":

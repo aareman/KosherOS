@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import time
+from pathlib import Path
 
 from . import profiles
 
@@ -72,7 +73,8 @@ class DemoClient:
                              {"action": "block", "pattern": "youtube.com/shorts*"}]),
                 _user(1003, "rivky", "teen"),
                 _user(1004, "shmuli", "young_child",
-                      whitelist=sorted(f"site{i}.org" for i in range(22))),
+                      whitelist_bundles=["torah"],
+                      whitelist=["chinuch.org", "ourfamily.example"]),
             ],
             "guest": {"enabled": False, "mode": "whitelist", "whitelist": []},
         }
@@ -174,6 +176,27 @@ class DemoClient:
     def set_whitelist(self, uid, domains, pw=""):
         self._user(uid)["whitelist"] = sorted(domains)
         self._change(uid, "SetWhitelist", [])
+
+    def list_whitelist_bundles(self):
+        """The ready-made approved-site lists, read from the image's own file
+        so the demo shows exactly what a machine offers."""
+        from . import whitelists
+
+        found = whitelists.describe()
+        if found:
+            return found
+        here = Path(__file__).resolve()
+        for parent in here.parents:
+            candidate = parent / "os-image/files/usr/share/kosher/whitelist-bundles.json"
+            if candidate.exists():
+                whitelists.BUNDLE_PATH = candidate
+                whitelists._cache = None
+                return whitelists.describe()
+        return []
+
+    def set_whitelist_bundles(self, uid, bundles, pw=""):
+        self._user(uid)["whitelist_bundles"] = sorted(bundles)
+        self._change(uid, "SetWhitelistBundles", [uid, sorted(bundles)])
 
     def set_url_rules(self, uid, rules, pw=""):
         self._user(uid)["rules"] = list(rules)

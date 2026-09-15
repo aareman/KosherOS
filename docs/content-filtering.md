@@ -435,6 +435,39 @@ YouTube stays greyed out everywhere but filtered mode, and that one is
 genuine: nothing outside the proxy can see which video is playing.
 
 
+## Ready-made approved-site lists
+
+"Whitelist only" is the strongest thing this product offers and the most
+work to set up: Sefaria alone loads from half a dozen hosts, and a page
+whose fonts and scripts are blocked looks *broken* rather than blocked —
+which is how a filter ends up switched off. So the image ships bundles
+(`os-image/files/usr/share/kosher/whitelist-bundles.json`,
+`kosherd/whitelists.py`) that a parent switches on instead of typing
+domains:
+
+- **Torah study** — Sefaria, YUTorah, TorahAnytime, the Daf Yomi sites,
+  Chabad.org, HebrewBooks, OU Torah, Alhatorah, Mechon Mamre and the rest,
+  with the audio and asset hosts they use.
+- **Email and files** — Gmail, Outlook, OneDrive, Google Drive, Dropbox,
+  Proton, iCloud, with the sign-in and content hosts each needs.
+  Deliberately *not* `google.com` or `microsoft.com` as a whole: entries
+  include their subdomains, so a bare `google.com` would open search and
+  YouTube alongside Gmail. There is a test asserting those stay out.
+
+Any number can be on at once, and a set of shared hosts (fonts, script
+CDNs) rides along whenever any bundle is on. The account's own list is
+merged with them, so a family still adds its shul's website by hand. The
+merge happens in `whitelists.effective()` and is what `dns.py` renders,
+so switching a bundle on reaches the resolver on the next apply.
+
+`kosherctl site-lists show` prints the bundles;
+`kosherctl site-lists set <user> torah` switches them on without the GUI.
+
+And in the admin app, a whitelist account is **not** asked which kinds of
+site to block: it reaches its list and nothing else, so the category grid
+would be fifteen toggles that change nothing. The approved lists take
+their place on that tab.
+
 ## Developer tools on a filtered machine
 
 In "Filtered internet" mode the machine reads the account's HTTPS with its

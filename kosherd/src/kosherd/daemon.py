@@ -51,6 +51,14 @@ INTROSPECTION_XML = """
       <arg direction="in" type="as" name="domains"/>
       <arg direction="in" type="s" name="guardian_password"/>
     </method>
+    <method name="ListWhitelistBundles">
+      <arg direction="out" type="s" name="bundles_json"/>
+    </method>
+    <method name="SetWhitelistBundles">
+      <arg direction="in" type="i" name="uid"/>
+      <arg direction="in" type="as" name="bundles"/>
+      <arg direction="in" type="s" name="guardian_password"/>
+    </method>
     <method name="SetBlockedCategories">
       <arg direction="in" type="i" name="uid"/>
       <arg direction="in" type="as" name="categories"/>
@@ -547,6 +555,26 @@ class Daemon:
         # has an empty list and would otherwise stay wide open.
         if not user.blocked_categories:
             user.blocked_categories = list(_default_categories(mode))
+        self._save_and_apply()
+        return None
+
+    def impl_ListWhitelistBundles(self):
+        """The ready-made approved-site lists a whitelist account can switch on."""
+        from . import whitelists
+
+        return GLib.Variant("(s)", (json.dumps(whitelists.describe()),))
+
+    def impl_SetWhitelistBundles(self, uid: int, bundles: list[str], _guardian_pw: str):
+        from . import whitelists
+
+        user = self.policy.account(uid)
+        if user is None:
+            raise PolicyError(f"uid {uid} is not managed")
+        known = whitelists.keys()
+        unknown = sorted({str(b) for b in bundles} - known)
+        if unknown:
+            raise PolicyError(f"unknown approved-site list(s): {', '.join(unknown)}")
+        user.whitelist_bundles = sorted({str(b) for b in bundles})
         self._save_and_apply()
         return None
 

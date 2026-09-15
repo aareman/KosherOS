@@ -249,6 +249,31 @@ def cmd_profile(args) -> int:
     return 0
 
 
+def cmd_site_lists(args) -> int:
+    """The ready-made approved-site lists, and which an account uses."""
+    c = _client()
+    bundles = c.list_whitelist_bundles()
+    if args.action == "show" and not args.username:
+        for bundle in bundles:
+            print(f"  {bundle['key']:<16} {bundle['label']}  ({bundle['domains']} sites)")
+            print(f"    {bundle['description']}")
+        return 0
+    policy = c.get_policy()
+    user = next((u for u in policy["users"] if u["username"] == args.username), None)
+    if user is None:
+        print(f"no managed account called {args.username!r}", file=sys.stderr)
+        return 1
+    if args.action == "show":
+        on = set(user.get("whitelist_bundles") or [])
+        for bundle in bundles:
+            print(f"  [{'x' if bundle['key'] in on else ' '}] {bundle['key']:<16} "
+                  f"{bundle['label']}")
+        return 0
+    c.set_whitelist_bundles(user["uid"], args.bundles, _guardian_pw(args))
+    print(f"{args.username}: {', '.join(args.bundles) or 'no ready-made lists'}")
+    return 0
+
+
 def cmd_activity(args) -> int:
     """The filter's diary: blocks, hidden pictures, refused searches, and
     settings changes, each with who and why."""
@@ -871,6 +896,13 @@ def main(argv: list[str] | None = None) -> int:
 
     s = sub.add_parser("lists", help="what the filter is actually holding")
     s.set_defaults(func=cmd_lists)
+
+    s = sub.add_parser("site-lists", help="ready-made approved-site lists")
+    s.add_argument("action", choices=["show", "set"])
+    s.add_argument("username", nargs="?", default="")
+    s.add_argument("bundles", nargs="*", help="keys to switch on (none switches all off)")
+    s.add_argument("--guardian-password")
+    s.set_defaults(func=cmd_site_lists)
 
     s = sub.add_parser("activity", help="what the filter did, newest first")
     s.add_argument("--user", help="only this account")

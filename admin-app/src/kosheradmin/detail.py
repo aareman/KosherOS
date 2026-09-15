@@ -257,8 +257,74 @@ class UserDetailPage(Adw.NavigationPage):
     # -- filtering -----------------------------------------------------------------
 
     def _filtering_tab(self, user: dict) -> list[Adw.PreferencesGroup]:
+        # A whitelist account reaches its approved list and nothing else, so
+        # "which kinds of site are blocked" is a question with no meaning
+        # there — fifteen toggles that change nothing. The approved list
+        # takes their place.
+        if user["mode"] == "whitelist":
+            return [self._mode_group(user), self._approved_sites_group(user),
+                    self._pages_group(user)]
         return [self._mode_group(user), self._categories_group(user),
                 self._pages_group(user)]
+
+    def _approved_sites_group(self, user: dict) -> Adw.PreferencesGroup:
+        """The whole of what a whitelist account may reach: ready-made lists
+        the family switches on, plus its own."""
+        group = Adw.PreferencesGroup(
+            title="Approved sites",
+            description="This account reaches these and nothing else. Switch on a "
+                        "ready-made list rather than typing the thirty hosts a site "
+                        "loads from; more than one can be on at once.")
+        chosen = set(user.get("whitelist_bundles") or [])
+        self.bundle_rows: dict[str, Adw.SwitchRow] = {}
+        self._bundles_building = True
+        loading = Adw.ActionRow(title="Loading the ready-made lists…")
+        group.add(loading)
+
+        domains = user.get("whitelist", [])
+        own = Adw.ActionRow(
+            title="This family's own list",
+            subtitle=(labels.plural(len(domains), "site") + " added here"
+                      if domains else "Nothing added here yet"),
+            activatable=True)
+        own.add_suffix(Gtk.Image(icon_name="go-next-symbolic"))
+        own.connect("activated", lambda _r: WhitelistDialog(
+            self.win, f"Approved sites — {user['username']}", domains,
+            lambda new: self._gated(
+                lambda pw: self.win.client.set_whitelist(user["uid"], new, pw),
+                f"Approved sites saved for {user['username']}")).present(self.win))
+
+        def on_done(bundles):
+            group.remove(loading)
+            for bundle in bundles:
+                row = Adw.SwitchRow(
+                    title=bundle["label"],
+                    subtitle=bundle["description"] + f" ({bundle['domains']} sites)",
+                    subtitle_lines=4, active=bundle["key"] in chosen)
+                row.connect("notify::active", self._on_bundle, bundle["key"])
+                self.bundle_rows[bundle["key"]] = row
+                group.add(row)
+            group.add(own)
+            self._bundles_building = False
+            pointer_cursors(group)
+
+        run_async(self.win.client.list_whitelist_bundles, on_done,
+                  lambda e: (group.remove(loading), group.add(own),
+                             self.win.toast(error_text(e))))
+        return group
+
+    def _on_bundle(self, row, _param, key: str) -> None:
+        if self._bundles_building:
+            return
+        chosen = sorted(k for k, r in self.bundle_rows.items() if r.get_active())
+        user = self.user
+        if chosen == sorted(user.get("whitelist_bundles") or []):
+            return
+        self._gated(
+            lambda pw: self.win.client.set_whitelist_bundles(user["uid"], chosen, pw),
+            (f"{self.bundle_rows[key].get_title()} "
+             + ("added to" if row.get_active() else "removed from")
+             + f" {user['username']}'s approved sites"))
 
     def _mode_group(self, user: dict) -> Adw.PreferencesGroup:
         group = Adw.PreferencesGroup(title="How the internet is filtered")
@@ -454,20 +520,14 @@ class UserDetailPage(Adw.NavigationPage):
                                    "mode that can see which page is being asked for.")
         group.add(rules_row)
 
-        domains = user.get("whitelist", [])
-        wl_row = Adw.ActionRow(title="Approved sites",
-                               subtitle=labels.plural(len(domains), "domain"),
-                               activatable=True)
-        wl_row.add_suffix(Gtk.Image(icon_name="go-next-symbolic"))
-        wl_row.connect("activated", lambda _r: WhitelistDialog(
-            self.win, f"Approved sites — {user['username']}", domains,
-            lambda new: self._gated(
-                lambda pw: self.win.client.set_whitelist(user["uid"], new, pw),
-                f"Approved sites saved for {user['username']}")).present(self.win))
         if user["mode"] != "whitelist":
+            # In every other mode the approved list is inert; say so once,
+            # here, rather than showing an editor that changes nothing.
+            wl_row = Adw.ActionRow(
+                title="Approved sites",
+                subtitle="Only a Whitelist only account is limited to a list.")
             wl_row.set_sensitive(False)
-            wl_row.set_subtitle("Only a Whitelist only account is limited to a list.")
-        group.add(wl_row)
+            group.add(wl_row)
         return group
 
     # -- pictures and words --------------------------------------------------------

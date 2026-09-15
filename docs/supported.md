@@ -56,6 +56,13 @@ otherwise, so it is harmless on an account that is not inspected.
 | Basic protection | known bad sites blocked at DNS, safe search forced | shown | left alone | moderate | can install approved apps |
 | No filtering | open | shown | left alone | open | can install approved apps |
 
+**Approved-site lists.** A Whitelist only account can switch on ready-made
+lists rather than typing domains: **Torah study** (Sefaria, YUTorah,
+TorahAnytime, the Daf Yomi sites, Chabad.org, HebrewBooks and more) and
+**Email and files** (Gmail, Outlook, OneDrive, Drive, Dropbox, Proton,
+iCloud). Both can be on at once, each brings the hosts those sites load
+from, and the family's own list is merged with them.
+
 The guest account takes any of these by the kind of internet it gets, and
 is wiped at sign‑out. See [content filtering](content-filtering.md) and
 [media filtering](media-filtering.md) for what each layer does.

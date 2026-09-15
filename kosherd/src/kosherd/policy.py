@@ -179,6 +179,10 @@ class UserPolicy:
     mode: str
     admin: bool = False
     whitelist: list[str] = field(default_factory=list)
+    # Ready-made approved-site lists (whitelists.py) switched on for this
+    # account, merged with `whitelist` when the filter is rendered. A
+    # parent picks "Torah study" instead of typing thirty hosts.
+    whitelist_bundles: list[str] = field(default_factory=list)
     apps: list[str] = field(default_factory=list)
     can_install_apps: bool = True
     rules: list[dict] = field(default_factory=list)
@@ -195,6 +199,8 @@ class UserPolicy:
             d["admin"] = True
         if self.whitelist:
             d["whitelist"] = self.whitelist
+        if self.whitelist_bundles:
+            d["whitelist_bundles"] = self.whitelist_bundles
         if self.rules:
             d["rules"] = self.rules
         if self.blocked_categories:
@@ -232,6 +238,7 @@ class GuestPolicy:
     uid: int | None = None
     mode: str = "whitelist"
     whitelist: list[str] = field(default_factory=list)
+    whitelist_bundles: list[str] = field(default_factory=list)
     rules: list[dict] = field(default_factory=list)
     blocked_categories: list[str] = field(default_factory=list)
     # The guest gets the same settings as anyone else. Without these a
@@ -251,6 +258,8 @@ class GuestPolicy:
             d["mode"] = self.mode
         if self.whitelist:
             d["whitelist"] = self.whitelist
+        if self.whitelist_bundles:
+            d["whitelist_bundles"] = self.whitelist_bundles
         if self.rules:
             d["rules"] = self.rules
         if self.blocked_categories:
@@ -308,6 +317,7 @@ class Policy:
             users.append(UserPolicy(
                 uid=self.guest.uid, username=GUEST_USERNAME,
                 mode=self.guest.mode, whitelist=list(self.guest.whitelist),
+                whitelist_bundles=list(self.guest.whitelist_bundles),
                 rules=list(self.guest.rules),
                 blocked_categories=list(self.guest.blocked_categories),
                 media_level=self.guest.media_level,
@@ -349,6 +359,7 @@ class Policy:
                     mode=u["mode"],
                     admin=u.get("admin", False),
                     whitelist=list(u.get("whitelist", [])),
+                    whitelist_bundles=list(u.get("whitelist_bundles", [])),
                     apps=list(u.get("apps", [])),
                     can_install_apps=u.get("can_install_apps", True),
                     rules=list(u.get("rules", [])),
@@ -370,6 +381,7 @@ class Policy:
                 uid=guest_doc.get("uid"),
                 mode=guest_doc.get("mode", "whitelist"),
                 whitelist=list(guest_doc.get("whitelist", [])),
+                whitelist_bundles=list(guest_doc.get("whitelist_bundles", [])),
                 rules=list(guest_doc.get("rules", [])),
                 blocked_categories=list(guest_doc.get("blocked_categories", [])),
                 media_level=guest_doc.get("media_level", DEFAULT_MEDIA_LEVEL),

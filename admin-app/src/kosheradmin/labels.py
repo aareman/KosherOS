@@ -456,7 +456,14 @@ def protection_lines(user: dict) -> list[tuple[str, str, bool]]:
     mode = user.get("mode", "filtered")
     kinds = len(user.get("blocked_categories") or [])
     if mode == "whitelist":
-        web = f"Only {plural(len(user.get('whitelist') or []), 'approved site')}"
+        bundles = len(user.get("whitelist_bundles") or [])
+        own = len(user.get("whitelist") or [])
+        if bundles and own:
+            web = f"Only {plural(bundles, 'approved list')} and {plural(own, 'site')}"
+        elif bundles:
+            web = f"Only {plural(bundles, 'approved list')} of sites"
+        else:
+            web = f"Only {plural(own, 'approved site')}"
     elif mode == "none":
         web = "No internet"
     elif mode == "unfiltered":

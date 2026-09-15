@@ -78,9 +78,15 @@ def _nftset_line(domain: str, set4: str, set6: str) -> str:
 def render(policy: Policy) -> str:
     # Dedupe on the stripped name: "example.org" and "*.example.org" render
     # to the same dnsmasq pattern.
+    # The account's own list PLUS any ready-made bundles switched on for it
+    # (whitelists.py): a parent picks "Torah study" rather than typing the
+    # thirty hosts those sites load from.
+    from . import whitelists
+
     user_domains = sorted(
         {d.removeprefix("*.")
-         for u in policy.effective_users() if u.mode == "whitelist" for d in u.whitelist}
+         for u in policy.effective_users() if u.mode == "whitelist"
+         for d in whitelists.effective(u)}
     )
     system_domains = sorted({d.removeprefix("*.") for d in policy.effective_system_whitelist()})
 

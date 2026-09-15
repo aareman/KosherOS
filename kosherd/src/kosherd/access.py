@@ -50,6 +50,10 @@ ACTIONS = {
     "GetPolicy": ACTION_READ_CONFIG,
     "SetFilterMode": ACTION_MANAGE_FILTER,
     "SetWhitelist": ACTION_MANAGE_FILTER,
+    "ListWhitelistBundles": ACTION_READ_CONFIG,
+    # Switching a ready-made approved-site list on widens what a whitelist
+    # account can reach, so it is a filter change like editing the list.
+    "SetWhitelistBundles": ACTION_MANAGE_FILTER,
     # Enrolling hands filter control to a portal and unenrolling takes it
     # back, so both are filter changes. Syncing only applies what the portal
     # already signed — the Ed25519 signature and a strictly increasing
@@ -138,7 +142,7 @@ ACTIONS = {
 
 # Methods that can weaken the filter: guardian password required when enabled.
 GUARDIAN_GATED = frozenset({
-    "SetFilterMode", "SetWhitelist", "SetUrlRules", "SetBlockedCategories", "ApplyProfile", "SaveProfile", "DeleteProfile", "ApproveRequest", "AllowUrl", "EditList",
+    "SetFilterMode", "SetWhitelist", "SetWhitelistBundles", "SetUrlRules", "SetBlockedCategories", "ApplyProfile", "SaveProfile", "DeleteProfile", "ApproveRequest", "AllowUrl", "EditList",
     "SetUserAdmin",
     "SetMediaLevel",
     "SetLanguageFilter", "SetYouTube",
@@ -161,7 +165,8 @@ UID_AWARE = frozenset({"Unlock", "Lock", "Status", "VerifyGuardian", "InstallApp
 # session calls and the store's own installs are not changes to the family's
 # settings and are not logged.
 CHANGES = frozenset({
-    "SetFilterMode", "SetWhitelist", "SetUrlRules", "SetBlockedCategories",
+    "SetFilterMode", "SetWhitelist", "SetWhitelistBundles", "SetUrlRules",
+    "SetBlockedCategories",
     "ApplyProfile", "SaveProfile", "DeleteProfile", "ApproveRequest",
     "DismissRequest", "AllowUrl", "EditList", "SetMediaLevel",
     "SetLanguageFilter", "SetYouTube", "SetUserAdmin", "SetLayout",
@@ -178,7 +183,8 @@ CHANGES = frozenset({
 })
 # Changes whose first argument is the account they are about.
 PER_USER = frozenset({
-    "SetFilterMode", "SetWhitelist", "SetUrlRules", "SetBlockedCategories",
+    "SetFilterMode", "SetWhitelist", "SetWhitelistBundles", "SetUrlRules",
+    "SetBlockedCategories",
     "ApplyProfile", "SaveProfile", "AllowUrl", "SetMediaLevel",
     "SetLanguageFilter", "SetYouTube", "SetUserAdmin", "SetLayout",
     "SetCoverStyle", "RemoveUser", "SetUserApps", "SetUserCanInstall",

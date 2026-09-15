@@ -44,6 +44,14 @@ class FakeClient:
         return self._overrides.get("edits",
                                    {"add": {}, "remove": [], "shipped": 119})
 
+    def list_whitelist_bundles(self):
+        return self._overrides.get("bundles", [
+            {"key": "torah", "label": "Torah study",
+             "description": "Sefaria, YUTorah, TorahAnytime and the rest", "domains": 38},
+            {"key": "mail-and-files", "label": "Email and files",
+             "description": "Gmail, Outlook, OneDrive, Drive, Dropbox", "domains": 40},
+        ])
+
     def list_categories(self):
         return {"domains": 5_000_000, "version": "1", "source": "test",
                 "categories": [{"name": "adult", "label": "Adult"},
@@ -1285,4 +1293,69 @@ def test_the_persons_header_carries_only_the_name():
     row = badge.get_parent()
     assert any(isinstance(w, Gtk.Label) and w.has_css_class("title-2")
                for w in _walk(row)), "the name and the mode share a line"
+
+
+# -- whitelist mode: lists, not categories -------------------------------------------
+
+def test_a_whitelist_account_is_not_asked_which_kinds_of_site_to_block():
+    # It reaches its approved list and nothing else, so fifteen category
+    # toggles would change nothing at all.
+    page, _w, _u = _detail(mode="whitelist")
+    drain()
+    titles = {r.get_title() for r in _rows(page)}
+    assert "Blocked kinds of sites" not in {g.get_title() for g in _groups(page)}
+    assert "Approved sites" in {g.get_title() for g in _groups(page)}
+    assert "Torah study" in titles and "Email and files" in titles
+    assert "This family's own list" in titles
+
+
+def test_a_filtered_account_still_gets_the_category_grid():
+    page, _w, _u = _detail(mode="filtered")
+    drain()
+    groups = {g.get_title() for g in _groups(page)}
+    assert "Blocked kinds of sites" in groups
+    assert "Approved sites" not in groups
+
+
+def _groups(widget, found=None):
+    found = [] if found is None else found
+    child = widget.get_first_child()
+    while child is not None:
+        if isinstance(child, Adw.PreferencesGroup):
+            found.append(child)
+        _groups(child, found)
+        child = child.get_next_sibling()
+    return found
+
+
+def test_switching_a_ready_made_list_on_saves_it():
+    saved = []
+
+    class Recording(FakeClient):
+        def set_whitelist_bundles(self, uid, bundles, pw):
+            saved.append((uid, list(bundles)))
+
+    win = FakeWindow(Recording())
+    user = a_user(mode="whitelist", whitelist=["ourfamily.example"])
+    win.policy = {"revision": 1, "users": [user], "guardian": {"enabled": False},
+                  "guest": {"enabled": False}, "adblock": {"enabled": True}}
+    page = detail.UserDetailPage(win, user)
+    drain()
+    _row_named(page, "Torah study").set_active(True)
+    drain()
+    assert saved == [(1001, ["torah"])]
+    _row_named(page, "Email and files").set_active(True)
+    drain()
+    assert saved[-1] == (1001, ["mail-and-files", "torah"]), "both can be on at once"
+
+
+def test_the_card_says_how_a_whitelist_account_is_set_up():
+    user = a_user(mode="whitelist", whitelist=["a.example", "b.example"],
+                  whitelist_bundles=["torah", "mail-and-files"])
+    lines = dict((text, protects) for _icon, text, protects
+                 in labels.protection_lines(user))
+    assert "Only 2 approved lists and 2 sites" in lines
+    only_lists = labels.protection_lines(a_user(mode="whitelist",
+                                                whitelist_bundles=["torah"]))[0][1]
+    assert only_lists == "Only 1 approved list of sites"
 

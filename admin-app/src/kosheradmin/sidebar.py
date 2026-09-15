@@ -148,5 +148,9 @@ class Sidebar(Adw.NavigationPage):
         approved = win.catalog_count
         self.rows["apps"].say(labels.plural(approved, "app") if approved is not None else "")
 
-        state = win.update_state or ""
-        self.rows["updates"].say(state[:22])
+        # Until somebody checks, the useful thing to say is what this
+        # computer is running; an empty row looks unfinished.
+        booted = (getattr(win, "deployment", None) or {}).get("booted") or {}
+        state = win.update_state or (f"Version {booted['version']}"
+                                     if booted.get("version") else "")
+        self.rows["updates"].say(state[:24])

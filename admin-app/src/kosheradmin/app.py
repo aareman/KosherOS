@@ -50,6 +50,7 @@ class Window(Adw.ApplicationWindow):
         self.time_usage: dict = {}
         self.catalog_count: int | None = None
         self.update_state: str | None = None
+        self.deployment: dict | None = None
         self.guardian_ok = False
         self.destination = "family"
 
@@ -255,11 +256,15 @@ class Window(Adw.ApplicationWindow):
             summary = _quiet(client.activity_summary, {})
             time_usage = _quiet(client.time_usage, {})
             catalog = _quiet(lambda: len(client.list_catalog().get("apps", [])), None)
-            return policy, requests, status, summary, time_usage, catalog
+            # Once only: bootc takes a moment to answer, and the version
+            # this computer is running does not change while it runs.
+            deployment = self.deployment if self.deployment is not None \
+                else _quiet(client.deployment_status, {})
+            return policy, requests, status, summary, time_usage, catalog, deployment
 
         def on_done(result):
             (self.policy, self.requests, self.status, self.summary, self.time_usage,
-             self.catalog_count) = result
+             self.catalog_count, self.deployment) = result
             self.family_page.refresh()
             self.sidebar.refresh()
             if self.destination == "activity":

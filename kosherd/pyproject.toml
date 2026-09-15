@@ -42,6 +42,10 @@ omit = [
     "*/kosherd/client.py",
     "*/kosherd/auth.py",
     "*/kosherd/cli.py",
+    # The pretend daemon behind `just admin-demo` and `just store-demo`: a
+    # development aid that never runs on a machine, and whose "coverage"
+    # would only measure the demo data. The apps' own widget tests drive it.
+    "*/kosherd/demo.py",
 ]
 
 [tool.coverage.report]

@@ -40,3 +40,35 @@ def test_ci_publishes_edge_and_never_stable():
     assert "$IMAGE:stable" not in ci, "stable is promoted by hand, never by a push"
     promote = (ROOT / ".github/workflows/release-stable.yml").read_text()
     assert "workflow_dispatch" in promote and "$IMAGE:stable" in promote
+
+
+def test_every_version_that_passes_gets_a_release():
+    """A commit whose tests pass must produce a release, image or not.
+
+    The image job is skipped for a commit that changes nothing in the image
+    (docs, tests, CI), and it used to carry the release with it — so those
+    versions existed in VERSION and in no history anywhere. The release is
+    its own job now, and runs when the tests pass and the image did not
+    fail.
+    """
+    document = yaml.safe_load((ROOT / ".github/workflows/ci.yml").read_text())
+    release = document["jobs"]["release"]
+    assert "image" in release["needs"], "it must wait for the image, when there is one"
+    condition = " ".join(release["if"].split())
+    assert "always()" in condition, "or a skipped image would skip the release"
+    for job in ("unit", "compile", "shell"):
+        assert f"needs.{job}.result == 'success'" in condition, job
+    assert "needs.image.result != 'failure'" in condition
+    assert "github.event_name == 'push'" in condition
+
+
+def test_the_release_says_when_there_is_no_new_image():
+    ci = (ROOT / ".github/workflows/ci.yml").read_text()
+    assert "No new OS image" in ci
+    assert "machines stay on the image from the previous version" in ci
+
+
+def test_the_image_job_still_tags_and_signs_the_version():
+    ci = (ROOT / ".github/workflows/ci.yml").read_text()
+    assert 'podman push "$IMAGE:v$version"' in ci
+    assert 'cosign sign --yes "$IMAGE:v$version"' in ci

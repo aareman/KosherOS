@@ -146,41 +146,67 @@ jobs:
           cosign sign --yes "$IMAGE:${GITHUB_SHA::12}"
           cosign sign --yes "$IMAGE:edge"
 
-      - name: Release this version
-        # Every commit carries its own pre-release version (VERSION, ticked
-        # by the dev shell's git hook). Once the image for it is pushed and
-        # signed, the same version becomes an image tag, a git tag and a
-        # GitHub pre-release, so a build a family is running can be traced
-        # to the commit it came from. A commit that did not tick VERSION
-        # (a merge) finds its release already made and leaves it alone.
+      - name: Tag this version's image
+        # The image keeps the version's own tag so a release can point at it
+        # and a machine can be moved to it by name. Making the RELEASE is a
+        # separate job, because a commit that changes nothing in the image
+        # still gets a version and still deserves a release.
         if: github.event_name == 'push'
+        run: |
+          version="$(tr -d '[:space:]' < VERSION)"
+          podman tag "$IMAGE:${GITHUB_SHA::12}" "$IMAGE:v$version"
+          podman push "$IMAGE:v$version"
+          cosign sign --yes "$IMAGE:v$version"
+
+            --title "KosherOS $version" --notes-file release-notes.md
+
+  release:
+    name: Release this version
+    # Every commit carries its own version (VERSION, ticked by the dev
+    # shell's git hook), so every commit that passes the tests gets a
+    # release — even one that changed no image file, which would otherwise
+    # leave a version with nothing to point at and a gap in the history.
+    # A commit whose tests fail gets none, and its changes appear in the
+    # next release's notes, which list everything since the previous tag.
+    needs: [unit, compile, shell, changes, image]
+    if: |
+      always() && github.event_name == 'push'
+      && needs.unit.result == 'success'
+      && needs.compile.result == 'success'
+      && needs.shell.result == 'success'
+      && needs.image.result != 'failure'
+      && needs.image.result != 'cancelled'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      IMAGE: ghcr.io/${{ github.repository_owner }}/kosher-linux
+      BUILT: ${{ needs.changes.outputs.image }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0 # the notes list the commits since the previous version
+
+      - name: Create the tag and the release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           version="$(tr -d '[:space:]' < VERSION)"
           tag="v$version"
-          podman tag "$IMAGE:${GITHUB_SHA::12}" "$IMAGE:$tag"
-          podman push "$IMAGE:$tag"
-          cosign sign --yes "$IMAGE:$tag"
           if gh release view "$tag" >/dev/null 2>&1; then
             echo "release $tag already exists; leaving it"
             exit 0
           fi
-          prerelease=""
-          case "$version" in *-pre.*) prerelease="--prerelease" ;; esac
           git fetch --tags --quiet origin
-          # The previous version tag, so the notes say what changed since it:
-          # every commit subject in between, which this repository writes as
-          # a full sentence about the change.
           previous="$(git tag --list 'v*' --sort=-creatordate | grep -v "^$tag\$" | head -1 || true)"
           if [ -n "$previous" ]; then
-            changes="$(git log --format='- %s' "$previous..$GITHUB_SHA" -- . ':!VERSION' | grep -v -- '- Bump\|- bump' || true)"
+            changes="$(git log --format='- %s' "$previous..$GITHUB_SHA" -- . ':!VERSION' || true)"
             since="since $previous"
           else
             changes="$(git log --format='- %s' -20 "$GITHUB_SHA")"
             since="(first release; the last twenty commits)"
           fi
-          [ -n "$changes" ] || changes="- No changes recorded between $previous and this build."
+          [ -n "$changes" ] || changes="- Nothing outside the version file changed."
           {
             echo "## What changed $since"
             echo
@@ -188,13 +214,20 @@ jobs:
             echo
             echo "## What this build is"
             echo
-            echo "- OS image \`$IMAGE:$tag\` (also \`$IMAGE:${GITHUB_SHA::12}\`), signed with cosign keyless. It is the current \`:edge\`."
-            echo "- Machines on the edge channel pick it up on their next update. Stable machines are unaffected until a person promotes a version with the **Promote to stable** workflow (\`version: $tag\`)."
-            echo "- An installer ISO for this channel is built locally with \`just release-iso edge\`; families install from \`just release-iso\` (stable)."
+            if [ "$BUILT" = "true" ]; then
+              echo "- OS image \`$IMAGE:$tag\` (also \`$IMAGE:${GITHUB_SHA::12}\`), signed with cosign keyless. It is the current \`:edge\`."
+              echo "- Machines on the edge channel pick it up on their next update. Stable machines are unaffected until a person promotes a version with the **Promote to stable** workflow (\`version: $tag\`)."
+            else
+              echo "- **No new OS image.** Nothing in this commit reaches the image (docs, tests or CI only), so machines stay on the image from the previous version. The version still exists so the history has no gaps."
+            fi
+            echo "- An installer ISO is built locally with \`just release-iso\` (stable) or \`just release-iso edge\`."
             echo
             echo "## What is supported"
             echo
             echo "Browsers, Flatpak apps, and the developer tools npm, yarn, pnpm, bun, pip, uv, gem, cargo, deno, go and git all work on a filtered account. Presets, hardware and the update channels are listed on the docs site: https://aareman.github.io/KosherOS/supported/"
           } > release-notes.md
+          prerelease=""
+          case "$version" in *-pre.*) prerelease="--prerelease" ;; esac
           gh release create "$tag" $prerelease --target "$GITHUB_SHA" \
             --title "KosherOS $version" --notes-file release-notes.md
+

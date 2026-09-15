@@ -76,7 +76,20 @@ def releases_from_git() -> list[dict]:
     return found
 
 
+def newest_first(found: list[dict]) -> list[dict]:
+    """Sort by when each was published, not by what GitHub hands back.
+
+    GitHub orders releases by comparing the tag as TEXT, which put
+    "pre.9" above "pre.13"; the version counter is zero-padded now so the
+    two orders agree, but the site sorts by date regardless so a future
+    numbering change cannot put the page out of order again.
+    """
+    return sorted(found, key=lambda r: (r.get("publishedAt") or "", r.get("tagName") or ""),
+                  reverse=True)
+
+
 def releases_page(found: list[dict]) -> str:
+    found = newest_first(found)
     lines = ["# Releases", "",
              "Every push to the repository becomes a pre-release on the **edge** channel; "
              "a person promotes one that has run well to **stable**. What each build changed "

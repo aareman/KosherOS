@@ -91,3 +91,17 @@ def test_the_diagram_is_handed_to_the_theme_to_draw():
     nav = (ROOT / "mkdocs.yml").read_text()
     assert "name: mermaid" in nav and "fence_code_format" in nav
     assert "```mermaid" in (ROOT / "docs/index.md").read_text()
+
+
+def test_the_releases_page_sorts_by_date_whatever_order_github_gives():
+    # GitHub compares the tag as text, which listed pre.9 above pre.13.
+    out_of_order = [
+        {"tagName": "v0.1.0-pre.9", "name": "old", "publishedAt": "2026-09-15T02:00:00Z",
+         "isPrerelease": True, "isLatest": False, "body": ""},
+        {"tagName": "v0.1.0-pre.013", "name": "new", "publishedAt": "2026-09-15T15:00:00Z",
+         "isPrerelease": True, "isLatest": False, "body": ""},
+    ]
+    assert [r["name"] for r in bd.newest_first(out_of_order)] == ["new", "old"]
+    page = bd.releases_page(out_of_order)
+    assert page.index("new") < page.index("old")
+

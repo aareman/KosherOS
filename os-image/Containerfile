@@ -307,11 +307,30 @@ RUN python3 -m pip install --prefix=/usr --no-deps \
     && systemctl enable kosher-firstboot.service \
     # Every graphical sign-in applies that account's desktop layout.
     && systemctl --global enable kosher-layout.service \
+    # ...and listens for kosherd's time warnings, so "5 minutes left" is a
+    # notification on the person's screen, not a line in a log.
+    && systemctl --global enable kosher-time-notify.service \
     && systemctl enable kosher-search-secret.service kosher-searxng.service \
         kosher-search.service \
     # Portal sync is inert until the device enrols (the unit and timer
     # both carry ConditionPathExists on the enrolment file).
     && systemctl enable kosher-sync.timer
+
+# Time limits at the door. kosherd renders /etc/security/time.conf from
+# the policy (when each account may sign in; an account whose daily time
+# is used up is refused outright); pam_time in the account stack is what
+# reads it. It goes into the login-screen and console services directly —
+# password-auth is authselect's, and editing that file breaks `authselect
+# check`. On a refusal, pam_exec notes it in the activity log so the
+# parent sees "sign-in refused, 21:14" beside everything else.
+RUN for f in gdm-password gdm-autologin login; do \
+        [ -f "/etc/pam.d/$f" ] && ! grep -q pam_time "/etc/pam.d/$f" && \
+        sed -i '0,/^account/{s|^account|account    [success=1 default=bad] pam_time.so\naccount    optional pam_exec.so quiet /usr/bin/kosher-time-refused\n&|}' "/etc/pam.d/$f"; \
+    done \
+    && grep -q pam_time /etc/pam.d/gdm-password \
+    && grep -q kosher-time-refused /etc/pam.d/gdm-password \
+    && test -x /usr/bin/kosher-time-refused \
+    && test -x /usr/bin/kosher-time-notify
 
 # The identity has to survive the build, not just be written during it.
 #

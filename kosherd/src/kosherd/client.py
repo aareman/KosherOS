@@ -155,6 +155,28 @@ class DaemonClient:
         """Ads and trackers blocked at the resolvers, for every account."""
         self._call("Profiles", "SetAdBlock", "(bs)", enabled, guardian_password)
 
+    def set_time_limits(self, uid: int, settings: dict,
+                        guardian_password: str = "") -> None:
+        """{"daily_minutes": n, "allowed": [7 day strings]} — see timelimits.py."""
+        self._call("Profiles", "SetTimeLimits", "(iss)", uid,
+                   json.dumps(settings), guardian_password)
+
+    def time_usage(self) -> dict:
+        """Today's time per account, keyed by uid as a string (JSON keys)."""
+        return json.loads(self._call("Profiles", "GetTimeUsage")[0])
+
+    def connect_time_signals(self, on_warning) -> int:
+        """Subscribe to TimeWarning(uid, minutes_left, reason)."""
+
+        def handler(_conn, _sender, _path, _iface, signal, params):
+            if signal == "TimeWarning":
+                on_warning(*params.unpack())
+
+        return self._conn.signal_subscribe(
+            BUS_NAME, "org.kosherlinux.Daemon1.Profiles", "TimeWarning", OBJECT_PATH,
+            None, Gio.DBusSignalFlags.NONE, handler,
+        )
+
     def my_layout(self) -> str:
         """The calling user's own desktop layout (any active local user)."""
         return self._call("Profiles", "GetMyLayout")[0]

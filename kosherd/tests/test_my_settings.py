@@ -164,3 +164,27 @@ def test_every_language_setting_has_words_too():
 
     described = _app_constants()["LANGUAGE"]
     assert set(LANGUAGE_MODES) == set(described)
+
+
+# ---- time --------------------------------------------------------------------
+
+def test_your_own_time_limit_and_what_is_left_today_are_shown():
+    from kosherd import timelimits
+
+    limited = UserPolicy(uid=1001, username="child", mode="filtered",
+                         time={"daily_minutes": 120,
+                               "allowed": timelimits.SCHEDULE_PRESETS["not_late"]})
+    settings = _settings([limited], uid=1001)
+    t = settings["time"]
+    assert t["limited"] is True and t["daily_minutes"] == 120 and t["admin"] is False
+    assert len(t["allowed"]) == 7 and len(t["today"]) == 24
+    assert t["today"] == timelimits.SCHEDULE_PRESETS["not_late"][0]
+    assert t["used"] == 0 and t["left"] is not None
+
+
+def test_an_unlimited_account_and_an_administrator_are_told_so():
+    settings = _settings([CHILD], uid=1001)
+    assert settings["time"]["limited"] is False and settings["time"]["left"] is None
+    settings = _settings([PARENT], uid=1000)
+    assert settings["time"]["admin"] is True and settings["time"]["limited"] is False
+    assert settings["time"]["daily_minutes"] == 0

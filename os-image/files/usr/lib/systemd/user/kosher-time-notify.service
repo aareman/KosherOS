@@ -1,0 +1,19 @@
+[Unit]
+Description=KosherOS: warn before this account's time runs out
+Documentation=file:///usr/share/doc/kosher/time-limits.md
+# Runs for the whole graphical session, as the person signed in. kosherd
+# decides when time is short and says so on the system bus; this turns
+# that into a desktop notification (see kosherd/timenotify.py). Ending it
+# loses the warning, not the limit: the sign-out happens regardless.
+PartOf=graphical-session.target
+After=graphical-session.target
+ConditionUser=!@system
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/kosher-time-notify
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=graphical-session.target

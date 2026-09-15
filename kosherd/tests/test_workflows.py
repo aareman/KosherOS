@@ -120,7 +120,7 @@ def test_the_release_tells_the_truth_about_the_image():
     assert "needs.image.result == 'success'" in ci, "the note keys off the result"
     assert '[ "${{ needs.image.result }}" = "failure" ] && failed=--image-failed' in ci
     notes = (ROOT / "scripts/release-notes.py").read_text()
-    assert "No image for this version" in notes
+    assert "The image build failed, so no machine can move to this version" in notes
     assert "No new image" in notes, "and the skipped-on-purpose case still reads well"
 
 

@@ -249,6 +249,14 @@ devenv shell      # or let direnv do it on cd
 just test         # the unit suites: about fifteen seconds, no root, no VM
 ```
 
+Every commit carries its own version. `VERSION` at the repo root reads
+`0.1.0-pre.N` between releases, and a git hook the dev shell installs ticks
+`N` on every commit, so each image, ISO and VM you build can be told apart
+and a bug report can say which build it came from. The number reaches
+os-release, the installer's welcome screen, the ISO's file name and the
+admin app's Updates page. A release is a person editing `VERSION` to a plain
+`X.Y.Z`; the next commit starts the following pre-release series by itself.
+
 The daemons are ordinary Python projects. Most work needs no image at all:
 
 ```sh

@@ -157,6 +157,14 @@
               "description": "YouTube's own Restricted Mode level."
             }
           }
+        },
+        "cover_style": {
+          "enum": [
+            "frost",
+            "skin"
+          ],
+          "default": "frost",
+          "description": "How a kept-but-partly-hidden picture is covered: frost = the detected figure is frosted (shape gone, layout kept); skin = skin-toned pixels inside the detected figure are painted a solid colour through an expanded mask, clothing and background left alone, falling back to frost where the colour gate finds nothing to paint. Cosmetic: what is judged and when is decided by media_level; this only decides what the cover looks like. Not part of presets; the guest account uses the default."
         }
       }
     },

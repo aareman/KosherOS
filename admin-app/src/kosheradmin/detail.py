@@ -82,7 +82,13 @@ class UserDetailPage(Adw.NavigationPage):
         builders = {"overview": self._overview_tab, "filtering": self._filtering_tab,
                     "media": self._media_tab, "youtube": self._youtube_tab,
                     "apps": self._apps_tab, "account": self._account_tab}
-        for name, title, icon in TABS:
+        tabs = TABS
+        if user.get("guest"):
+            # A guest installs nothing and cannot be an admin or be removed;
+            # its Account tab is the switch that turns it off.
+            builders["account"] = self._guest_account_tab
+            tabs = tuple(t for t in TABS if t[0] != "apps")
+        for name, title, icon in tabs:
             page = Adw.PreferencesPage()
             for group in builders[name](user):
                 page.add(group)
@@ -866,6 +872,27 @@ class UserDetailPage(Adw.NavigationPage):
         remove.connect("activated", lambda *_: confirm_remove_user(self.win, user))
         danger.add(remove)
         return [group, desktop, danger]
+
+    def _guest_account_tab(self, user: dict) -> list[Adw.PreferencesGroup]:
+        group = Adw.PreferencesGroup(
+            title="Guest account",
+            description="Anyone can sign in as the guest without a password. "
+                        "Everything the guest does is erased at sign-out. The "
+                        "filter settings on the other tabs apply to whoever it is.")
+        switch = Adw.SwitchRow(title="Guest account is on", active=True)
+
+        def on_toggle(row, _p):
+            if row.get_active():
+                return
+            self.win.with_guardian(lambda pw: self.win.call(
+                lambda: self.win.client.set_guest_config(
+                    False, user["mode"], user.get("whitelist", []), pw),
+                done_msg="Guest account is off"))
+            self.win.nav.pop_to_tag("root")
+
+        switch.connect("notify::active", on_toggle)
+        group.add(switch)
+        return [group]
 
     def _confirm_delete_preset(self, key: str) -> None:
         custom = self.win.policy.get("custom_profiles", [])

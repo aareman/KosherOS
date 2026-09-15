@@ -538,7 +538,7 @@ class Daemon:
     def impl_SetFilterMode(self, uid: int, mode: str, _guardian_pw: str):
         if mode not in MODES:
             raise PolicyError(f"unknown mode {mode!r}")
-        user = self.policy.user(uid)
+        user = self.policy.account(uid)
         if user is None:
             raise PolicyError(f"uid {uid} is not managed")
         user.mode = mode
@@ -551,7 +551,7 @@ class Daemon:
         return None
 
     def impl_SetWhitelist(self, uid: int, domains: list[str], _guardian_pw: str):
-        user = self.policy.user(uid)
+        user = self.policy.account(uid)
         if user is None:
             raise PolicyError(f"uid {uid} is not managed")
         user.whitelist = sorted(set(domains))
@@ -711,7 +711,7 @@ class Daemon:
         """Allow a page the filter blocked, straight from the activity
         view — the same grant as approving a request, without waiting for
         the person to ask."""
-        user = self.policy.user(uid)
+        user = self.policy.account(uid)
         if user is None:
             raise PolicyError(f"uid {uid} is not managed")
         host = self._grant(user, url, whole_site)
@@ -794,7 +794,7 @@ class Daemon:
         return None
 
     def _managed(self, uid: int):
-        user = self.policy.user(uid)
+        user = self.policy.account(uid)
         if user is None:
             raise PolicyError(f"uid {uid} is not managed")
         return user
@@ -968,7 +968,7 @@ class Daemon:
         """
         from . import profiles
 
-        user = self.policy.user(uid)
+        user = self.policy.account(uid)
         if user is None:
             raise PolicyError(f"uid {uid} is not managed")
         if not label.strip():
@@ -1023,7 +1023,7 @@ class Daemon:
     def impl_ApplyProfile(self, uid: int, profile_key: str, _guardian_pw: str):
         from . import profiles
 
-        user = self.policy.user(uid)
+        user = self.policy.account(uid)
         if user is None:
             raise PolicyError(f"uid {uid} is not managed")
         try:
@@ -1036,7 +1036,8 @@ class Daemon:
         user.media_level = profile.media_level
         user.language_filter = profile.language_filter
         user.youtube = dict(profile.youtube)
-        user.can_install_apps = profile.can_install_apps
+        if hasattr(user, "can_install_apps"):  # the guest installs nothing
+            user.can_install_apps = profile.can_install_apps
         self._save_and_apply()
         log.info("applied profile %s to uid %d", profile_key, uid)
         return None
@@ -1067,7 +1068,7 @@ class Daemon:
         }),))
 
     def impl_SetBlockedCategories(self, uid: int, cats: list[str], _guardian_pw: str):
-        user = self.policy.user(uid)
+        user = self.policy.account(uid)
         if user is None:
             raise PolicyError(f"uid {uid} is not managed")
         user.blocked_categories = sorted(set(cats))
@@ -1077,7 +1078,7 @@ class Daemon:
     def impl_SetUrlRules(self, uid: int, rules_json: str, _guardian_pw: str):
         from .urlrules import parse_rules
 
-        user = self.policy.user(uid)
+        user = self.policy.account(uid)
         if user is None:
             raise PolicyError(f"uid {uid} is not managed")
         try:

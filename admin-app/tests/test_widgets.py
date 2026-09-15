@@ -479,6 +479,39 @@ def test_the_guest_is_set_up_by_kind_of_internet_not_preset():
     assert sent == {"enabled": True, "mode": "child"}
 
 
+def test_an_enabled_guest_opens_the_same_page_as_anyone_without_an_apps_tab():
+    win = FakeWindow(FakeClient())
+    win.policy = {"revision": 1, "users": [], "guardian": {"enabled": False},
+                  "adblock": {"enabled": True},
+                  "guest": {"enabled": True, "uid": 1010, "mode": "filtered",
+                            "blocked_categories": ["adult"], "media_level": "immodest"}}
+    guest = family.guest_user(win.policy)
+    assert guest["username"] == "Guest" and guest["guest"] is True
+    page = detail.UserDetailPage(win, guest)
+    drain()
+    names = [page.stack.get_pages().get_item(i).get_name()
+             for i in range(page.stack.get_pages().get_n_items())]
+    assert names == ["overview", "filtering", "media", "youtube", "account"]
+    titles = {r.get_title() for r in _rows(page)}
+    assert "Guest account is on" in titles
+    assert "Administrator" not in titles and "Remove This Account…" not in titles
+    # Every filter setting is there to change.
+    for title in ("Filter mode", "Pictures and video", "Bad language", "Restricted Mode",
+                  "Page rules"):
+        assert title in titles, title
+
+
+def test_the_guest_card_routes_to_turn_on_when_off_and_to_the_page_when_on():
+    win, page = a_board([])
+    cards = _children(page.cards)
+    page._on_card(page.cards, cards[-1])
+    assert isinstance(win.pushed[-1], family.GuestPage)
+    win.policy["guest"] = {"enabled": True, "uid": 1010, "mode": "whitelist"}
+    page._on_card(page.cards, cards[-1])
+    assert win.pushed[-1] == ("detail", 1010)
+    assert family.guest_user({"guest": {"enabled": False}}) is None
+
+
 def test_the_guest_card_fills_its_cell_like_the_others():
     card = family.guest_card({"enabled": False})
     assert card.get_valign() == Gtk.Align.FILL

@@ -160,6 +160,12 @@ class Window(Adw.ApplicationWindow):
         if isinstance(page, UserDetailPage):
             fresh = next((u for u in self.policy["users"] if u["uid"] == page.uid), None)
             if fresh is None:
+                from .family import guest_user
+
+                guest = guest_user(self.policy)
+                if guest is not None and guest["uid"] == page.uid:
+                    fresh = guest
+            if fresh is None:
                 self.nav.pop_to_tag("root")  # the account was removed
             else:
                 page.rebuild(fresh)

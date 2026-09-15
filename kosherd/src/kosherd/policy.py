@@ -201,6 +201,7 @@ class GuestPolicy:
     media_level: str = DEFAULT_MEDIA_LEVEL
     language_filter: str = "off"
     youtube: dict = field(default_factory=dict)
+    cover_style: str = DEFAULT_COVER_STYLE
 
     def to_dict(self) -> dict:
         d: dict = {"enabled": self.enabled}
@@ -220,6 +221,8 @@ class GuestPolicy:
             d["language_filter"] = self.language_filter
         if self.youtube:
             d["youtube"] = self.youtube
+        if self.cover_style != DEFAULT_COVER_STYLE:
+            d["cover_style"] = self.cover_style
         return d
 
 
@@ -242,6 +245,20 @@ class Policy:
 
     def user(self, uid: int) -> UserPolicy | None:
         return next((u for u in self.users if u.uid == uid), None)
+
+    def account(self, uid: int):
+        """A managed user OR the guest, by uid: whatever the filter settings
+        apply to. The guest used to be reachable only through one coarse
+        SetGuestConfig call and so could only be given a preset; every
+        per-account filter setter now finds it here and changes it like
+        anybody else. Account-management calls (admin, apps, removal) still
+        use `user()` — the guest has none of those."""
+        found = self.user(uid)
+        if found is not None:
+            return found
+        if self.guest.enabled and self.guest.uid is not None and self.guest.uid == uid:
+            return self.guest
+        return None
 
     def effective_users(self) -> list[UserPolicy]:
         """Managed users plus the guest account (when enabled and created) —
@@ -317,6 +334,7 @@ class Policy:
                 media_level=guest_doc.get("media_level", DEFAULT_MEDIA_LEVEL),
                 language_filter=guest_doc.get("language_filter", "off"),
                 youtube=dict(guest_doc.get("youtube", {})),
+                cover_style=guest_doc.get("cover_style", DEFAULT_COVER_STYLE),
             ),
         )
 

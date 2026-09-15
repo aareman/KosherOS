@@ -189,7 +189,11 @@ class FamilyPage(Gtk.Box):
     def _on_card(self, _box, child) -> None:
         user = getattr(child, "user", None)
         if user is None:
-            self.win.push(GuestPage(self.win))
+            guest = guest_user(self.win.policy)
+            if guest is None:
+                self.win.push(GuestPage(self.win))   # off: turn it on first
+            else:
+                self.win.open_user_detail(guest)     # on: a page like anyone's
         else:
             self.win.open_user_detail(user)
 
@@ -260,6 +264,25 @@ def person_card(user: dict, counts: dict | None, waiting: int, custom=()) -> Gtk
     return box
 
 
+def guest_user(policy: dict) -> dict | None:
+    """The guest as the detail page sees an account, or None while it is
+    off. Same fields as a user, so every filter tab works on it; the
+    'guest' flag hides what a guest cannot have (apps, admin, removal)."""
+    guest = policy.get("guest") or {}
+    if not guest.get("enabled") or guest.get("uid") is None:
+        return None
+    return {"uid": guest["uid"], "username": "Guest", "guest": True,
+            "mode": guest.get("mode", "whitelist"),
+            "whitelist": list(guest.get("whitelist", [])),
+            "rules": list(guest.get("rules", [])),
+            "blocked_categories": list(guest.get("blocked_categories", [])),
+            "media_level": guest.get("media_level", "none"),
+            "language_filter": guest.get("language_filter", "off"),
+            "youtube": dict(guest.get("youtube", {})),
+            "cover_style": guest.get("cover_style", "frost"),
+            "admin": False, "apps": [], "can_install_apps": False}
+
+
 def guest_card(guest: dict, custom=()) -> Gtk.Box:
     # The same size as every other card: the box fills its cell and the
     # content is centred inside it, instead of the box shrinking to fit.
@@ -286,7 +309,8 @@ def guest_card(guest: dict, custom=()) -> Gtk.Box:
     sub.add_css_class("dim-label")
     sub.add_css_class("caption")
     box.append(sub)
-    hint = Gtk.Label(label="Set up" if enabled else "Turn on", halign=Gtk.Align.CENTER)
+    hint = Gtk.Label(label="Configure like any account" if enabled else "Turn on",
+                     halign=Gtk.Align.CENTER)
     hint.add_css_class("accent")
     hint.add_css_class("caption")
     box.append(hint)

@@ -1231,6 +1231,50 @@ def test_the_demo_family_drives_every_screen():
     assert client.get_policy()["users"][2]["media_level"] == "all"
 
 
+def test_the_real_window_walks_every_sidebar_destination():
+    """The window, not a stand-in.
+
+    Every page has its own test, but the thing that broke when the app
+    grew a sidebar was the wiring between them — which page the content
+    pane holds, which row is lit, and whether a person still pushes on
+    top. So this builds the actual Window against the demo daemon and
+    walks it.
+    """
+    from kosherd.demo import DemoClient
+
+    original, admin.DaemonClient = admin.DaemonClient, DemoClient
+    was_admin = admin.Window._not_an_admin
+    admin.Window._not_an_admin = lambda self: False
+    try:
+        win = admin.Window()
+        drain()
+        assert win.policy["users"], "the demo family loaded"
+        for key, title, _icon, _section in sidebar.DESTINATIONS:
+            win.go_to(key)
+            drain()
+            page = win.nav.get_visible_page()
+            assert page is not None, key
+            assert win.sidebar.rows[key].is_selected(), key
+            assert win.destination == key
+        # The sidebar says how each destination is, without being opened.
+        assert win.sidebar.rows["apps"].status.get_label().endswith("apps")
+        assert win.sidebar.rows["family"].status.get_label().endswith("people")
+        # A person pushes on top of the board, and backs out to it.
+        win.go_to("family")
+        win.open_user_detail(win.policy["users"][0])
+        drain()
+        assert isinstance(win.nav.get_visible_page(), detail.UserDetailPage)
+        win.pop_to_root()
+        drain()
+        assert win.nav.get_visible_page().get_tag() == "family"
+        # The health banner's Details is the Protection page now.
+        win.family_page.health_banner.emit("button-clicked")
+        drain()
+        assert win.destination == "protection"
+    finally:
+        admin.DaemonClient = original
+        admin.Window._not_an_admin = was_admin
+
 
 # -- the cursor says what can be clicked ----------------------------------------------
 

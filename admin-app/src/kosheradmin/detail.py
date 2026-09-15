@@ -824,9 +824,9 @@ class UserDetailPage(Adw.NavigationPage):
             subtitle = "Allowed until " + time.strftime("%H:%M", time.localtime(usage["block_ends"]))
         elif usage and usage.get("blocked"):
             subtitle = "Not allowed right now"
-            if usage.get("next_allowed"):
-                subtitle += ", until " + labels.when_text(usage["next_allowed"]) \
-                    if usage["next_allowed"] > time.time() else ""
+            comes_back = usage.get("next_allowed")
+            if comes_back and comes_back > time.time():
+                subtitle += ", until " + labels.until_text(comes_back)
         if usage and usage.get("signed_in"):
             subtitle = (subtitle + " · " if subtitle else "") + "Signed in now"
         self.time_today_row = Adw.ActionRow(title=text, subtitle=subtitle, use_markup=False)

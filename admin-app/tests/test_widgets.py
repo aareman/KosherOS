@@ -1467,6 +1467,21 @@ def test_an_existing_limit_and_schedule_are_shown_as_set():
     assert "Signed in now" in today.get_subtitle()
 
 
+def test_a_blocked_account_is_told_when_it_comes_back():
+    now = time.time()
+    tomorrow_six = time.mktime((*time.localtime(now + 86400)[:3], 6, 0, 0, 0, 0, -1))
+    page, _s, _u = _time_page(time={"daily_minutes": 60},
+                              usage={"1001": {"used": 3600, "limit": 3600, "left": 0,
+                                              "blocked": True, "reason": "limit",
+                                              "allowed_now": True, "block_ends": None,
+                                              "next_allowed": int(tomorrow_six),
+                                              "limited": True, "signed_in": False}})
+    assert page.time_today_row.get_subtitle() == "Not allowed right now, until tomorrow 06:00"
+    assert labels.until_text(int(now) + 60, now) == time.strftime("%H:%M", time.localtime(now + 60))
+    assert labels.until_text(int(now) + 3 * 86400, now).startswith(
+        time.strftime("%a ", time.localtime(now + 3 * 86400)))
+
+
 def test_an_administrator_cannot_be_limited_and_the_tab_says_so():
     page, _s, _u = _time_page(admin=True)
     titles = {r.get_title() for r in _rows(page)}

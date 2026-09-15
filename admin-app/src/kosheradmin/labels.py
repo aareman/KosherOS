@@ -273,6 +273,20 @@ def when_text(t: int, now: float | None = None) -> str:
     return time.strftime("%-d %b ", then) + clock
 
 
+def until_text(t: int, now: float | None = None) -> str:
+    """A moment ahead: '21:00', 'tomorrow 06:00', 'Mon 06:00'."""
+    now = time.time() if now is None else now
+    then = time.localtime(t)
+    today = time.localtime(now)
+    clock = time.strftime("%H:%M", then)
+    if (then.tm_year, then.tm_yday) == (today.tm_year, today.tm_yday):
+        return clock
+    tomorrow = time.localtime(now + 86400)
+    if (then.tm_year, then.tm_yday) == (tomorrow.tm_year, tomorrow.tm_yday):
+        return f"tomorrow {clock}"
+    return time.strftime("%a ", then) + clock
+
+
 def day_label(t: int, now: float | None = None) -> str:
     """The heading a feed entry files under: Today, Yesterday, Sunday, 3 Sep."""
     now = time.time() if now is None else now

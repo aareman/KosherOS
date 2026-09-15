@@ -100,7 +100,12 @@ three things:
 - `/.buildstamp` — where Anaconda reads its product name and version
   (`pyanaconda/core/product.py`), so the welcome screen says KosherOS;
 - `/etc/anaconda/conf.d/90-kosheros.conf` — a drop-in loaded after the
-  Fedora profile (`set_from_files`), pointing `custom_stylesheet` at ours;
+  Fedora profile (`set_from_files`), pointing `custom_stylesheet` at ours
+  and hiding every hub spoke the kickstart already answers (keyboard,
+  language, time zone, network, source, software), so the installer is one
+  question — which disk — and a Begin Installation button. The first real
+  install found the stock hub "non-linear and quite complex"; this is the
+  fix that stays inside Anaconda;
 - `/usr/share/anaconda/pixmaps/kosheros/` — the stylesheet (navy sidebar
   and top bar, the mark at the top of the sidebar) and the logo, fitted
   from `branding/logo.png`. Fedora's own stylesheet path is overwritten

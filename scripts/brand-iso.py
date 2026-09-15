@@ -80,10 +80,30 @@ AnacondaSpokeWindow #nav-box {{
 }}
 """
 
+# Anaconda's hub shows every step at once, in any order, and asks about
+# things the kickstart in os-image/iso-config.toml has already answered
+# (language, keyboard, time zone) or that an offline bootc install never
+# needs (network, software, an installation source). A parent installing a
+# family computer should see one question — which disk — and a button. So
+# every spoke but Installation Destination is hidden; the Users module is
+# already switched off in the ISO config, which removes the account and
+# root-password spokes. Class names are Anaconda's GTK spoke classes.
+HIDDEN_SPOKES = (
+    "KeyboardSpoke",           # keyboard us, from the kickstart
+    "LangsupportSpoke",        # lang en_US.UTF-8, from the kickstart
+    "DatetimeSpoke",           # timezone, from the kickstart
+    "NetworkSpoke",            # the install is offline; the OS brings the network up
+    "SourceSpoke",             # the image is on the ISO
+    "SoftwareSelectionSpoke",  # a bootc image has no package selection
+)
+
 ANACONDA_DROPIN = f"""# KosherOS: loaded after the Fedora profile (see /etc/anaconda/profile.d).
 [User Interface]
 custom_stylesheet = {STYLESHEET}
-"""
+# One question, one button: everything the kickstart answers is hidden,
+# leaving Installation Destination.
+hidden_spokes =
+""" + "".join(f"    {spoke}\n" for spoke in HIDDEN_SPOKES)
 
 
 def buildstamp(version: str = VERSION, arch: str | None = None,

@@ -75,6 +75,23 @@ def test_the_dropin_points_anaconda_at_our_stylesheet(img, tmp_path):
     assert (tmp_path / sheet.lstrip("/")).is_file()
 
 
+def test_the_installer_is_one_question_and_a_button(img, tmp_path):
+    # The hub used to show seven steps in any order. Everything the ISO's
+    # kickstart already answers is hidden, so only the disk is asked.
+    _extract(img, tmp_path)
+    conf = configparser.ConfigParser()
+    conf.read(tmp_path / "etc/anaconda/conf.d/90-kosheros.conf")
+    hidden = set(conf["User Interface"]["hidden_spokes"].split())
+    assert hidden == {"KeyboardSpoke", "LangsupportSpoke", "DatetimeSpoke",
+                      "NetworkSpoke", "SourceSpoke", "SoftwareSelectionSpoke"}
+    assert "StorageSpoke" not in hidden, "the disk is the one question that must be asked"
+    # Each hidden spoke is one the kickstart or the module list has answered.
+    kickstart = (ROOT / "os-image/iso-config.toml").read_text()
+    for needed in ("keyboard", "lang ", "timezone"):
+        assert needed in kickstart
+    assert "org.fedoraproject.Anaconda.Modules.Users" in kickstart
+
+
 def test_the_stylesheet_only_references_files_in_the_archive(img, tmp_path):
     import re
 

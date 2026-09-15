@@ -427,9 +427,32 @@ def setup_sentence(key: str | None, changes: list[dict], custom=()) -> str:
 
 # -- the four lines on a card, in a fixed order --------------------------------
 
-def protection_lines(user: dict) -> list[tuple[str, str]]:
-    """(icon, text) × 4: web, pictures, video, apps. Always the same order,
-    so the eye can compare across the family."""
+# How the mode reads on a badge, and whether that mode is protecting.
+# The mode is the one thing a parent must be able to see without reading,
+# so it is drawn as a badge rather than a line of text, and an account that
+# is not being filtered is amber rather than blue.
+MODE_BADGE = {
+    "none": "No internet",
+    "whitelist": "Approved sites only",
+    "dnsfilter": "Basic protection",
+    "filtered": "Filtered internet",
+    "unfiltered": "Not filtered",
+}
+MODE_PROTECTS = {"none": True, "whitelist": True, "dnsfilter": True,
+                 "filtered": True, "unfiltered": False}
+
+
+def mode_badge(user: dict) -> tuple[str, bool]:
+    """(what the badge says, whether it is protecting)."""
+    mode = user.get("mode", "filtered")
+    return MODE_BADGE.get(mode, MODE_LABELS.get(mode, mode)), MODE_PROTECTS.get(mode, True)
+
+
+def protection_lines(user: dict) -> list[tuple[str, str, bool]]:
+    """(icon, text, protects) × 4: web, pictures, video, apps. Always the
+    same order, so the eye can compare across the family; the last element
+    says whether that line is blocking something (drawn blue) or leaving it
+    open (drawn amber), which is what a parent is scanning for."""
     mode = user.get("mode", "filtered")
     kinds = len(user.get("blocked_categories") or [])
     if mode == "whitelist":
@@ -461,12 +484,23 @@ def protection_lines(user: dict) -> list[tuple[str, str]]:
         video = f"YouTube {restrict.lower()}" + (f", {plural(blocked, 'kind')} blocked" if blocked else "")
 
     allowed = user.get("apps") or []
+    can_install = user.get("can_install_apps", True)
     if allowed:
         apps = plural(len(allowed), "app allowed")
     else:
-        apps = "All apps" + (", can install" if user.get("can_install_apps", True) else "")
-    return [("web-browser-symbolic", web), ("image-x-generic-symbolic", pictures),
-            ("video-display-symbolic", video), ("view-grid-symbolic", apps)]
+        apps = "All apps" + (", can install" if can_install else "")
+
+    mode_protects = MODE_PROTECTS.get(mode, True)
+    return [
+        ("web-browser-symbolic", web, mode_protects),
+        ("image-x-generic-symbolic", pictures,
+         mode_protects and user.get("media_level", "none") != "none"),
+        ("video-display-symbolic", video,
+         mode in ("none", "whitelist") or (mode == "filtered" and (
+             bool(youtube.get("allowed_channels")) or bool(youtube.get("blocked_categories"))
+             or youtube.get("restrict", "moderate") != "none"))),
+        ("view-grid-symbolic", apps, bool(allowed) or not can_install),
+    ]
 
 
 def today_sentence(counts: dict | None) -> str:

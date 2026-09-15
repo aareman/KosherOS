@@ -95,7 +95,7 @@ def test_the_command_line(tmp_path, monkeypatch, capsys):
     assert vt.main(["show"]) == 0
     assert vt.main(["next"]) == 0
     out = capsys.readouterr().out.split()
-    assert out == ["0.1.0-pre.7", "0.1.0-pre.8"]
+    assert out == ["0.1.0-pre.7", "0.1.0-pre.008"]
     assert vt.main(["nonsense"]) == 2
 
 

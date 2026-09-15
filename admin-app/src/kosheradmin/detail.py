@@ -22,8 +22,8 @@ from kosherd import profiles as profiles_mod  # noqa: E402
 from kosherd.policy import MEDIA_LEVELS, MODES, YOUTUBE_CATEGORIES  # noqa: E402
 
 from . import labels  # noqa: E402
-from .common import (avatar, chip, clear, confirm, error_text, pointer_cursors,  # noqa: E402
-                     run_async, small_button, tag)
+from .common import (avatar, chip, clear, confirm, error_text, mode_badge,  # noqa: E402
+                     pointer_cursors, run_async, small_button, tag)
 from .dialogs import (RulesDialog, SavePresetDialog, WhitelistDialog, allow_menu,  # noqa: E402
                       confirm_remove_user, request_row)
 from .feed import fold  # noqa: E402
@@ -131,6 +131,11 @@ class UserDetailPage(Adw.NavigationPage):
             self.preset_key, self.drift, custom), xalign=0, wrap=True)
         setup.add_css_class("dim-label")
         names.append(setup)
+        # The mode, large and coloured, next to the name: what this account
+        # is allowed to reach is the first question, so it is the first
+        # thing on the page.
+        text, protects = labels.mode_badge(user)
+        names.append(mode_badge(text, protects, big=True))
         who.append(names)
         actions = Gtk.Box(spacing=6, halign=Gtk.Align.END, hexpand=True,
                           valign=Gtk.Align.CENTER)
@@ -149,8 +154,8 @@ class UserDetailPage(Adw.NavigationPage):
 
         chips = Gtk.FlowBox(selection_mode=Gtk.SelectionMode.NONE, column_spacing=6,
                             row_spacing=6, max_children_per_line=8, homogeneous=False)
-        for icon, text in labels.protection_lines(user):
-            chips.append(chip(text, icon=icon))
+        for icon, text, protects in labels.protection_lines(user):
+            chips.append(chip(text, "blocking" if protects else "open", icon=icon))
         for sentence in labels.drift_sentences(self.drift):
             chips.append(chip(sentence, "diff"))
         box.append(chips)

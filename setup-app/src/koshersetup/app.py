@@ -164,10 +164,35 @@ def _page(title: str, description: str) -> tuple[Gtk.Box, Adw.PreferencesGroup]:
     return box, group
 
 
+# The wizard is read once, by somebody setting up a new computer, often on
+# a laptop screen at arm's length and often by a parent who would rather
+# not squint. Everything here is sized in em, so one number moves the whole
+# wizard and the platform's own accessibility scaling still applies on top.
+WIZARD_CSS = b"""
+.kosher-wizard { font-size: 1.2em; }
+.kosher-wizard .title-1 { font-size: 2.1em; }
+.kosher-wizard .caption { font-size: 0.92em; }
+.kosher-wizard button.pill { padding: 8px 26px; }
+.kosher-wizard row { min-height: 52px; }
+"""
+
+
+def _load_css() -> None:
+    display = Gdk.Display.get_default()
+    if display is None:
+        return
+    provider = Gtk.CssProvider()
+    provider.load_from_data(WIZARD_CSS)
+    Gtk.StyleContext.add_provider_for_display(
+        display, provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
+
+
 class Window(Adw.ApplicationWindow):
     def __init__(self, **kwargs):
         super().__init__(**kwargs, title="Welcome to KosherOS",
-                         default_width=760, default_height=620)
+                         default_width=860, default_height=700)
+        _load_css()
+        self.add_css_class("kosher-wizard")
         self.client = DaemonClient()
         self.admin_uid: int | None = None
 

@@ -46,6 +46,20 @@ CSS = b"""
 }
 .chip.diff { background-color: alpha(@accent_bg_color, 0.18); color: @accent_color; }
 .chip.dim { opacity: 0.6; }
+/* What is being blocked reads blue; what is left open reads amber, so a
+   parent can see at a glance which is which without reading the words. */
+.chip.blocking { background-color: alpha(@accent_bg_color, 0.18); color: @accent_color; }
+.chip.open { background-color: alpha(@warning_bg_color, 0.28); color: @warning_color; }
+.line-open { color: @warning_color; }
+.mode-badge {
+  padding: 3px 12px;
+  border-radius: 999px;
+  font-weight: 700;
+  background-color: @accent_bg_color;
+  color: @accent_fg_color;
+}
+.mode-badge.open { background-color: @warning_bg_color; color: @warning_fg_color; }
+.mode-badge.big { padding: 6px 18px; font-size: 1.15em; }
 .tag {
   padding: 1px 7px;
   border-radius: 6px;
@@ -135,7 +149,7 @@ def tag(text: str, *classes: str) -> Gtk.Label:
     return label
 
 
-def icon_line(icon_name: str, text: str) -> Gtk.Box:
+def icon_line(icon_name: str, text: str, protects: bool | None = None) -> Gtk.Box:
     box = Gtk.Box(spacing=7)
     image = Gtk.Image(icon_name=icon_name, pixel_size=14)
     image.add_css_class("dim-label")
@@ -143,8 +157,25 @@ def icon_line(icon_name: str, text: str) -> Gtk.Box:
     label = Gtk.Label(label=text, xalign=0, ellipsize=3, hexpand=True,  # END
                       max_width_chars=30)
     label.add_css_class("card-line")
+    if protects is False:
+        # Not blocked: amber, so the one unprotected line on a card is the
+        # one the eye goes to.
+        label.add_css_class("line-open")
+        image.remove_css_class("dim-label")
+        image.add_css_class("line-open")
     box.append(label)
     return box
+
+
+def mode_badge(text: str, protects: bool, big: bool = False) -> Gtk.Label:
+    """The account's filter mode, as the loudest thing on the card."""
+    label = Gtk.Label(label=text, halign=Gtk.Align.START, valign=Gtk.Align.CENTER)
+    label.add_css_class("mode-badge")
+    if not protects:
+        label.add_css_class("open")
+    if big:
+        label.add_css_class("big")
+    return label
 
 
 def next_arrow() -> Gtk.Image:

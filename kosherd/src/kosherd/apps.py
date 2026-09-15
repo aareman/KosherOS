@@ -115,6 +115,19 @@ def approve(ref: str, name: str = "", summary: str = "") -> None:
     entry = {"ref": ref, "name": name or ref}
     if summary:
         entry["summary"] = summary
+    # What the Store needs to look like a store: which shelf the app sits
+    # on and which icon to draw. Taken from the remote's own metadata here,
+    # once, so the Store itself never parses a 40 MB catalogue — it reads
+    # this file and local icon files, and opens instantly.
+    try:
+        known = {a["ref"]: a for a in _load_index()}.get(ref)
+    except Exception:  # noqa: BLE001 - metadata is a nicety; approval is not
+        known = None
+    if known:
+        if known.get("categories"):
+            entry["categories"] = list(known["categories"])
+        if known.get("icon"):
+            entry["icon"] = known["icon"]
     apps_list.append(entry)
     apps_list.sort(key=lambda a: a.get("name", a["ref"]).lower())
     save_catalog(catalog)
@@ -137,10 +150,13 @@ _APPSTREAM_MAX_AGE = 24 * 3600
 _index_cache: tuple[float, list[dict]] | None = None
 
 
+def _arch() -> str:
+    return Flatpak.get_default_arch() if Flatpak is not None else "x86_64"
+
+
 def _appstream_path() -> Path:
     return Path(
-        f"/var/lib/flatpak/appstream/{REMOTE}/{Flatpak.get_default_arch()}"
-        "/active/appstream.xml.gz"
+        f"/var/lib/flatpak/appstream/{REMOTE}/{_arch()}/active/appstream.xml.gz"
     )
 
 
@@ -202,9 +218,75 @@ def parse_appstream(path: Path) -> list[dict]:
                 name = _untranslated(element, "name") or app_id
                 summary = _untranslated(element, "summary")
                 if app_id:
-                    index.append({"ref": app_id, "name": name, "summary": summary})
+                    index.append({"ref": app_id, "name": name, "summary": summary,
+                                  "categories": _categories(element),
+                                  "icon": _cached_icon(element)})
             element.clear()
     return index
+
+
+def _categories(component) -> list[str]:
+    """The freedesktop menu categories a component declares.
+
+    The Store groups apps by these (Network, Office, Game and so on), which
+    is what makes it a store rather than a list. Order is kept: the first
+    is the one the publisher considers primary.
+    """
+    node = component.find("categories")
+    if node is None:
+        return []
+    found = []
+    for category in node.findall("category"):
+        text = (category.text or "").strip()
+        if text and text not in found:
+            found.append(text)
+    return found
+
+
+def _cached_icon(component) -> str:
+    """The file name of the icon flatpak caches locally for this component.
+
+    AppStream offers several icon kinds; "cached" is the one the remote
+    ships alongside the catalogue and flatpak writes under the appstream
+    directory, so it costs no network and no unpacking to draw.
+    """
+    best = ""
+    best_size = -1
+    for icon in component.findall("icon"):
+        if icon.get("type") != "cached":
+            continue
+        name = (icon.text or "").strip()
+        if not name:
+            continue
+        try:
+            size = int(icon.get("height") or icon.get("width") or 0)
+        except ValueError:
+            size = 0
+        # Prefer the largest that is not bigger than we draw (128 px).
+        score = size if size <= 128 else 128 - size
+        if score > best_size:
+            best, best_size = name, score
+    return best
+
+
+def icon_file(entry: dict, size: int = 128) -> str:
+    """Where an approved app's icon actually is on this machine, or "".
+
+    Looks beside the appstream catalogue flatpak already downloaded; the
+    Store draws from there. An app with no cached icon falls back in the UI
+    to its own themed icon (installed apps export one) and then to a
+    generic one, so a missing file is never an error.
+    """
+    name = entry.get("icon") or ""
+    if not name:
+        return ""
+    base = Path(f"/var/lib/flatpak/appstream/{REMOTE}/{_arch()}/active/icons")
+    sizes = [f"{size}x{size}", "128x128", "64x64"]
+    for folder in dict.fromkeys(sizes):
+        candidate = base / folder / name
+        if candidate.exists():
+            return str(candidate)
+    return ""
 
 
 def _load_index() -> list[dict]:

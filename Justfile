@@ -54,6 +54,8 @@ test *ARGS:
     PYTHONPATH=kosherd/src:search-app python3 -m pytest search-app/tests -q {{ARGS}}
     xvfb-run -a env PYTHONPATH=kosherd/src:admin-app/src \
         python3 -m pytest admin-app/tests -q {{ARGS}}
+    xvfb-run -a env PYTHONPATH=kosherd/src:store-app/src \
+        python3 -m pytest store-app/tests -q {{ARGS}}
     xvfb-run -a env PYTHONPATH=kosherd/src:setup-app/src \
         python3 -m pytest setup-app/tests -q {{ARGS}}
     python3 scripts/wizard-check.py

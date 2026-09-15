@@ -297,6 +297,54 @@ def test_the_board_has_a_card_per_person_and_one_for_the_guest():
     assert len(_children(page.cards)) == len(users) + 1
 
 
+def test_the_mode_is_a_badge_on_the_card_and_the_persons_page():
+    # The most important thing to see, so it is drawn rather than read:
+    # blue while the account is filtered, amber when it is not.
+    win, page = a_board([a_user(mode="filtered"), a_user(uid=1002, username="avi",
+                                                          mode="unfiltered")])
+    cards = _children(page.cards)
+    filtered = next(w for w in _walk(cards[0]) if w.has_css_class("mode-badge"))
+    assert filtered.get_label() == "Filtered internet"
+    assert not filtered.has_css_class("open")
+    unfiltered = next(w for w in _walk(cards[1]) if w.has_css_class("mode-badge"))
+    assert unfiltered.get_label() == "Not filtered"
+    assert unfiltered.has_css_class("open")
+
+    detail_page, _w, _u = _detail(mode="whitelist")
+    badge = next(w for w in _walk(detail_page) if w.has_css_class("mode-badge"))
+    assert badge.get_label() == "Approved sites only"
+    assert badge.has_css_class("big"), "the person's page shows it large"
+
+
+def test_what_is_blocked_reads_blue_and_what_is_open_reads_amber():
+    page, _w, _u = _detail(mode="filtered", media_level="none",
+                           youtube={"restrict": "none"})
+    chips = [w for w in _walk(page) if w.has_css_class("chip")]
+    blocking = [c for c in chips if c.has_css_class("blocking")]
+    open_ = [c for c in chips if c.has_css_class("open")]
+    assert blocking and open_, "both kinds are on this account"
+    texts = {_chip_text(c) for c in open_}
+    assert any("pictures shown" in t for t in texts)
+    # An unfiltered account's web line is amber too.
+    page, _w, _u = _detail(mode="unfiltered")
+    open_ = [c for c in _walk(page) if c.has_css_class("chip") and c.has_css_class("open")]
+    assert any("Unfiltered internet" == _chip_text(c) for c in open_)
+
+
+def _walk(widget, found=None):
+    found = [] if found is None else found
+    child = widget.get_first_child()
+    while child is not None:
+        found.append(child)
+        _walk(child, found)
+        child = child.get_next_sibling()
+    return found
+
+
+def _chip_text(chip):
+    return " ".join(w.get_label() for w in _walk(chip) if isinstance(w, Gtk.Label))
+
+
 def test_a_card_has_the_four_lines_in_a_fixed_order():
     win, page = a_board([a_user()])
     card = _children(page.cards)[0]

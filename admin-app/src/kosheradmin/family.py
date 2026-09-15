@@ -23,7 +23,7 @@ from kosherd import profiles as profiles_mod  # noqa: E402
 
 from . import labels  # noqa: E402
 from .common import (avatar, clear, confirm, error_text, icon_line,  # noqa: E402
-                     pointer_cursors, run_async, tag)
+                     mode_badge, pointer_cursors, run_async, tag)
 from .dialogs import (HealthDialog, ListEditDialog, RequestsDialog,  # noqa: E402
                       WhitelistDialog, guardian_dialog)
 
@@ -255,9 +255,15 @@ def person_card(user: dict, counts: dict | None, waiting: int, custom=()) -> Gtk
     who.append(names)
     box.append(who)
 
+    # The filter mode, big and coloured: the one thing a parent should be
+    # able to read across the room, and amber when the account is not
+    # being filtered at all.
+    text, protects = labels.mode_badge(user)
+    box.append(mode_badge(text, protects))
+
     lines = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
-    for icon, text in labels.protection_lines(user):
-        lines.append(icon_line(icon, text))
+    for icon, text, protects in labels.protection_lines(user):
+        lines.append(icon_line(icon, text, protects))
     box.append(lines)
 
     foot = Gtk.Box(spacing=6, margin_top=2)
@@ -309,10 +315,9 @@ def guest_card(guest: dict, custom=()) -> Gtk.Box:
     name.add_css_class("heading")
     box.append(name)
     if enabled:
-        key = profiles_mod.matching(guest, custom)
-        setup = profiles_mod.get(key, custom).label if key else \
-            labels.MODE_LABELS.get(guest.get("mode", "whitelist"), "")
-        text = f"On · {setup}. Wiped at sign-out."
+        badge, protects = labels.mode_badge(guest)
+        box.append(mode_badge(badge, protects))
+        text = "On. Passwordless; everything is wiped at sign-out."
     else:
         text = "Off. Passwordless, wiped at sign-out."
     sub = Gtk.Label(label=text, halign=Gtk.Align.CENTER, wrap=True, justify=2)

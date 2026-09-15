@@ -287,3 +287,18 @@ def test_enter_on_the_welcome_page_starts_the_wizard():
     win = window()
     assert page(win) == "welcome"
     assert win.get_focus() is win.next
+
+
+def test_the_wizard_is_set_in_larger_type():
+    # It is read once, by somebody setting up a new computer, often at
+    # arm's length. One number moves the whole wizard, in em so the
+    # platform's own scaling still applies on top.
+    from koshersetup import app as setup
+
+    win = setup.Window.__new__(setup.Window)
+    assert b".kosher-wizard { font-size: 1.2em; }" in setup.WIZARD_CSS
+    assert b".title-1 { font-size: 2.1em; }" in setup.WIZARD_CSS
+    source = (__import__("pathlib").Path(setup.__file__)).read_text()
+    assert 'self.add_css_class("kosher-wizard")' in source
+    assert "default_width=860" in source
+    del win

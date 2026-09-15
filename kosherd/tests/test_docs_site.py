@@ -105,3 +105,28 @@ def test_the_releases_page_sorts_by_date_whatever_order_github_gives():
     page = bd.releases_page(out_of_order)
     assert page.index("new") < page.index("old")
 
+
+
+def test_the_site_wears_the_products_own_colours():
+    # Sampled from branding/wallpaper.png, not a stock Material palette, so
+    # the site, the desktop and the boot splash read as one product.
+    css = (ROOT / "docs/stylesheets/brand.css").read_text()
+    for value in ("#faf7f0", "#48423a", "#8f6a3f", "#1b1813", "#c99a66"):
+        assert value in css, value
+    for scheme in ('[data-md-color-scheme="default"]', '[data-md-color-scheme="slate"]'):
+        assert scheme in css, scheme
+    nav = (ROOT / "mkdocs.yml").read_text()
+    assert "stylesheets/brand.css" in nav
+    assert "primary: custom" in nav and "indigo" not in nav
+
+
+def test_the_cream_is_the_artworks_cream():
+    from PIL import Image
+
+    wallpaper = Image.open(ROOT / "branding/wallpaper.png").convert("RGB")
+    wallpaper.thumbnail((80, 80))
+    lights = [p for p in wallpaper.getdata() if min(p) > 200]
+    assert lights, "the artwork is a light sepia painting"
+    # Its paper is warm: more red than blue, which is what #faf7f0 is too.
+    average = tuple(sum(c[i] for c in lights) / len(lights) for i in range(3))
+    assert average[0] > average[2], "warm, not a cool grey"

@@ -13,15 +13,18 @@ theme:
   logo: images/logo.png
   favicon: images/logo.png
   palette:
+    # "custom" hands the colours to docs/stylesheets/brand.css, which takes
+    # them from the artwork (branding/wallpaper.png) rather than a stock
+    # Material palette.
     - scheme: default
-      primary: indigo
-      accent: indigo
+      primary: custom
+      accent: custom
       toggle:
         icon: material/brightness-7
         name: Dark
     - scheme: slate
-      primary: indigo
-      accent: indigo
+      primary: custom
+      accent: custom
       toggle:
         icon: material/brightness-4
         name: Light
@@ -49,6 +52,9 @@ nav:
       - Testing: testing.md
   - Notes:
       - A standalone filter?: standalone.md
+
+extra_css:
+  - stylesheets/brand.css
 
 markdown_extensions:
   - admonition

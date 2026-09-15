@@ -1,0 +1,91 @@
+/* KosherOS on the web, in the colours of the artwork.
+ *
+ * The wallpaper is a light sepia painting: its paper is #fcfbf6 to #eeece7,
+ * its shadows a warm grey-brown, and the wordmark painted into its corner
+ * is #48423a. Those are the values here, so the site, the desktop and the
+ * boot splash read as one product rather than three. Sampled from
+ * branding/wallpaper.png rather than guessed.
+ */
+
+:root,
+[data-md-color-scheme="default"] {
+  /* Paper, ink, and the brass the mark is drawn in. */
+  --md-default-bg-color: #faf7f0;
+  --md-default-bg-color--light: #fcfbf6;
+  --md-default-bg-color--lighter: #fdfdf9;
+  --md-default-bg-color--lightest: #ffffff;
+  --md-default-fg-color: #48423a;
+  --md-default-fg-color--light: #6b6157;
+  --md-default-fg-color--lighter: #9a8f82;
+  --md-default-fg-color--lightest: #d7d1c6;
+
+  /* The header and sidebar: the wordmark's warm ink, not a stock blue. */
+  --md-primary-fg-color: #4a4038;
+  --md-primary-fg-color--light: #675c50;
+  --md-primary-fg-color--dark: #332c26;
+  --md-primary-bg-color: #faf7f0;
+  --md-primary-bg-color--light: #e8e3d8;
+
+  --md-accent-fg-color: #8f6a3f;
+  --md-accent-fg-color--transparent: rgba(143, 106, 63, 0.12);
+  --md-accent-bg-color: #ffffff;
+
+  --md-typeset-a-color: #7a5a33;
+  --md-code-bg-color: #f2ede2;
+  --md-code-fg-color: #4a4038;
+  --md-footer-bg-color: #4a4038;
+  --md-footer-bg-color--dark: #332c26;
+}
+
+/* The dark side of the same paper: the sepia ground the design canvas uses,
+ * with the mark's brass warmed up so it still reads on it. */
+[data-md-color-scheme="slate"] {
+  --md-hue: 30;
+  --md-default-bg-color: #1b1813;
+  --md-default-bg-color--light: #221e18;
+  --md-default-bg-color--lighter: #2a251e;
+  --md-default-bg-color--lightest: #332c24;
+  --md-default-fg-color: #ede6db;
+  --md-default-fg-color--light: #c9c0b2;
+  --md-default-fg-color--lighter: #9a9082;
+  --md-default-fg-color--lightest: #554d43;
+
+  --md-primary-fg-color: #241f19;
+  --md-primary-fg-color--light: #3a332b;
+  --md-primary-fg-color--dark: #16130f;
+  --md-primary-bg-color: #ede6db;
+  --md-primary-bg-color--light: #c9c0b2;
+
+  --md-accent-fg-color: #c99a66;
+  --md-accent-fg-color--transparent: rgba(201, 154, 102, 0.16);
+
+  --md-typeset-a-color: #d9b483;
+  --md-code-bg-color: #221e18;
+  --md-code-fg-color: #ede6db;
+  --md-footer-bg-color: #16130f;
+  --md-footer-bg-color--dark: #0f0d0a;
+}
+
+/* Small things that otherwise stay stock-blue or stock-grey. */
+.md-typeset h1,
+.md-typeset h2 {
+  color: var(--md-default-fg-color);
+  font-weight: 600;
+}
+.md-typeset table:not([class]) th {
+  background-color: var(--md-default-bg-color--light);
+  color: var(--md-default-fg-color);
+}
+.md-typeset .md-button {
+  border-color: var(--md-accent-fg-color);
+  color: var(--md-accent-fg-color);
+}
+.md-typeset .md-button:hover {
+  background-color: var(--md-accent-fg-color);
+  border-color: var(--md-accent-fg-color);
+  color: var(--md-default-bg-color);
+}
+.md-header__topic:first-child {
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}

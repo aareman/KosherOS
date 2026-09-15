@@ -199,35 +199,18 @@ jobs:
           fi
           git fetch --tags --quiet origin
           previous="$(git tag --list 'v*' --sort=-creatordate | grep -v "^$tag\$" | head -1 || true)"
-          if [ -n "$previous" ]; then
-            changes="$(git log --format='- %s' "$previous..$GITHUB_SHA" -- . ':!VERSION' || true)"
-            since="since $previous"
-          else
-            changes="$(git log --format='- %s' -20 "$GITHUB_SHA")"
-            since="(first release; the last twenty commits)"
-          fi
-          [ -n "$changes" ] || changes="- Nothing outside the version file changed."
-          {
-            echo "## What changed $since"
-            echo
-            echo "$changes"
-            echo
-            echo "## What this build is"
-            echo
-            if [ "$BUILT" = "true" ]; then
-              echo "- OS image \`$IMAGE:$tag\` (also \`$IMAGE:${GITHUB_SHA::12}\`), signed with cosign keyless. It is the current \`:edge\`."
-              echo "- Machines on the edge channel pick it up on their next update. Stable machines are unaffected until a person promotes a version with the **Promote to stable** workflow (\`version: $tag\`)."
-            elif [ "${{ needs.image.result }}" = "failure" ]; then
-              echo "- **No OS image: the build failed.** The code passed its tests, so the version exists and its changes are recorded here, but no machine can move to it. The next successful build carries these changes."
-            else
-              echo "- **No new OS image.** Nothing in this commit reaches the image (docs, tests or CI only), so machines stay on the image from the previous version. The version still exists so the history has no gaps."
-            fi
-            echo "- An installer ISO is built locally with \`just release-iso\` (stable) or \`just release-iso edge\`."
-            echo
-            echo "## What is supported"
-            echo
-            echo "Browsers, Flatpak apps, and the developer tools npm, yarn, pnpm, bun, pip, uv, gem, cargo, deno, go and git all work on a filtered account. Presets, hardware and the update channels are listed on the docs site: https://aareman.github.io/KosherOS/supported/"
-          } > release-notes.md
+          # The notes are written by scripts/release-notes.py: grouped into
+          # new things, fixes and the rest, each labelled with the part of
+          # the product it touched. Keeping them out of this file means they
+          # can be read and tested like any other code.
+          built=no
+          [ "$BUILT" = "true" ] && built=yes
+          failed=""
+          [ "${{ needs.image.result }}" = "failure" ] && failed=--image-failed
+          python3 scripts/release-notes.py --version "$version" --previous "$previous" \
+            --sha "$GITHUB_SHA" --image "$IMAGE" --built "$built" $failed \
+            --out release-notes.md
+          cat release-notes.md
           prerelease=""
           case "$version" in *-pre.*) prerelease="--prerelease" ;; esac
           gh release create "$tag" $prerelease --target "$GITHUB_SHA" \

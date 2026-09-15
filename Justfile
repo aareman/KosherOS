@@ -297,7 +297,25 @@ release-iso CHANNEL="stable":
     #!/usr/bin/env bash
     set -euo pipefail
     ref="ghcr.io/aareman/kosher-linux:{{CHANNEL}}"
-    podman pull "$ref"
+    if ! podman pull "$ref" 2>/dev/null; then
+        echo "There is no '{{CHANNEL}}' image at ghcr.io/aareman/kosher-linux." >&2
+        echo >&2
+        if [ "{{CHANNEL}}" = "stable" ]; then
+            echo "Nothing has been promoted to stable yet. Either:" >&2
+            echo "  - open Actions -> 'Promote to stable' on GitHub and give it a version" >&2
+            echo "    (for example v0.1.0-pre.021), then run this again; or" >&2
+            echo "  - build an installer that follows the edge channel instead:" >&2
+            echo "        just release-iso edge" >&2
+        else
+            echo "Published channels and versions:" >&2
+            token=$(curl -s "https://ghcr.io/token?scope=repository:aareman/kosher-linux:pull" \
+                | python3 -c "import sys,json;print(json.load(sys.stdin).get('token',''))")
+            curl -s -H "Authorization: Bearer $token" \
+                https://ghcr.io/v2/aareman/kosher-linux/tags/list \
+                | python3 -c "import sys,json;print('  ' + ', '.join(t for t in sorted(json.load(sys.stdin).get('tags') or []) if not t.startswith('sha256-')))" >&2 || true
+        fi
+        exit 1
+    fi
     version="$(podman run --rm "$ref" cat /usr/share/kosher/VERSION | tr -d '[:space:]')"
     echo "release ISO from $ref (KosherOS $version)"
     KOSHER_IMAGE="$ref" just _iso_from "$ref" os-image/iso-config.toml

@@ -8,6 +8,10 @@ on:
   push:
     branches: [master]
   pull_request:
+  # "Rebuild and publish edge now", for when the last commits touched
+  # nothing in the image and a fresh one is wanted anyway — before
+  # promoting a version to stable, for instance.
+  workflow_dispatch:
 
 concurrency:
   # One Pages deployment at a time; a second push while one is publishing
@@ -91,6 +95,11 @@ jobs:
         env:
           BASE: ${{ github.event.before }}
         run: |
+          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then
+            echo "image=true" >> "$GITHUB_OUTPUT"
+            echo "asked for by hand: building"
+            exit 0
+          fi
           if [ "$GITHUB_EVENT_NAME" != "push" ] || [ -z "$BASE" ] \
              || [ "$BASE" = "0000000000000000000000000000000000000000" ] \
              || ! git cat-file -e "$BASE" 2>/dev/null; then
@@ -135,16 +144,16 @@ jobs:
         run: podman build -t "$IMAGE:${GITHUB_SHA::12}" -t "$IMAGE:edge" -f os-image/Containerfile .
 
       - name: Push
-        if: github.event_name == 'push'
+        if: github.event_name != 'pull_request'
         run: |
           podman login ghcr.io -u "$GITHUB_ACTOR" -p "${{ secrets.GITHUB_TOKEN }}"
           podman push "$IMAGE:${GITHUB_SHA::12}"
           podman push "$IMAGE:edge"
 
       - name: Sign (cosign keyless)
-        if: github.event_name == 'push'
+        if: github.event_name != 'pull_request'
         uses: sigstore/cosign-installer@v3
-      - if: github.event_name == 'push'
+      - if: github.event_name != 'pull_request'
         run: |
           # cosign reads Docker's credential store, not podman's auth.json,
           # so it needs its own login to push signatures to ghcr.
@@ -157,7 +166,7 @@ jobs:
         # and a machine can be moved to it by name. Making the RELEASE is a
         # separate job, because a commit that changes nothing in the image
         # still gets a version and still deserves a release.
-        if: github.event_name == 'push'
+        if: github.event_name != 'pull_request'
         run: |
           version="$(tr -d '[:space:]' < VERSION)"
           podman tag "$IMAGE:${GITHUB_SHA::12}" "$IMAGE:v$version"
@@ -230,7 +239,7 @@ jobs:
     # default token deliberately does not trigger other workflows, so that
     # page sat several versions behind without anything looking broken.
     needs: [release]
-    if: always() && github.event_name == 'push'
+    if: always() && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
     runs-on: ubuntu-latest
     permissions:
       contents: read

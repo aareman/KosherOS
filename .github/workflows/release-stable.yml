@@ -36,8 +36,13 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          case "$VERSION_TAG" in v[0-9]*) ;; *) echo "version must look like v0.1.0-pre.9"; exit 1 ;; esac
-          gh release view "$VERSION_TAG" >/dev/null
+          case "$VERSION_TAG" in v[0-9]*) ;; *) echo "version must look like v0.1.0-pre.009"; exit 1 ;; esac
+          if ! gh release view "$VERSION_TAG" >/dev/null 2>&1; then
+            echo "There is no release called $VERSION_TAG." >&2
+            echo "Only a version CI built AND released can be promoted; these can:" >&2
+            gh release list --limit 10 >&2
+            exit 1
+          fi
           sudo apt-get update && sudo apt-get install -y skopeo
           skopeo login ghcr.io -u "$GITHUB_ACTOR" -p "${{ secrets.GITHUB_TOKEN }}"
           skopeo inspect "docker://$IMAGE:$VERSION_TAG" --format '{{.Digest}}' | tee digest.txt

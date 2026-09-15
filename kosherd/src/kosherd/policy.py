@@ -127,6 +127,46 @@ BUILTIN_SYSTEM_WHITELIST = (
     "*.cloudfront.net",
 )
 
+# The package registries developer tools fetch from, reachable from every
+# account so that npm, pip, uv, gem, cargo, deno, bun and Go work on a
+# filtered machine. Registries hold code, not pages: nothing here is a
+# site a person browses, and every one of them is what a school or work
+# project on this computer will need on day one. The tools trust the
+# filter's certificate through /etc/profile.d/kosher-ca.sh.
+DEVELOPER_REGISTRIES = (
+    # Node: npm, yarn, pnpm, bun
+    "registry.npmjs.org",
+    "registry.yarnpkg.com",
+    "bun.sh",
+    "*.bun.sh",
+    # Python: pip, uv
+    "pypi.org",
+    "files.pythonhosted.org",
+    "astral.sh",
+    "*.astral.sh",
+    "github.com",                 # uv's Python builds and many tool installers are GitHub releases
+    "objects.githubusercontent.com",
+    "release-assets.githubusercontent.com",
+    "raw.githubusercontent.com",
+    # Ruby
+    "rubygems.org",
+    "*.rubygems.org",
+    # Rust
+    "crates.io",
+    "*.crates.io",
+    "static.rust-lang.org",
+    # Deno / JSR
+    "deno.land",
+    "*.deno.land",
+    "jsr.io",
+    "*.jsr.io",
+    # Go
+    "proxy.golang.org",
+    "sum.golang.org",
+    "go.dev",
+    "storage.googleapis.com",     # Go toolchain downloads
+)
+
 
 class PolicyError(Exception):
     """Raised for invalid policy documents or invalid mutations."""
@@ -277,7 +317,8 @@ class Policy:
         return users
 
     def effective_system_whitelist(self) -> list[str]:
-        return list(dict.fromkeys([*BUILTIN_SYSTEM_WHITELIST, *self.system_whitelist]))
+        return list(dict.fromkeys([*BUILTIN_SYSTEM_WHITELIST, *DEVELOPER_REGISTRIES,
+                                   *self.system_whitelist]))
 
     def to_dict(self) -> dict:
         return {

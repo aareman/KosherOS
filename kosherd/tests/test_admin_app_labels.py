@@ -67,6 +67,24 @@ def test_every_cover_style_has_a_label_and_a_hint(constants):
     assert constants["COVER_ORDER"][0] == "frost", "the default comes first"
 
 
+def test_every_time_preset_has_words(constants):
+    from kosherd import timelimits
+
+    # The one-click daily limits, and no limit first: the answer for an
+    # account nobody has thought about yet.
+    assert set(constants["TIME_LIMIT_LABELS"]) == set(timelimits.LIMIT_PRESET_MINUTES)
+    assert set(constants["TIME_LIMIT_ORDER"]) == set(timelimits.LIMIT_PRESET_MINUTES)
+    assert constants["TIME_LIMIT_ORDER"][0] == 0
+    assert set(constants["SCHEDULE_PRESET_LABELS"]) == set(timelimits.SCHEDULE_PRESETS)
+    assert set(constants["SCHEDULE_PRESET_HINTS"]) == set(timelimits.SCHEDULE_PRESETS)
+    assert set(constants["SCHEDULE_PRESET_ORDER"]) == set(timelimits.SCHEDULE_PRESETS)
+    assert constants["SCHEDULE_PRESET_ORDER"][0] == "always"
+    # Every reason the daemon can end a session has words in the feed.
+    assert set(constants["TIME_WHY"]) == {timelimits.WHY_LIMIT, timelimits.WHY_SCHEDULE,
+                                          timelimits.WHY_LOGIN}
+    assert set(constants["TIME_EVENT_TITLES"]) == set(constants["TIME_WHY"])
+
+
 def test_the_youtube_restricted_mode_choices_match_the_daemon(constants):
     # The daemon rejects anything else (see impl_SetYouTube).
     assert set(constants["YOUTUBE_RESTRICT_LABELS"]) == {"none", "moderate", "strict"}

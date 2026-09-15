@@ -19,6 +19,7 @@ from gi.repository import Adw, GLib, Gtk  # noqa: E402
 
 from kosherd import activity as activity_mod  # noqa: E402
 from kosherd import profiles as profiles_mod  # noqa: E402
+from kosherd import timelimits  # noqa: E402
 from kosherd.policy import MEDIA_LEVELS, MODES, YOUTUBE_CATEGORIES  # noqa: E402
 
 from . import labels  # noqa: E402
@@ -27,11 +28,13 @@ from .common import (avatar, chip, clear, confirm, error_text, mode_badge,  # no
 from .dialogs import (RulesDialog, SavePresetDialog, WhitelistDialog, allow_menu,  # noqa: E402
                       confirm_remove_user, request_row)
 from .feed import fold  # noqa: E402
+from .schedule import ScheduleGrid, legend  # noqa: E402
 
 TABS = (("overview", "Overview", "view-list-symbolic"),
         ("filtering", "Filtering", "web-browser-symbolic"),
         ("media", "Pictures & words", "image-x-generic-symbolic"),
         ("youtube", "YouTube", "video-display-symbolic"),
+        ("time", "Time", "alarm-symbolic"),
         ("apps", "Apps", "view-grid-symbolic"),
         ("account", "Account", "system-users-symbolic"))
 
@@ -82,6 +85,7 @@ class UserDetailPage(Adw.NavigationPage):
         self.stack = Adw.ViewStack()
         builders = {"overview": self._overview_tab, "filtering": self._filtering_tab,
                     "media": self._media_tab, "youtube": self._youtube_tab,
+                    "time": self._time_tab,
                     "apps": self._apps_tab, "account": self._account_tab}
         tabs = TABS
         if user.get("guest"):
@@ -159,6 +163,8 @@ class UserDetailPage(Adw.NavigationPage):
                             row_spacing=6, max_children_per_line=8, homogeneous=False)
         for icon, text, protects in labels.protection_lines(user):
             chips.append(chip(text, "blocking" if protects else "open", icon=icon))
+        text, protects = labels.time_line(user, self._time_usage(user))
+        chips.append(chip(text, "blocking" if protects else "open", icon="alarm-symbolic"))
         for sentence in labels.drift_sentences(self.drift):
             chips.append(chip(sentence, "diff"))
         box.append(chips)
@@ -252,6 +258,9 @@ class UserDetailPage(Adw.NavigationPage):
         elif kind == activity_mod.SEARCH:
             row.set_title(f"Would not search for “{event.get('text', '')}”")
             row.set_subtitle((event.get("why") or "") + again)
+        elif kind == activity_mod.TIME:
+            row.set_title(labels.time_event_title(event))
+            row.set_subtitle(labels.why_text(event.get("why", "")) + again)
         return row
 
     # -- filtering -----------------------------------------------------------------
@@ -786,6 +795,131 @@ class UserDetailPage(Adw.NavigationPage):
                 self.yt_channels.remove(n), self._rebuild_channels(), self._save_youtube()))
             row.add_suffix(remove)
             self.channel_list.append(row)
+
+    # -- time --------------------------------------------------------------------
+
+    def _time_usage(self, user: dict) -> dict | None:
+        return (getattr(self.win, "time_usage", None) or {}).get(str(user["uid"]))
+
+    def _time_tab(self, user: dict) -> list[Adw.PreferencesGroup]:
+        """How long, and when, this person may use the computer.
+
+        A daily limit with one-click amounts and a calendar to paint the
+        allowed hours on. Nothing is set until the parent sets it, and an
+        administrator's page says plainly that it cannot be.
+        """
+        settings = dict(user.get("time") or {})
+        usage = self._time_usage(user)
+        self._time_saved = timelimits.parse(settings)
+        self._time_minutes = timelimits.daily_minutes(settings)
+        self._time_grid = timelimits.grid(settings)
+        self._time_building = True
+        self._time_debounce = None
+
+        today = Adw.PreferencesGroup(title=labels.TIME_TODAY_TITLE,
+                                     description=labels.TIME_TAB_INTRO)
+        text, _protects = labels.time_line(user, usage)
+        subtitle = ""
+        if usage and usage.get("block_ends"):
+            subtitle = "Allowed until " + time.strftime("%H:%M", time.localtime(usage["block_ends"]))
+        elif usage and usage.get("blocked"):
+            subtitle = "Not allowed right now"
+            if usage.get("next_allowed"):
+                subtitle += ", until " + labels.when_text(usage["next_allowed"]) \
+                    if usage["next_allowed"] > time.time() else ""
+        if usage and usage.get("signed_in"):
+            subtitle = (subtitle + " · " if subtitle else "") + "Signed in now"
+        self.time_today_row = Adw.ActionRow(title=text, subtitle=subtitle, use_markup=False)
+        self.time_today_row.add_prefix(Gtk.Image(icon_name="alarm-symbolic"))
+        today.add(self.time_today_row)
+        if user.get("admin"):
+            today.add(Adw.ActionRow(title="Administrator", subtitle=labels.TIME_ADMIN_NOTE,
+                                    subtitle_lines=4))
+            self._time_building = False
+            return [today]
+
+        limit = Adw.PreferencesGroup(title="Time each day")
+        choices = [labels.TIME_LIMIT_LABELS[m] for m in labels.TIME_LIMIT_ORDER]
+        self.time_limit_row = Adw.ComboRow(
+            title="Daily limit", model=Gtk.StringList.new(choices + [labels.TIME_LIMIT_CUSTOM]))
+        preset = self._time_minutes in labels.TIME_LIMIT_ORDER
+        self.time_limit_row.set_selected(
+            labels.TIME_LIMIT_ORDER.index(self._time_minutes) if preset else len(choices))
+        self.time_limit_row.connect("notify::selected", self._on_time_limit_choice)
+        limit.add(self.time_limit_row)
+        self.time_custom_row = Adw.SpinRow.new_with_range(5, timelimits.MAX_DAILY_MINUTES, 5)
+        self.time_custom_row.set_title("Minutes a day")
+        self.time_custom_row.set_value(self._time_minutes or 90)
+        self.time_custom_row.set_visible(not preset)
+        self.time_custom_row.connect("notify::value", self._on_time_custom)
+        limit.add(self.time_custom_row)
+        hint_under(limit, labels.TIME_LIMIT_HINT)
+
+        schedule = Adw.PreferencesGroup(title=labels.SCHEDULE_TITLE)
+        presets = Gtk.Box(spacing=6)
+        for key in labels.SCHEDULE_PRESET_ORDER:
+            button = small_button(labels.SCHEDULE_PRESET_LABELS[key], "flat")
+            button.set_tooltip_text(labels.SCHEDULE_PRESET_HINTS[key])
+            button.connect("clicked", lambda _b, k=key: self._set_schedule(
+                timelimits.SCHEDULE_PRESETS[k]))
+            presets.append(button)
+        schedule.set_header_suffix(presets)
+        self.schedule_grid = ScheduleGrid(self._time_grid, on_change=self._on_schedule_painted)
+        frame = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        frame.add_css_class("card")
+        frame.append(self.schedule_grid)
+        schedule.add(frame)
+        schedule.add(legend())
+        hint_under(schedule, labels.SCHEDULE_HINT)
+        self._time_building = False
+        return [today, limit, schedule]
+
+    def _on_time_limit_choice(self, combo, _param) -> None:
+        if self._time_building:
+            return
+        index = combo.get_selected()
+        if index >= len(labels.TIME_LIMIT_ORDER):
+            self.time_custom_row.set_visible(True)
+            self._time_minutes = int(self.time_custom_row.get_value())
+        else:
+            self.time_custom_row.set_visible(False)
+            self._time_minutes = labels.TIME_LIMIT_ORDER[index]
+        self._save_time()
+
+    def _on_time_custom(self, row, _param) -> None:
+        """A spin row fires on every click; save once the clicking stops."""
+        if self._time_building or not row.get_visible():
+            return
+        self._time_minutes = int(row.get_value())
+        if self._time_debounce:
+            GLib.source_remove(self._time_debounce)
+
+        def fire():
+            self._time_debounce = None
+            self._save_time()
+            return False
+
+        self._time_debounce = GLib.timeout_add(700, fire)
+
+    def _set_schedule(self, grid: list[str]) -> None:
+        self.schedule_grid.set_grid(grid)
+        self._on_schedule_painted(list(grid))
+
+    def _on_schedule_painted(self, grid: list[str]) -> None:
+        self._time_grid = list(grid)
+        self._save_time()
+
+    def _save_time(self) -> None:
+        if self._time_building:
+            return
+        user = self.user
+        settings = timelimits.parse({"daily_minutes": self._time_minutes,
+                                     "allowed": self._time_grid})
+        if settings == self._time_saved:
+            return
+        self._time_saved = settings
+        self._gated(lambda pw: self.win.client.set_time_limits(user["uid"], settings, pw),
+                    f"{user['username']}: {labels.time_summary(settings)}")
 
     # -- apps ----------------------------------------------------------------------
 

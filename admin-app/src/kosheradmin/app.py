@@ -42,6 +42,7 @@ class Window(Adw.ApplicationWindow):
         self.requests: list[dict] = []
         self.status: dict | None = None
         self.summary: dict = {}
+        self.time_usage: dict = {}
         self.catalog_count: int | None = None
         self.update_state: str | None = None
         self.guardian_ok = False
@@ -199,11 +200,13 @@ class Window(Adw.ApplicationWindow):
             requests = _quiet(client.list_requests, [])
             status = _quiet(client.filter_status, None)
             summary = _quiet(client.activity_summary, {})
+            time_usage = _quiet(client.time_usage, {})
             catalog = _quiet(lambda: len(client.list_catalog().get("apps", [])), None)
-            return policy, requests, status, summary, catalog
+            return policy, requests, status, summary, time_usage, catalog
 
         def on_done(result):
-            self.policy, self.requests, self.status, self.summary, self.catalog_count = result
+            (self.policy, self.requests, self.status, self.summary, self.time_usage,
+             self.catalog_count) = result
             self.family_page.refresh()
             if self.stack.get_visible_child_name() == "activity":
                 self.activity_page.refresh()

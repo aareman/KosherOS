@@ -156,9 +156,11 @@ class FamilyPage(Gtk.Box):
         # less did not fill it; a vertical size group makes them all ask
         # for the tallest one's height.
         self.card_heights = Gtk.SizeGroup(mode=Gtk.SizeGroupMode.VERTICAL)
+        time_usage = getattr(win, "time_usage", None) or {}
         for user in win.policy.get("users", []):
             counts = (win.summary or {}).get(str(user["uid"]))
-            card = person_card(user, counts, by_uid.get(user["uid"], 0), custom)
+            card = person_card(user, counts, by_uid.get(user["uid"], 0), custom,
+                               time_usage.get(str(user["uid"])))
             self.card_heights.add_widget(card)
             child = Gtk.FlowBoxChild()
             child.set_child(card)
@@ -233,7 +235,8 @@ class FamilyPage(Gtk.Box):
 
 # -- cards ---------------------------------------------------------------------------------
 
-def person_card(user: dict, counts: dict | None, waiting: int, custom=()) -> Gtk.Box:
+def person_card(user: dict, counts: dict | None, waiting: int, custom=(),
+                time_usage: dict | None = None) -> Gtk.Box:
     box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10, width_request=240)
     box.add_css_class("card")
     box.add_css_class("person-card")
@@ -264,6 +267,10 @@ def person_card(user: dict, counts: dict | None, waiting: int, custom=()) -> Gtk
     lines = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
     for icon, text, protects in labels.protection_lines(user):
         lines.append(icon_line(icon, text, protects))
+    # The fifth line: today's time, "1 h 20 min used of 2 h", amber when
+    # nothing limits it.
+    text, protects = labels.time_line(user, time_usage)
+    lines.append(icon_line("alarm-symbolic", text, protects))
     box.append(lines)
 
     foot = Gtk.Box(spacing=6, margin_top=2)
@@ -296,6 +303,7 @@ def guest_user(policy: dict) -> dict | None:
             "language_filter": guest.get("language_filter", "off"),
             "youtube": dict(guest.get("youtube", {})),
             "cover_style": guest.get("cover_style", "frost"),
+            "time": dict(guest.get("time", {})),
             "admin": False, "apps": [], "can_install_apps": False}
 
 

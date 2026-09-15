@@ -61,6 +61,8 @@ test *ARGS:
         python3 -m pytest store-app/tests -q {{ARGS}}
     xvfb-run -a env PYTHONPATH=kosherd/src:setup-app/src \
         python3 -m pytest setup-app/tests -q {{ARGS}}
+    xvfb-run -a env PYTHONPATH=kosherd/src:myfilter-app/src \
+        python3 -m pytest myfilter-app/tests -q {{ARGS}}
     python3 scripts/wizard-check.py
     cd portal && PYTHONPATH=src:../kosherd/src python3 -m pytest tests/ -q {{ARGS}}
 

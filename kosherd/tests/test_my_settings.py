@@ -159,6 +159,18 @@ def test_every_shipped_mode_has_words_for_the_person_being_filtered():
             f"{mode}: the explanation repeats the jargon instead of replacing it"
 
 
+def test_the_time_words_cover_what_the_daemon_can_say():
+    # The page fills these by key; a key the code asks for and the table
+    # lacks is a KeyError on the child's screen.
+    words = _app_constants()["TIME"]
+    for key in ("title", "unlimited", "admin", "limit", "left", "used", "none_left",
+                "today", "today_any", "today_never", "until", "warning"):
+        assert words[key], key
+    for jargon in ("uid", "logind", "pam", "kosherd", "daemon"):
+        assert jargon not in " ".join(words.values()).lower(), jargon
+    assert "{left}" in words["left"] and "{used}" in words["used"] and "{clock}" in words["until"]
+
+
 def test_every_language_setting_has_words_too():
     from kosherd.language import MODES as LANGUAGE_MODES
 

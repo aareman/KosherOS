@@ -83,6 +83,25 @@ YOUTUBE = {
     "off": "No restriction",
 }
 
+# Your time on the computer. Shown to everyone, limited or not: "no limit"
+# is an answer too, and a person who can see the limit and how much of
+# today is left accepts the sign-out far more readily than one it ambushes.
+TIME = {
+    "title": "Your time",
+    "unlimited": "No time limit",
+    "admin": "No time limit — this is an administrator account",
+    "limit": "Time each day",
+    "left": "{left} left today",
+    "used": "{used} used of {limit}",
+    "none_left": "Today's time is used up",
+    "today": "Today you can use this computer",
+    "today_any": "Any time",
+    "today_never": "Not today",
+    "until": "Allowed until {clock}",
+    "warning": "You will be warned 15 and 5 minutes before your time runs "
+               "out, then signed out. Time the screen sits idle is not counted.",
+}
+
 
 def _error_text(e: Exception) -> str:
     import re
@@ -168,6 +187,8 @@ class Window(Adw.ApplicationWindow):
         page.add(banner)
 
         page.add(self._what_applies(s))
+        if s.get("time") is not None:
+            page.add(self._time(s["time"]))
 
         blocked = s.get("blocked_categories", [])
         if blocked:
@@ -221,6 +242,52 @@ class Window(Adw.ApplicationWindow):
             subtitle=("You can install apps from KosherOS Store"
                       if s.get("can_install_apps") else
                       "Only an administrator can install apps")))
+        return group
+
+    def _time(self, t: dict) -> Adw.PreferencesGroup:
+        """How long, and when, you may use this computer — and how much of
+        today is left. Everything here is the daemon's arithmetic
+        (kosherd.timelimits); this window only puts words to it."""
+        import time as time_mod
+
+        from kosherd import timelimits
+
+        group = Adw.PreferencesGroup(title=TIME["title"])
+        if t.get("admin"):
+            group.add(Adw.ActionRow(title=TIME["admin"]))
+            return group
+        if not t.get("limited"):
+            group.add(Adw.ActionRow(title=TIME["unlimited"]))
+            return group
+
+        minutes = int(t.get("daily_minutes") or 0)
+        if minutes:
+            used = int(t.get("used") or 0)
+            limit = minutes * 60
+            subtitle = TIME["used"].format(used=timelimits.duration_text(used),
+                                           limit=timelimits.duration_text(limit))
+            left = max(0, limit - used)
+            subtitle += " · " + (TIME["left"].format(left=timelimits.duration_text(left))
+                                 if left else TIME["none_left"])
+            group.add(Adw.ActionRow(title=TIME["limit"], subtitle=subtitle))
+
+        today = t.get("today") or timelimits.ALWAYS
+        if today == timelimits.ALWAYS:
+            hours = TIME["today_any"]
+        elif today == timelimits.NEVER:
+            hours = TIME["today_never"]
+        else:
+            hours = timelimits.hours_text(today)
+        if t.get("block_ends"):
+            hours += " · " + TIME["until"].format(
+                clock=time_mod.strftime("%H:%M", time_mod.localtime(t["block_ends"])))
+        if today != timelimits.ALWAYS or minutes == 0:
+            group.add(Adw.ActionRow(title=TIME["today"], subtitle=hours))
+
+        note = Gtk.Label(label=TIME["warning"], wrap=True, xalign=0,
+                         margin_top=6, margin_start=6, margin_end=6,
+                         css_classes=["dim-label", "caption"])
+        group.add(note)
         return group
 
     def _footer(self, s: dict) -> Adw.PreferencesGroup:

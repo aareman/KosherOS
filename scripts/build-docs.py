@@ -7,9 +7,13 @@
 
 Two pages are generated rather than written:
 
-- `docs/index.md` is the repository readme with its links rewritten for the
-  site (`docs/foo.md` -> `foo.md`, `branding/logo.png` -> `images/logo.png`).
-  One text, two homes; nothing to keep in step by hand.
+The front page is NOT generated: `docs/index.md` is written for the site.
+It used to be the readme with its links rewritten, and that came out
+broken — the readme is full of raw HTML (a centred div, badges, a details
+block) and Python-Markdown does not render Markdown inside raw HTML, so
+the front page showed its own source. The readme is for GitHub; the front
+page is for the site.
+
 - `docs/third-party.md` is a copy of the repo-root THIRD-PARTY.md.
 - `docs/releases.md` is every GitHub release, newest first, with its notes.
   In CI it comes from the GitHub API (`gh`); offline it falls back to the
@@ -32,18 +36,6 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 DOCS = ROOT / "docs"
 REPO = "aareman/KosherOS"
-
-
-def index_from_readme(readme: str) -> str:
-    text = readme
-    text = text.replace("](docs/", "](")
-    text = text.replace('src="docs/', 'src="')
-    text = text.replace('src="branding/logo.png"', 'src="images/logo.png"')
-    text = text.replace("](branding/logo.png)", "](images/logo.png)")
-    text = text.replace("](THIRD-PARTY.md)", "](third-party.md)")
-    # The readme's "Read the docs" link points at this very site now.
-    text = text.replace("[Read the docs](architecture.md)", "[Read the docs](architecture.md)")
-    return text
 
 
 def releases_from_github() -> list[dict] | None:
@@ -109,7 +101,6 @@ def releases_page(found: list[dict]) -> str:
 def generate() -> None:
     (DOCS / "images").mkdir(exist_ok=True)
     shutil.copy(ROOT / "branding/logo.png", DOCS / "images/logo.png")
-    (DOCS / "index.md").write_text(index_from_readme((ROOT / "readme.md").read_text()))
     # The third-party notices live at the repo root, where licences are
     # looked for; the site gets a copy.
     (DOCS / "third-party.md").write_text((ROOT / "THIRD-PARTY.md").read_text())
@@ -119,7 +110,8 @@ def generate() -> None:
         found = releases_from_git()
         source = "local git tags"
     (DOCS / "releases.md").write_text(releases_page(found))
-    print(f"docs/index.md and docs/releases.md written ({len(found)} releases, from {source})")
+    print(f"docs/releases.md and docs/third-party.md written "
+          f"({len(found)} releases, from {source})")
 
 
 def main(argv=None) -> int:

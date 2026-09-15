@@ -52,8 +52,16 @@ nav:
 
 markdown_extensions:
   - admonition
+  - attr_list
+  - md_in_html   # the card grid on the front page
   - tables
   - toc:
       permalink: true
-  - pymdownx.superfences
+  # The diagram on the front page: Material draws mermaid itself when the
+  # fence is handed to it this way, with no script of ours.
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
   - pymdownx.highlight

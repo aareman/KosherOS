@@ -12,15 +12,31 @@ sys.modules["build_docs"] = bd
 spec.loader.exec_module(bd)
 
 
-def test_the_front_page_is_the_readme_with_links_that_work_on_the_site():
-    index = bd.index_from_readme((ROOT / "readme.md").read_text())
-    assert "](docs/" not in index
-    assert 'src="docs/' not in index
-    assert 'src="images/logo.png"' in index
-    # Every local page the front page links to exists in docs/.
+def test_the_front_page_is_written_for_the_site_not_lifted_from_the_readme():
+    # The readme is full of raw HTML (a centred div, shield badges, a
+    # details block) and Python-Markdown does not render Markdown inside
+    # raw HTML, so lifting it made the front page show its own source.
+    index = (ROOT / "docs/index.md").read_text()
+    assert "<div align=" not in index and "<details>" not in index
+    assert "[ci-shield]" not in index, "reference-style badges never resolve here"
+    assert index.startswith("# KosherOS")
     generated = {"index.md", "releases.md", "third-party.md"}
     for target in set(re.findall(r"\]\(([a-z-]+\.md)\)", index)) - generated:
         assert (ROOT / "docs" / target).is_file(), target
+    for image in set(re.findall(r"\]\((images/[^)]+)\)", index)):
+        assert (ROOT / "docs" / image).is_file(), image
+
+
+def test_no_page_on_the_site_hides_markdown_inside_raw_html():
+    for page in (ROOT / "docs").glob("*.md"):
+        text = page.read_text()
+        for opener in ("<div", "<details", "<table"):
+            if opener in text:
+                # Only allowed with the md_in_html marker, which is what
+                # makes the content inside render.
+                for line in text.splitlines():
+                    if line.strip().startswith(opener):
+                        assert "markdown" in line, f"{page.name}: {line.strip()[:60]}"
 
 
 def test_the_releases_page_lists_every_release_newest_first():
@@ -61,10 +77,17 @@ def test_the_supported_page_matches_what_the_image_actually_sets():
 
 
 def test_generate_runs_offline(tmp_path, monkeypatch):
-    # Without gh the page still gets written, from local tags.
+    # Without gh the releases page still gets written, from local tags.
     monkeypatch.setattr(bd, "releases_from_github", lambda: None)
     monkeypatch.setattr(bd, "DOCS", tmp_path)
     (tmp_path / "images").mkdir()
     bd.generate()
-    assert (tmp_path / "index.md").is_file()
     assert (tmp_path / "releases.md").read_text().startswith("# Releases")
+    assert (tmp_path / "third-party.md").is_file()
+    assert not (tmp_path / "index.md").exists(), "the front page is written, not generated"
+
+
+def test_the_diagram_is_handed_to_the_theme_to_draw():
+    nav = (ROOT / "mkdocs.yml").read_text()
+    assert "name: mermaid" in nav and "fence_code_format" in nav
+    assert "```mermaid" in (ROOT / "docs/index.md").read_text()

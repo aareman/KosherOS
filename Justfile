@@ -312,9 +312,21 @@ iso-unattended: (_iso "os-image/iso-config-unattended.toml")
 release-iso CHANNEL="stable": _sudo
     #!/usr/bin/env bash
     set -euo pipefail
-    ref="ghcr.io/aareman/kosher-linux:{{CHANNEL}}"
-    if ! podman pull "$ref" 2>/dev/null; then
-        echo "There is no '{{CHANNEL}}' image at ghcr.io/aareman/kosher-linux." >&2
+    # Ctrl-C ends the recipe here, instead of dropping into the
+    # explanation below and blaming a missing image for an interrupted download.
+    trap 'echo; echo "interrupted; run it again to resume the download" >&2; exit 130' INT
+    repo="ghcr.io/aareman/kosher-linux"
+    ref="$repo:{{CHANNEL}}"
+    # Ask the registry what is published before pulling, so "no such
+    # channel" and "the download failed" are told apart: they need
+    # different next steps. An unreachable registry lists nothing and the
+    # pull below then says what went wrong.
+    token=$(curl -sf "https://ghcr.io/token?scope=repository:aareman/kosher-linux:pull" \
+        | python3 -c "import sys,json;print(json.load(sys.stdin).get('token',''))" 2>/dev/null || true)
+    tags=$(curl -sf -H "Authorization: Bearer $token" "https://ghcr.io/v2/aareman/kosher-linux/tags/list" \
+        | python3 -c "import sys,json;print(' '.join(sorted(json.load(sys.stdin).get('tags') or [])))" 2>/dev/null || true)
+    if [ -n "$tags" ] && ! grep -qw -- "{{CHANNEL}}" <<<"$tags"; then
+        echo "There is no '{{CHANNEL}}' image at $repo." >&2
         echo >&2
         if [ "{{CHANNEL}}" = "stable" ]; then
             echo "Nothing has been promoted to stable yet. Either:" >&2
@@ -323,13 +335,17 @@ release-iso CHANNEL="stable": _sudo
             echo "  - build an installer that follows the edge channel instead:" >&2
             echo "        just release-iso edge" >&2
         else
+            # Channels and versions only; the per-commit sha tags are noise here.
             echo "Published channels and versions:" >&2
-            token=$(curl -s "https://ghcr.io/token?scope=repository:aareman/kosher-linux:pull" \
-                | python3 -c "import sys,json;print(json.load(sys.stdin).get('token',''))")
-            curl -s -H "Authorization: Bearer $token" \
-                https://ghcr.io/v2/aareman/kosher-linux/tags/list \
-                | python3 -c "import sys,json;print('  ' + ', '.join(t for t in sorted(json.load(sys.stdin).get('tags') or []) if not t.startswith('sha256-')))" >&2 || true
+            tr ' ' '\n' <<<"$tags" | grep -E '^(edge|stable|latest|v[0-9])' | sed 's/^/  /' >&2
         fi
+        exit 1
+    fi
+    # Progress stays visible: this is gigabytes, and a silent pull looks hung.
+    if ! podman pull "$ref"; then
+        echo >&2
+        echo "Could not download $ref. The registry lists it, so the download itself failed" >&2
+        echo "(network, disk, or interrupted). Run this again; podman resumes from the layers it has." >&2
         exit 1
     fi
     version="$(podman run --rm "$ref" cat /usr/share/kosher/VERSION | tr -d '[:space:]')"

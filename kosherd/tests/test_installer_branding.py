@@ -157,12 +157,10 @@ def test_the_command_line_builds_only_the_image_when_asked(tmp_path):
     assert dest.is_file()
 
 
-def test_the_release_name_carries_version_date_and_arch():
-    name = brand.release_name("0.1", now=1_800_000_000, arch="x86_64")
-    import time
-
-    day = time.strftime("%Y%m%d", time.localtime(1_800_000_000))
-    assert name == f"KosherOS-0.1-{day}-x86_64.iso"
+def test_the_release_name_is_version_and_arch_only():
+    # No date: the version is distinct per commit, and a date would make
+    # one release look like two files.
+    assert brand.release_name("0.1.0-pre.37", arch="x86_64") == "KosherOS-0.1.0-pre.37-x86_64.iso"
 
 
 def test_renaming_leaves_install_iso_pointing_at_the_release(tmp_path):
@@ -170,9 +168,10 @@ def test_renaming_leaves_install_iso_pointing_at_the_release(tmp_path):
     iso.write_bytes(b"iso")
     named = brand.rename(iso, "0.1")
     assert named.name.startswith("KosherOS-0.1-") and named.name.endswith(".iso")
+    assert named.name.count("-") == 2, "version and arch only, no date"
     assert iso.is_symlink() and iso.resolve() == named.resolve()
     assert iso.read_bytes() == b"iso"
-    # A second build the same day replaces the release file cleanly.
+    # A second build of the same version replaces the release file cleanly.
     iso.unlink()
     iso.write_bytes(b"newer")
     again = brand.rename(iso, "0.1")

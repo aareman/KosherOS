@@ -359,7 +359,7 @@ _iso_from ref config:
 
 # Brand the installer ISO bib already wrote (product.img with the name,
 # stylesheet and logo) and give it its release name,
-# KosherOS-<version>-<date>-<arch>.iso; install.iso links to it. `just iso`
+# KosherOS-<version>-<arch>.iso; install.iso links to it. `just iso`
 # runs this last; run it alone to redo the branding without rebuilding.
 brand-iso:
     python3 scripts/brand-iso.py build/bootiso/install.iso

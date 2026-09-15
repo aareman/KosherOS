@@ -91,6 +91,11 @@ ACTIONS = {
     # Machine-wide ad and tracker blocking at the resolvers. Turning it off
     # weakens what reaches the screen, so it is guardian-gated.
     "SetAdBlock": ACTION_MANAGE_FILTER,
+    # How long and when an account may be signed in. Loosening a limit
+    # weakens the protection like any other filter change, so it takes
+    # the same road: a filter action, guardian-gated.
+    "SetTimeLimits": ACTION_MANAGE_FILTER,
+    "GetTimeUsage": ACTION_READ_CONFIG,
     "ApproveRequest": ACTION_MANAGE_FILTER,
     "DismissRequest": ACTION_MANAGE_USERS,
     "ListRequests": ACTION_READ_CONFIG,
@@ -147,7 +152,7 @@ GUARDIAN_GATED = frozenset({
     "SetMediaLevel",
     "SetLanguageFilter", "SetYouTube",
     "SetGuestConfig", "DisableGuardian", "Enrol", "Unenrol",
-    "SetAdBlock",
+    "SetAdBlock", "SetTimeLimits",
 })
 
 # First-boot only; closed forever once setup is stamped complete.
@@ -170,7 +175,7 @@ CHANGES = frozenset({
     "ApplyProfile", "SaveProfile", "DeleteProfile", "ApproveRequest",
     "DismissRequest", "AllowUrl", "EditList", "SetMediaLevel",
     "SetLanguageFilter", "SetYouTube", "SetUserAdmin", "SetLayout",
-    "SetCoverStyle", "SetAdBlock", "SetGuestConfig", "CreateUser",
+    "SetCoverStyle", "SetAdBlock", "SetTimeLimits", "SetGuestConfig", "CreateUser",
     "AdoptUser", "RemoveUser", "SetUserApps", "RemoveApp", "ApproveApp",
     "UnapproveApp", "SetUserCanInstall", "SetCaptiveMode",
     "SetGuardianPassword", "DisableGuardian", "Enrol", "Unenrol",
@@ -187,8 +192,8 @@ PER_USER = frozenset({
     "SetBlockedCategories",
     "ApplyProfile", "SaveProfile", "AllowUrl", "SetMediaLevel",
     "SetLanguageFilter", "SetYouTube", "SetUserAdmin", "SetLayout",
-    "SetCoverStyle", "RemoveUser", "SetUserApps", "SetUserCanInstall",
-    "SetCaptiveMode",
+    "SetCoverStyle", "SetTimeLimits", "RemoveUser", "SetUserApps",
+    "SetUserCanInstall", "SetCaptiveMode",
 })
 # Changes whose arguments are secrets or too big to be worth keeping.
 NO_ARGS_LOGGED = frozenset({"SetGuardianPassword", "DisableGuardian",

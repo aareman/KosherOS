@@ -29,7 +29,7 @@ if not Gtk.init_check():  # pragma: no cover - no display
 Adw.init()
 
 from kosheradmin import app as admin  # noqa: E402
-from kosheradmin import detail, dialogs, family, feed, labels  # noqa: E402
+from kosheradmin import detail, dialogs, family, feed, labels, schedule  # noqa: E402
 
 
 class FakeClient:
@@ -111,6 +111,7 @@ class FakeWindow(Gtk.Window):
         self.requests = state.get("requests", [])
         self.status = state.get("status", self.client.filter_status())
         self.summary = state.get("summary", {})
+        self.time_usage = state.get("time_usage", {})
         self.catalog_count = state.get("catalog_count")
         self.update_state = None
         self.pushed = []
@@ -549,7 +550,7 @@ def test_an_enabled_guest_opens_the_same_page_as_anyone_without_an_apps_tab():
     drain()
     names = [page.stack.get_pages().get_item(i).get_name()
              for i in range(page.stack.get_pages().get_n_items())]
-    assert names == ["overview", "filtering", "media", "youtube", "account"]
+    assert names == ["overview", "filtering", "media", "youtube", "time", "account"]
     titles = {r.get_title() for r in _rows(page)}
     assert "Guest account is on" in titles
     assert "Administrator" not in titles and "Remove This Account…" not in titles
@@ -730,13 +731,13 @@ def _detail(mode="filtered", users=None, **kw):
     return page, win, user
 
 
-def test_the_detail_page_has_six_tabs_and_starts_on_the_overview():
+def test_the_detail_page_has_seven_tabs_and_starts_on_the_overview():
     page, _w, _u = _detail()
     names = []
     stack_pages = page.stack.get_pages()
     for i in range(stack_pages.get_n_items()):
         names.append(stack_pages.get_item(i).get_name())
-    assert names == ["overview", "filtering", "media", "youtube", "apps", "account"]
+    assert names == ["overview", "filtering", "media", "youtube", "time", "apps", "account"]
     assert page.stack.get_visible_child_name() == "overview"
 
 
@@ -1153,15 +1154,17 @@ def test_the_demo_family_drives_every_screen():
     win.requests = client.list_requests()
     win.status = client.filter_status()
     win.summary = client.activity_summary()
+    win.time_usage = client.time_usage()
     board = family.FamilyPage(win)
     board.refresh()
     drain()
     assert len(_children(board.cards)) == 6
+    assert any("used of 2 h" in t for t in _texts(board)), "yosef's card shows today's time"
     assert board.requests_banner.get_revealed()
     for user in win.policy["users"]:
         page = detail.UserDetailPage(win, user)
         drain()
-        assert page.stack.get_pages().get_n_items() == 6, user["username"]
+        assert page.stack.get_pages().get_n_items() == 7, user["username"]
     activity = feed.ActivityPage(win)
     activity.refresh()
     drain()
@@ -1359,3 +1362,253 @@ def test_the_card_says_how_a_whitelist_account_is_set_up():
                                                 whitelist_bundles=["torah"]))[0][1]
     assert only_lists == "Only 1 approved list of sites"
 
+
+
+# -- time: the tab, the calendar, the card ------------------------------------------
+
+def _time_page(users=None, usage=None, **kw):
+    saved = []
+
+    class Recording(FakeClient):
+        def set_time_limits(self, uid, settings, pw=""):
+            saved.append((uid, settings))
+
+    win = FakeWindow(Recording())
+    user = a_user(**kw)
+    win.policy = {"revision": 1, "users": users or [user], "guardian": {"enabled": False},
+                  "guest": {"enabled": False}, "adblock": {"enabled": True}}
+    win.time_usage = usage or {}
+    page = detail.UserDetailPage(win, user)
+    drain()
+    return page, saved, user
+
+
+def test_the_time_tab_has_the_limit_the_presets_and_the_calendar():
+    page, saved, _u = _time_page()
+    titles = {r.get_title() for r in _rows(page)}
+    assert "Daily limit" in titles and "Minutes a day" in titles
+    combo = _row_named(page, "Daily limit")
+    options = [combo.get_model().get_string(i) for i in range(combo.get_model().get_n_items())]
+    assert options == ["No daily limit", "30 minutes a day", "1 hour a day", "2 hours a day",
+                       "3 hours a day", "A different amount…"]
+    assert options[combo.get_selected()] == "No daily limit", "nothing is set until you set it"
+    assert not _row_named(page, "Minutes a day").get_visible()
+    labels_ = [b.get_label() for b in _buttons(page) if b.get_label()]
+    for preset in ("Always", "After school", "Not late at night", "Weekdays only"):
+        assert preset in labels_, preset
+    assert isinstance(page.schedule_grid, schedule.ScheduleGrid)
+    assert page.schedule_grid.get_grid() == ["1" * 24] * 7
+    assert saved == [], "building the tab must not save anything"
+
+
+def test_picking_a_daily_limit_saves_it_and_the_change_reads_well():
+    page, saved, _u = _time_page()
+    combo = _row_named(page, "Daily limit")
+    combo.set_selected(3)                                   # 2 hours a day
+    drain()
+    assert saved == [(1001, {"daily_minutes": 120})]
+    assert labels.time_summary(saved[0][1]) == "2 h a day, any hour", "what the toast says"
+    combo.set_selected(0)                                   # no limit
+    drain()
+    assert saved[-1] == (1001, {})
+
+
+def test_a_custom_amount_shows_the_spinner_and_saves_once_the_clicking_stops():
+    from gi.repository import GLib
+
+    page, saved, _u = _time_page()
+    combo = _row_named(page, "Daily limit")
+    combo.set_selected(5)                                   # a different amount
+    drain()
+    spin = _row_named(page, "Minutes a day")
+    assert spin.get_visible()
+    assert saved[-1] == (1001, {"daily_minutes": 90}), "the spinner's value is what is saved"
+    spin.set_value(95)
+    spin.set_value(100)
+    drain()
+    assert saved[-1] == (1001, {"daily_minutes": 90}), "not yet: the clicks are still coming"
+    done = []
+    GLib.timeout_add(900, lambda: done.append(True) or False)
+    while not done:
+        GLib.MainContext.default().iteration(True)
+    assert saved[-1] == (1001, {"daily_minutes": 100})
+
+
+def test_a_schedule_preset_paints_the_calendar_and_saves():
+    from kosherd import timelimits
+
+    page, saved, _u = _time_page()
+    after_school = next(b for b in _buttons(page) if b.get_label() == "After school")
+    after_school.emit("clicked")
+    drain()
+    assert page.schedule_grid.get_grid() == timelimits.SCHEDULE_PRESETS["after_school"]
+    assert saved == [(1001, {"allowed": timelimits.SCHEDULE_PRESETS["after_school"]})]
+    always = next(b for b in _buttons(page) if b.get_label() == "Always")
+    always.emit("clicked")
+    drain()
+    assert saved[-1] == (1001, {})
+
+
+def test_an_existing_limit_and_schedule_are_shown_as_set():
+    from kosherd import timelimits
+
+    page, _s, _u = _time_page(time={"daily_minutes": 60,
+                                    "allowed": timelimits.SCHEDULE_PRESETS["not_late"]},
+                              usage={"1001": {"used": 80 * 60, "limit": 3600, "left": 0,
+                                              "blocked": True, "reason": "limit",
+                                              "allowed_now": True, "block_ends": None,
+                                              "next_allowed": None, "limited": True,
+                                              "signed_in": True}})
+    combo = _row_named(page, "Daily limit")
+    assert combo.get_model().get_string(combo.get_selected()) == "1 hour a day"
+    assert page.schedule_grid.get_grid() == timelimits.SCHEDULE_PRESETS["not_late"]
+    today = _rows(page)[0] if False else page.time_today_row
+    assert today.get_title().startswith("1 h 20 min used of 1 h")
+    assert "Signed in now" in today.get_subtitle()
+
+
+def test_a_blocked_account_is_told_when_it_comes_back():
+    now = time.time()
+    tomorrow_six = time.mktime((*time.localtime(now + 86400)[:3], 6, 0, 0, 0, 0, -1))
+    page, _s, _u = _time_page(time={"daily_minutes": 60},
+                              usage={"1001": {"used": 3600, "limit": 3600, "left": 0,
+                                              "blocked": True, "reason": "limit",
+                                              "allowed_now": True, "block_ends": None,
+                                              "next_allowed": int(tomorrow_six),
+                                              "limited": True, "signed_in": False}})
+    assert page.time_today_row.get_subtitle() == "Not allowed right now, until tomorrow 06:00"
+    assert labels.until_text(int(now) + 60, now) == time.strftime("%H:%M", time.localtime(now + 60))
+    assert labels.until_text(int(now) + 3 * 86400, now).startswith(
+        time.strftime("%a ", time.localtime(now + 3 * 86400)))
+
+
+def test_an_administrator_cannot_be_limited_and_the_tab_says_so():
+    page, _s, _u = _time_page(admin=True)
+    titles = {r.get_title() for r in _rows(page)}
+    assert "Daily limit" not in titles and "Administrator" in titles
+    assert any("never limited" in (r.get_subtitle() or "") for r in _rows(page)
+               if isinstance(r, Adw.ActionRow))
+    assert not hasattr(page, "schedule_grid")
+
+
+# -- the calendar widget itself ---------------------------------------------------------
+
+def _painted(grid_widget):
+    """Render the grid to an image and return it."""
+    import cairo
+
+    width, height = 400, schedule.HEADER + 24 * schedule.CELL_HEIGHT + 4
+    surface = cairo.ImageSurface(cairo.FORMAT_ARGB32, width, height)
+    cr = cairo.Context(surface)
+    grid_widget._draw(grid_widget, cr, width, height)
+    return surface
+
+
+def test_the_calendar_draws_allowed_and_blocked_hours_in_two_colours():
+    from kosherd import timelimits
+
+    widget = schedule.ScheduleGrid(timelimits.SCHEDULE_PRESETS["not_late"])
+    widget.set_size_request(400, 0)
+    surface = _painted(widget)
+    data = surface.get_data()
+    stride = surface.get_stride()
+
+    def pixel(x, y):
+        offset = y * stride + x * 4
+        return tuple(data[offset:offset + 4])
+
+    # The widget has no allocation off-screen, so use its content geometry.
+    column_width = (400 - schedule.LEFT) / 7
+    x = int(schedule.LEFT + column_width * 1.5)
+    allowed = pixel(x, schedule.HEADER + 10 * schedule.CELL_HEIGHT + 8)   # 10:00
+    blocked = pixel(x, schedule.HEADER + 23 * schedule.CELL_HEIGHT + 8)   # 23:00
+    assert allowed != blocked
+    # BGRA: the allowed (amber) cell is redder than blue; the blocked one bluer.
+    assert allowed[2] > allowed[0] and blocked[0] > blocked[2]
+
+
+def test_dragging_paints_a_rectangle_and_saves_once():
+    changes = []
+    widget = schedule.ScheduleGrid(["1" * 24] * 7, on_change=changes.append)
+    widget.set_size_request(400, 0)
+    # Off-screen the widget has no width, so geometry is driven by hand.
+    widget._column_width = lambda: 50.0
+    x0 = schedule.LEFT + 25              # Sunday column
+    y0 = schedule.HEADER + 8 * schedule.CELL_HEIGHT + 3   # 08:00
+
+    class Gesture:
+        def get_start_point(self):
+            return True, x0, y0
+
+    widget._on_drag_begin(Gesture(), x0, y0)
+    assert widget.cell(0, 8) == "0", "the first cell flips at once"
+    widget._on_drag_update(Gesture(), 2 * 50, 3 * schedule.CELL_HEIGHT)   # to Tue 11:00
+    widget._on_drag_end(Gesture(), 2 * 50, 3 * schedule.CELL_HEIGHT)
+    assert changes and len(changes) == 1, "one save per drag"
+    grid = changes[0]
+    sunday, monday, tuesday = grid[6], grid[0], grid[1]
+    for day in (sunday, monday, tuesday):
+        assert day[8:12] == "0000" and day[:8] == "1" * 8 and day[12:] == "1" * 12
+    assert grid[2] == "1" * 24, "Wednesday was not touched"
+    # A press off the cells does nothing.
+    widget._on_drag_begin(Gesture(), 2, 2)
+    widget._on_drag_end(Gesture(), 0, 0)
+    assert len(changes) == 1
+
+
+def test_the_keyboard_moves_a_cursor_and_space_flips_the_hour():
+    from gi.repository import Gdk
+
+    changes = []
+    widget = schedule.ScheduleGrid(["1" * 24] * 7, on_change=changes.append)
+    assert widget.get_focusable()
+    widget._on_key(None, Gdk.KEY_Right, 0, 0)
+    widget._on_key(None, Gdk.KEY_Down, 0, 0)
+    assert widget.cursor == (1, 9)
+    widget._on_key(None, Gdk.KEY_space, 0, 0)
+    assert widget.cell(1, 9) == "0"
+    assert changes[-1][0][9] == "0", "column 1 as shown is Monday in the policy"
+    assert not widget._on_key(None, Gdk.KEY_a, 0, 0)
+
+
+def test_the_card_carries_a_fifth_line_for_time():
+    from kosherd import timelimits
+
+    limited = a_user(time={"daily_minutes": 120})
+    win, page = a_board([limited, a_user(uid=1002, username="rivky")],
+                        time_usage={"1001": {"used": 80 * 60, "limit": 7200, "left": 2400,
+                                             "limited": True, "signed_in": True}})
+    cards = _children(page.cards)
+    texts = _texts(cards[0])
+    assert "1 h 20 min used of 2 h" in texts
+    apps = next(i for i, t in enumerate(texts) if "app" in t.lower())
+    clock = texts.index("1 h 20 min used of 2 h")
+    assert apps < clock, "after the four fixed lines"
+    assert "No daily limit" in _texts(cards[1])
+    # Amber when nothing limits, blue when something does.
+    text, protects = labels.time_line(limited, None)
+    assert protects and text == "0 min used of 2 h"
+    text, protects = labels.time_line(a_user(), None)
+    assert not protects and text == "No daily limit"
+    text, protects = labels.time_line(a_user(admin=True), None)
+    assert not protects and "administrator" in text
+    text, _p = labels.time_line(a_user(time={"allowed": timelimits.SCHEDULE_PRESETS["weekdays"]}),
+                                {"used": 600})
+    assert text.startswith("10 min today, no daily limit")
+
+
+def test_a_time_event_reads_in_the_feed_and_on_the_overview():
+    now = int(time.time())
+    events = [an_event(t=now - 4, kind="time", url="", why="time:login"),
+              an_event(t=now - 5, kind="time", url="", why="time:limit")]
+    win, page = a_feed(events)
+    titles = [r.get_title() for r in _rows(page.feed)]
+    assert titles == ["Refused a sign-in outside the allowed time",
+                      "Signed out: today's time was used up"]
+    page, _w, _u = _detail(activity=events)
+    titles = [r.get_title() for r in _rows(page.blocked_group)]
+    assert "Signed out: today's time was used up" in titles
+    assert labels.why_text("time:schedule") == "the allowed hours ended"
+    what, _d = labels.change_sentence({"method": "SetTimeLimits", "username": "yosef",
+                                       "args": [1001, {"daily_minutes": 60}], "t": now})
+    assert what == "yosef: time → 1 h a day, any hour"

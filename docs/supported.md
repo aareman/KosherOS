@@ -67,6 +67,20 @@ The guest account takes any of these by the kind of internet it gets, and
 is wiped at sign‑out. See [content filtering](content-filtering.md) and
 [media filtering](media-filtering.md) for what each layer does.
 
+## Time limits
+
+| | On a user account | Notes |
+|---|---|---|
+| A daily limit ("2 hours a day") | supported | Counts active, signed‑in time; idle time is free. Kept across a restart; starts again at midnight. One‑click 30 min / 1 h / 2 h / 3 h / no limit, or any number of minutes. |
+| Allowed hours, painted on a weekly calendar | supported | Presets: Always, After school, Not late at night, Weekdays only. Sign‑in outside the hours is refused at the login screen (`pam_time`). |
+| Warnings before the time is up | supported | Desktop notifications at 15 and 5 minutes and when it ends; then the screen locks and the session is ended a minute later. |
+| What the person sees | supported | My Filter shows their limit, what is left today and today's allowed hours. |
+| Administrator accounts | never limited | A parent must always be able to sign in and change a setting. |
+| The guest account | supported | Limited like any other account. |
+
+Both settings are off until a parent sets them. See
+[time limits](time-limits.md).
+
 ## Hardware
 
 | | |

@@ -20,6 +20,7 @@ import pytest
 from kosherd import apply as apply_mod
 from kosherd import dns, nft
 from kosherd import search as search_mod
+from kosherd import timelimits
 from kosherd.policy import MODES, Policy, UserPolicy
 
 UID = 1001
@@ -84,6 +85,9 @@ EVERYTHING = {
     "youtube": {"restrict": "strict", "blocked_categories": ["24"]},
     "layout": "tiling",
     "cover_style": "skin",
+    # Not a network setting: acts in every mode through pam_time and the
+    # daemon's own clock, so it has no INERT entry at all.
+    "time": {"daily_minutes": 120, "allowed": timelimits.SCHEDULE_PRESETS["not_late"]},
 }
 
 
@@ -95,7 +99,8 @@ def rendered(mode: str) -> str:
     parts = [nft.render(policy, dns_uid=989, mitm_uid=988, search_uid=987),
              dns.render(policy),
              dns.render_safesearch(policy),
-             search_mod.render_policy(policy)]
+             search_mod.render_policy(policy),
+             timelimits.render_time_conf(policy)]
 
     per_user = {}
     for u in policy.effective_users():
@@ -120,6 +125,7 @@ EVIDENCE = {
     "youtube": '"restrict"',
     "layout": "tiling",
     "cover_style": '"skin"',
+    "time": "0600-2100",
 }
 
 

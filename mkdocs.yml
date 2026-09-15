@@ -50,6 +50,7 @@ nav:
       - Architecture: architecture.md
       - Content filtering: content-filtering.md
       - Media filtering: media-filtering.md
+      - Time limits: time-limits.md
       - Search: search.md
       - Desktop: desktop.md
       - Branding: branding.md

@@ -40,12 +40,13 @@ def test_every_method_has_an_action():
 
 READS = ["GetPolicy", "Status", "IsEnabled", "ListCatalog", "ListInstalled",
          "ListInstalledDetails", "SearchApps", "CheckUpdate", "Lock",
-         "VerifyGuardian", "PortalStatus", "SyncNow", "GetMyLayout"]
+         "VerifyGuardian", "PortalStatus", "SyncNow", "GetMyLayout", "GetTimeUsage"]
 CHANGES = ["SetFilterMode", "SetWhitelist", "SetUrlRules", "CreateUser",
            "AdoptUser", "RemoveUser", "RemoveApp", "ApproveApp",
            "UnapproveApp", "SetUserApps", "SetUserCanInstall", "ApplyUpdate",
            "SetCaptiveMode", "SetGuardianPassword", "DisableGuardian",
-           "SetGuestConfig", "Enrol", "Unenrol", "SetLayout", "SetCoverStyle", "SetAdBlock"]
+           "SetGuestConfig", "Enrol", "Unenrol", "SetLayout", "SetCoverStyle", "SetAdBlock",
+           "SetTimeLimits"]
 
 
 @pytest.mark.parametrize("method", READS + CHANGES)
@@ -132,7 +133,7 @@ def test_the_guardian_gate_covers_every_filter_weakening_method():
                 "SetMediaLevel",
                 "SetLanguageFilter", "SetYouTube", "SetGuestConfig",
                 "DisableGuardian",
-                "Enrol", "Unenrol", "SetAdBlock"}
+                "Enrol", "Unenrol", "SetAdBlock", "SetTimeLimits"}
     assert GUARDIAN_GATED == expected
     filter_actions = {m for m, a in ACTIONS.items()
                       if a == access.ACTION_MANAGE_FILTER}

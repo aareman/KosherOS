@@ -159,8 +159,44 @@ def test_every_shipped_mode_has_words_for_the_person_being_filtered():
             f"{mode}: the explanation repeats the jargon instead of replacing it"
 
 
+def test_the_time_words_cover_what_the_daemon_can_say():
+    # The page fills these by key; a key the code asks for and the table
+    # lacks is a KeyError on the child's screen.
+    words = _app_constants()["TIME"]
+    for key in ("title", "unlimited", "admin", "limit", "left", "used", "none_left",
+                "today", "today_any", "today_never", "until", "warning"):
+        assert words[key], key
+    for jargon in ("uid", "logind", "pam", "kosherd", "daemon"):
+        assert jargon not in " ".join(words.values()).lower(), jargon
+    assert "{left}" in words["left"] and "{used}" in words["used"] and "{clock}" in words["until"]
+
+
 def test_every_language_setting_has_words_too():
     from kosherd.language import MODES as LANGUAGE_MODES
 
     described = _app_constants()["LANGUAGE"]
     assert set(LANGUAGE_MODES) == set(described)
+
+
+# ---- time --------------------------------------------------------------------
+
+def test_your_own_time_limit_and_what_is_left_today_are_shown():
+    from kosherd import timelimits
+
+    limited = UserPolicy(uid=1001, username="child", mode="filtered",
+                         time={"daily_minutes": 120,
+                               "allowed": timelimits.SCHEDULE_PRESETS["not_late"]})
+    settings = _settings([limited], uid=1001)
+    t = settings["time"]
+    assert t["limited"] is True and t["daily_minutes"] == 120 and t["admin"] is False
+    assert len(t["allowed"]) == 7 and len(t["today"]) == 24
+    assert t["today"] == timelimits.SCHEDULE_PRESETS["not_late"][0]
+    assert t["used"] == 0 and t["left"] is not None
+
+
+def test_an_unlimited_account_and_an_administrator_are_told_so():
+    settings = _settings([CHILD], uid=1001)
+    assert settings["time"]["limited"] is False and settings["time"]["left"] is None
+    settings = _settings([PARENT], uid=1000)
+    assert settings["time"]["admin"] is True and settings["time"]["limited"] is False
+    assert settings["time"]["daily_minutes"] == 0

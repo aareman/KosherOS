@@ -235,6 +235,9 @@ class ActivityPage(Gtk.Box):
         elif kind == activity_mod.SEARCH:
             row.set_title(f"Would not search for “{event.get('text', '')}”")
             row.set_subtitle(" · ".join(p for p in (name, event.get("why", ""), again.strip(" ·")) if p))
+        elif kind == activity_mod.TIME:
+            row.set_title(labels.time_event_title(event))
+            row.set_subtitle(" · ".join(p for p in (name, again.strip(" ·")) if p))
         return row
 
     def _allowable(self, event: dict) -> bool:
@@ -251,8 +254,11 @@ def fold(events: list[dict]) -> list[dict]:
     out: list[dict] = []
     seen: dict[tuple, dict] = {}
     for event in events:
+        # A time event has no page; what distinguishes a sign-out from a
+        # refused sign-in is the reason.
+        why = event.get("why", "") if event["kind"] == activity_mod.TIME else ""
         key = (event["uid"], event["kind"], event.get("url", ""),
-               event.get("text", ""), labels.day_label(event["t"]))
+               event.get("text", ""), why, labels.day_label(event["t"]))
         if event["kind"] != activity_mod.CHANGE and key in seen:
             seen[key]["times"] = seen[key].get("times", 1) + 1
             continue

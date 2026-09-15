@@ -14,7 +14,7 @@ import json
 import time
 from pathlib import Path
 
-from . import profiles
+from . import profiles, timelimits
 
 now = int(time.time())
 
@@ -50,7 +50,7 @@ def _user(uid, name, key, admin=False, **kw):
          "rules": [], "apps": [], "blocked_categories": list(p.blocked_categories),
          "media_level": p.media_level, "language_filter": p.language_filter,
          "youtube": dict(p.youtube), "can_install_apps": p.can_install_apps,
-         "layout": "classic", "cover_style": "frost"}
+         "layout": "classic", "cover_style": "frost", "time": {}}
     u.update(kw)
     return u
 
@@ -70,11 +70,15 @@ class DemoClient:
                       blocked_categories=sorted({*child.blocked_categories, "sports"}),
                       youtube={"restrict": "strict", "blocked_categories": ["24", "20", "10", "17"]},
                       rules=[{"action": "allow", "pattern": "chabad.org"},
-                             {"action": "block", "pattern": "youtube.com/shorts*"}]),
-                _user(1003, "rivky", "teen"),
+                             {"action": "block", "pattern": "youtube.com/shorts*"}],
+                      time={"daily_minutes": 120,
+                            "allowed": timelimits.SCHEDULE_PRESETS["after_school"]}),
+                _user(1003, "rivky", "teen",
+                      time={"allowed": timelimits.SCHEDULE_PRESETS["not_late"]}),
                 _user(1004, "shmuli", "young_child",
                       whitelist_bundles=["torah"],
-                      whitelist=["chinuch.org", "ourfamily.example"]),
+                      whitelist=["chinuch.org", "ourfamily.example"],
+                      time={"daily_minutes": 60}),
             ],
             "guest": {"enabled": False, "mode": "whitelist", "whitelist": []},
         }
@@ -99,6 +103,10 @@ class DemoClient:
              "url": "https://twitch.tv/", "why": "category:video"},
             {"t": now - 12000, "kind": "search", "uid": 1003, "username": "rivky",
              "text": "something rude", "why": "it contains a blocked word"},
+            {"t": now - 86400 - 1200, "kind": "time", "uid": 1002, "username": "yosef",
+             "why": "time:limit"},
+            {"t": now - 86400 - 900, "kind": "time", "uid": 1002, "username": "yosef",
+             "why": "time:login"},
             {"t": now - 86400 - 3000, "kind": "change", "uid": 1003, "username": "rivky",
              "by": 1001, "by_username": "miriam", "method": "ApplyProfile",
              "args": [1003, "teen"], "guardian": True},
@@ -118,6 +126,9 @@ class DemoClient:
         self.catalog = _shipped_catalog()
 
         self._on_progress = self._on_finished = None
+        self._on_time_warning = None
+        # Seconds of active use so far today, as the real daemon counts them.
+        self.used_today = {1002: 80 * 60, 1003: 35 * 60, 1004: 60 * 60}
         self.status = {"pictures": "no_model", "detect_ms": None, "degraded": [],
                        "problems": [],
                        "services": {"kosher-mitm.service": "active", "kosher-dns.service": "active",
@@ -239,8 +250,46 @@ class DemoClient:
     def get_my_settings(self):
         """What My Filter shows the person at the keyboard: in the demo, yosef."""
         u = self._user(1002)
-        return {k: u.get(k) for k in ("username", "mode", "whitelist", "blocked_categories",
-                                      "media_level", "language_filter", "youtube")}
+        settings = {k: u.get(k) for k in ("username", "mode", "whitelist", "blocked_categories",
+                                          "media_level", "language_filter", "youtube")}
+        settings["managed"] = True
+        state = self._time_state(u)
+        settings["time"] = {
+            "admin": False, "limited": state["limited"],
+            "daily_minutes": timelimits.daily_minutes(u.get("time")),
+            "allowed": timelimits.grid(u.get("time")),
+            "today": timelimits.grid(u.get("time"))[time.localtime().tm_wday],
+            "used": state["used"], "left": state["left"], "block_ends": state["block_ends"],
+        }
+        return settings
+
+    # -- time ---------------------------------------------------------------------
+
+    def _time_state(self, u):
+        return timelimits.status(u.get("time"), self.used_today.get(u["uid"], 0))
+
+    def set_time_limits(self, uid, settings, pw=""):
+        self._user(uid)["time"] = timelimits.parse(settings)
+        self._change(uid, "SetTimeLimits", [uid, timelimits.parse(settings)])
+
+    def time_usage(self):
+        out = {}
+        for u in self.policy["users"]:
+            if u.get("admin"):
+                out[str(u["uid"])] = {"admin": True, "limited": False, "used": 0,
+                                      "signed_in": u["uid"] == 1000}
+                continue
+            state = self._time_state(u)
+            state["signed_in"] = u["uid"] in (1002, 1003)
+            out[str(u["uid"])] = state
+        g = self.policy["guest"]
+        if g.get("enabled") and g.get("uid") is not None:
+            out[str(g["uid"])] = {**self._time_state(g), "signed_in": False}
+        return out
+
+    def connect_time_signals(self, on_warning):
+        self._on_time_warning = on_warning
+        return 2
 
     def apply_profile(self, uid, key, pw=""):
         p = profiles.get(key, self.policy["custom_profiles"])

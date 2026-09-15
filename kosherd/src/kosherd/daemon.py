@@ -29,6 +29,8 @@ from .apps import AppError
 from .guardian import Guardian, GuardianError
 from .policy import INSPECTED_MODES, MODES, Policy, PolicyError, UserPolicy
 from .session import SessionStore
+from . import timelimits
+from .timekeeper import TICK_SECONDS, Session, Timekeeper
 
 log = logging.getLogger("kosherd")
 
@@ -140,6 +142,14 @@ INTROSPECTION_XML = """
     <method name="GetMyLayout">
       <arg direction="out" type="s" name="layout"/>
     </method>
+    <method name="SetTimeLimits">
+      <arg direction="in" type="i" name="uid"/>
+      <arg direction="in" type="s" name="settings_json"/>
+      <arg direction="in" type="s" name="guardian_password"/>
+    </method>
+    <method name="GetTimeUsage">
+      <arg direction="out" type="s" name="usage_json"/>
+    </method>
     <method name="ApplyProfile">
       <arg direction="in" type="i" name="uid"/>
       <arg direction="in" type="s" name="profile"/>
@@ -189,6 +199,11 @@ INTROSPECTION_XML = """
     </method>
     <signal name="PolicyChanged">
       <arg type="i" name="revision"/>
+    </signal>
+    <signal name="TimeWarning">
+      <arg type="i" name="uid"/>
+      <arg type="i" name="minutes_left"/>
+      <arg type="s" name="reason"/>
     </signal>
   </interface>
   <interface name="org.kosherlinux.Daemon1.Apps">
@@ -402,6 +417,12 @@ class Daemon:
         self.sessions = SessionStore()
         self.app_manager = apps.AppManager(self._on_app_progress, self._on_app_finished)
         self.connection: Gio.DBusConnection | None = None
+        # The clock behind the time limits: fed logind's sessions once a
+        # minute, it counts, warns, locks and signs out (timekeeper.py).
+        self.timekeeper = Timekeeper(
+            lambda: self.policy, self._logind_sessions, timelimits.UsageStore(),
+            warn=self._emit_time_warning, lock=self._lock_uid,
+            terminate=self._terminate_uid)
 
     # ---- lifecycle -------------------------------------------------------
 
@@ -425,6 +446,7 @@ class Daemon:
             apps.write_remote_filter()
         except Exception:
             log.exception("could not apply the flatpak remote filter")
+        GLib.timeout_add_seconds(TICK_SECONDS, self._time_tick)
         try:
             loop.run()
         finally:
@@ -436,6 +458,86 @@ class Daemon:
         for iface in node.interfaces:
             connection.register_object(OBJECT_PATH, iface, self._handle_call, None, None)
         log.info("kosherd listening on %s", BUS_NAME)
+        # The first look at who is signed in, now that logind is reachable:
+        # it also renders the sign-in schedule, so a reboot does not leave
+        # /etc/security/time.conf a minute behind the policy.
+        self._time_tick()
+
+    # ---- time limits: the minute tick and logind -------------------------
+
+    def _time_tick(self) -> bool:
+        try:
+            self.timekeeper.tick()
+        except Exception:  # noqa: BLE001 - a bad minute must not stop the clock
+            log.exception("time limits: the tick failed")
+        return True  # keep the timeout
+
+    def _logind_sessions(self) -> list[Session]:
+        """Every logind user session: who, whether it is the active one
+        on its seat, and whether the person has gone idle."""
+        if self.connection is None:
+            return []
+        found = []
+        listed = self.connection.call_sync(
+            "org.freedesktop.login1", "/org/freedesktop/login1",
+            "org.freedesktop.login1.Manager", "ListSessions", None,
+            GLib.VariantType("(a(susso))"), Gio.DBusCallFlags.NONE, 5000, None,
+        ).unpack()[0]
+        for session_id, uid, _user, _seat, path in listed:
+            props = self.connection.call_sync(
+                "org.freedesktop.login1", path,
+                "org.freedesktop.DBus.Properties", "GetAll",
+                GLib.Variant("(s)", ("org.freedesktop.login1.Session",)),
+                GLib.VariantType("(a{sv})"), Gio.DBusCallFlags.NONE, 5000, None,
+            ).unpack()[0]
+            # Greeter, lock-screen and background sessions are not a person
+            # using the computer.
+            if props.get("Class", "user") != "user":
+                continue
+            found.append(Session(id=str(session_id), uid=int(uid),
+                                 active=bool(props.get("Active", True)),
+                                 idle=bool(props.get("IdleHint", False))))
+        return found
+
+    def _lock_uid(self, uid: int) -> None:
+        if self.connection is None:
+            return
+        for session in self._logind_sessions():
+            if session.uid != uid:
+                continue
+            try:
+                self.connection.call_sync(
+                    "org.freedesktop.login1", "/org/freedesktop/login1",
+                    "org.freedesktop.login1.Manager", "LockSession",
+                    GLib.Variant("(s)", (session.id,)), None,
+                    Gio.DBusCallFlags.NONE, 5000, None)
+            except GLib.Error as e:
+                log.warning("could not lock session %s of uid %d: %s",
+                            session.id, uid, e.message)
+        log.info("time limits: locked uid %d", uid)
+
+    def _terminate_uid(self, uid: int) -> None:
+        if self.connection is None:
+            return
+        try:
+            self.connection.call_sync(
+                "org.freedesktop.login1", "/org/freedesktop/login1",
+                "org.freedesktop.login1.Manager", "TerminateUser",
+                GLib.Variant("(u)", (uid,)), None,
+                Gio.DBusCallFlags.NONE, 10000, None)
+        except GLib.Error as e:
+            log.error("could not end uid %d's sessions: %s", uid, e.message)
+            return
+        log.info("time limits: signed out uid %d", uid)
+
+    def _emit_time_warning(self, uid: int, minutes_left: int, reason: str) -> None:
+        """Tell the person's session (see timenotify.py) how long is left."""
+        if self.connection is None:
+            return
+        self.connection.emit_signal(
+            None, OBJECT_PATH, "org.kosherlinux.Daemon1.Profiles", "TimeWarning",
+            GLib.Variant("(iis)", (int(uid), int(minutes_left), str(reason or ""))),
+        )
 
     # ---- dispatch --------------------------------------------------------
 
@@ -524,11 +626,20 @@ class Daemon:
         policy_mod.save(self.policy)
         apply_policy(self.policy)
         self._apply_mct()
+        self._apply_time()
         if self.connection:
             self.connection.emit_signal(
                 None, OBJECT_PATH, "org.kosherlinux.Daemon1.Profiles", "PolicyChanged",
                 GLib.Variant("(i)", (self.policy.revision,)),
             )
+
+    def _apply_time(self) -> None:
+        """Re-render the sign-in schedule and re-judge everyone signed in,
+        so a limit changed in the admin app is live at once."""
+        try:
+            self.timekeeper.policy_changed()
+        except Exception:  # noqa: BLE001 - never let the clock block the firewall path
+            log.exception("time limits could not be re-applied")
 
     def _apply_mct(self) -> None:
         try:
@@ -916,6 +1027,50 @@ class Daemon:
         self._save_and_apply()
         return None
 
+    def impl_SetTimeLimits(self, uid: int, settings_json: str, _guardian_pw: str):
+        """How long, and when, an account may be signed in.
+
+        Guardian-gated in both directions, like every other filter setting:
+        a shorter limit costs nothing to prove and a longer one is exactly
+        the change dual control exists for. Administrators cannot be limited
+        at all — a parent must always be able to sign in and change things.
+        """
+        try:
+            settings = timelimits.parse(json.loads(settings_json or "{}"))
+        except ValueError as e:   # TimeError is a ValueError; so is bad JSON
+            raise PolicyError(f"time settings not accepted: {e}") from None
+        user = self._managed(uid)
+        if getattr(user, "admin", False):
+            raise PolicyError("administrators are never limited; make this "
+                              "account a user account first")
+        user.time = settings
+        self._save_and_apply()
+        return None
+
+    def impl_GetTimeUsage(self):
+        """Where every account stands today, keyed by uid, for the cards."""
+        return GLib.Variant("(s)", (json.dumps(self.timekeeper.snapshot()),))
+
+    def _my_time(self, user) -> dict:
+        """The caller's own time limits and how much of today is left."""
+        import time as time_mod
+
+        keeper = getattr(self, "timekeeper", None)
+        state = keeper.status_for(user.uid) if keeper is not None else None
+        if state is None or user.admin:
+            state = timelimits.status(user.time, 0) if not user.admin else {}
+        grid = timelimits.grid(user.time)
+        return {
+            "admin": bool(user.admin),
+            "limited": bool(not user.admin and timelimits.is_limited(user.time)),
+            "daily_minutes": 0 if user.admin else timelimits.daily_minutes(user.time),
+            "allowed": grid,
+            "today": grid[time_mod.localtime().tm_wday],
+            "used": int(state.get("used", 0)),
+            "left": state.get("left"),
+            "block_ends": state.get("block_ends"),
+        }
+
     def impl_GetMyLayout(self, _uid: int):
         """The caller's own layout, for the sign-in helper.
 
@@ -976,6 +1131,9 @@ class Daemon:
             # KosherOS Search, so listing it here reveals nothing new and
             # answers the question this app exists to answer.
             settings["whitelist"] = sorted(user.whitelist)
+        # A person who can see their own limit, and how much of today is
+        # left, accepts a sign-out far more readily than one it ambushes.
+        settings["time"] = self._my_time(user)
         return GLib.Variant("(s)", (json.dumps(settings),))
 
     def impl_ListProfiles(self):
@@ -1776,6 +1934,7 @@ class Daemon:
         policy_mod.save(self.policy, bump_revision=False)
         apply_policy(self.policy)
         self._apply_mct()
+        self._apply_time()
         log.info("applied portal policy revision %d", self.policy.revision)
         return True
 

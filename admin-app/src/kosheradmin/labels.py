@@ -119,6 +119,59 @@ LAYOUT_ORDER = ("classic", "tiling", "advanced")
 
 PROFILE_CUSTOM = "Custom"
 
+# -- time -----------------------------------------------------------------------
+
+# The daily limits offered with one click, keyed by minutes; 0 is no limit.
+# A test keeps the keys in step with timelimits.LIMIT_PRESET_MINUTES.
+TIME_LIMIT_LABELS = {
+    30: "30 minutes a day",
+    60: "1 hour a day",
+    120: "2 hours a day",
+    180: "3 hours a day",
+    0: "No daily limit",
+}
+TIME_LIMIT_ORDER = (0, 30, 60, 120, 180)
+TIME_LIMIT_CUSTOM = "A different amount…"
+TIME_LIMIT_HINT = ("Counts the time this person is signed in and using the "
+                   "computer; a screen left idle is not counted. They are "
+                   "warned 15 and 5 minutes before it runs out, then signed "
+                   "out. The count starts again at midnight.")
+
+# One-click starting points for the calendar, keyed like
+# timelimits.SCHEDULE_PRESETS; a parent paints from there.
+SCHEDULE_PRESET_LABELS = {
+    "always": "Always",
+    "after_school": "After school",
+    "not_late": "Not late at night",
+    "weekdays": "Weekdays only",
+}
+SCHEDULE_PRESET_HINTS = {
+    "always": "Any hour of any day.",
+    "after_school": "School days from 3 pm to 8 pm, weekends from 9 am to 8 pm.",
+    "not_late": "Every day from 6 am to 9 pm.",
+    "weekdays": "Monday to Friday at any hour; not at the weekend.",
+}
+SCHEDULE_PRESET_ORDER = ("always", "after_school", "not_late", "weekdays")
+SCHEDULE_TITLE = "When this account may be used"
+SCHEDULE_HINT = ("Click or drag across the calendar to paint the hours. Amber "
+                 "hours are allowed; blue hours are not. Signing in outside "
+                 "the amber hours is refused, and a session that runs into a "
+                 "blue hour is warned and then signed out.")
+SCHEDULE_LEGEND_ALLOWED = "Allowed"
+SCHEDULE_LEGEND_BLOCKED = "Not allowed"
+TIME_ADMIN_NOTE = ("Administrators are never limited. A parent must always be "
+                   "able to sign in and change a setting; to limit this "
+                   "person, make the account a user account first.")
+TIME_TODAY_TITLE = "Today"
+TIME_TAB_INTRO = ("How long, and when, this person may use the computer. "
+                  "Nothing here is set until you set it.")
+# Why a session ended, for the activity feed (activity.TIME events).
+TIME_WHY = {
+    "time:limit": "today's time was used up",
+    "time:schedule": "the allowed hours ended",
+    "time:login": "a sign-in outside the allowed time was refused",
+}
+
 MODE_NOTHING_APPLIES = {
     "none": "This account has no internet access, so nothing here applies.",
     "unfiltered": "An unfiltered account enforces nothing.",
@@ -191,6 +244,8 @@ def why_text(why: str) -> str:
     if kind == "youtube":
         return ("not an approved channel" if rest == "channel"
                 else "that kind of video is turned off")
+    if kind == "time":
+        return TIME_WHY.get(why, "time was up")
     return why
 
 
@@ -216,6 +271,20 @@ def when_text(t: int, now: float | None = None) -> str:
     if delta < 6 * 86400:
         return time.strftime("%a ", then) + clock
     return time.strftime("%-d %b ", then) + clock
+
+
+def until_text(t: int, now: float | None = None) -> str:
+    """A moment ahead: '21:00', 'tomorrow 06:00', 'Mon 06:00'."""
+    now = time.time() if now is None else now
+    then = time.localtime(t)
+    today = time.localtime(now)
+    clock = time.strftime("%H:%M", then)
+    if (then.tm_year, then.tm_yday) == (today.tm_year, today.tm_yday):
+        return clock
+    tomorrow = time.localtime(now + 86400)
+    if (then.tm_year, then.tm_yday) == (tomorrow.tm_year, tomorrow.tm_yday):
+        return f"tomorrow {clock}"
+    return time.strftime("%a ", then) + clock
 
 
 def day_label(t: int, now: float | None = None) -> str:
@@ -317,6 +386,8 @@ def change_sentence(event: dict, users_by_uid: dict | None = None) -> tuple[str,
         what = f"Word list edited ({_list_title(arg(0))})"
     elif method == "SetAdBlock":
         what = "Ads and trackers " + ("blocked for everyone" if arg(0) else "no longer blocked")
+    elif method == "SetTimeLimits":
+        what = f"{who}: time → {time_summary(arg(1) if isinstance(arg(1), dict) else {})}"
     elif method == "SetGuestConfig":
         what = "Guest account " + ("turned on" if arg(0) else "turned off") + \
             (f", set up as {_preset_label(arg(1), users_by_uid)}" if arg(0) and arg(1) else "")
@@ -508,6 +579,73 @@ def protection_lines(user: dict) -> list[tuple[str, str, bool]]:
              or youtube.get("restrict", "moderate") != "none"))),
         ("view-grid-symbolic", apps, bool(allowed) or not can_install),
     ]
+
+
+# -- time, on a card and a chip --------------------------------------------------
+
+def time_sentence(time_settings: dict | None, usage: dict | None) -> str:
+    """'1 h 20 min used of 2 h' / '45 min today, no daily limit' / 'No daily limit'."""
+    from kosherd import timelimits
+
+    minutes = timelimits.daily_minutes(time_settings)
+    used = int((usage or {}).get("used", 0) or 0)
+    if minutes:
+        return (f"{timelimits.duration_text(used)} used of "
+                f"{timelimits.duration_text(minutes * 60)}")
+    if used:
+        return f"{timelimits.duration_text(used)} today, no daily limit"
+    return "No daily limit"
+
+
+def time_today(time_settings: dict | None, now: float | None = None) -> str:
+    """'today 15:00–20:00' / 'not today' / '' when any hour is fine."""
+    from kosherd import timelimits
+
+    grid = timelimits.grid(time_settings)
+    today = grid[time.localtime(now).tm_wday]
+    if today == timelimits.ALWAYS:
+        return ""
+    if today == timelimits.NEVER:
+        return "not today"
+    return "today " + timelimits.hours_text(today)
+
+
+def time_line(user: dict, usage: dict | None) -> tuple[str, bool]:
+    """(text, protects) — the one line about time on a card and its chip.
+    Blue when a limit or a schedule holds; amber when nothing does."""
+    from kosherd import timelimits
+
+    if user.get("admin"):
+        return "No time limit (administrator)", False
+    settings = user.get("time") or {}
+    text = time_sentence(settings, usage)
+    today = time_today(settings)
+    if today:
+        text += " · " + today
+    return text, timelimits.is_limited(settings)
+
+
+def time_summary(time_settings: dict | None) -> str:
+    """'2 h a day, chosen hours' — a setting in five words, for the change log."""
+    from kosherd import timelimits
+
+    minutes = timelimits.daily_minutes(time_settings)
+    parts = [f"{timelimits.duration_text(minutes * 60)} a day" if minutes else "no daily limit",
+             "any hour" if timelimits.is_always(timelimits.grid(time_settings))
+             else "chosen hours"]
+    return ", ".join(parts)
+
+
+# What the feed says when time, not content, ended something.
+TIME_EVENT_TITLES = {
+    "time:limit": "Signed out: today's time was used up",
+    "time:schedule": "Signed out: the allowed hours ended",
+    "time:login": "Refused a sign-in outside the allowed time",
+}
+
+
+def time_event_title(event: dict) -> str:
+    return TIME_EVENT_TITLES.get(event.get("why", ""), "Signed out: time was up")
 
 
 def today_sentence(counts: dict | None) -> str:

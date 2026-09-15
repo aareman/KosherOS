@@ -192,6 +192,10 @@ class UserPolicy:
     language_filter: str = "off"
     layout: str = DEFAULT_LAYOUT
     cover_style: str = DEFAULT_COVER_STYLE
+    # How long and when the account may be signed in (see timelimits.py).
+    # Empty means no daily limit and always allowed — the default, so a
+    # family that never opens the Time tab is not surprised by a sign-out.
+    time: dict = field(default_factory=dict)
 
     def to_dict(self) -> dict:
         d: dict = {"uid": self.uid, "username": self.username, "mode": self.mode}
@@ -219,6 +223,8 @@ class UserPolicy:
             d["layout"] = self.layout
         if self.cover_style != DEFAULT_COVER_STYLE:
             d["cover_style"] = self.cover_style
+        if self.time:
+            d["time"] = self.time
         return d
 
 
@@ -249,6 +255,7 @@ class GuestPolicy:
     language_filter: str = "off"
     youtube: dict = field(default_factory=dict)
     cover_style: str = DEFAULT_COVER_STYLE
+    time: dict = field(default_factory=dict)
 
     def to_dict(self) -> dict:
         d: dict = {"enabled": self.enabled}
@@ -272,6 +279,8 @@ class GuestPolicy:
             d["youtube"] = self.youtube
         if self.cover_style != DEFAULT_COVER_STYLE:
             d["cover_style"] = self.cover_style
+        if self.time:
+            d["time"] = self.time
         return d
 
 
@@ -323,6 +332,8 @@ class Policy:
                 media_level=self.guest.media_level,
                 language_filter=self.guest.language_filter,
                 youtube=dict(self.guest.youtube),
+                cover_style=self.guest.cover_style,
+                time=dict(self.guest.time),
             ))
         return users
 
@@ -369,6 +380,7 @@ class Policy:
                     language_filter=u.get("language_filter", "off"),
                     layout=u.get("layout", DEFAULT_LAYOUT),
                     cover_style=u.get("cover_style", DEFAULT_COVER_STYLE),
+                    time=dict(u.get("time", {})),
                 )
                 for u in doc["users"]
             ],
@@ -388,6 +400,7 @@ class Policy:
                 language_filter=guest_doc.get("language_filter", "off"),
                 youtube=dict(guest_doc.get("youtube", {})),
                 cover_style=guest_doc.get("cover_style", DEFAULT_COVER_STYLE),
+                time=dict(guest_doc.get("time", {})),
             ),
         )
 

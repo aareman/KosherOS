@@ -20,8 +20,8 @@ page is for the site.
   version tags in the local repository, so a local preview still has a
   page there.
 
-Both are ignored by git; the site is rebuilt by .github/workflows/docs.yml
-on every push that touches the docs, and on every published release.
+Both are ignored by git; the site is rebuilt by the docs job in
+.github/workflows/ci.yml, in the same run that publishes the release.
 """
 
 from __future__ import annotations

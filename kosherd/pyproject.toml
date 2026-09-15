@@ -22,6 +22,12 @@ kosherd = "kosherd.daemon:main"
 kosherctl = "kosherd.cli:main"
 # Runs as the person signing in (a systemd user unit), not as root.
 kosher-layout = "kosherd.layout:main"
+# Also in the person's session: turns the daemon's TimeWarning signal into
+# a desktop notification before their time runs out.
+kosher-time-notify = "kosherd.timenotify:main"
+# Run by pam_exec after pam_time refuses a sign-in, so the refusal shows in
+# the activity log.
+kosher-time-refused = "kosherd.timelimits:refused_login_main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/kosherd"]

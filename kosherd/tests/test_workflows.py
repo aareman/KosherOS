@@ -72,3 +72,27 @@ def test_the_image_job_still_tags_and_signs_the_version():
     ci = (ROOT / ".github/workflows/ci.yml").read_text()
     assert 'podman push "$IMAGE:v$version"' in ci
     assert 'cosign sign --yes "$IMAGE:v$version"' in ci
+
+
+def test_no_step_ends_in_a_stray_continuation():
+    """A `run:` block whose last line is an argument is a step cut in half.
+
+    Moving the release out of the image job left `--title …` behind, and the
+    shell ran it as a command: "--title: command not found", which failed
+    the image build for a reason that had nothing to do with the image.
+    """
+    import re
+
+    for path in WORKFLOWS:
+        document = yaml.safe_load(path.read_text())
+        for job in document["jobs"].values():
+            for step in job.get("steps", []):
+                script = step.get("run")
+                if not script:
+                    continue
+                for line in script.splitlines():
+                    stripped = line.strip()
+                    if not stripped or stripped.startswith("#"):
+                        continue
+                    assert not re.match(r"^--[a-z]", stripped), \
+                        f"{path.name}: {step.get('name')}: stray {stripped[:40]!r}"

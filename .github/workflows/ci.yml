@@ -158,8 +158,6 @@ jobs:
           podman push "$IMAGE:v$version"
           cosign sign --yes "$IMAGE:v$version"
 
-            --title "KosherOS $version" --notes-file release-notes.md
-
   release:
     name: Release this version
     # Every commit carries its own version (VERSION, ticked by the dev

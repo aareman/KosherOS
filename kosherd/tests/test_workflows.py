@@ -58,8 +58,11 @@ def test_every_version_that_passes_gets_a_release():
     assert "always()" in condition, "or a skipped image would skip the release"
     for job in ("unit", "compile", "shell"):
         assert f"needs.{job}.result == 'success'" in condition, job
-    assert "needs.image.result != 'failure'" in condition
+    assert "needs.image.result != 'cancelled'" in condition
     assert "github.event_name == 'push'" in condition
+    # A failed image no longer blocks the release: the version is real, its
+    # changes are recorded, and the notes say no image exists for it.
+    assert "needs.image.result != 'failure'" not in condition
 
 
 def test_the_release_says_when_there_is_no_new_image():

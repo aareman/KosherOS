@@ -11,8 +11,6 @@ Everything that is not about a person lives there now, in computer.py.
 
 from __future__ import annotations
 
-import time
-
 import gi
 
 gi.require_version("Gtk", "4.0")
@@ -58,9 +56,11 @@ class FamilyPage(Gtk.Box):
         self.scroller.set_child(clamp)
         self.append(self.scroller)
 
-        self.family_group = Adw.PreferencesGroup(title="The family")
-        self.health_tag = tag("", "ok")
-        self.family_group.set_header_suffix(self.health_tag)
+        # No group title: the sidebar row and the header bar both already
+        # say Family, and a third one only pushed the cards down. The
+        # filter's health, which used to be a chip up here, is on the
+        # sidebar's Protection row where it shows on every page.
+        self.family_group = Adw.PreferencesGroup()
         self.cards = Gtk.FlowBox(selection_mode=Gtk.SelectionMode.NONE,
                                  min_children_per_line=1, max_children_per_line=3,
                                  column_spacing=12, row_spacing=12, homogeneous=True,
@@ -87,16 +87,10 @@ class FamilyPage(Gtk.Box):
         else:
             self.requests_banner.set_revealed(False)
 
-        rows = health_rows(win.status)
-        problems = [r for r in rows if not r[2]]
+        problems = [r for r in health_rows(win.status) if not r[2]]
         if problems:
             self.health_banner.set_title(problems[0][0])
-            self.health_banner.set_revealed(True)
-            self.health_tag.set_visible(False)
-        else:
-            self.health_banner.set_revealed(False)
-            self.health_tag.set_label(f"Filter running · checked {time.strftime('%H:%M')}")
-            self.health_tag.set_visible(True)
+        self.health_banner.set_revealed(bool(problems))
 
         clear(self.cards)
         by_uid: dict[int, int] = {}

@@ -14,8 +14,8 @@ without anyone having root. Powered by Fedora.
 [Releases](releases.md){ .md-button } [What works](supported.md){ .md-button }
 [How it is built](architecture.md){ .md-button }
 
-![The admin app's home screen: one card per person, a blue banner for waiting requests,
-an amber one for filter health](images/admin-family-board.png)
+![The admin app: a sidebar with The family and This computer, one card per person, a blue
+banner for waiting requests, an amber one for filter health](images/admin-family-board.png)
 
 ## The idea
 
@@ -86,13 +86,21 @@ The admin app opens with one password and then everything works without another 
     the account has drifted from its preset with a way back, what was blocked today with an
     Allow button beside it.
 
-- ![The activity tab](images/admin-activity.png)
+- ![The activity page](images/admin-activity.png)
 
     **The filter's own diary.** What it blocked, hid or refused, newest first, with the
     people as filters. A record of the filter, not of the person: what was allowed through
     is never written down.
 
 </div>
+
+![The Protection page: is the filter working, what applies to everyone, and who may change
+it](images/admin-protection.png)
+
+**The computer has a page of its own.** *This computer* in the sidebar holds what is not
+about one person: Protection, Apps and Updates. Protection opens on whether the filter is
+actually working, and then on the things one machine can only answer once — ad and tracker
+blocking, the word lists, the guardian password.
 
 Requests come first: when somebody asks for a blocked page from the block page, a blue
 banner says so and one click answers it. Filter health is honest: if picture checking has

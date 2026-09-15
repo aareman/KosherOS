@@ -470,10 +470,15 @@ def test_a_whitelist_request_offers_only_the_whole_site():
 
 
 def test_health_speaks_when_it_is_fine_too():
+    # The board stays quiet when there is nothing wrong; the sidebar is
+    # where a healthy filter says so, on every page rather than only here.
     win, page = a_board([a_user()])
     assert not page.health_banner.get_revealed()
-    assert page.health_tag.get_visible()
-    assert page.health_tag.get_label().startswith("Filter running")
+    rail = sidebar.Sidebar(win)
+    rail.refresh()
+    drain()
+    assert rail.rows["protection"].status.get_label() == "Running"
+    assert not rail.rows["protection"].badge.get_visible()
 
 
 def test_a_problem_is_an_amber_banner_with_the_details_behind_it():

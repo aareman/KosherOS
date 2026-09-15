@@ -32,7 +32,9 @@ from .schedule import ScheduleGrid, legend  # noqa: E402
 
 TABS = (("overview", "Overview", "view-list-symbolic"),
         ("filtering", "Filtering", "web-browser-symbolic"),
-        ("media", "Pictures & words", "image-x-generic-symbolic"),
+        # "Pictures & words" no longer fits the switcher beside the
+        # sidebar, and a truncated tab is worse than a shorter one.
+        ("media", "Pictures", "image-x-generic-symbolic"),
         ("youtube", "YouTube", "video-display-symbolic"),
         ("time", "Time", "alarm-symbolic"),
         ("apps", "Apps", "view-grid-symbolic"),

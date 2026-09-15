@@ -154,8 +154,9 @@ refuses is written to an activity log (`kosherd/activity.py`; the proxy
 and the search service append to their own files under
 `/var/lib/kosher-activity`, the same 0730 root:kosher-spool arrangement as
 the request spool, and kosherd is the only reader). The admin app shows it
-as an Activity tab — the filter's diary, newest first, narrowable to one
-person — and on each person's own page as "Blocked today". A blocked page
+as an Activity page in the sidebar — the filter's diary, newest first,
+narrowable to one person from the header bar — and on each person's own
+page as "Blocked today". A blocked page
 has an Allow button that does exactly what approving a request does
 (`AllowUrl`), so a parent who sees the block can fix it before the child
 comes to ask. It is a record of the filter, not of the person: what was
@@ -399,9 +400,11 @@ not given the list twice.
 
 Machine-wide, on by default. It is not content filtering, so it applies to
 unfiltered accounts too; switching it **off** is the guardian-gated act
-(`SetAdBlock`, the "Ads and trackers" tile under "This computer" in the
-admin app, `kosherctl adblock off`), because an ad network is also where immodest imagery
-arrives uninvited. What it does not do: cosmetic filtering (an empty box
+(`SetAdBlock`, the switch on the Protection page under "This computer" in
+the admin app, `kosherctl adblock off`), because an ad network is also where
+immodest imagery arrives uninvited. It sits there, under "Applies to
+everyone", rather than on a person's page, because one resolver cannot
+answer differently per account — the page says so next to the switch. What it does not do: cosmetic filtering (an empty box
 where an ad was), first-party ads served from the site's own domain, and
 ads inside YouTube's own player, which the YouTube limits handle.
 

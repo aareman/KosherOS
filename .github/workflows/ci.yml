@@ -64,9 +64,49 @@ jobs:
           shellcheck -e SC1091 scripts/*.sh scripts/vm-tests/*.sh \
             os-image/files/etc/greenboot/check/required.d/*.sh
 
+  changes:
+    name: What changed
+    # The image job costs eleven minutes and republishes :edge. A commit
+    # that cannot change the image — docs, tests, CI, the Justfile — should
+    # not trigger it. VERSION is deliberately NOT on the list: the git hook
+    # ticks it on every commit, so it would make the filter always true;
+    # the version inside :edge is the version of the last commit that
+    # touched the image, and a skipped commit's version simply has no
+    # build behind it. Anything but an ordinary push (a pull request, a
+    # first push, a rewritten history) builds, to be safe.
+    runs-on: ubuntu-latest
+    outputs:
+      image: ${{ steps.filter.outputs.image }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - id: filter
+        env:
+          BASE: ${{ github.event.before }}
+        run: |
+          if [ "$GITHUB_EVENT_NAME" != "push" ] || [ -z "$BASE" ] \
+             || [ "$BASE" = "0000000000000000000000000000000000000000" ] \
+             || ! git cat-file -e "$BASE" 2>/dev/null; then
+            echo "image=true" >> "$GITHUB_OUTPUT"
+            echo "not an ordinary push: building"
+            exit 0
+          fi
+          changed="$(git diff --name-only "$BASE" "$GITHUB_SHA")"
+          echo "$changed"
+          if echo "$changed" | grep -E -q \
+               '^(os-image/|kosherd/src/|kosherd/pyproject|admin-app/src/|store-app/src/|setup-app/src/|myfilter-app/src/|search-app/kosher_search/|mitm/|branding/|policy/|scripts/fetch-categories\.py|scripts/curated-sites\.json|scripts/check-searxng-settings\.py|scripts/version\.py)'; then
+            echo "image=true" >> "$GITHUB_OUTPUT"
+            echo "the image changes: building"
+          else
+            echo "image=false" >> "$GITHUB_OUTPUT"
+            echo "nothing that reaches the image changed: skipping the build"
+          fi
+
   image:
     name: Build OS image
-    needs: [unit, compile, shell]
+    needs: [unit, compile, shell, changes]
+    if: needs.changes.outputs.image == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: write # the version tag and its GitHub release

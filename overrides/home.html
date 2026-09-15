@@ -1,0 +1,283 @@
+{% extends "main.html" %}
+
+{#
+  The front page. Not a documentation page: a page that has to say what
+  KosherOS is to somebody who has never heard of it, in the artwork's own
+  colours and with the product's own screens. The documentation front page
+  it replaced now lives at docs/overview.md and is linked from here.
+
+  Material renders this instead of index.md's body: the markdown content
+  block is emptied and the whole page is drawn in the tabs block, which
+  sits above the content grid and is free of its column widths.
+#}
+
+{% block styles %}
+  {{ super() }}
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Frank+Ruhl+Libre:wght@400;500;700;900&family=Assistant:wght@300;400;600;700&display=swap">
+  <link rel="stylesheet" href="{{ 'stylesheets/home.css' | url }}">
+{% endblock %}
+
+{% block content %}{% endblock %}
+
+{% block tabs %}
+<script>document.documentElement.classList.add("ko-js")</script>
+<div class="ko">
+
+  <!-- The painting the desktop wears, with the page emerging out of it. -->
+  <header class="ko-hero">
+    <div class="ko-hero__art">
+      <img src="{{ 'images/hero.jpg' | url }}" alt="" aria-hidden="true" fetchpriority="high">
+    </div>
+    <div class="ko-hero__veil" aria-hidden="true"></div>
+    <div class="ko-hero__inner">
+      <p class="ko-eyebrow ko-rise" style="--d:.1s">KosherOS &middot; powered by Fedora</p>
+      <h1 class="ko-display ko-hero__title">
+        <span class="ko-rise" style="--d:.18s">A family computer</span>
+        <span class="ko-rise" style="--d:.26s">that is filtered, locked down,</span>
+        <span class="ko-rise" style="--d:.34s">and still a real computer.</span>
+      </h1>
+      <p class="ko-hero__lede ko-rise" style="--d:.44s">
+        A Linux distribution for frum families. The filter runs on the machine itself, so it
+        works in every browser and every app, with no account and no subscription. A parent is
+        in charge, and nobody has root &mdash; not even the parent.
+      </p>
+      <p class="ko-hero__actions ko-rise" style="--d:.52s">
+        <a class="ko-btn ko-btn--solid" href="{{ 'overview/' | url }}">What it is</a>
+        <a class="ko-btn" href="{{ 'releases/' | url }}">Releases</a>
+        <a class="ko-btn ko-btn--quiet" href="{{ config.repo_url }}">Source on GitHub</a>
+      </p>
+      <p class="ko-hero__note ko-rise" style="--d:.6s">
+        <span class="ko-dot" aria-hidden="true"></span>
+        Pre-alpha. Built and covered by tests; not yet lived with on a family's machine.
+      </p>
+    </div>
+  </header>
+
+  <!-- The thesis. -->
+  <section class="ko-band">
+    <div class="ko-col">
+      <p class="ko-eyebrow ko-reveal">The idea</p>
+      <p class="ko-standfirst ko-display ko-reveal">
+        Most kosher filters are a service you subscribe to and a browser you are told to use.
+        KosherOS is the operating system.
+      </p>
+    </div>
+    <div class="ko-pillars ko-col ko-col--wide">
+      <div class="ko-pillar ko-reveal">
+        <h2>Complete out of the box</h2>
+        <p>A parent installs it, picks a preset for each person, and is finished. The category
+          lists, the word lists and the picture filter ship whole. Adding a site or a word is
+          possible; it is never homework.</p>
+      </div>
+      <div class="ko-pillar ko-reveal" style="--d:.08s">
+        <h2>Local first</h2>
+        <p>Every decision is made on the device, on modest hardware, with no account to create
+          and nothing to renew. What the family reads never leaves the house.</p>
+      </div>
+      <div class="ko-pillar ko-reveal" style="--d:.16s">
+        <h2>Locked, not hidden</h2>
+        <p>No root, a read-only system, atomic signed updates. One small daemon is the only
+          privileged surface, and a second <em>guardian</em> password &mdash; the other
+          spouse&rsquo;s &mdash; is needed to weaken anything.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- One choice per account, shown as the card the admin app really draws. -->
+  <section class="ko-band ko-band--tint">
+    <div class="ko-preset ko-col ko-reveal">
+      <div>
+      <p class="ko-eyebrow">One choice per account</p>
+      <h2 class="ko-display ko-h2">Say who this account is for. That is the setup.</h2>
+      <p class="ko-lede">A preset sets the web, the pictures, the language, YouTube and
+        the apps together, so a parent answers one question instead of twenty. Anything under it
+        can still be changed afterwards.</p>
+      <div class="ko-preset__chips" role="tablist" aria-label="Presets">
+        <button class="ko-chip" role="tab" data-preset="young" aria-selected="false">Young child</button>
+        <button class="ko-chip" role="tab" data-preset="child" aria-selected="true">Child</button>
+        <button class="ko-chip" role="tab" data-preset="teen" aria-selected="false">Teenager</button>
+        <button class="ko-chip" role="tab" data-preset="adult" aria-selected="false">Adult</button>
+        <button class="ko-chip" role="tab" data-preset="basic" aria-selected="false">Basic protection</button>
+        <button class="ko-chip" role="tab" data-preset="open" aria-selected="false">No filtering</button>
+      </div>
+      </div>
+
+      <div>
+      <div class="ko-card" aria-live="polite">
+        <div class="ko-card__head">
+          <span class="ko-card__avatar" data-field="initial">S</span>
+          <span>
+            <span class="ko-card__name" data-field="name">shmuli</span>
+            <span class="ko-card__mode" data-field="mode">Child</span>
+          </span>
+          <span class="ko-card__badge" data-field="badge">Filtered internet</span>
+        </div>
+        <dl class="ko-card__rows">
+          <div class="ko-row" data-row="web"><dt>Web</dt><dd></dd></div>
+          <div class="ko-row" data-row="pictures"><dt>Pictures</dt><dd></dd></div>
+          <div class="ko-row" data-row="language"><dt>Language</dt><dd></dd></div>
+          <div class="ko-row" data-row="youtube"><dt>YouTube</dt><dd></dd></div>
+          <div class="ko-row" data-row="apps"><dt>Apps</dt><dd></dd></div>
+        </dl>
+        <p class="ko-card__foot" data-field="who">School age, with room to grow.</p>
+      </div>
+      <p class="ko-preset__key">
+        <span class="ko-key ko-key--guard">Blue</span> is something the filter holds.
+        <span class="ko-key ko-key--open">Amber</span> is something it leaves open.
+        The admin app uses the same two colours, so a glance is enough.
+      </p>
+      </div>
+    </div>
+  </section>
+
+  <!-- The plate: the app itself, on the ink ground its own theme uses. -->
+  <section class="ko-plate">
+    <div class="ko-col">
+      <p class="ko-eyebrow ko-reveal">What the parent sees</p>
+      <h2 class="ko-display ko-h2 ko-reveal">One password. Then nothing asks again.</h2>
+      <p class="ko-lede ko-reveal">The admin app opens on the family: a card for each person,
+        what applies to them, and what happened today. Requests come first &mdash; when somebody
+        asks for a blocked page, a blue banner says so and one click answers it. Trouble is
+        admitted rather than hidden: if picture checking has backed off, an amber banner says so
+        in the same words you would.</p>
+    </div>
+    <figure class="ko-shot ko-shot--wide ko-reveal">
+      <img src="{{ 'images/admin-family-board.png' | url }}" loading="lazy"
+           alt="The admin app's family board: a card per person, a blue banner reading two requests waiting for you, an amber banner reading pictures are being hidden, not checked">
+    </figure>
+    <div class="ko-shots ko-col ko-col--wide">
+      <figure class="ko-shot ko-reveal">
+        <img src="{{ 'images/admin-person.png' | url }}" loading="lazy"
+             alt="One person's page in the admin app, with the filter mode as a badge and today's blocks listed">
+        <figcaption><strong>One person, one page.</strong> The mode as a badge, the protections as
+          chips, how far the account has drifted from its preset with a way back, and what was
+          blocked today with an Allow button beside it.</figcaption>
+      </figure>
+      <figure class="ko-shot ko-reveal" style="--d:.08s">
+        <img src="{{ 'images/admin-activity.png' | url }}" loading="lazy"
+             alt="The activity tab: what the filter blocked, hid or refused, newest first">
+        <figcaption><strong>The filter&rsquo;s diary, not the family&rsquo;s.</strong> What was
+          blocked, hidden or refused, newest first. What was allowed through is never written
+          down.</figcaption>
+      </figure>
+    </div>
+  </section>
+
+  <!-- What the filter can actually do, in the words the house uses. -->
+  <section class="ko-band">
+    <div class="ko-col">
+      <p class="ko-eyebrow ko-reveal"><span lang="he" dir="rtl">שמירת עיניים</span>
+        &middot; shmiras einayim</p>
+      <h2 class="ko-display ko-h2 ko-reveal">It reads the page, not just the address.</h2>
+      <p class="ko-lede ko-reveal">In the filtered modes the machine inspects the connection
+        locally, which is the difference between a blocklist and a filter.</p>
+    </div>
+    <ul class="ko-list ko-col ko-col--wide">
+      <li class="ko-reveal">Blocks a <em>page</em> rather than a whole site, so one bad corner
+        does not cost the rest of it.</li>
+      <li class="ko-reveal" style="--d:.05s">Judges a page nobody has ever catalogued, by what is
+        written on it.</li>
+      <li class="ko-reveal" style="--d:.1s">Covers the figure in a picture instead of blanking
+        the site around it.</li>
+      <li class="ko-reveal" style="--d:.15s">Looks inside a video and an animation a few frames
+        at a time, not only at its cover.</li>
+      <li class="ko-reveal" style="--d:.2s">Replaces bad language on a page that is otherwise
+        fine to read.</li>
+      <li class="ko-reveal" style="--d:.25s">Holds YouTube to its limits inside the app, not on
+        top of it.</li>
+      <li class="ko-reveal" style="--d:.3s">Blocks ads and trackers at the resolver for every
+        account, the way a Pi-hole does.</li>
+    </ul>
+  </section>
+
+  <!-- The three apps around it. -->
+  <section class="ko-band ko-band--tint">
+    <div class="ko-split ko-col ko-col--wide">
+      <figure class="ko-shot ko-shot--tall ko-reveal">
+        <img src="{{ 'images/store-home.png' | url }}" loading="lazy"
+             alt="The KosherOS Store's home screen: approved apps arranged in categories">
+      </figure>
+      <div class="ko-split__text">
+        <p class="ko-eyebrow ko-reveal">Around it</p>
+        <h2 class="ko-display ko-h2 ko-reveal">A store, a search engine and an honest window.</h2>
+        <p class="ko-reveal"><strong>Apps from an allowlist.</strong> The KosherOS Store installs
+          from upstream Flathub, limited to what a parent has approved, arranged the way any app
+          store is. A guest account can be switched on, given its own kind of internet, and wiped
+          at sign-out.</p>
+        <p class="ko-reveal"><strong>Search that respects the filter.</strong> A local SearXNG
+          behind a KosherOS front end filters results under the same policy as the traffic. A
+          filtered user stops clicking into block pages, and a whitelist user can finally see
+          what the whitelist contains.</p>
+        <p class="ko-reveal"><strong>A window for the person being filtered.</strong>
+          <em>My Filter</em> is a read-only app on every account that says, in plain language,
+          what applies to you. A child who can read the rules is likelier to accept them than one
+          who only ever meets a block page.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- Getting it. A real sequence, so it is numbered. -->
+  <section class="ko-band">
+    <div class="ko-col">
+      <p class="ko-eyebrow ko-reveal">Trying it</p>
+      <h2 class="ko-display ko-h2 ko-reveal">Three commands and a wizard.</h2>
+    </div>
+    <ol class="ko-steps ko-col ko-col--wide">
+      <li class="ko-reveal">
+        <h3>Build the image</h3>
+        <p>KosherOS is a Containerfile. From a clone, inside the
+          <a href="https://devenv.sh">devenv</a> shell:</p>
+        <pre><code>just build</code></pre>
+      </li>
+      <li class="ko-reveal" style="--d:.08s">
+        <h3>Boot a throwaway copy</h3>
+        <p>Make a disk from it and start it, without touching anything of yours.</p>
+        <pre><code>just vm
+just try</code></pre>
+      </li>
+      <li class="ko-reveal" style="--d:.16s">
+        <h3>Set up the family</h3>
+        <p>The first boot runs the setup wizard: one account per person, one preset each. To
+          install on real hardware instead, <code>just release-iso</code> builds an installer that
+          follows the stable channel and updates itself.</p>
+      </li>
+    </ol>
+    <p class="ko-aside ko-col ko-reveal">Only want to look at the apps? <code>just admin-demo</code>
+      and <code>just store-demo</code> open them against a pretend daemon with a sample family,
+      with nothing installed and nothing changed.</p>
+  </section>
+
+  <!-- Honesty, because the product is about trust. -->
+  <section class="ko-band ko-band--plainend">
+    <div class="ko-col">
+      <p class="ko-eyebrow ko-reveal">Where it stands</p>
+      <h2 class="ko-display ko-h2 ko-reveal">What is proven, and what is not.</h2>
+    </div>
+    <div class="ko-status ko-col ko-col--wide">
+      <div class="ko-status__half ko-reveal">
+        <h3>Built and covered by tests</h3>
+        <p>Over twelve hundred unit tests, widget tests that build the real GTK screens, and live
+          checks that exercise the firewall, the resolver and the proxy inside the built image on
+          every push.</p>
+      </div>
+      <div class="ko-status__half ko-status__half--warn ko-reveal" style="--d:.08s">
+        <h3>Not yet proven</h3>
+        <p>Time on a booted machine in a home. Several recent pieces have been seen rendering but
+          not lived with, and the update-rollback path has never had to fire for real. Read every
+          claim here as <em>built and tested</em>, not <em>proven in a home</em>.</p>
+      </div>
+    </div>
+    <p class="ko-cta ko-col ko-reveal">
+      <a class="ko-btn ko-btn--solid" href="{{ 'overview/' | url }}">Read what it does</a>
+      <a class="ko-btn" href="{{ 'supported/' | url }}">What works today</a>
+      <a class="ko-btn" href="{{ 'architecture/' | url }}">How it is built</a>
+    </p>
+  </section>
+</div>
+{% endblock %}
+
+{% block scripts %}
+  {{ super() }}
+  <script src="{{ 'javascripts/home.js' | url }}"></script>
+{% endblock %}

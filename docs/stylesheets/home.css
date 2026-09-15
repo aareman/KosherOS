@@ -1,0 +1,549 @@
+/* The front page only. Loaded by docs/overrides/home.html, so nothing here
+ * touches a documentation page.
+ *
+ * The palette is the one in brand.css, which was sampled from the wallpaper
+ * the desktop wears: sepia paper, warm ink, brass. The two state colours —
+ * a cyan for what the filter holds and an amber for what it leaves open —
+ * are the admin app's own banner colours, so a screenshot and the page
+ * around it agree.
+ *
+ * The type is Frank Ruhl Libre for display and Assistant for text: a Hebrew
+ * book serif and a Hebrew humanist sans, both of which set English as well
+ * as they set Hebrew, which is the right pair for this product and not the
+ * pair every other site reaches for.
+ */
+
+/* The markdown body of index.md is empty; the page is this template. */
+.md-main { display: none; }
+.md-footer__inner:not([hidden]) { display: none; }
+
+.ko {
+  --paper: #faf7f0;
+  --paper-2: #f2ede2;
+  --scrim: 250, 247, 240;
+  --ink: #48423a;
+  --ink-soft: #6b6157;
+  --ink-faint: #9a8f82;
+  --rule: #e0d9ca;
+  --brass: #8f6a3f;
+  --plate: #1b1813;
+  --plate-2: #262019;
+  --on-plate: #ede6db;
+  --on-plate-soft: #b3a795;
+  --guard: #2f7f92;          /* what the filter holds */
+  --guard-bright: #5ac8dc;   /* the same, on the ink ground */
+  --open: #a75c2f;           /* what it leaves open */
+  --open-bright: #f0a37e;
+  --shadow: 0 30px 60px -34px rgba(40, 32, 22, 0.55);
+
+  background: var(--paper);
+  color: var(--ink);
+  font-family: "Assistant", "Segoe UI", system-ui, sans-serif;
+  font-size: 17px;
+  line-height: 1.62;
+  -webkit-font-smoothing: antialiased;
+}
+
+[data-md-color-scheme="slate"] .ko {
+  --paper: #1b1813;
+  --paper-2: #221e18;
+  --scrim: 27, 24, 19;
+  --ink: #ede6db;
+  --ink-soft: #c9c0b2;
+  --ink-faint: #9a9082;
+  --rule: #3b332a;
+  --brass: #c99a66;
+  --plate: #120f0c;
+  --plate-2: #1d1913;
+  --guard: #6fd2e4;
+  --open: #f0a37e;
+  --shadow: 0 30px 60px -34px rgba(0, 0, 0, 0.8);
+}
+
+.ko *,
+.ko *::before,
+.ko *::after { box-sizing: border-box; }
+
+.ko-display {
+  font-family: "Frank Ruhl Libre", "Iowan Old Style", Georgia, serif;
+  font-weight: 500;
+  letter-spacing: -0.012em;
+  text-wrap: balance;
+}
+
+.ko a { color: inherit; }
+
+/* ---------------------------------------------------------------- hero */
+
+.ko-hero {
+  position: relative;
+  display: flex;
+  align-items: flex-end;
+  overflow: hidden;
+  min-height: clamp(500px, 82vh, 800px);
+  padding: 0 24px clamp(36px, 5vw, 76px);
+}
+.ko-hero__art { position: absolute; inset: -6% 0 -2%; z-index: 0; }
+.ko-hero__art img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: 58% 42%;
+  transform: translate3d(0, var(--par, 0px), 0);
+  will-change: transform;
+}
+.ko-js .ko-hero__art { animation: ko-settle 2.8s cubic-bezier(0.16, 0.84, 0.34, 1) both; }
+@keyframes ko-settle {
+  from { transform: scale(1.07); }
+  to { transform: scale(1); }
+}
+.ko-hero__veil {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  background:
+    linear-gradient(to bottom,
+      rgba(var(--scrim), 0) 26%,
+      rgba(var(--scrim), 0.35) 52%,
+      rgba(var(--scrim), 0.88) 78%,
+      rgb(var(--scrim)) 100%),
+    linear-gradient(to right,
+      rgba(var(--scrim), 0.66) 0%,
+      rgba(var(--scrim), 0.5) 30%,
+      rgba(var(--scrim), 0.12) 50%,
+      rgba(var(--scrim), 0) 64%);
+}
+.ko-hero__inner {
+  position: relative;
+  z-index: 2;
+  width: 100%;
+  max-width: 1060px;
+  margin-inline: auto;
+}
+.ko-hero__title {
+  margin: 10px 0 0;
+  font-size: clamp(33px, 5.6vw, 68px);
+  line-height: 1.05;
+}
+.ko-hero__title span { display: block; }
+.ko-hero__lede {
+  max-width: 34em;
+  margin: 20px 0 0;
+  font-size: clamp(17px, 1.6vw, 20px);
+  color: var(--ink-soft);
+}
+.ko-hero__actions { display: flex; flex-wrap: wrap; gap: 12px; margin: 28px 0 0; }
+.ko-hero__note {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin: 26px 0 0;
+  font-size: 14px;
+  color: var(--ink-faint);
+}
+.ko-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--open);
+  box-shadow: 0 0 0 4px rgba(167, 92, 47, 0.16);
+}
+.ko-js .ko-dot { animation: ko-breathe 3.4s ease-in-out infinite; }
+@keyframes ko-breathe {
+  0%, 100% { box-shadow: 0 0 0 3px rgba(167, 92, 47, 0.14); }
+  50% { box-shadow: 0 0 0 7px rgba(167, 92, 47, 0.04); }
+}
+
+/* -------------------------------------------------------------- pieces */
+
+.ko-eyebrow {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 0;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.17em;
+  text-transform: uppercase;
+  color: var(--brass);
+}
+.ko-eyebrow::before {
+  content: "";
+  width: 26px;
+  height: 1px;
+  background: currentColor;
+  opacity: 0.6;
+}
+.ko-eyebrow [lang="he"] {
+  font-size: 15px;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.ko-btn {
+  display: inline-block;
+  padding: 11px 22px;
+  border: 1px solid var(--brass);
+  border-radius: 999px;
+  font-size: 15px;
+  font-weight: 600;
+  text-decoration: none;
+  color: var(--brass);
+  background: rgba(var(--scrim), 0.6);
+  transition: background 0.25s ease, color 0.25s ease, transform 0.25s ease;
+}
+.ko-btn:hover { background: var(--brass); color: var(--paper); transform: translateY(-2px); }
+.ko-btn--solid { background: var(--brass); color: var(--paper); }
+.ko-btn--solid:hover { background: var(--ink); border-color: var(--ink); }
+.ko-btn--quiet {
+  border-color: transparent;
+  color: var(--ink-soft);
+  background: transparent;
+}
+.ko-btn--quiet:hover { background: transparent; color: var(--brass); transform: none; text-decoration: underline; }
+
+.ko-band { padding: clamp(56px, 8.5vw, 116px) 24px; }
+.ko-band--tint { background: var(--paper-2); }
+/* One left edge down the whole page: every section, wide or narrow, sits in
+ * the same 1060px column, and the text inside it is kept to a readable
+ * measure rather than being centred into a different place each time. */
+.ko-col { max-width: 1060px; margin-inline: auto; }
+.ko-h2 { margin: 14px 0 0; max-width: 15em; font-size: clamp(27px, 3.4vw, 42px); line-height: 1.16; }
+.ko-lede { margin: 16px 0 0; max-width: 38em; font-size: clamp(16px, 1.4vw, 19px); color: var(--ink-soft); }
+.ko-standfirst {
+  margin: 18px 0 0;
+  max-width: 18em;
+  font-size: clamp(24px, 3.4vw, 40px);
+  line-height: 1.28;
+}
+.ko-pillars {
+  display: grid;
+  gap: clamp(26px, 3.6vw, 52px);
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  margin-top: clamp(44px, 5vw, 72px);
+}
+.ko-pillar { border-top: 1px solid var(--rule); padding-top: 18px; }
+.ko-pillar h2 {
+  margin: 0 0 8px;
+  font-family: "Frank Ruhl Libre", Georgia, serif;
+  font-size: 21px;
+  font-weight: 700;
+}
+.ko-pillar p { margin: 0; color: var(--ink-soft); font-size: 16px; }
+
+/* ------------------------------------------------------ preset chooser */
+
+.ko-preset {
+  display: grid;
+  gap: clamp(30px, 4vw, 60px);
+  grid-template-columns: minmax(280px, 1fr) minmax(320px, 520px);
+  align-items: start;
+}
+.ko-preset__chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 9px;
+  margin: 26px 0 0;
+}
+.ko-chip {
+  padding: 9px 17px;
+  border: 1px solid var(--rule);
+  border-radius: 999px;
+  font: inherit;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--ink-soft);
+  background: transparent;
+  cursor: pointer;
+  transition: background 0.22s ease, color 0.22s ease, border-color 0.22s ease, transform 0.22s ease;
+}
+.ko-chip:hover { border-color: var(--brass); color: var(--brass); }
+.ko-chip[aria-selected="true"] {
+  background: var(--ink);
+  border-color: var(--ink);
+  color: var(--paper);
+  transform: translateY(-1px);
+}
+
+.ko-card {
+  padding: 22px 24px 18px;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 16px;
+  background: var(--plate-2);
+  color: var(--on-plate);
+  box-shadow: var(--shadow);
+}
+.ko-card__head { display: flex; align-items: center; gap: 13px; }
+.ko-card__avatar {
+  display: grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  background: #c4577a;
+  color: #fff;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+.ko-card__name { display: block; font-weight: 700; font-size: 17px; }
+.ko-card__mode { display: block; font-size: 13px; color: var(--on-plate-soft); }
+.ko-card__badge {
+  margin-inline-start: auto;
+  padding: 5px 12px;
+  border-radius: 999px;
+  font-size: 12.5px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  background: rgba(90, 200, 220, 0.16);
+  color: var(--guard-bright);
+  white-space: nowrap;
+}
+.ko-card__badge[data-state="open"] { background: rgba(240, 163, 126, 0.16); color: var(--open-bright); }
+.ko-card__rows { margin: 18px 0 0; }
+.ko-row {
+  display: grid;
+  grid-template-columns: 86px 1fr;
+  gap: 12px;
+  align-items: baseline;
+  padding: 9px 0;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+.ko-row dt {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--on-plate-soft);
+}
+.ko-row dd { margin: 0; font-size: 15.5px; }
+.ko-row dd::before {
+  content: "";
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin-inline-end: 9px;
+  border-radius: 50%;
+  background: var(--guard-bright);
+  transition: background 0.3s ease;
+}
+.ko-row[data-state="open"] dd::before { background: var(--open-bright); }
+.ko-js .ko-row.is-new { animation: ko-rowin 0.45s cubic-bezier(0.16, 0.84, 0.34, 1) both; animation-delay: var(--i); }
+@keyframes ko-rowin {
+  from { opacity: 0; transform: translateY(7px); }
+  to { opacity: 1; transform: none; }
+}
+.ko-card__foot {
+  margin: 14px 0 0;
+  font-size: 14px;
+  font-style: italic;
+  color: var(--on-plate-soft);
+}
+.ko-preset__key {
+  margin: 16px 0 0;
+  font-size: 14px;
+  color: var(--ink-faint);
+}
+.ko-key { font-weight: 700; }
+.ko-key--guard { color: var(--guard); }
+.ko-key--open { color: var(--open); }
+
+/* -------------------------------------------------------------- plates */
+
+.ko-plate {
+  padding: clamp(60px, 9vw, 124px) 24px;
+  background: var(--plate);
+  color: var(--on-plate);
+}
+.ko-plate .ko-eyebrow { color: #c99a66; }
+.ko-plate .ko-lede { color: var(--on-plate-soft); }
+.ko-shot { margin: clamp(34px, 4.5vw, 56px) auto 0; max-width: 1060px; }
+.ko-shot img {
+  display: block;
+  width: 100%;
+  height: auto;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 13px;
+  box-shadow: 0 40px 80px -40px rgba(0, 0, 0, 0.85);
+}
+.ko-shot figcaption {
+  margin-top: 14px;
+  font-size: 14.5px;
+  color: var(--on-plate-soft);
+}
+.ko-shot figcaption strong { color: var(--on-plate); }
+.ko-shots {
+  display: grid;
+  gap: clamp(24px, 3.5vw, 44px);
+  grid-template-columns: repeat(auto-fit, minmax(290px, 1fr));
+  margin-top: clamp(30px, 4vw, 52px);
+}
+.ko-shots .ko-shot { margin: 0; }
+
+/* --------------------------------------------------------------- lists */
+
+.ko-list {
+  display: grid;
+  gap: 14px 40px;
+  grid-template-columns: repeat(auto-fit, minmax(420px, 1fr));
+  margin: clamp(36px, 4.5vw, 60px) auto 0;
+  padding: 0;
+  list-style: none;
+}
+.ko-list li {
+  padding: 0 0 14px 26px;
+  border-bottom: 1px solid var(--rule);
+  position: relative;
+  color: var(--ink-soft);
+}
+.ko-list li::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 11px;
+  width: 11px;
+  height: 1px;
+  background: var(--brass);
+}
+.ko-list em { font-style: italic; color: var(--ink); }
+
+.ko-split {
+  display: grid;
+  gap: clamp(30px, 5vw, 64px);
+  grid-template-columns: minmax(240px, 0.8fr) 1.2fr;
+  align-items: center;
+}
+.ko-split__text p { color: var(--ink-soft); }
+.ko-split__text p strong { color: var(--ink); }
+.ko-shot--tall img { border-radius: 13px; }
+.ko-band--tint .ko-shot { margin: 0; }
+
+/* --------------------------------------------------------------- steps */
+
+.ko-steps {
+  counter-reset: step;
+  margin: clamp(34px, 4.5vw, 56px) auto 0;
+  padding: 0;
+  list-style: none;
+}
+.ko-steps li {
+  position: relative;
+  padding: 0 0 30px 62px;
+  border-left: 1px solid var(--rule);
+  margin-left: 18px;
+}
+.ko-steps li:last-child { border-left-color: transparent; padding-bottom: 0; }
+.ko-steps li::before {
+  counter-increment: step;
+  content: counter(step);
+  position: absolute;
+  left: -18px;
+  top: -4px;
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: var(--brass);
+  color: var(--paper);
+  font-family: "Frank Ruhl Libre", Georgia, serif;
+  font-size: 18px;
+  font-weight: 700;
+}
+.ko-steps h3 {
+  margin: 2px 0 6px;
+  font-family: "Frank Ruhl Libre", Georgia, serif;
+  font-size: 21px;
+  font-weight: 700;
+}
+.ko-steps p { margin: 0 0 12px; max-width: 40em; color: var(--ink-soft); }
+.ko-steps pre { max-width: 34em; }
+.ko pre {
+  margin: 0;
+  padding: 13px 16px;
+  border-radius: 10px;
+  background: var(--plate);
+  color: var(--on-plate);
+  overflow-x: auto;
+}
+.ko pre code { font-size: 14px; background: none; color: inherit; padding: 0; }
+.ko code {
+  padding: 2px 6px;
+  border-radius: 5px;
+  background: var(--paper-2);
+  font-family: "JetBrains Mono", ui-monospace, "SFMono-Regular", monospace;
+  font-size: 0.88em;
+}
+[data-md-color-scheme="slate"] .ko code { background: #2a241d; }
+.ko-aside {
+  margin-top: clamp(30px, 4vw, 46px);
+  padding-top: 18px;
+  border-top: 1px solid var(--rule);
+  font-size: 15px;
+  color: var(--ink-faint);
+}
+
+/* -------------------------------------------------------------- status */
+
+.ko-status {
+  display: grid;
+  gap: clamp(24px, 3.5vw, 48px);
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  margin-top: clamp(34px, 4.5vw, 56px);
+}
+.ko-status__half { border-top: 2px solid var(--guard); padding-top: 16px; }
+.ko-status__half--warn { border-top-color: var(--open); }
+.ko-status__half h3 {
+  margin: 0 0 8px;
+  font-family: "Frank Ruhl Libre", Georgia, serif;
+  font-size: 20px;
+  font-weight: 700;
+}
+.ko-status__half p { margin: 0; color: var(--ink-soft); font-size: 16px; }
+.ko-cta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: clamp(40px, 5vw, 64px);
+}
+.ko-band--plainend { padding-bottom: clamp(64px, 9vw, 120px); }
+
+/* ------------------------------------------------------------- motion */
+
+.ko-js .ko-rise { animation: ko-rise 0.85s cubic-bezier(0.16, 0.84, 0.34, 1) both; animation-delay: var(--d, 0s); }
+@keyframes ko-rise {
+  from { opacity: 0; transform: translateY(16px); }
+  to { opacity: 1; transform: none; }
+}
+.ko-js .ko-reveal { opacity: 0; transform: translateY(20px); }
+.ko-js .ko-reveal.is-in {
+  opacity: 1;
+  transform: none;
+  transition: opacity 0.75s ease, transform 0.75s cubic-bezier(0.16, 0.84, 0.34, 1);
+  transition-delay: var(--d, 0s);
+}
+.ko :focus-visible { outline: 2px solid var(--brass); outline-offset: 3px; border-radius: 4px; }
+
+@media (prefers-reduced-motion: reduce) {
+  .ko-js .ko-rise,
+  .ko-js .ko-hero__art,
+  .ko-js .ko-dot,
+  .ko-js .ko-row.is-new { animation: none; }
+  .ko-js .ko-reveal { opacity: 1; transform: none; transition: none; }
+  .ko-hero__art img { transform: none !important; }
+  .ko-btn:hover, .ko-chip[aria-selected="true"] { transform: none; }
+}
+
+/* ---------------------------------------------------------- narrow */
+
+@media (max-width: 860px) {
+  .ko-split, .ko-preset { grid-template-columns: 1fr; }
+  .ko-shot--tall { max-width: 420px; margin-inline: auto; }
+}
+@media (max-width: 520px) {
+  .ko { font-size: 16px; }
+  .ko-hero { min-height: 560px; }
+  .ko-hero__title span { display: inline; }
+  .ko-preset__chips { justify-content: flex-start; }
+  .ko-row { grid-template-columns: 1fr; gap: 2px; }
+  .ko-steps li { padding-left: 46px; }
+}

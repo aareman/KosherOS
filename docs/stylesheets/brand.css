@@ -1,3 +1,4 @@
+@import url("https://fonts.googleapis.com/css2?family=Frank+Ruhl+Libre:wght@400;500;700&display=swap");
 /* KosherOS on the web, in the colours of the artwork.
  *
  * The wallpaper is a light sepia painting: its paper is #fcfbf6 to #eeece7,
@@ -66,11 +67,15 @@
   --md-footer-bg-color--dark: #0f0d0a;
 }
 
-/* Small things that otherwise stay stock-blue or stock-grey. */
+/* Headings across the site are set in the same book serif the front page
+ * uses, so a documentation page and the landing page are one product. */
 .md-typeset h1,
-.md-typeset h2 {
+.md-typeset h2,
+.md-typeset h3 {
+  font-family: "Frank Ruhl Libre", Georgia, serif;
   color: var(--md-default-fg-color);
-  font-weight: 600;
+  font-weight: 700;
+  letter-spacing: -0.01em;
 }
 .md-typeset table:not([class]) th {
   background-color: var(--md-default-bg-color--light);

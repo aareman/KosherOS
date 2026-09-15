@@ -10,6 +10,7 @@ strict: false
 
 theme:
   name: material
+  custom_dir: overrides
   logo: images/logo.png
   favicon: images/logo.png
   palette:
@@ -28,6 +29,12 @@ theme:
       toggle:
         icon: material/brightness-4
         name: Light
+  font:
+    # A Hebrew humanist sans for text and the classic Hebrew book serif for
+    # headings: both set English as well as they set Hebrew, which is the
+    # right pair for this product.
+    text: Assistant
+    code: JetBrains Mono
   features:
     - navigation.sections
     - navigation.top
@@ -35,7 +42,8 @@ theme:
     - search.suggest
 
 nav:
-  - Start here: index.md
+  - Home: index.md
+  - What it is: overview.md
   - Releases: releases.md
   - What works: supported.md
   - How it is built:

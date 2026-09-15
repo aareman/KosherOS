@@ -12,19 +12,63 @@ sys.modules["build_docs"] = bd
 spec.loader.exec_module(bd)
 
 
-def test_the_front_page_is_written_for_the_site_not_lifted_from_the_readme():
+def test_the_overview_is_written_for_the_site_not_lifted_from_the_readme():
     # The readme is full of raw HTML (a centred div, shield badges, a
     # details block) and Python-Markdown does not render Markdown inside
-    # raw HTML, so lifting it made the front page show its own source.
-    index = (ROOT / "docs/index.md").read_text()
-    assert "<div align=" not in index and "<details>" not in index
-    assert "[ci-shield]" not in index, "reference-style badges never resolve here"
-    assert index.startswith("# KosherOS")
+    # raw HTML, so lifting it made the page show its own source.
+    page = (ROOT / "docs/overview.md").read_text()
+    assert "<div align=" not in page and "<details>" not in page
+    assert "[ci-shield]" not in page, "reference-style badges never resolve here"
+    assert page.startswith("# KosherOS")
     generated = {"index.md", "releases.md", "third-party.md"}
-    for target in set(re.findall(r"\]\(([a-z-]+\.md)\)", index)) - generated:
+    for target in set(re.findall(r"\]\(([a-z-]+\.md)\)", page)) - generated:
         assert (ROOT / "docs" / target).is_file(), target
-    for image in set(re.findall(r"\]\((images/[^)]+)\)", index)):
+    for image in set(re.findall(r"\]\((images/[^)]+)\)", page)):
         assert (ROOT / "docs" / image).is_file(), image
+
+
+def test_the_front_page_is_the_landing_template_and_everything_it_names_exists():
+    index = (ROOT / "docs/index.md").read_text()
+    assert "template: home.html" in index
+    assert "- navigation" in index and "- toc" in index, "no sidebars on a landing page"
+    nav = (ROOT / "mkdocs.yml").read_text()
+    assert "custom_dir: overrides" in nav
+    assert re.search(r"^\s+- [^:]+: overview\.md\s*$", nav, re.M), "the old front page stays reachable"
+    template = (ROOT / "overrides/home.html").read_text()
+    assert template.startswith('{% extends "main.html" %}')
+    generated = {"releases/", "third-party/"}
+    for target in set(re.findall(r"\{\{\s*'([^']+)'\s*\|\s*url\s*\}\}", template)):
+        if target in generated:
+            continue
+        if target.endswith("/"):
+            assert (ROOT / "docs" / (target[:-1] + ".md")).is_file(), target
+        else:
+            assert (ROOT / "docs" / target).is_file(), target
+    for asset in ("docs/stylesheets/home.css", "docs/javascripts/home.js", "docs/images/hero.jpg"):
+        assert (ROOT / asset).is_file(), asset
+
+
+def test_the_landing_pages_presets_are_the_shipped_ones():
+    # The chooser on the front page draws real presets, not marketing ones:
+    # every chip is a row of the overview's preset table, in the same words.
+    template = (ROOT / "overrides/home.html").read_text()
+    overview = (ROOT / "docs/overview.md").read_text()
+    chips = re.findall(r'data-preset="[a-z]+"[^>]*>([^<]+)</button>', template)
+    assert len(chips) == 6
+    for chip in chips:
+        assert f"| **{chip}** |" in overview, chip
+    script = (ROOT / "docs/javascripts/home.js").read_text()
+    for key in re.findall(r'data-preset="([a-z]+)"', template):
+        assert re.search(rf"^\s+{key}: \{{", script, re.M), key
+
+
+def test_the_landing_page_moves_only_for_people_who_want_motion():
+    css = (ROOT / "docs/stylesheets/home.css").read_text()
+    js = (ROOT / "docs/javascripts/home.js").read_text()
+    assert "prefers-reduced-motion: reduce" in css and "prefers-reduced-motion" in js
+    # Nothing is hidden unless the script that will reveal it is running.
+    assert ".ko-js .ko-reveal { opacity: 0;" in css
+    assert 'classList.add("ko-js")' in (ROOT / "overrides/home.html").read_text()
 
 
 def test_no_page_on_the_site_hides_markdown_inside_raw_html():
@@ -90,7 +134,7 @@ def test_generate_runs_offline(tmp_path, monkeypatch):
 def test_the_diagram_is_handed_to_the_theme_to_draw():
     nav = (ROOT / "mkdocs.yml").read_text()
     assert "name: mermaid" in nav and "fence_code_format" in nav
-    assert "```mermaid" in (ROOT / "docs/index.md").read_text()
+    assert "```mermaid" in (ROOT / "docs/overview.md").read_text()
 
 
 def test_the_releases_page_sorts_by_date_whatever_order_github_gives():

@@ -90,9 +90,28 @@ def test_no_step_ends_in_a_stray_continuation():
                 script = step.get("run")
                 if not script:
                     continue
+                continued = False
                 for line in script.splitlines():
                     stripped = line.strip()
                     if not stripped or stripped.startswith("#"):
+                        continued = False
                         continue
-                    assert not re.match(r"^--[a-z]", stripped), \
-                        f"{path.name}: {step.get('name')}: stray {stripped[:40]!r}"
+                    # An argument line is fine when the line before it ended
+                    # with a backslash; orphaned, it is a command.
+                    if not continued:
+                        assert not re.match(r"^--[a-z]", stripped), \
+                            f"{path.name}: {step.get('name')}: stray {stripped[:40]!r}"
+                    continued = stripped.endswith("\\")
+
+
+def test_the_release_tells_the_truth_about_the_image():
+    """A version whose image build failed must say so, not claim an image.
+
+    The first run of this said "OS image ghcr...:v0.1.0-pre.022, signed"
+    for a version whose image had failed, because the note keyed off
+    whether the image was MEANT to be built.
+    """
+    ci = (ROOT / ".github/workflows/ci.yml").read_text()
+    assert "needs.image.result == 'success'" in ci, "the note keys off the result"
+    assert "No OS image: the build failed" in ci
+    assert "No new OS image" in ci, "and the skipped-on-purpose case still reads well"

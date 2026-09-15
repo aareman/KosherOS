@@ -172,14 +172,16 @@ jobs:
       && needs.unit.result == 'success'
       && needs.compile.result == 'success'
       && needs.shell.result == 'success'
-      && needs.image.result != 'failure'
       && needs.image.result != 'cancelled'
     runs-on: ubuntu-latest
     permissions:
       contents: write
     env:
       IMAGE: ghcr.io/${{ github.repository_owner }}/kosher-linux
-      BUILT: ${{ needs.changes.outputs.image }}
+      # "true" only when an image was actually built and pushed for this
+      # version. `changes.outputs.image` says whether one was MEANT to be,
+      # which is not the same thing when the build fails.
+      BUILT: ${{ needs.image.result == 'success' && needs.changes.outputs.image || 'false' }}
     steps:
       - uses: actions/checkout@v5
         with:
@@ -215,6 +217,8 @@ jobs:
             if [ "$BUILT" = "true" ]; then
               echo "- OS image \`$IMAGE:$tag\` (also \`$IMAGE:${GITHUB_SHA::12}\`), signed with cosign keyless. It is the current \`:edge\`."
               echo "- Machines on the edge channel pick it up on their next update. Stable machines are unaffected until a person promotes a version with the **Promote to stable** workflow (\`version: $tag\`)."
+            elif [ "${{ needs.image.result }}" = "failure" ]; then
+              echo "- **No OS image: the build failed.** The code passed its tests, so the version exists and its changes are recorded here, but no machine can move to it. The next successful build carries these changes."
             else
               echo "- **No new OS image.** Nothing in this commit reaches the image (docs, tests or CI only), so machines stay on the image from the previous version. The version still exists so the history has no gaps."
             fi

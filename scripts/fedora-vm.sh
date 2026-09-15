@@ -135,7 +135,12 @@ case "${1:-}" in
     up) cmd_up ;;
     ssh) shift; exec ssh -F "$ssh_config" kosher-fedora "$@" ;;
     status) running && echo "running (pid $(cat "$pidfile"))" || echo "stopped" ;;
-    down) running && kill "$(cat "$pidfile")" && echo stopped || echo "not running" ;;
+    down)
+        if running && kill "$(cat "$pidfile")"; then
+            echo stopped
+        else
+            echo "not running"
+        fi ;;
     destroy)
         if running; then
             kill "$(cat "$pidfile")" 2>/dev/null || true

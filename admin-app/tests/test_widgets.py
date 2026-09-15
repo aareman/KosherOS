@@ -1068,3 +1068,48 @@ def test_going_back_asks_first_and_then_calls_the_daemon():
     # Presenting the confirmation must not roll anything back on its own.
     assert called == []
 
+
+# -- the demo mode ------------------------------------------------------------------
+
+def test_the_demo_client_answers_everything_the_real_client_does():
+    # `just admin-demo` must not hit a screen that calls a method the
+    # pretend daemon lacks.
+    import inspect
+
+    from kosherd.client import DaemonClient
+    from kosheradmin.demo import DemoClient
+
+    real = {n for n, _ in inspect.getmembers(DaemonClient, inspect.isfunction)
+            if not n.startswith("_")}
+    demo = {n for n, _ in inspect.getmembers(DemoClient, inspect.isfunction)
+            if not n.startswith("_")}
+    assert real <= demo, real - demo
+
+
+def test_the_demo_family_drives_every_screen():
+    from kosheradmin.demo import DemoClient
+
+    client = DemoClient()
+    win = FakeWindow(client)
+    win.policy = client.get_policy()
+    win.requests = client.list_requests()
+    win.status = client.filter_status()
+    win.summary = client.activity_summary()
+    board = family.FamilyPage(win)
+    board.refresh()
+    drain()
+    assert len(_children(board.cards)) == 6
+    assert board.requests_banner.get_revealed()
+    for user in win.policy["users"]:
+        page = detail.UserDetailPage(win, user)
+        drain()
+        assert page.stack.get_pages().get_n_items() == 6, user["username"]
+    activity = feed.ActivityPage(win)
+    activity.refresh()
+    drain()
+    assert _rows(activity.feed), "the demo feed has entries"
+    # A change made through the client shows up as a change event.
+    client.set_media_level(1002, "all", "")
+    assert client.list_activity()[0]["method"] == "SetMediaLevel"
+    assert client.get_policy()["users"][2]["media_level"] == "all"
+

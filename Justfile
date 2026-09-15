@@ -27,6 +27,12 @@ qemu_gui := if env_var_or_default("KOSHER_GL", "") != "" {
     "qemu-system-x86_64 -device virtio-vga -display " + display
 }
 
+# Open the admin app on a pretend daemon with a sample family, to look at
+# and click through the UI. No kosherd, no D-Bus, nothing touched; every
+# control acts on the sample data so changes show across screens.
+admin-demo:
+    env PYTHONPATH=kosherd/src:admin-app/src python3 -m kosheradmin.demo
+
 # Run the unit test suites (pure logic — no root, no D-Bus, no VM needed).
 test *ARGS:
     cd kosherd && python3 -m pytest tests/ -q {{ARGS}}

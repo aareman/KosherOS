@@ -856,14 +856,16 @@ class UserDetailPage(Adw.NavigationPage):
         hint_under(limit, labels.TIME_LIMIT_HINT)
 
         schedule = Adw.PreferencesGroup(title=labels.SCHEDULE_TITLE)
-        presets = Gtk.Box(spacing=6)
+        # The presets sit on their own row under the title: beside it they
+        # squeezed the title down to "When this …".
+        presets = Gtk.Box(spacing=6, margin_bottom=6)
         for key in labels.SCHEDULE_PRESET_ORDER:
             button = small_button(labels.SCHEDULE_PRESET_LABELS[key], "flat")
             button.set_tooltip_text(labels.SCHEDULE_PRESET_HINTS[key])
             button.connect("clicked", lambda _b, k=key: self._set_schedule(
                 timelimits.SCHEDULE_PRESETS[k]))
             presets.append(button)
-        schedule.set_header_suffix(presets)
+        schedule.add(presets)
         self.schedule_grid = ScheduleGrid(self._time_grid, on_change=self._on_schedule_painted)
         frame = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         frame.add_css_class("card")

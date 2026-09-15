@@ -294,24 +294,10 @@ COPY mitm/ /usr/share/kosher/mitm/
 # had already shipped: an invalid `preferences.lock` entry stopped the
 # engine starting at all, and disabling an engine SearXNG does not have
 # does not disable anything — it defines a broken one.
+COPY scripts/check-searxng-settings.py /tmp/check-searxng-settings.py
 RUN SEARXNG_SETTINGS_PATH=/usr/share/kosher/searxng/settings.yml \
-    PYTHONPATH=/usr/share/kosher/searxng-src python3 - <<'PYEOF'
-import sys
-import yaml
-
-sys.path.insert(0, "/usr/share/kosher/searxng-src")
-import searx  # noqa: F401 - raises on an invalid settings.yml
-from searx import settings_loader
-
-defaults, _ = settings_loader.load_settings(load_user_settings=False)
-known = {e["name"] for e in defaults["engines"]}
-ours = yaml.safe_load(
-    open("/usr/share/kosher/searxng/settings.yml")).get("engines") or []
-missing = sorted(e["name"] for e in ours if e["name"] not in known)
-if missing:
-    raise SystemExit(f"settings.yml names engines SearXNG does not ship: {missing}")
-print(f"searxng settings valid; {len(ours)} engines disabled")
-PYEOF
+    PYTHONPATH=/usr/share/kosher/searxng-src python3 /tmp/check-searxng-settings.py \
+    && rm /tmp/check-searxng-settings.py
 RUN python3 -m pip install --prefix=/usr --no-deps \
         /tmp/kosherd/ /tmp/admin-app/ /tmp/store-app/ /tmp/setup-app/ \
         /tmp/search-app/ /tmp/myfilter-app/ \

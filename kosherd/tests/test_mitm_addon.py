@@ -1330,6 +1330,92 @@ def test_pictures_are_held_only_when_they_will_be_looked_at(addon):
     assert passed.response.stream is True
 
 
+def _real_image_flow(addon, width=640, height=480, url="https://cdn.example.com/p.jpg"):
+    import io
+
+    from PIL import Image
+
+    out = io.BytesIO()
+    Image.new("RGB", (width, height), (90, 120, 200)).save(out, "JPEG")
+    return types.SimpleNamespace(
+        request=types.SimpleNamespace(pretty_host="cdn.example.com", pretty_url=url,
+                                      headers={}),
+        response=types.SimpleNamespace(content=out.getvalue(),
+                                       headers={"content-type": "image/jpeg"}),
+        metadata={"kosher_uid": 1001})
+
+
+def test_a_hidden_picture_keeps_its_size_so_the_page_does_not_jump(addon):
+    import io
+
+    from PIL import Image
+
+    filt = _filt(addon, media="immodest")
+    flow = _real_image_flow(addon, 320, 200)
+    filt._blank_image(flow)
+    with Image.open(io.BytesIO(flow.response.content)) as tile:
+        assert tile.size == (320, 200)
+        assert tile.getpixel((5, 5)) == addon.imageedit_mod.PLACEHOLDER_GREY
+    assert flow.response.headers["content-type"] == "image/png"
+    assert flow.response.headers["x-kosheros"] == "image-hidden"
+    # A picture whose size cannot be read still gets the old one-pixel blank.
+    odd = _image_flow_sized(addon, 4000)
+    odd.metadata = {"kosher_uid": 1001}
+    filt._blank_image(odd)
+    assert odd.response.content == addon.BLANK_PNG
+
+
+def test_a_picture_judged_clean_a_moment_ago_streams_instead_of_being_held(addon):
+    from kosherd import vision
+
+    filt = _filt(addon, media="immodest",
+                 vision=_stub_vision(vision.ImageVerdict(vision.CLEAN, ())))
+    first = _real_image_flow(addon)
+    filt._filter_image(first, 1001)                   # judged clean by content
+    again = _hflow("image/jpeg")
+    again.request.pretty_url = "https://cdn.example.com/p.jpg"
+    filt.responseheaders(again)
+    assert again.response.stream is True, "the same URL is not held twice"
+    # A different URL, or a different media level, is still held.
+    other = _hflow("image/jpeg")
+    other.request.pretty_url = "https://cdn.example.com/q.jpg"
+    filt.responseheaders(other)
+    assert not getattr(other.response, "stream", False)
+    stricter = _filt(addon, media="suggestive")
+    stricter.__dict__["_clean_urls"] = filt.__dict__["_clean_urls"]
+    same = _hflow("image/jpeg")
+    same.request.pretty_url = "https://cdn.example.com/p.jpg"
+    stricter.responseheaders(same)
+    assert not getattr(same.response, "stream", False)
+
+
+def test_a_hidden_or_covered_picture_is_never_remembered_as_clean(addon):
+    from kosherd import vision
+
+    verdict = vision.ImageVerdict(vision.IMMODEST, ((10, 10, 50, 50),), True)
+    filt = _filt(addon, media="immodest", vision=_stub_vision(verdict))
+    flow = _real_image_flow(addon)
+    filt._filter_image(flow, 1001)
+    assert not filt.__dict__.get("_clean_urls")
+    again = _hflow("image/jpeg")
+    again.request.pretty_url = "https://cdn.example.com/p.jpg"
+    filt.responseheaders(again)
+    assert not getattr(again.response, "stream", False)
+
+
+def test_the_clean_memo_forgets_after_its_window(addon, monkeypatch):
+    filt = _filt(addon, media="immodest")
+    flow = _real_image_flow(addon)
+    filt._remember_clean(flow, "immodest")
+    later = _hflow("image/jpeg")
+    later.request.pretty_url = "https://cdn.example.com/p.jpg"
+    import time as _time
+
+    real = _time.monotonic
+    monkeypatch.setattr(addon.time, "monotonic", lambda: real() + filt.CLEAN_URL_SECONDS + 1)
+    assert filt._recently_clean(later, "immodest") is False
+
+
 def test_a_connection_that_is_nobodys_streams(addon):
     flow = _hflow("text/html", uid=None)
     _filt(addon).responseheaders(flow)
@@ -1507,7 +1593,7 @@ def test_a_cover_that_would_take_most_of_the_picture_hides_it_whole(addon):
     filt = _filt(addon, media="nsfw",
                  vision=_async_vision(ImageVerdict(NSFW, ((20, 20, 260, 260),), True)))
     asyncio.run(filt.response(flow))
-    assert flow.response.content == addon.BLANK_PNG
+    assert flow.response.headers["x-kosheros"] == "image-hidden"  # a same-size tile now
     assert len(filt.covers) == 0, "nothing was frosted"
 
 
@@ -1572,7 +1658,7 @@ def test_an_animation_that_hides_is_hidden_whole_not_covered(addon):
     filt = _filt(addon, media="nsfw",
                  vision=_async_vision(ImageVerdict(NSFW, ((20, 20, 60, 60),), True)))
     asyncio.run(filt.response(flow))
-    assert flow.response.content == addon.BLANK_PNG
+    assert flow.response.headers["x-kosheros"] == "image-hidden"  # a same-size tile now
     assert len(filt.covers) == 0
 
 

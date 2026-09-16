@@ -123,3 +123,39 @@ def test_the_frost_is_neutral_not_skin_toned():
         for y in range(150, 300, 10):
             r, g, b = covered.getpixel((x, y))
             assert max(r, g, b) - min(r, g, b) < 24, (x, y, (r, g, b))
+
+
+def test_the_covers_edge_is_a_few_pixels_not_a_band_the_figure_shows_through():
+    # A 40px feather let the face and shins through at the top and bottom
+    # of a figure, and blended a ring of skin tone round the grey that read
+    # as a pink box. Now only the outermost pixels soften.
+    import io
+
+    from PIL import Image, ImageDraw
+
+    im = Image.new("RGB", (300, 600), (214, 196, 170))
+    ImageDraw.Draw(im).rectangle((100, 0, 200, 600), fill=(224, 172, 130))  # skin column
+    out = io.BytesIO(); im.save(out, "JPEG", quality=92)
+    covered = imageedit.cover(out.getvalue(), [(100, 40, 100, 520)])
+    with Image.open(io.BytesIO(covered)) as result:
+        # The grown region reaches the top and bottom of the picture; a
+        # pixel just inside its edge, over the skin column, must be grey,
+        # not skin.
+        for y in (12, 300, 588):
+            r, g, b = result.getpixel((150, y))
+            assert max(r, g, b) - min(r, g, b) < 24, (y, (r, g, b))
+
+
+def test_a_placeholder_is_the_pictures_size_and_neutral():
+    import io
+
+    from PIL import Image
+
+    out = io.BytesIO()
+    Image.new("RGB", (123, 45), (200, 30, 30)).save(out, "PNG")
+    tile = imageedit.placeholder_for(out.getvalue())
+    with Image.open(io.BytesIO(tile)) as im:
+        assert im.size == (123, 45)
+        assert im.getpixel((0, 0)) == imageedit.PLACEHOLDER_GREY
+    assert imageedit.placeholder_for(b"not a picture") is None
+    assert imageedit.placeholder(123, 45) is tile, "cached by size"

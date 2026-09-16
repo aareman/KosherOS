@@ -741,7 +741,8 @@ class KosherFilter:
                 self._refuse_video(flow, before_body=True)
             return  # "hold": sampled in response()
         if content_type.startswith(IMAGE_TYPES):
-            if self.policy.media_level_for(uid) == "none":
+            level = self.policy.media_level_for(uid)
+            if level == "none" or self._recently_clean(flow, level):
                 flow.response.stream = True
             return
         if "text/html" in content_type or YouTube.applies(flow.request.pretty_host) \
@@ -1050,6 +1051,7 @@ class KosherFilter:
             # presence of a person together catch most of that.
             if not vision_mod.in_context(verdict, self._referring_page_level(flow),
                                          CONTENT_TOLERANCE.get(level, "nsfw")):
+                self._remember_clean(flow, level)
                 return True
             log.info("hid a picture on a page that reads as %s",
                      self._referring_page_level(flow))
@@ -1242,8 +1244,55 @@ class KosherFilter:
             flow.response.content or b"", videocheck_mod.key(flow.request.pretty_url, total))
         self._video_settle(flow, uid, level, verdict)
 
+    # -- pictures judged clean a moment ago ----------------------------------------
+    #
+    # Every picture on a page is held until the model has looked at it, and
+    # a shop's search page has sixty; on a machine that judges one in a
+    # fifth of a second they arrive in a burst ten seconds long, each moving
+    # the page as it lands. Most of them are pictures this machine judged
+    # minutes ago — a shop reuses its images across every page and every
+    # reload — but the verdict cache is keyed by content, and the content is
+    # what the hold waits for. So a URL whose picture was judged clean is
+    # remembered for a while, and the next request for it is streamed
+    # straight through from the headers.
+    #
+    # The trust is narrow: the exact URL, the same media level, judged clean
+    # by content within CLEAN_URL_SECONDS. A picture that was hidden or
+    # covered is never remembered. An image CDN changing what a URL serves
+    # inside that window is possible and rare; the window is short for it.
+    CLEAN_URL_SECONDS = 15 * 60
+    MAX_CLEAN_URLS = 4000
+
+    def _remember_clean(self, flow: http.HTTPFlow, level: str) -> None:
+        url = getattr(flow.request, "pretty_url", None)
+        if not url:
+            return
+        memo = self.__dict__.setdefault("_clean_urls", {})
+        memo[(url, level)] = time.monotonic()
+        while len(memo) > self.MAX_CLEAN_URLS:
+            memo.pop(next(iter(memo)))
+
+    def _recently_clean(self, flow: http.HTTPFlow, level: str) -> bool:
+        url = getattr(flow.request, "pretty_url", None)
+        memo = self.__dict__.get("_clean_urls")
+        if not url or not memo:
+            return False
+        when = memo.get((url, level))
+        if when is None:
+            return False
+        if time.monotonic() - when > self.CLEAN_URL_SECONDS:
+            memo.pop((url, level), None)
+            return False
+        return True
+
     def _blank_image(self, flow: http.HTTPFlow) -> None:
-        flow.response.content = BLANK_PNG
+        # The same size as the picture it replaces, when that can be read:
+        # a 1x1 collapsed the picture's box, and on a shop's grid every
+        # picture that arrived after it moved the page — the scroll felt
+        # jumpy. The tile is neutral grey; the 1x1 stays for a picture whose
+        # size cannot be read.
+        tile = imageedit_mod.placeholder_for(flow.response.content or b"")
+        flow.response.content = tile if tile is not None else BLANK_PNG
         flow.response.headers["content-type"] = "image/png"
         flow.response.headers["x-kosheros"] = "image-hidden"
         flow.response.headers.pop("content-length", None)

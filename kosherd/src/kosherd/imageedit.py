@@ -39,7 +39,19 @@ FROST_CELLS = 6
 # lightness, which flattens what contrast survives without stamping a flat
 # block. Grey, not the region's colour: the average colour of a figure is
 # skin tone, and a cover in skin tone reads as a pink blob.
-FLATTEN = 0.35
+FLATTEN = 0.5
+# The soft edge of the cover, in pixels, at most. It used to be an eighth
+# of the region's short side — forty pixels on a figure — and the original
+# blended through the whole of that band: the face at the top, the shins at
+# the bottom, and a ring of skin tone all round that read as "a pink box".
+# A cover's edge only has to not look cut out; a few pixels do that.
+FEATHER_MAX = 6
+# The tile that stands in for a picture hidden whole: neutral, and the same
+# size as the picture, so the page keeps its layout instead of collapsing
+# the box to a pixel and jumping when the rest of the images arrive.
+PLACEHOLDER_GREY = (214, 214, 214)
+PLACEHOLDER_MAX_SIDE = 4096
+_placeholders: dict[tuple[int, int], bytes] = {}
 # Noise under the blur, so the cover cannot be undone by deconvolution.
 NOISE = 0.10
 
@@ -122,12 +134,14 @@ def cover(image_bytes: bytes, regions, style: str = FROST) -> bytes | None:
                                         os.urandom(pw * ph)).convert(covered.mode)
                 covered = Image.blend(covered, noise, NOISE)
                 covered = covered.filter(ImageFilter.GaussianBlur(4))
-                # Feather: a soft-edged mask melts the cover into the photo
-                # instead of stamping a hard rectangle on it.
-                feather = max(6, min(pw, ph) // 8)
-                mask = Image.new("L", (pw, ph), 0)
-                ImageDraw.Draw(mask).rectangle(
-                    (feather, feather, pw - feather, ph - feather), fill=255)
+                # A soft edge, a few pixels wide and no more: the mask is
+                # solid to the border and only its outermost pixels fade, so
+                # nothing of the figure shows through and the cover still
+                # does not look cut out with scissors.
+                feather = max(2, min(FEATHER_MAX, min(pw, ph) // 40))
+                mask = Image.new("L", (pw, ph), 255)
+                ImageDraw.Draw(mask).rectangle((0, 0, pw - 1, ph - 1), outline=0,
+                                               width=1)
                 mask = mask.filter(ImageFilter.GaussianBlur(feather))
                 image.paste(covered, (left, top), mask)
             return encode(image, fmt)
@@ -184,6 +198,38 @@ def encode(image, fmt: str) -> bytes:
     else:
         image.save(out, "PNG", compress_level=1)
     return out.getvalue()
+
+
+def placeholder_for(image_bytes: bytes) -> bytes | None:
+    """A flat neutral PNG the size of this picture, or None if its size
+    cannot be read. Reads only the header; the tiles are cached by size,
+    since a shop's grid repeats one size a hundred times."""
+    try:
+        from PIL import Image
+
+        with Image.open(io.BytesIO(image_bytes)) as im:
+            width, height = im.size
+    except Exception:  # noqa: BLE001 - unreadable: the caller has a 1x1
+        return None
+    if width <= 1 or height <= 1:
+        return None
+    width, height = min(width, PLACEHOLDER_MAX_SIDE), min(height, PLACEHOLDER_MAX_SIDE)
+    return placeholder(width, height)
+
+
+def placeholder(width: int, height: int) -> bytes:
+    key = (width, height)
+    tile = _placeholders.get(key)
+    if tile is None:
+        from PIL import Image
+
+        out = io.BytesIO()
+        Image.new("RGB", key, PLACEHOLDER_GREY).save(out, "PNG", compress_level=1)
+        tile = out.getvalue()
+        if len(_placeholders) >= 256:
+            _placeholders.pop(next(iter(_placeholders)))
+        _placeholders[key] = tile
+    return tile
 
 
 def content_type(data: bytes) -> str:

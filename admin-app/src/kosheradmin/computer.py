@@ -340,8 +340,19 @@ class UpdatesPage(_Page):
         apply_btn.connect("clicked", self._apply)
         self.status_row.add_suffix(check)
         self.status_row.add_suffix(apply_btn)
+        self.apply_button = apply_btn
         group.add(self.status_row)
+        # The bar under the row: an update pulls gigabytes, and a button
+        # that goes dead for ten minutes is a button that gets pressed
+        # again. It listens to the daemon's own signals, so it also shows
+        # an update somebody else (or the timer) started.
+        self.progress = Gtk.ProgressBar(show_text=True, visible=False,
+                                        margin_top=8, margin_start=12, margin_end=12)
+        group.add(self.progress)
         self.prefs.add(group)
+        self._subscription: int | None = None
+        self.connect("shown", lambda _p: self._listen())
+        self.connect("hidden", lambda _p: self._stop_listening())
 
         # Going back. Shown with the version it would return to, never as
         # a bare button: a "Roll back" with no target is the control that
@@ -420,10 +431,58 @@ class UpdatesPage(_Page):
         run_async(self.win.client.check_update, on_done,
                   lambda e: self.status_row.set_subtitle(error_text(e)))
 
+    # -- applying, with the daemon telling us how far it is ----------------------
+
+    def _listen(self) -> None:
+        if self._subscription is None:
+            self._subscription = self.win.client.connect_update_signals(
+                self.on_progress, self.on_finished)
+
+    def _stop_listening(self) -> None:
+        if self._subscription is not None:
+            self.win.client.disconnect_signals(self._subscription)
+            self._subscription = None
+
     def _apply(self, _b) -> None:
-        self.status_row.set_subtitle("Updating (staged on reboot when done)…")
-        self.win.call(self.win.client.apply_update, refresh=False,
-                      done_msg="Update staged — reboot to apply")
+        self._listen()  # in case the page was built but never shown (tests)
+        self.apply_button.set_sensitive(False)
+        self.status_row.set_subtitle("Updating…")
+        self.progress.set_fraction(0)
+        self.progress.set_text("Starting…")
+        self.progress.set_visible(True)
+
+        def on_error(e):
+            self.apply_button.set_sensitive(True)
+            self.progress.set_visible(False)
+            self.status_row.set_subtitle(error_text(e))
+            self.win.toast(error_text(e))
+
+        run_async(self.win.client.apply_update, lambda _r: None, on_error)
+
+    def on_progress(self, percent: int, status: str) -> None:
+        self.apply_button.set_sensitive(False)
+        self.progress.set_visible(True)
+        if percent < 0:
+            self.progress.pulse()
+            self.progress.set_text(status)
+        else:
+            self.progress.set_fraction(percent / 100)
+            self.progress.set_text(f"{status} · {percent}%")
+        self.status_row.set_subtitle("Updating…")
+
+    def on_finished(self, ok: bool, error: str) -> None:
+        self.apply_button.set_sensitive(True)
+        self.progress.set_visible(False)
+        if ok:
+            self.win.update_state = "Update ready — restart to use it"
+            self.status_row.set_subtitle(
+                "The update is ready. Restart the computer to start using it; "
+                "until then everything carries on as it is.")
+            self.win.toast("Update ready — restart to apply")
+            self._load_deployment()
+        else:
+            self.status_row.set_subtitle(error or "The update did not finish.")
+            self.win.toast(error or "The update did not finish")
 
 
 def _deployment_words(entry: dict | None) -> str:

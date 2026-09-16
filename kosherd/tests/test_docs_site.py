@@ -91,9 +91,98 @@ def test_the_releases_page_lists_every_release_newest_first():
          "publishedAt": "2026-09-14T02:00:00Z", "isLatest": True, "body": "- One"},
     ])
     assert page.index("pre.2") < page.index("pre.1")
-    assert "## KosherOS 0.1.0-pre.1 · **stable**" in page
-    assert "## KosherOS 0.1.0-pre.2 · pre-release" in page
+    assert "## 0.1.0-pre.1\n\n`v0.1.0-pre.1` · 2026-09-14 · **stable**" in page
+    assert "## 0.1.0-pre.2\n\n`v0.1.0-pre.2` · 2026-09-15\n" in page
     assert "- Two" in page and "- One" in page
+
+
+NOTES = """**Two new things and one fix.**
+
+```sh
+bootc switch ghcr.io/aareman/kosher-linux:v0.1.0-pre.055
+```
+Signed with cosign. Machines on **edge** pick this up on their next update; **stable** machines stay where they are until someone promotes it.
+
+## ✨ New
+
+- **Admin** — The sidebar is Family then Administration
+- **Updates** — Checking for updates says which version you would get
+
+## 🔧 Fixed
+
+- **Filter** — The menu is quieted through user.cfg
+
+Behind the scenes: five changes to the build tooling and the docs. Since **v0.1.0-pre.054**. [What works](https://aareman.github.io/KosherOS/supported/) · [All releases](https://aareman.github.io/KosherOS/releases/)
+"""
+
+
+def _release(n, body, **more):
+    return {"tagName": f"v0.1.0-pre.{n:03d}", "name": f"KosherOS 0.1.0-pre.{n:03d}",
+            "isPrerelease": True, "publishedAt": f"2026-09-{n:02d}T02:00:00Z",
+            "isLatest": False, "body": body, **more}
+
+
+def test_the_boilerplate_every_release_repeats_is_said_once():
+    # Each release's notes stand alone on GitHub, so each says how to
+    # install it, that it is signed and where the rest are. Listed forty at
+    # a time that was the same four lines forty times.
+    page = bd.releases_page([_release(2, NOTES), _release(1, NOTES)])
+    assert page.count("bootc switch") == 1 and page.count("cosign") == 1
+    assert "[What works]" not in page and "Since **" not in page
+    # One heading per release, and the kinds ride on the lines instead of
+    # being headings that flood the table of contents.
+    headings = re.findall(r"^#+ .*$", page, re.M)
+    assert headings == ["# Releases", "## 0.1.0-pre.002", "## 0.1.0-pre.001"]
+    assert "- ✨ **Admin** — The sidebar is Family then Administration" in page
+    assert "- 🔧 **Filter** — The menu is quieted through user.cfg" in page
+    assert "*Behind the scenes: five changes to the build tooling and the docs.*" in page
+    assert "Two new things and one fix" not in page, "the list says it"
+
+
+OLD_NOTES = """## What changed since v0.1.0-pre.011
+
+- Package managers trust the filter's certificate
+
+## What this build is
+
+- **No new OS image.** Nothing in this commit reaches the image, so machines stay on the image from the previous version.
+- An installer ISO is built locally with `just release-iso`.
+
+## What is supported
+
+Browsers, Flatpak apps, and the developer tools all work on a filtered account.
+
+> This release was renamed from `v0.1.0-pre.12` to `v0.1.0-pre.012`.
+"""
+
+
+def test_the_older_notes_are_flattened_the_same_way():
+    page = bd.releases_page([_release(12, OLD_NOTES)])
+    assert "- Package managers trust the filter's certificate" in page
+    assert "`v0.1.0-pre.012` · 2026-09-12 · no new image" in page
+    assert "What is supported" not in page and "Flatpak apps" not in page
+    assert "renamed" not in page and "What this build is" not in page
+
+
+def test_a_build_that_changes_nothing_says_so_in_one_line():
+    body = ("**Nothing on a KosherOS machine changes in this build.**\n\n"
+            "Behind the scenes: two changes to the docs. Since **v0.1.0-pre.001**.")
+    page = bd.releases_page([_release(2, body)])
+    assert "Nothing on a KosherOS machine changes in this build." in page
+    assert "*Behind the scenes: two changes to the docs.*" in page
+
+
+def test_older_releases_collapse_to_a_table():
+    found = [_release(n, NOTES) for n in range(20, 0, -1)]
+    found[-1]["isLatest"] = True
+    page = bd.releases_page(found)
+    assert page.count("\n## ") == bd.DETAILED + 1  # the newest in full, then the table
+    assert "## Earlier releases" in page
+    rows = [line for line in page.splitlines() if line.startswith("| `v")]
+    assert len(rows) == 20 - bd.DETAILED
+    assert rows[0].startswith("| `v0.1.0-pre.008` | 2026-09-08 | ✨ **Admin** — The sidebar")
+    assert "and 2 more" in rows[0]
+    assert "| `v0.1.0-pre.001` **stable** |" in page
 
 
 def test_every_page_in_the_nav_exists():

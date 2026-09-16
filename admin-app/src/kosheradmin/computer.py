@@ -370,8 +370,8 @@ class UpdatesPage(_Page):
             description="The previous version stays on disk. Going back to it "
                         "takes effect at the next restart and keeps every "
                         "setting and file.")
-        self.version_row = Adw.ActionRow(title="Running now", subtitle="Checking…")
-        back.add(self.version_row)
+        # No "running now" row: the Operating system row above already
+        # names the version, and two rows saying it read as two things.
         self.back_row = Adw.ActionRow(title="Go back to the previous version",
                                       subtitle="Checking…", subtitle_lines=3)
         self.back_button = Gtk.Button(label="Go back", valign=Gtk.Align.CENTER,
@@ -399,9 +399,9 @@ class UpdatesPage(_Page):
         """
         status = status or {}
         if status.get("error"):
-            self.version_row.set_subtitle(f"Could not read: {status['error']}")
-        else:
-            self.version_row.set_subtitle(_deployment_words(status.get("booted")))
+            self.back_row.set_subtitle(f"Could not read the versions: {status['error']}")
+            self.back_button.set_sensitive(False)
+            return
         staged = status.get("staged") or None
         if staged:
             # The timer, or a previous visit, already fetched an update.

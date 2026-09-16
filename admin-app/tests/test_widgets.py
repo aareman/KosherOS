@@ -1070,7 +1070,7 @@ def test_the_updates_page_names_the_version_it_would_go_back_to():
                   "guest": {"enabled": False}}
     page = computer.UpdatesPage(win)
     drain()
-    assert "2026.09.10" in page.version_row.get_subtitle()
+    assert not hasattr(page, "version_row"), "the OS row already names the version"
     assert "Would return to version 2026.09.03" in page.back_row.get_subtitle()
     assert page.back_button.get_sensitive()
 
@@ -1104,8 +1104,8 @@ def test_a_status_with_every_key_missing_still_renders():
                   "guest": {"enabled": False}}
     page = computer.UpdatesPage(win)
     drain()
-    assert page.version_row.get_subtitle() == "unknown"
     assert not page.back_button.get_sensitive()
+    assert "no previous version" in page.back_row.get_subtitle()
 
 
 def test_update_now_shows_a_bar_that_follows_the_daemon_and_says_when_to_restart():

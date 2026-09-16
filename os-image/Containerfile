@@ -363,3 +363,13 @@ RUN grep -q '^DEFAULT_HOSTNAME=kosheros' /usr/lib/os-release \
 
 # bootc images must pass a container lint.
 RUN bootc container lint
+
+# --- The version, where bootc reads it ---------------------------------------
+# `bootc status` and `bootc upgrade --check` take their "Version:" from the
+# org.opencontainers.image.version label, and the base image carries
+# Fedora's. Without ours, the admin app could say an update was available
+# but never which one, and the running version was the image reference.
+# Last, so a new number does not invalidate the layers above it: an ARG
+# breaks the cache from its first use, not its declaration.
+ARG KOSHER_VERSION=local
+LABEL org.opencontainers.image.version="${KOSHER_VERSION}"

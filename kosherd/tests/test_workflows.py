@@ -178,3 +178,19 @@ def test_the_version_is_ticked_once_per_merge_by_ci_not_per_commit():
     # And the dev shell no longer installs the hook.
     nix = (ROOT / "devenv.nix").read_text()
     assert "git-hooks.hooks.version-bump" not in nix
+
+
+def test_the_image_carries_its_version_where_bootc_reads_it():
+    # bootc prints "Version:" from org.opencontainers.image.version — for
+    # the running deployment and for the update it offers. The admin app's
+    # check could only say "an update is available" until the label was ours.
+    containerfile = (ROOT / "os-image/Containerfile").read_text()
+    assert 'LABEL org.opencontainers.image.version="${KOSHER_VERSION}"' in containerfile
+    assert containerfile.index("ARG KOSHER_VERSION") < containerfile.index(
+        "LABEL org.opencontainers.image.version")
+    assert containerfile.rstrip().endswith('"${KOSHER_VERSION}"'), \
+        "last, so a new version number does not rebuild every layer"
+    for path in (".github/workflows/ci.yml", "Justfile"):
+        text = (ROOT / path).read_text()
+        assert "--build-arg" in text and "KOSHER_VERSION=" in text, path
+        assert "< VERSION" in text, f"{path}: the label comes from the VERSION file"

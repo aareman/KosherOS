@@ -200,7 +200,12 @@ jobs:
       # existing signed version by hand, so what families run is a build
       # somebody chose, not the newest commit.
       - name: Build image
-        run: podman build -t "$IMAGE:${SHA::12}" -t "$IMAGE:edge" -f os-image/Containerfile .
+        # The version goes into the image's label, which is where bootc
+        # reads the "Version:" it shows for the running and the offered build.
+        run: |
+          version="$(tr -d '[:space:]' < VERSION)"
+          podman build --build-arg "KOSHER_VERSION=$version" \
+            -t "$IMAGE:${SHA::12}" -t "$IMAGE:edge" -f os-image/Containerfile .
 
       - name: Push
         if: github.event_name != 'pull_request'

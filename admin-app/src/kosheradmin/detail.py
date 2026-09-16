@@ -1113,6 +1113,23 @@ class UserDetailPage(Adw.NavigationPage):
             captive.set_subtitle("An unfiltered account needs no window.")
         group.add(captive)
 
+        # A child who forgets their password is otherwise locked out for
+        # good: there is no root on this machine to reset it with. This
+        # hands nobody a password — the login screen asks them for a new
+        # one — so the account stays theirs.
+        password = Adw.ActionRow(
+            title="Reset the password",
+            subtitle="They choose a new password the next time they sign in. "
+                     "Nothing else about the account changes.",
+            subtitle_lines=3, activatable=True)
+        password.add_suffix(Gtk.Image(icon_name="dialog-password-symbolic"))
+        password.connect("activated", lambda _r: self._confirm_reset_password(user))
+        if user.get("admin"):
+            password.set_sensitive(False)
+            password.set_subtitle("An administrator changes their own password "
+                                  "in Settings.")
+        group.add(password)
+
         is_admin = Adw.SwitchRow(
             title="Administrator",
             subtitle="Can change every setting here, including for other people.",
@@ -1160,6 +1177,18 @@ class UserDetailPage(Adw.NavigationPage):
         remove.connect("activated", lambda *_: confirm_remove_user(self.win, user))
         danger.add(remove)
         return [group, desktop, danger]
+
+    def _confirm_reset_password(self, user: dict):
+        return confirm(
+            self.win, f"Reset {user['username']}'s password?",
+            "The next time they sign in, the login screen asks them to choose "
+            "a new password. Nobody sees it, and nothing else about the "
+            "account changes.", "Reset",
+            lambda: self.win.call(
+                lambda: self.win.client.reset_password(user["uid"]),
+                done_msg=f"{user['username']} chooses a new password at their "
+                         "next sign-in"),
+            destructive=False)
 
     def _guest_account_tab(self, user: dict) -> list[Adw.PreferencesGroup]:
         group = Adw.PreferencesGroup(

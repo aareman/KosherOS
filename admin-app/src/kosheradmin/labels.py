@@ -403,6 +403,8 @@ def change_sentence(event: dict, users_by_uid: dict | None = None) -> tuple[str,
         what = f"Account {arg(0)} created"
     elif method == "AdoptUser":
         what = f"Account {arg(0)} brought under management"
+    elif method == "ResetPassword":
+        what = f"{who}: password reset — a new one is chosen at their next sign-in"
     elif method == "RemoveUser":
         what = f"Account {who} removed"
     elif method == "SetUserApps":

@@ -41,6 +41,12 @@ ACTIONS = {
     "ExistingAccounts": ACTION_READ_CONFIG,
     "CreateFirstAdmin": ACTION_MANAGE_USERS,
     "FinishSetup": ACTION_MANAGE_USERS,
+    # Getting the new machine online from the wizard. First-boot only like
+    # the rest of this block; afterwards Wi-Fi is GNOME Settings' job, which
+    # the everyday polkit rule lets an administrator use.
+    "NetworkStatus": ACTION_READ_CONFIG,
+    "ListWifi": ACTION_READ_CONFIG,
+    "ConnectWifi": ACTION_MANAGE_NETWORK,
     # Unlock is THE prompt: one polkit check opens a sliding session, after
     # which the admin works without re-authenticating (see session.py).
     "Unlock": ACTION_MANAGE_USERS,
@@ -157,7 +163,8 @@ GUARDIAN_GATED = frozenset({
 
 # First-boot only; closed forever once setup is stamped complete.
 SETUP_METHODS = frozenset({"IsComplete", "AdminExists", "ExistingAccounts",
-                           "CreateFirstAdmin", "FinishSetup"})
+                           "CreateFirstAdmin", "FinishSetup",
+                           "NetworkStatus", "ListWifi", "ConnectWifi"})
 # Readable forever: the wizard and the apps ask these on every start.
 SETUP_READS = frozenset({"IsComplete", "AdminExists"})
 

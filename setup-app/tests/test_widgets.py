@@ -29,6 +29,7 @@ class FakeClient:
     def __init__(self, admin: str = ""):
         self.admin = admin
         self.created = []
+        self.joined = []
 
     def setup_complete(self):
         return False
@@ -45,6 +46,20 @@ class FakeClient:
 
     def finish_setup(self, guardian, grub):
         pass
+
+    # -- first-boot network: offline, with a Wi-Fi card, two networks in range
+    status = {"online": False, "kind": "", "name": "", "wifi_hardware": True}
+
+    def network_status(self):
+        return dict(self.status)
+
+    def list_wifi(self):
+        return [{"ssid": "Home", "signal": 82, "secured": True, "active": False},
+                {"ssid": "Shul Guest", "signal": 61, "secured": False, "active": False}]
+
+    def connect_wifi(self, ssid, password=""):
+        self.joined.append((ssid, password))
+        self.status = {"online": True, "kind": "wifi", "name": ssid, "wifi_hardware": True}
 
 
 def window(admin: str = "") -> setup.Window:
@@ -69,7 +84,7 @@ def test_back_goes_to_the_previous_page_not_the_start():
     assert page(win) == "protect", "Back from the last page must go one page back"
     win._go("admin")
     win._back()
-    assert page(win) == "welcome"
+    assert page(win) == "network"  # the internet step now sits before the account
 
 
 def test_back_is_hidden_once_the_account_exists():
@@ -302,3 +317,118 @@ def test_the_wizard_is_set_in_larger_type():
     assert 'self.add_css_class("kosher-wizard")' in source
     assert "default_width=860" in source
     del win
+
+
+# -- the optional internet step ----------------------------------------------------
+
+def settle():
+    """Let the wizard's worker threads finish and their idle callbacks run."""
+    import time
+
+    context = GLib.MainContext.default()
+    for _ in range(60):
+        while context.pending():
+            context.iteration(False)
+        time.sleep(0.005)
+
+
+def rows(listbox):
+    found, child = [], listbox.get_first_child()
+    while child is not None:
+        found.append(child)
+        child = child.get_next_sibling()
+    return found
+
+
+def test_the_internet_step_sits_between_welcome_and_the_account_and_never_blocks():
+    win = window()
+    win._advance()                      # Get Started
+    assert page(win) == "network"
+    assert win.next.get_sensitive(), "optional: always passable"
+    settle()
+    assert win.next.get_label() == "Skip for now"
+    win._advance()
+    assert page(win) == "admin"
+    win._back()
+    assert page(win) == "network"
+
+
+def test_offline_with_a_wifi_card_lists_the_networks_nearby():
+    win = window()
+    win._go("network")
+    settle()
+    assert "Not connected" in win.net_row.get_title()
+    assert win.wifi_group.get_visible()
+    names = [r.get_title() for r in rows(win.wifi_list)]
+    assert names == ["Home", "Shul Guest"]
+    assert rows(win.wifi_list)[0].get_subtitle() == "Password needed"
+    assert rows(win.wifi_list)[1].get_subtitle() == "Open network"
+
+
+def test_an_open_network_joins_at_once_and_the_button_turns_into_continue():
+    win = window()
+    win._go("network")
+    settle()
+    win._join({"ssid": "Shul Guest", "secured": False})
+    assert page(win) == "working"
+    settle()
+    assert win.client.joined == [("Shul Guest", "")]
+    assert page(win) == "network"
+    assert win.online and win.next.get_label() == "Continue"
+    assert "Connected by Wi-Fi: Shul Guest" in win.net_row.get_title()
+    assert not win.wifi_group.get_visible()
+
+
+def test_a_secured_network_asks_for_its_password_first():
+    win = window()
+    win._go("network")
+    settle()
+    dialog = win._join({"ssid": "Home", "secured": True})
+    assert dialog is not None and "Home" in dialog.get_heading()
+    assert win.client.joined == []
+    dialog.get_extra_child().set_text("letmein")
+    dialog.emit("response", "join")
+    settle()
+    assert win.client.joined == [("Home", "letmein")]
+
+
+def test_a_refused_password_comes_back_to_the_page_with_the_reason():
+    class Refusing(FakeClient):
+        def connect_wifi(self, ssid, password=""):
+            raise RuntimeError("That password was not accepted. Check it and try again.")
+
+    setup.DaemonClient = lambda: Refusing()  # type: ignore[assignment]
+    win = setup.Window(application=setup.App())
+    win._go("network")
+    settle()
+    win._connect_wifi("Home", "wrong")
+    settle()
+    assert page(win) == "network"
+    assert not win.online and win.next.get_label() == "Skip for now"
+
+
+def test_already_online_by_cable_says_so_and_offers_no_list():
+    class Wired(FakeClient):
+        status = {"online": True, "kind": "ethernet", "name": "Wired connection 1",
+                  "wifi_hardware": True}
+
+    setup.DaemonClient = lambda: Wired()  # type: ignore[assignment]
+    win = setup.Window(application=setup.App())
+    win._go("network")
+    settle()
+    assert win.net_row.get_title().startswith("Connected by a network cable")
+    assert not win.wifi_group.get_visible()
+    assert win.next.get_label() == "Continue"
+
+
+def test_no_wifi_card_says_a_cable_will_do_and_lets_the_person_skip():
+    class Desktop(FakeClient):
+        status = {"online": False, "kind": "", "name": "", "wifi_hardware": False}
+
+    setup.DaemonClient = lambda: Desktop()  # type: ignore[assignment]
+    win = setup.Window(application=setup.App())
+    win._go("network")
+    settle()
+    assert "no Wi-Fi found" in win.net_row.get_title()
+    assert not win.wifi_group.get_visible()
+    assert win.next.get_sensitive() and win.next.get_label() == "Skip for now"

@@ -443,7 +443,52 @@ class DemoClient:
     # -- system --------------------------------------------------------------------
 
     def check_update(self): return "Up to date"
-    def apply_update(self): self._change(None, "ApplyUpdate", [])
+
+    def connect_update_signals(self, on_progress, on_finished):
+        self._on_update_progress, self._on_update_finished = on_progress, on_finished
+        return 2
+
+    def disconnect_signals(self, subscription):
+        if subscription == 2:
+            self._on_update_progress = self._on_update_finished = None
+
+    def apply_update(self):
+        """Pretend to update: a pull that takes a few seconds, then staged."""
+        from gi.repository import GLib
+
+        self._change(None, "ApplyUpdate", [])
+        steps = [(0, "Pulling image (1 of 4)"), (18, "Pulling image (1 of 4)"),
+                 (41, "Pulling image (2 of 4)"), (67, "Pulling image (3 of 4)"),
+                 (88, "Pulling image (4 of 4)"), (96, "Deploying"), (100, "Update ready")]
+
+        def tick(i=0):
+            progress = getattr(self, "_on_update_progress", None)
+            finished = getattr(self, "_on_update_finished", None)
+            if i < len(steps):
+                if progress:
+                    progress(*steps[i])
+                GLib.timeout_add(600, tick, i + 1)
+            elif finished:
+                finished(True, "")
+            return False
+
+        GLib.timeout_add(300, tick)
+
+    # -- first-boot network ------------------------------------------------------
+
+    def network_status(self):
+        return {"online": False, "kind": "", "name": "", "wifi_hardware": True}
+
+    def list_wifi(self):
+        return [{"ssid": "Home", "signal": 82, "secured": True, "active": False},
+                {"ssid": "Shul Guest", "signal": 61, "secured": False, "active": False},
+                {"ssid": "Next door", "signal": 34, "secured": True, "active": False}]
+
+    def connect_wifi(self, ssid, password=""):
+        if ssid == "Home" and password != "letmein":
+            raise RuntimeError("That password was not accepted. Check it and try again.")
+        self.network_status = lambda: {"online": True, "kind": "wifi", "name": ssid,
+                                       "wifi_hardware": True}
 
     def deployment_status(self):
         return {"booted": {"image": "ghcr.io/aareman/kosher-linux:edge", "version": "0.1.0-pre.11",

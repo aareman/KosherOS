@@ -1,8 +1,9 @@
 """KosherOS first-boot wizard.
 
-Four steps: welcome, administrator account, protection (guardian + boot
-password), and a firmware checklist for the things an OS cannot enforce
-about its own hardware. Runs full-screen on first boot; kosherd closes the
+Five steps: welcome, an optional internet connection (Wi-Fi, through
+kosherd), administrator account, protection (guardian + boot password),
+and a firmware checklist for the things an OS cannot enforce about its own
+hardware. Runs full-screen on first boot; kosherd closes the
 setup API permanently once this finishes.
 """
 
@@ -230,6 +231,7 @@ class Window(Adw.ApplicationWindow):
         self.toasts.set_child(box)
 
         self.stack.add_named(self._welcome_page(), "welcome")
+        self.stack.add_named(self._network_page(), "network")
         self.stack.add_named(self._admin_page(), "admin")
         self.stack.add_named(self._protect_page(), "protect")
         self.stack.add_named(self._firmware_page(), "firmware")
@@ -294,6 +296,149 @@ class Window(Adw.ApplicationWindow):
         except Exception:  # noqa: BLE001 - artwork is optional
             page.set_icon_name("security-high-symbolic")
         return page
+
+    def _network_page(self) -> Gtk.Widget:
+        """Optional. A machine that is online at the end of setup gets its
+        first update and its filter lists straight away; one that is not
+        still works, and a cable plugged in later does the same job. So this
+        never blocks: the button says Skip for now until there is a
+        connection, and Continue once there is."""
+        box, group = _page(
+            "Connect to the internet",
+            "Optional. KosherOS works without it, but updates and the filter "
+            "lists need it. A network cable works too — plug one in and this "
+            "page will notice.")
+        self.online = False
+        self.net_row = Adw.ActionRow(title="Checking the connection…")
+        self.net_icon = Gtk.Image(icon_name="network-wireless-symbolic")
+        self.net_row.add_prefix(self.net_icon)
+        group.add(self.net_row)
+
+        self.wifi_group = Adw.PreferencesGroup(title="Wi-Fi networks nearby",
+                                               visible=False)
+        rescan = Gtk.Button(label="Scan again", valign=Gtk.Align.CENTER)
+        rescan.connect("clicked", lambda _b: self._scan_wifi())
+        self.wifi_group.set_header_suffix(rescan)
+        self.wifi_list = Gtk.ListBox(selection_mode=Gtk.SelectionMode.NONE)
+        self.wifi_list.add_css_class("boxed-list")
+        self.wifi_group.add(self.wifi_list)
+        box.append(self.wifi_group)
+        return box
+
+    def _refresh_network(self) -> None:
+        """Ask the daemon what this machine is connected to, and scan for
+        Wi-Fi if it is not connected and has a card to scan with."""
+        def on_done(status):
+            self.online = bool(status.get("online"))
+            if self.online:
+                by = {"wifi": "Wi-Fi", "ethernet": "a network cable"}.get(
+                    status.get("kind", ""), "the network")
+                name = status.get("name") or ""
+                self.net_row.set_title(f"Connected by {by}" + (f": {name}" if name else ""))
+                self.net_row.set_subtitle("You can continue.")
+                self.net_icon.set_from_icon_name("emblem-ok-symbolic")
+                self.wifi_group.set_visible(False)
+            elif status.get("wifi_hardware"):
+                self.net_row.set_title("Not connected")
+                self.net_row.set_subtitle("Pick a Wi-Fi network below, plug in a "
+                                          "cable, or skip for now.")
+                self.net_icon.set_from_icon_name("network-wireless-offline-symbolic")
+                self.wifi_group.set_visible(True)
+                self._scan_wifi()
+            else:
+                self.net_row.set_title("Not connected, and no Wi-Fi found on this computer")
+                self.net_row.set_subtitle("A network cable will work, or skip for now.")
+                self.net_icon.set_from_icon_name("network-wired-offline-symbolic")
+                self.wifi_group.set_visible(False)
+            self._relabel_next()
+
+        def on_error(e):
+            self.online = False
+            self.net_row.set_title("Could not check the connection")
+            self.net_row.set_subtitle(_error_text(e) + " You can skip this step.")
+            self._relabel_next()
+
+        _run_async(self.client.network_status, on_done, on_error)
+
+    def _relabel_next(self) -> None:
+        if self.stack.get_visible_child_name() == "network":
+            self.next.set_label("Continue" if self.online else "Skip for now")
+
+    def _wifi_message(self, text: str) -> None:
+        while (child := self.wifi_list.get_first_child()) is not None:
+            self.wifi_list.remove(child)
+        row = Adw.ActionRow(title=text)
+        row.set_sensitive(False)
+        self.wifi_list.append(row)
+
+    def _scan_wifi(self) -> None:
+        self._wifi_message("Scanning…")
+
+        def on_done(networks):
+            if not networks:
+                self._wifi_message("No networks found. Scan again, or move nearer "
+                                   "the router.")
+                return
+            while (child := self.wifi_list.get_first_child()) is not None:
+                self.wifi_list.remove(child)
+            for network in networks:
+                row = Adw.ActionRow(title=network["ssid"],
+                                    subtitle=("Connected" if network.get("active")
+                                              else "Password needed" if network["secured"]
+                                              else "Open network"),
+                                    activatable=True)
+                strength = network.get("signal", 0)
+                bars = ("excellent" if strength >= 75 else "good" if strength >= 50
+                        else "ok" if strength >= 25 else "weak")
+                row.add_prefix(Gtk.Image(icon_name=f"network-wireless-signal-{bars}-symbolic"))
+                if network["secured"]:
+                    row.add_suffix(Gtk.Image(icon_name="channel-secure-symbolic"))
+                row.add_suffix(Gtk.Image(icon_name="go-next-symbolic"))
+                row.network = network
+                row.connect("activated", lambda r: self._join(r.network))
+                row.set_cursor_from_name("pointer")
+                self.wifi_list.append(row)
+
+        _run_async(self.client.list_wifi, on_done,
+                   lambda e: self._wifi_message(_error_text(e)))
+
+    def _join(self, network: dict):
+        """An open network joins at once; a secured one asks for its
+        password first. Returns the dialog when there is one, for tests."""
+        if not network.get("secured"):
+            self._connect_wifi(network["ssid"], "")
+            return None
+        dialog = Adw.AlertDialog(heading=f"Join {network['ssid']}",
+                                 body="Enter the network's password.")
+        entry = Gtk.PasswordEntry(show_peek_icon=True, hexpand=True)
+        dialog.set_extra_child(entry)
+        dialog.add_response("cancel", "Cancel")
+        dialog.add_response("join", "Join")
+        dialog.set_response_appearance("join", Adw.ResponseAppearance.SUGGESTED)
+        dialog.set_default_response("join")
+        dialog.set_close_response("cancel")
+        entry.set_property("activates-default", True)
+        entry.connect("activate", lambda _e: (dialog.emit("response", "join"),
+                                              dialog.close()))
+        dialog.connect("response", lambda _d, r: r == "join" and
+                       self._connect_wifi(network["ssid"], entry.get_text()))
+        dialog.present(self)
+        entry.grab_focus()
+        return dialog
+
+    def _connect_wifi(self, ssid: str, password: str) -> None:
+        self._busy(f"Connecting to {ssid}…", "Joining the network and asking it for an address")
+
+        def on_done(_r):
+            self._unbusy("network")
+            self.toast(f"Connected to {ssid}")
+            self._refresh_network()
+
+        def on_error(e):
+            self._unbusy("network")
+            self.toast(_error_text(e))
+
+        _run_async(lambda: self.client.connect_wifi(ssid, password), on_done, on_error)
 
     def _admin_page(self) -> Gtk.Widget:
         box, group = _page(
@@ -397,17 +542,20 @@ class Window(Adw.ApplicationWindow):
 
     # Back goes to the PREVIOUS page. Not to the welcome page, which is what
     # it did, and not past the account step once the account exists.
-    PAGES = ("welcome", "admin", "protect", "firmware")
-    PREVIOUS = {"admin": "welcome", "firmware": "protect"}
+    PAGES = ("welcome", "network", "admin", "protect", "firmware")
+    PREVIOUS = {"network": "welcome", "admin": "network", "firmware": "protect"}
 
     def _go(self, name: str) -> None:
         self.stack.set_visible_child_name(name)
         self.back.set_visible(name in self.PREVIOUS)
         self.next.set_visible(True)
         self.next.set_sensitive(True)
-        self.next.set_label({"welcome": "Get Started", "admin": "Create Account",
-                             "protect": "Continue", "firmware": "Finish"}[name])
+        self.next.set_label({"welcome": "Get Started", "network": "Skip for now",
+                             "admin": "Create Account", "protect": "Continue",
+                             "firmware": "Finish"}[name])
         self._revalidate()
+        if name == "network":
+            self._refresh_network()
         # Put the keyboard where the person will type next — and on the
         # welcome page, on the button, so Enter starts the wizard: there is
         # nothing to type there, and a person who reads the screen and
@@ -443,6 +591,8 @@ class Window(Adw.ApplicationWindow):
     def _advance(self) -> None:
         page = self.stack.get_visible_child_name()
         if page == "welcome":
+            self._go("network")
+        elif page == "network":
             self._go("admin")
         elif page == "admin":
             self._create_admin()

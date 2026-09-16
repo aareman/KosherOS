@@ -42,6 +42,17 @@ class DaemonClient:
         return self._call("Setup", "CreateFirstAdmin", "(sss)",
                           username, full_name, password)[0]
 
+    def network_status(self) -> dict:
+        """Is this machine online, and by what; whether it has Wi-Fi at all."""
+        return json.loads(self._call("Setup", "NetworkStatus")[0])
+
+    def list_wifi(self) -> list[dict]:
+        """Networks in range: ssid, signal, secured, active. Rescans."""
+        return json.loads(self._call("Setup", "ListWifi")[0])
+
+    def connect_wifi(self, ssid: str, password: str = "") -> None:
+        self._call("Setup", "ConnectWifi", "(ss)", ssid, password)
+
     def finish_setup(self, guardian_password: str, grub_password: str) -> None:
         self._call("Setup", "FinishSetup", "(ss)", guardian_password, grub_password)
 
@@ -266,7 +277,30 @@ class DaemonClient:
         return self._call("System", "CheckUpdate")[0]
 
     def apply_update(self) -> None:
+        """Start the update. It runs on in the daemon; progress arrives on
+        the signals connect_update_signals subscribes to."""
         self._call("System", "ApplyUpdate")
+
+    def disconnect_signals(self, subscription: int) -> None:
+        """Drop a subscription from connect_app_signals or
+        connect_update_signals, for a page that is going away."""
+        self._conn.signal_unsubscribe(subscription)
+
+    def connect_update_signals(self, on_progress, on_finished) -> int:
+        """Subscribe to update progress: on_progress(percent, status) as it
+        runs (percent -1 when bootc cannot say), on_finished(ok, error)
+        once. Returns a subscription id."""
+
+        def handler(_conn, _sender, _path, _iface, signal, params):
+            if signal == "UpdateProgress":
+                on_progress(*params.unpack())
+            elif signal == "UpdateFinished":
+                on_finished(*params.unpack())
+
+        return self._conn.signal_subscribe(
+            BUS_NAME, "org.kosherlinux.Daemon1.System", None, OBJECT_PATH, None,
+            Gio.DBusSignalFlags.NONE, handler,
+        )
 
     def deployment_status(self) -> dict:
         """Which image is booted, and what a rollback would return to."""

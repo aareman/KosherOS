@@ -177,8 +177,12 @@ class AppCard(Gtk.Box):
     """One app: icon, name, what it is, and the button that acts on it."""
 
     def __init__(self, app: dict, store: "Window"):
+        # A fixed height as well as a fixed width: a summary that wraps to
+        # two lines on a narrow card and one on a wide one changed the row
+        # height, which changed whether the list needed a scrollbar, which
+        # changed the width — the loop a person sees as flickering.
         super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=6,
-                         width_request=280)
+                         width_request=280, height_request=96)
         self.app = app
         self.ref = app["ref"]
         self.store = store
@@ -215,7 +219,11 @@ class AppCard(Gtk.Box):
         self.progress = Gtk.ProgressBar(show_text=True, visible=False,
                                         valign=Gtk.Align.CENTER)
         self.append(self.progress)
-        self.set_state(store.state_of(self.ref))
+        # The store remembers what is in hand, so a card built while an
+        # install is running shows the progress rather than an Install
+        # button that would start it a second time.
+        percent, status = store.work_of(self.ref)
+        self.set_state(store.state_of(self.ref), percent, status)
 
     def set_state(self, state: str, percent: int = 0, status: str = "") -> None:
         self.state = state
@@ -251,13 +259,17 @@ class AppCard(Gtk.Box):
 
     def _on_clicked(self, _b) -> None:
         before = self.state
+        if before == "working":
+            return  # already in hand: a second request is an error, not a wish
         # Several apps can be requested at once; kosherd queues them.
+        self.store.work_started(self.ref)
         self.set_state("working", 0, "Queued…")
         work = {"installed": self.store.client.remove_app,
                 "update": self.store.client.update_app}.get(
                     before, self.store.client.install_app)
 
         def on_error(e):
+            self.store.work_ended(self.ref)
             self.set_state(before)
             self.store.toast(_error_text(e))
 
@@ -267,7 +279,7 @@ class AppCard(Gtk.Box):
 class ShelfTile(Gtk.Box):
     """One category on the home page: what it is, and how much is on it."""
 
-    def __init__(self, key: str, label: str, count: int, icon: str):
+    def __init__(self, key: str, label: str, count: int, icon: str, words: str = ""):
         super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=8,
                          width_request=190, height_request=120)
         self.key = key
@@ -278,7 +290,7 @@ class ShelfTile(Gtk.Box):
         name = Gtk.Label(label=label, wrap=True, justify=Gtk.Justification.CENTER)
         name.add_css_class("heading")
         self.append(name)
-        n = Gtk.Label(label=f"{count} app" if count == 1 else f"{count} apps")
+        n = Gtk.Label(label=words or (f"{count} app" if count == 1 else f"{count} apps"))
         n.add_css_class("dim-label")
         n.add_css_class("caption")
         self.append(n)
@@ -291,6 +303,13 @@ class Window(Adw.ApplicationWindow):
                          default_width=980, default_height=700)
         self.client = DaemonClient()
         self.installed: set[str] = set()
+        # Everything installed on this machine as the daemon reports it,
+        # which is not the same as "catalogue entries whose ref is
+        # installed": an app approved once and installed is still here.
+        self.installed_apps: list[dict] = []
+        # ref -> (percent, what it is doing). Kept by the window, not by
+        # the card, so rebuilding the grid never loses an install.
+        self.working: dict[str, tuple[int, str]] = {}
         self.updates: dict[str, dict] = {}   # ref -> what is new about it
         self.cards: dict[str, AppCard] = {}
         self.can_install = True
@@ -320,6 +339,15 @@ class Window(Adw.ApplicationWindow):
         self.update_all.set_cursor_from_name("pointer")
         self.update_all.connect("clicked", lambda _b: self._update_all())
         header.pack_end(self.update_all)
+        # Asking the remote what is new. The shelf can only show an update
+        # flatpak already knows about, and nothing else on the machine
+        # fetches that, so the check is a thing a person can press.
+        self.check_button = Gtk.Button(label="Check for updates", visible=False,
+                                       tooltip_text="Ask Flathub whether the installed "
+                                                    "apps have newer builds")
+        self.check_button.set_cursor_from_name("pointer")
+        self.check_button.connect("clicked", lambda _b: self._check_updates())
+        header.pack_end(self.check_button)
 
         # Home: the categories themselves, which is what a store opens on.
         self.tiles = Gtk.FlowBox(selection_mode=Gtk.SelectionMode.NONE,
@@ -352,9 +380,15 @@ class Window(Adw.ApplicationWindow):
                                               width_request=210, vexpand=True)
         sidebar_scroller.set_child(self.sidebar)
 
+        # Exactly two columns, or exactly one when the window is narrow.
+        # Left to choose between one and two for itself, the grid and the
+        # scrollbar chased each other — two columns made the cards narrow,
+        # narrow cards made the list taller, a taller list wanted a
+        # scrollbar, and the scrollbar left room for only one column. The
+        # count now follows the window's width and nothing else.
         self.grid = Gtk.FlowBox(selection_mode=Gtk.SelectionMode.NONE,
                                 homogeneous=True, column_spacing=12, row_spacing=12,
-                                min_children_per_line=1, max_children_per_line=2,
+                                min_children_per_line=2, max_children_per_line=2,
                                 margin_start=14, margin_end=14, margin_top=12,
                                 margin_bottom=18, valign=Gtk.Align.START)
         grid_scroller = Gtk.ScrolledWindow(vexpand=True, hexpand=True,
@@ -378,6 +412,11 @@ class Window(Adw.ApplicationWindow):
         view.add_top_bar(header)
         view.set_content(self.stack)
         self.toasts.set_child(view)
+
+        narrow = Adw.Breakpoint.new(Adw.BreakpointCondition.parse("max-width: 880sp"))
+        narrow.add_setter(self.grid, "min-children-per-line", 1)
+        narrow.add_setter(self.grid, "max-children-per-line", 1)
+        self.add_breakpoint(narrow)
 
         self.client.connect_app_signals(self._on_progress, self._on_finished)
         self.reload()
@@ -403,6 +442,11 @@ class Window(Adw.ApplicationWindow):
         def load():
             catalog = self.client.list_catalog().get("apps", [])
             installed = set(self.client.list_installed())
+            details = []
+            try:
+                details = self.client.list_installed_details()
+            except Exception:  # noqa: BLE001 - an older daemon has only the refs
+                pass
             policy = None
             try:
                 policy = self.client.get_policy()
@@ -413,10 +457,10 @@ class Window(Adw.ApplicationWindow):
                 updates = {u["ref"]: u for u in self.client.list_app_updates()}
             except Exception:  # noqa: BLE001 - a store with no update news still opens
                 pass
-            return catalog, installed, policy, updates
+            return catalog, installed, details, policy, updates
 
         def on_done(result):
-            self.catalog, self.installed, policy, self.updates = result
+            self.catalog, self.installed, self.installed_apps, policy, self.updates = result
             if policy:
                 me = next((u for u in policy["users"] if u["uid"] == os.getuid()), None)
                 if me is not None:
@@ -429,9 +473,85 @@ class Window(Adw.ApplicationWindow):
         _run_async(load, on_done, lambda e: self.toast(_error_text(e)))
 
     def state_of(self, ref: str) -> str:
+        if ref in self.working:
+            return "working"
         if ref in self.updates:
             return "update"
         return "installed" if ref in self.installed else "available"
+
+    def work_of(self, ref: str) -> tuple[int, str]:
+        """How far along this app is, if anything is happening to it."""
+        return self.working.get(ref, (0, "Queued…"))
+
+    def work_started(self, ref: str, status: str = "Queued…") -> None:
+        """Remember that an app is being worked on. The card used to hold
+        this by itself and forgot the moment the grid was rebuilt, so an
+        app being installed showed an Install button, and pressing it
+        asked for the same install twice — which is an error, not a wish."""
+        fresh = ref not in self.working
+        self.working[ref] = (0, status)
+        if fresh:
+            self._refresh_counts()
+
+    def work_ended(self, ref: str) -> None:
+        self.working.pop(ref, None)
+        self._refresh_counts()
+
+    def _refresh_counts(self) -> None:
+        """The shelves that come and go: Installing, Updates, Installed."""
+        self._render_home()
+        self._render_sidebar()
+        if self.shelf == "installing":
+            self._render()
+
+    @staticmethod
+    def _readable(ref: str) -> str:
+        """'org.gnome.Boxes' -> 'Boxes'. What to call an app the catalogue
+        does not describe, rather than showing a person a ref."""
+        return (ref.rsplit(".", 1)[-1] or ref).strip() or ref
+
+    def installed_entries(self) -> list[dict]:
+        """Every app installed on this computer, best names first.
+
+        Taken from the daemon's own account of what is installed rather
+        than by filtering the catalogue to refs that happen to be
+        installed: an app that was approved when it was installed and has
+        since left the list is still on the machine, and the Installed
+        shelf that filtered the catalogue showed nothing at all for it.
+        """
+        catalog = {a["ref"]: a for a in self.catalog}
+        if not self.installed_apps:
+            return [catalog[ref] for ref in sorted(self.installed) if ref in catalog]
+        out = []
+        for detail in self.installed_apps:
+            ref = detail.get("ref")
+            if not ref:
+                continue
+            entry = dict(catalog.get(ref) or {"ref": ref})
+            entry["name"] = entry.get("name") or detail.get("name") or self._readable(ref)
+            if detail.get("icon_name") and not entry.get("icon_name"):
+                entry["icon_name"] = detail["icon_name"]
+            if not entry.get("summary"):
+                entry["summary"] = (
+                    "Installed on this computer" if detail.get("approved", True)
+                    else "Installed, but no longer on the approved list")
+            out.append(entry)
+        out.sort(key=lambda a: a["name"].lower())
+        return out
+
+    def installing_entries(self) -> list[dict]:
+        """What is being installed, updated or removed right now — including
+        work another window started, which arrives on the same signals."""
+        catalog = {a["ref"]: a for a in self.catalog}
+        known = {a["ref"]: a for a in self.installed_entries()}
+        out = []
+        for ref in sorted(self.working):
+            entry = dict(catalog.get(ref) or known.get(ref) or {"ref": ref})
+            entry["name"] = entry.get("name") or self._readable(ref)
+            if not entry.get("summary"):
+                entry["summary"] = self.working[ref][1] or "Working…"
+            out.append(entry)
+        return out
 
     def update_words(self, ref: str) -> str:
         """'Version 2.1 is available' / 'A newer build is available'."""
@@ -441,8 +561,8 @@ class Window(Adw.ApplicationWindow):
 
     def shelf_counts(self) -> dict[str, int]:
         counts: dict[str, int] = {"all": len(self.catalog),
-                                  "installed": len([a for a in self.catalog
-                                                    if a["ref"] in self.installed]),
+                                  "installed": len(self.installed_entries()),
+                                  "installing": len(self.working),
                                   "updates": len([a for a in self.catalog
                                                   if a["ref"] in self.updates])}
         for app in self.catalog:
@@ -476,8 +596,12 @@ class Window(Adw.ApplicationWindow):
             "An administrator chooses which apps this computer may install, "
             "in KosherOS Admin.")
         tiles = []
-        if counts["updates"]:
-            tiles.append(("updates", "Updates", "software-update-available-symbolic"))
+        if counts["installing"]:
+            tiles.append(("installing", "Installing", "folder-download-symbolic"))
+        # Updates is always here, with or without one waiting: a shelf that
+        # appeared only when something needed updating was a feature nobody
+        # could find — "where is the feature to update apps".
+        tiles.append(("updates", "Updates", "software-update-available-symbolic"))
         if counts["installed"]:
             tiles.append(("installed", "Installed", "emblem-ok-symbolic"))
         tiles += [(key, label, SHELF_ICONS.get(key, (FALLBACK_ICON,))[0])
@@ -485,7 +609,8 @@ class Window(Adw.ApplicationWindow):
         tiles.append(("all", "All apps", "view-grid-symbolic"))
         for key, label, icon in tiles:
             child = Gtk.FlowBoxChild()
-            child.set_child(ShelfTile(key, label, counts.get(key, 0), icon))
+            words = "Up to date" if key == "updates" and not counts["updates"] else ""
+            child.set_child(ShelfTile(key, label, counts.get(key, 0), icon, words))
             child.key = key
             child.set_cursor_from_name("pointer")
             self.tiles.append(child)
@@ -499,9 +624,9 @@ class Window(Adw.ApplicationWindow):
         while (child := self.sidebar.get_first_child()) is not None:
             self.sidebar.remove(child)
         counts = self.shelf_counts()
-        rows = [("all", "All apps"), ("installed", "Installed")]
-        if counts["updates"]:
-            rows.insert(1, ("updates", "Updates"))
+        rows = [("all", "All apps"), ("updates", "Updates"), ("installed", "Installed")]
+        if counts["installing"]:
+            rows.insert(0, ("installing", "Installing"))
         rows += self.shelves_with_apps()
         for key, label in rows:
             row = Gtk.ListBoxRow()
@@ -510,6 +635,7 @@ class Window(Adw.ApplicationWindow):
                           margin_start=6, margin_end=6)
             icon = ("view-grid-symbolic" if key == "all" else
                     "emblem-ok-symbolic" if key == "installed" else
+                    "folder-download-symbolic" if key == "installing" else
                     "software-update-available-symbolic" if key == "updates" else
                     SHELF_ICONS.get(key, (FALLBACK_ICON,))[0])
             box.append(Gtk.Image(icon_name=icon, pixel_size=16))
@@ -560,15 +686,19 @@ class Window(Adw.ApplicationWindow):
 
     def shown_apps(self) -> list[dict]:
         needle = self.search.get_text().strip().lower()
+        if self.shelf == "installed":
+            pool = self.installed_entries()
+        elif self.shelf == "installing":
+            pool = self.installing_entries()
+        else:
+            pool = self.catalog
         found = []
-        for app in self.catalog:
-            if self.shelf == "installed":
-                if app["ref"] not in self.installed:
-                    continue
-            elif self.shelf == "updates":
+        for app in pool:
+            if self.shelf == "updates":
                 if app["ref"] not in self.updates:
                     continue
-            elif self.shelf != "all" and shelf_of(app) != self.shelf:
+            elif self.shelf not in ("all", "installed", "installing") \
+                    and shelf_of(app) != self.shelf:
                 continue
             if needle and needle not in app.get("name", "").lower() \
                     and needle not in app["ref"].lower() \
@@ -583,8 +713,9 @@ class Window(Adw.ApplicationWindow):
             self.grid.remove(child)
         self.cards.clear()
         shown = self.shown_apps()
-        self.update_all.set_visible(self.shelf == "updates" and bool(shown)
-                                    and self.stack.get_visible_child_name() == "browse")
+        browsing = self.stack.get_visible_child_name() == "browse"
+        self.update_all.set_visible(self.shelf == "updates" and bool(shown) and browsing)
+        self.check_button.set_visible(self.shelf == "updates" and browsing)
         if not shown:
             self.results.set_visible_child_name("empty")
             if not self.catalog:
@@ -599,6 +730,14 @@ class Window(Adw.ApplicationWindow):
                 self.empty.set_title("Everything is up to date")
                 self.empty.set_description("Installed apps are updated from here when a "
                                            "newer build is available.")
+            elif self.shelf == "installed":
+                self.empty.set_title("Nothing is installed yet")
+                self.empty.set_description("Apps you install from here appear in this "
+                                           "list, and can be removed from it.")
+            elif self.shelf == "installing":
+                self.empty.set_title("Nothing is being installed")
+                self.empty.set_description("An app appears here while it is being "
+                                           "installed, updated or removed.")
             else:
                 self.empty.set_title("Nothing in this category")
                 self.empty.set_description("Try another category.")
@@ -611,7 +750,32 @@ class Window(Adw.ApplicationWindow):
             child.set_child(card)
             self.grid.append(child)
 
+    def _check_updates(self) -> None:
+        """Ask the daemon to fetch the remote's news and say what is new."""
+        self.check_button.set_sensitive(False)
+        self.check_button.set_label("Checking…")
+
+        def done(found):
+            self.updates = {u["ref"]: u for u in found}
+            self.check_button.set_sensitive(True)
+            self.check_button.set_label("Check for updates")
+            self._render_home()
+            self._render_sidebar()
+            self._render()
+            self.toast(f"{len(found)} app can be updated" if len(found) == 1
+                       else f"{len(found)} apps can be updated" if found
+                       else "Every app is up to date")
+
+        def failed(e):
+            self.check_button.set_sensitive(True)
+            self.check_button.set_label("Check for updates")
+            self.toast(_error_text(e))
+
+        _run_async(self.client.check_app_updates, done, failed)
+
     def _update_all(self) -> None:
+        for ref in list(self.updates):
+            self.work_started(ref)
         for ref, card in self.cards.items():
             if ref in self.updates:
                 card.set_state("working", 0, "Queued…")
@@ -628,11 +792,18 @@ class Window(Adw.ApplicationWindow):
     # -- progress ------------------------------------------------------------------
 
     def _on_progress(self, ref: str, percent: int, status: str) -> None:
+        fresh = ref not in self.working
+        self.working[ref] = (percent, status)
         card = self.cards.get(ref)
         if card is not None:
             card.set_state("working", percent, status)
+        if fresh:
+            # Something this window did not start — the admin app, or an
+            # update — is now in hand. It belongs on the Installing shelf.
+            self._refresh_counts()
 
     def _on_finished(self, ref: str, ok: bool, error: str) -> None:
+        self.working.pop(ref, None)
         card = self.cards.get(ref)
         name = card.app.get("name", ref) if card else ref
         if ok:
@@ -645,6 +816,7 @@ class Window(Adw.ApplicationWindow):
         else:
             if card is not None:
                 card.set_state(self.state_of(ref))
+            self._refresh_counts()
             self.toast(error or f"{name} failed")
 
 

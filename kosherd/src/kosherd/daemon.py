@@ -245,6 +245,9 @@ INTROSPECTION_XML = """
     <method name="ListAppUpdates">
       <arg direction="out" type="s" name="updates_json"/>
     </method>
+    <method name="CheckAppUpdates">
+      <arg direction="out" type="s" name="updates_json"/>
+    </method>
     <method name="UpdateApp">
       <arg direction="in" type="s" name="ref"/>
     </method>
@@ -1706,6 +1709,20 @@ class Daemon:
             found = apps.available_updates()
         except Exception as e:  # noqa: BLE001 - "could not look" is an empty list, said
             log.warning("could not list app updates: %s", e)
+            found = []
+        return GLib.Variant("(s)", (json.dumps(found),))
+
+    def impl_CheckAppUpdates(self):
+        """Fetch the remote's news first, then list what can be updated.
+
+        Slower than ListAppUpdates — it goes to the network — which is why
+        it is what a person asks for by pressing a button, and the cheap
+        one is what the store reads when it opens.
+        """
+        try:
+            found = apps.refresh_updates()
+        except Exception as e:  # noqa: BLE001 - "could not look" is an empty list, said
+            log.warning("could not check for app updates: %s", e)
             found = []
         return GLib.Variant("(s)", (json.dumps(found),))
 

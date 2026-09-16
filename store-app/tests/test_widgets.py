@@ -7,6 +7,8 @@ window against the pretend daemon, on a virtual display.
 
 from __future__ import annotations
 
+import pathlib
+
 import pytest
 
 gi = pytest.importorskip("gi")
@@ -312,3 +314,168 @@ def test_an_app_with_no_update_keeps_its_ordinary_button(window):
     states = {ref: card.state for ref, card in window.cards.items()}
     assert set(states.values()) == {"update", "installed"}
     assert sum(1 for s in states.values() if s == "update") == 2
+
+
+# -- what is in hand, and what is installed ---------------------------------------
+
+def test_an_install_in_hand_survives_a_rebuild_and_cannot_be_asked_for_twice(window):
+    asked = []
+
+    class Counting(type(window.client)):
+        pass
+
+    window.client.install_app = lambda ref: asked.append(ref)
+    window.show_shelf("all")
+    drain()
+    card = next(c.get_child() for c in _children(window.grid)
+                if c.get_child().ref == "org.gnome.Chess")
+    card.button.emit("clicked")
+    drain()
+    assert asked == ["org.gnome.Chess"]
+    assert window.working["org.gnome.Chess"][1] == "Queued…"
+    # A second press does nothing: the button is hidden, and the handler
+    # refuses anyway.
+    card._on_clicked(None)
+    assert asked == ["org.gnome.Chess"]
+    # Every later render still shows it as working — this is what used to
+    # be lost, leaving an Install button that asked for it again.
+    window.show_shelf("all")
+    drain()
+    rebuilt = next(c.get_child() for c in _children(window.grid)
+                   if c.get_child().ref == "org.gnome.Chess")
+    assert rebuilt is not card
+    assert rebuilt.state == "working"
+    assert rebuilt.progress.get_visible() and not rebuilt.button.get_visible()
+
+
+def test_the_installing_shelf_lists_what_is_being_installed(window):
+    assert "installing" not in [k for k, _l in _sidebar_rows(window)]
+    window._on_progress("org.gnome.Chess", 40, "Downloading")
+    drain()
+    assert window.shelf_counts()["installing"] == 1
+    assert ("installing", "Installing") in _sidebar_rows(window)
+    window.show_shelf("installing")
+    drain()
+    shown = window.shown_apps()
+    assert [a["ref"] for a in shown] == ["org.gnome.Chess"]
+    card = _children(window.grid)[0].get_child()
+    assert card.state == "working"
+    assert "Downloading" in card.progress.get_text()
+    # When it finishes the shelf empties again.
+    window._on_finished("org.gnome.Chess", True, "")
+    drain()
+    assert window.working == {}
+    assert ("installing", "Installing") not in _sidebar_rows(window)
+
+
+def test_the_installing_shelf_says_so_when_nothing_is_happening(window):
+    window.show_shelf("installing")
+    drain()
+    assert window.results.get_visible_child_name() == "empty"
+    assert window.empty.get_title() == "Nothing is being installed"
+
+
+def test_installed_lists_what_the_machine_has_even_outside_the_catalogue(monkeypatch):
+    # An app approved when it was installed, since taken off the list, is
+    # still on the machine. The shelf used to filter the catalogue, so it
+    # showed nothing for it.
+    class Extra(DemoClient):
+        def list_installed_details(self):
+            return super().list_installed_details() + [
+                {"ref": "org.example.Old", "name": "An Older App", "approved": False}]
+
+        def list_installed(self):
+            return super().list_installed() + ["org.example.Old"]
+
+    monkeypatch.setattr(store, "DaemonClient", Extra)
+    win = store.Window()
+    drain()
+    win.show_shelf("installed")
+    drain()
+    refs = [a["ref"] for a in win.shown_apps()]
+    assert "org.example.Old" in refs
+    assert win.shelf_counts()["installed"] == len(refs)
+    entry = next(a for a in win.shown_apps() if a["ref"] == "org.example.Old")
+    assert entry["name"] == "An Older App"
+    assert "no longer on the approved list" in entry["summary"]
+
+
+def test_installed_says_so_when_nothing_is_installed(monkeypatch):
+    class Nothing(DemoClient):
+        def list_installed(self):
+            return []
+
+        def list_installed_details(self):
+            return []
+
+    monkeypatch.setattr(store, "DaemonClient", Nothing)
+    win = store.Window()
+    drain()
+    win.show_shelf("installed")
+    drain()
+    assert win.results.get_visible_child_name() == "empty"
+    assert win.empty.get_title() == "Nothing is installed yet"
+
+
+def test_the_grid_has_a_fixed_number_of_columns_at_any_one_width(window):
+    # "app lists flicker between two column and one": left to choose for
+    # itself, the grid and the scrollbar chased each other.
+    assert window.grid.get_min_children_per_line() == window.grid.get_max_children_per_line() == 2
+    source = (pathlib.Path(store.__file__)).read_text()
+    assert 'Adw.BreakpointCondition.parse("max-width: 880sp")' in source
+    assert 'narrow.add_setter(self.grid, "min-children-per-line", 1)' in source
+    # And a card cannot change height as it changes width.
+    window.show_shelf("all")
+    drain()
+    card = _children(window.grid)[0].get_child()
+    width, height = card.get_size_request()
+    assert width > 0 and height > 0
+
+
+def _sidebar_rows(window):
+    rows = []
+    row = window.sidebar.get_first_child()
+    while row is not None:
+        key = getattr(row, "key", None)
+        label = row.get_child().get_first_child().get_next_sibling()
+        rows.append((key, label.get_label()))
+        row = row.get_next_sibling()
+    return rows
+
+
+def test_updates_are_always_findable_even_with_nothing_to_update(monkeypatch):
+    # "where is the feature to update apps": the shelf used to appear only
+    # when something needed updating, which on a machine that had never
+    # fetched the remote's news was never.
+    class UpToDate(DemoClient):
+        def list_app_updates(self):
+            return []
+
+    monkeypatch.setattr(store, "DaemonClient", UpToDate)
+    win = store.Window()
+    drain()
+    assert ("updates", "Updates") in _sidebar_rows(win)
+    tiles = [c.get_child() for c in _children(win.tiles)]
+    updates_tile = next(t for t in tiles if t.key == "updates")
+    words = [w.get_label() for w in _children(updates_tile) if isinstance(w, Gtk.Label)]
+    assert "Up to date" in words
+    win.show_shelf("updates")
+    drain()
+    assert win.check_button.get_visible(), "and a way to go and look"
+    assert not win.update_all.get_visible()
+
+
+def test_checking_for_updates_asks_the_remote_and_says_what_it_found(window):
+    asked = []
+    window.client.check_app_updates = lambda: (
+        asked.append(1) or [{"ref": "org.gnome.Chess", "name": "Chess", "version": "4.2"}])
+    window.show_shelf("updates")
+    drain()
+    window.check_button.emit("clicked")
+    drain()
+    assert asked, "the button goes to the daemon, which goes to the remote"
+    assert window.check_button.get_label() == "Check for updates"
+    assert "org.gnome.Chess" in window.updates
+    assert window.state_of("org.gnome.Chess") == "update"
+    assert [a["ref"] for a in window.shown_apps()] == ["org.gnome.Chess"]
+

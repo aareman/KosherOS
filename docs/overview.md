@@ -70,8 +70,9 @@ page and a whitelist user can finally *see* what the whitelist contains. See
 [search](search.md).
 
 **Apps from an allowlist.** The KosherOS Store installs from upstream Flathub, limited to
-the apps a parent has approved, and keeps them current: an Updates shelf appears whenever an
-installed app has a newer build, with one button per app and one for all of them. A guest
+the apps a parent has approved, and keeps them current: an Updates shelf is always there,
+with a Check for updates button that asks Flathub, one button per app and one for all of
+them. Installed lists everything on the machine and Installing shows what is in hand. A guest
 account can be switched on, given its own kind of internet, and is wiped at sign-out.
 
 **A window for the person being filtered.** *My Filter* is a read-only app on every account

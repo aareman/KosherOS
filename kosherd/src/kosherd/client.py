@@ -260,6 +260,12 @@ class DaemonClient:
     def unapprove_app(self, ref: str) -> None:
         self._call("Apps", "UnapproveApp", "(s)", ref)
 
+    def check_app_updates(self) -> list[dict]:
+        """Ask the remote for news, then list what can be updated. Goes to
+        the network, so it is what a button asks for, not what a window
+        reads when it opens."""
+        return json.loads(self._call("Apps", "CheckAppUpdates")[0])
+
     def list_app_updates(self) -> list[dict]:
         """Installed apps with a newer build available: ref, name, version,
         commit, latest."""

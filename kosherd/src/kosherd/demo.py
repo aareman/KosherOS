@@ -471,6 +471,9 @@ class DemoClient:
 
     # -- updates: the first two installed apps have a newer build ------------------
 
+    def check_app_updates(self):
+        return self.list_app_updates()
+
     def list_app_updates(self):
         pending = getattr(self, "_updated", set())
         out = []

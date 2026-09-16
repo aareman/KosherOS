@@ -430,6 +430,30 @@ def resolve_remote_ref(app_id: str) -> str:
     return matches[0].format_ref()
 
 
+def refresh_updates() -> list[dict]:
+    """Ask the remote what is new, then say what can be updated.
+
+    `available_updates` reads what flatpak already knows, and flatpak only
+    learns of a new build when something fetches the remote's summary. On
+    a machine where nothing has, the answer is "nothing" forever and the
+    store's Updates shelf never appears — "where is the feature to update
+    apps". This fetches first, which is what `flatpak update` does before
+    it decides anything.
+    """
+    if Flatpak is None:
+        return []
+    installation = Flatpak.Installation.new_system(None)
+    for step in ("update_remote_sync", "drop_caches"):
+        method = getattr(installation, step, None)
+        if method is None:
+            continue
+        try:
+            method(REMOTE, None) if step == "update_remote_sync" else method(None)
+        except Exception as e:  # noqa: BLE001 - a stale answer beats no answer
+            log.warning("could not refresh %s before listing updates: %s", REMOTE, e)
+    return available_updates()
+
+
 def available_updates() -> list[dict]:
     """Installed apps with a newer build on the remote.
 

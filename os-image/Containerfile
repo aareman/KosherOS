@@ -252,16 +252,19 @@ RUN true \
     # (The timeout GRUB actually uses is set in the static config,
     # configs.d/09_kosheros_quiet.cfg; this file is documentation.)
     && printf 'GRUB_DISTRIBUTOR="KosherOS"\nGRUB_TIMEOUT=1\nGRUB_TIMEOUT_STYLE=hidden\n' > /etc/default/grub \
-    # systemd.show_status=auto surfaces "Starting ..." lines to Plymouth, so
-    # the splash reports what a slow boot is waiting on instead of just
-    # sitting there looking hung. The rest keep the text console blank:
+    # No systemd.show_status: it surfaced "Starting Plymouth…" and unit
+    # names on the splash, which is not a sentence a family should have to
+    # read. Our own units say what is happening instead, in plain words,
+    # through `plymouth display-message` (see the *.service.d/10-kosheros-
+    # splash.conf drop-ins), and the theme opens on "Starting KosherOS…".
+    # The rest keep the text console blank:
     # between the login screen and the desktop (and back, at sign-out) the
     # display falls to the kernel console for a moment, and what it showed
     # there was kernel and audit chatter with a blinking cursor. A quiet
     # console at loglevel 3 and no cursor makes that moment a plain dark
     # screen, which is the most a kernel console can be asked to be.
     && mkdir -p /usr/lib/bootc/kargs.d \
-    && printf 'kargs = ["quiet", "loglevel=3", "systemd.show_status=auto", "vt.global_cursor_default=0", "rd.udev.log_level=3", "udev.log_priority=3"]\n' \
+    && printf 'kargs = ["quiet", "loglevel=3", "vt.global_cursor_default=0", "rd.udev.log_level=3", "udev.log_priority=3"]\n' \
          > /usr/lib/bootc/kargs.d/10-kosheros.toml \
     && dconf update
 

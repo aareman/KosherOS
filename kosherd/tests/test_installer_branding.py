@@ -231,3 +231,25 @@ def test_the_person_model_is_fetched_by_hash():
     assert persons.MODEL_URL in containerfile
     assert persons.MODEL_SHA256 in containerfile
     assert str(persons.MODEL_PATH) in containerfile or "/usr/share/kosher/models/yolox_nano.onnx" in containerfile
+
+
+def test_the_boot_splash_speaks_in_sentences_not_unit_names():
+    """'Can we make the text shown of what is happening more user friendly
+    than just plymouth etc.' systemd's status lines are off the splash;
+    our units announce themselves in words through plymouth's message
+    channel, and the theme opens on one of ours."""
+    containerfile = (ROOT / "os-image/Containerfile").read_text()
+    assert "systemd.show_status" not in containerfile.split("kargs = [")[1].split("]")[0]
+    script = (ROOT / "os-image/files/usr/share/plymouth/themes/kosheros/kosheros.script").read_text()
+    assert 'show_status("Starting KosherOS…");' in script
+    units = ROOT / "os-image/files/usr/lib/systemd/system"
+    said = {}
+    for conf in units.glob("*.service.d/10-kosheros-splash.conf"):
+        text = conf.read_text()
+        assert "ExecStartPre=-/usr/bin/plymouth display-message --text=" in text, conf
+        said[conf.parent.name] = text.split('--text="')[1].split('"')[0]
+    assert set(said) >= {"kosherd.service.d", "greenboot-healthcheck.service.d",
+                         "kosher-firstboot.service.d"}
+    for unit, words in said.items():
+        assert words.endswith("…") and "service" not in words.lower(), (unit, words)
+        assert words[0].isupper(), words

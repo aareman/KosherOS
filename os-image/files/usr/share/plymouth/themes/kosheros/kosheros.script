@@ -42,6 +42,11 @@ fun draw_fill(fraction) {
 }
 
 # --- status text -------------------------------------------------------------
+# What the family reads under the bar. It opens on a sentence of ours and
+# changes only when one of our units says what it is doing (`plymouth
+# display-message`); systemd's own "Starting …" lines are no longer sent
+# here (no systemd.show_status on the kernel line), because "Starting
+# Plymouth Boot Screen" is nobody's idea of reassurance.
 status.y = bar.y + 28;
 fun show_status(text) {
     status.image = Image.Text(text, 0.72, 0.79, 0.90);
@@ -49,6 +54,7 @@ fun show_status(text) {
     status.sprite.SetPosition(
         screen_width / 2 - status.image.GetWidth() / 2, status.y, 3);
 }
+show_status("Starting KosherOS…");
 
 # --- progress ----------------------------------------------------------------
 ticks = 0;
@@ -74,7 +80,7 @@ fun boot_progress_callback(duration, progress_fraction) {
 }
 Plymouth.SetBootProgressFunction(boot_progress_callback);
 
-# systemd's "Starting ..." messages arrive here; showing the latest means a
+# Our units' messages arrive here; showing the latest means a
 # slow boot says what it is waiting on instead of looking hung.
 fun message_callback(text) {
     show_status(text);

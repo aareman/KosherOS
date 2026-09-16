@@ -448,14 +448,18 @@ class UpdatesPage(_Page):
     def _check(self, _b) -> None:
         self.status_row.set_subtitle("Checking…")
 
-        def on_done(status):
-            first = next((line for line in status.splitlines() if line.strip()),
-                         "Up to date")
-            self.win.update_state = first[:120]
-            self.status_row.set_subtitle(first[:120])
+        def on_done(info):
+            sentence, short = check_words(info, self._running_version())
+            self.win.update_state = short
+            self.status_row.set_subtitle(sentence)
+            self.win.sidebar.refresh() if hasattr(self.win, "sidebar") else None
 
         run_async(self.win.client.check_update, on_done,
                   lambda e: self.status_row.set_subtitle(error_text(e)))
+
+    def _running_version(self) -> str | None:
+        booted = (getattr(self.win, "deployment", None) or {}).get("booted") or {}
+        return booted.get("version") or None
 
     # -- applying, with the daemon telling us how far it is ----------------------
 
@@ -511,6 +515,33 @@ class UpdatesPage(_Page):
         else:
             self.status_row.set_subtitle(error or "The update did not finish.")
             self.win.toast(error or "The update did not finish")
+
+
+def check_words(info: dict, running: str | None) -> tuple[str, str]:
+    """(the sentence for the row, the few words for the sidebar) from a
+    CheckUpdate answer. The version is the point: 'what would I get' is the
+    question, and bootc's first line names the image instead."""
+    version = info.get("version")
+    channel = info.get("channel")
+    if info.get("available"):
+        if version:
+            sentence = f"Version {version} is available"
+            if running:
+                sentence += f" — you are on {running}"
+            if channel:
+                sentence += f" ({channel} channel)"
+            return sentence + ".", f"{version} available"
+        sentence = "An update is available"
+        if channel:
+            sentence += f" on the {channel} channel"
+        return sentence + ".", "Update available"
+    if info.get("available") is False:
+        if running:
+            return f"Up to date — {running} is the newest on the {channel or 'update'} channel.", "Up to date"
+        return "Up to date.", "Up to date"
+    raw = (info.get("raw") or "").strip()
+    first = next((line for line in raw.splitlines() if line.strip()), "Could not check.")
+    return first[:120], first[:24]
 
 
 def _deployment_words(entry: dict | None) -> str:

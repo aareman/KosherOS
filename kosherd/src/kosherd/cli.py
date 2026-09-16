@@ -517,7 +517,7 @@ def cmd_system(args) -> int:
             print("  a rollback is already queued for the next restart")
         return 0
     if args.action == "check":
-        print(c.check_update().strip() or "no update information")
+        print(check_sentence(c.check_update()))
         return 0
     if args.action == "update":
         c.apply_update()
@@ -725,6 +725,17 @@ def cmd_setup(args) -> int:
     return 0
 
 
+def check_sentence(info: dict) -> str:
+    """One line from a CheckUpdate answer."""
+    if info.get("available"):
+        where = f" on the {info['channel']} channel" if info.get("channel") else ""
+        return (f"update available: {info['version']}{where}" if info.get("version")
+                else f"update available{where}")
+    if info.get("available") is False:
+        return "up to date"
+    return (info.get("raw") or "").strip() or "no update information"
+
+
 def cmd_check_catalog(args) -> int:
     """Verify every approved app actually exists on the remote."""
     from kosherd import apps
@@ -766,7 +777,7 @@ def cmd_update(args) -> int:
         c.apply_update()
         print("update staged; reboot to apply")
     else:
-        print(c.check_update())
+        print(check_sentence(c.check_update()))
     return 0
 
 

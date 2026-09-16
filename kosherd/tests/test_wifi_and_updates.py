@@ -130,3 +130,24 @@ def test_an_old_bootc_without_progress_fd_is_run_plain(tmp_path):
                         argv=(str(fake), "upgrade")).join(timeout=10)
     assert done == [(True, "")]
     assert (-1, "Updating…") in seen and seen[-1] == (100, "Update ready")
+
+
+# -- what "check for updates" says ------------------------------------------------
+
+def test_bootcs_answer_is_read_into_a_version_and_a_channel():
+    info = updates.parse_check(
+        "Update available for: ghcr.io/aareman/kosher-linux:edge\n"
+        "  Version: 0.1.0-pre.055\n  Digest: sha256:abc\n")
+    assert info["available"] is True
+    assert info["version"] == "0.1.0-pre.055"
+    assert info["channel"] == "edge" and info["image"].endswith(":edge")
+    assert info["digest"] == "sha256:abc"
+
+
+def test_no_changes_means_up_to_date_and_a_strange_answer_keeps_its_words():
+    quiet = updates.parse_check("No changes in: ghcr.io/aareman/kosher-linux:stable\n")
+    assert quiet["available"] is False and quiet["channel"] == "stable"
+    odd = updates.parse_check("error: registry unreachable")
+    assert odd["available"] is False and odd["version"] is None
+    assert odd["raw"] == "error: registry unreachable"
+    assert updates._channel("ghcr.io/x/y@sha256:abc") is None

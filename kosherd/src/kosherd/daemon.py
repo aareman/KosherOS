@@ -1630,8 +1630,15 @@ class Daemon:
     # ---- System ----------------------------------------------------------
 
     def impl_CheckUpdate(self):
+        """Is there a newer image, and which version is it: JSON with
+        `available`, `version`, `channel`, `image`, `digest` and bootc's
+        own words in `raw` (see updates.parse_check)."""
+        from . import updates
+
         res = subprocess.run(["bootc", "upgrade", "--check"], capture_output=True, text=True)
-        return GLib.Variant("(s)", (res.stdout or res.stderr,))
+        info = updates.parse_check(res.stdout or res.stderr)
+        info["ok"] = res.returncode == 0
+        return GLib.Variant("(s)", (json.dumps(info),))
 
     def impl_ApplyUpdate(self):
         """Start the update and return at once.

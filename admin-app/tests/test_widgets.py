@@ -93,7 +93,8 @@ class FakeClient:
             "staged": None, "rollback_queued": False})
 
     def check_update(self):
-        return "Up to date"
+        return self._overrides.get("check", {"ok": True, "available": False, "version": None,
+                                             "channel": "edge", "raw": "No changes in: x:edge"})
 
     # The update runs on in the daemon; the page hears about it by signal.
     update_calls = 0
@@ -1262,6 +1263,44 @@ def test_update_now_shows_a_bar_that_follows_the_daemon_and_says_when_to_restart
     assert not page.progress.get_visible() and page.apply_button.get_sensitive()
     assert "Restart the computer" in page.status_row.get_subtitle()
     assert any("Update ready" in t for t in win.toasts)
+
+
+def test_checking_says_which_version_you_would_get():
+    # "the updator when checking should show the tag value so you can see
+    # at a glance what you are getting"
+    win = FakeWindow(FakeClient(check={"ok": True, "available": True,
+                                       "version": "0.1.0-pre.055", "channel": "edge",
+                                       "image": "ghcr.io/x/kosher-linux:edge"}))
+    win.policy = {"revision": 1, "users": [], "guardian": {"enabled": False},
+                  "guest": {"enabled": False}}
+    win.deployment = {"booted": {"version": "0.1.0-pre.054"}}
+    page = computer.UpdatesPage(win)
+    drain()
+    page._check(None)
+    drain()
+    assert page.status_row.get_subtitle() == \
+        "Version 0.1.0-pre.055 is available — you are on 0.1.0-pre.054 (edge channel)."
+    assert win.update_state == "0.1.0-pre.055 available"
+
+
+def test_checking_when_current_says_so_with_the_version_you_have():
+    win = FakeWindow(FakeClient())
+    win.policy = {"revision": 1, "users": [], "guardian": {"enabled": False},
+                  "guest": {"enabled": False}}
+    win.deployment = {"booted": {"version": "0.1.0-pre.054"}}
+    page = computer.UpdatesPage(win)
+    drain()
+    page._check(None)
+    drain()
+    assert page.status_row.get_subtitle() == \
+        "Up to date — 0.1.0-pre.054 is the newest on the edge channel."
+    assert win.update_state == "Up to date"
+
+
+def test_an_answer_the_daemon_could_not_read_is_shown_as_it_came():
+    sentence, short = computer.check_words({"available": None, "raw": "error: no network\nmore"},
+                                           "0.1.0-pre.054")
+    assert sentence == "error: no network" and short == "error: no network"
 
 
 def test_once_an_update_is_ready_restart_is_one_click_away():

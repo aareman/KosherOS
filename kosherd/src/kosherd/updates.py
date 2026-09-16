@@ -61,6 +61,49 @@ def parse_progress(line: str) -> tuple[int, str] | None:
     return percent, str(words)
 
 
+def parse_check(text: str) -> dict:
+    """`bootc upgrade --check` output -> what a person wants from it.
+
+    bootc prints, for example:
+
+        Update available for: ghcr.io/aareman/kosher-linux:edge
+          Version: 0.1.0-pre.055
+          Digest: sha256:…
+
+    or `No changes in: ghcr.io/…:edge`. The page used to show the first
+    line, which names the image and not what you would get; the version
+    is the thing to see at a glance. Every field is optional, because
+    bootc's wording has moved before and will again; `raw` keeps the
+    original for the case none of it matched.
+    """
+    import re
+
+    text = text or ""
+    version = re.search(r"Version:\s*(\S+)", text)
+    digest = re.search(r"Digest:\s*(\S+)", text)
+    image = re.search(r"(?:Update available for|No changes in|No update available for|"
+                      r"Already at latest):?\s*(\S+)", text)
+    lowered = text.lower()
+    available = "update available" in lowered or ("version:" in lowered
+                                                 and "no changes" not in lowered)
+    return {
+        "available": bool(available),
+        "version": version.group(1) if version else None,
+        "digest": digest.group(1) if digest else None,
+        "image": image.group(1) if image else None,
+        "channel": _channel(image.group(1)) if image else None,
+        "raw": text.strip(),
+    }
+
+
+def _channel(image: str) -> str | None:
+    """'ghcr.io/x/kosher-linux:edge' -> 'edge'; a digest reference has none."""
+    if not image or "@" in image:
+        return None
+    tail = image.rsplit("/", 1)[-1]
+    return tail.split(":", 1)[1] if ":" in tail else None
+
+
 def run_upgrade(on_progress: Progress, on_finished: Finished,
                 argv: tuple[str, ...] = ("bootc", "upgrade")) -> threading.Thread:
     """Start the upgrade in a thread and return it.

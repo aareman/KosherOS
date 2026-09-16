@@ -442,7 +442,11 @@ class DemoClient:
 
     # -- system --------------------------------------------------------------------
 
-    def check_update(self): return "Up to date"
+    def check_update(self):
+        return {"ok": True, "available": True, "version": "0.1.0-pre.12", "channel": "edge",
+                "image": "ghcr.io/aareman/kosher-linux:edge", "digest": "sha256:demo",
+                "raw": "Update available for: ghcr.io/aareman/kosher-linux:edge\n"
+                       "  Version: 0.1.0-pre.12"}
 
     def connect_update_signals(self, on_progress, on_finished):
         self._on_update_progress, self._on_update_finished = on_progress, on_finished

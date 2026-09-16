@@ -273,8 +273,15 @@ class DaemonClient:
         )
 
     # System
-    def check_update(self) -> str:
-        return self._call("System", "CheckUpdate")[0]
+    def check_update(self) -> dict:
+        """Whether a newer image exists and which version it is: keys
+        `available`, `version`, `channel`, `image`, `digest`, `raw`, `ok`."""
+        answer = self._call("System", "CheckUpdate")[0]
+        try:
+            info = json.loads(answer)
+        except ValueError:  # an older daemon's plain text
+            info = {"available": None, "version": None, "raw": answer}
+        return info if isinstance(info, dict) else {"raw": str(answer)}
 
     def apply_update(self) -> None:
         """Start the update. It runs on in the daemon; progress arrives on

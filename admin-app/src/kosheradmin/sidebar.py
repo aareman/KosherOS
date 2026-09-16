@@ -70,8 +70,13 @@ class _Row(Gtk.ListBoxRow):
 
     def _pack(self, lead: Gtk.Widget) -> None:
         # One 28px column for every row's lead, so a face and an icon share
-        # a left edge and the names line up down the whole list.
-        column = Gtk.Box(width_request=28)
+        # a left edge and the names line up down the whole list. The
+        # column's width is fixed and it is told, explicitly, not to
+        # expand: a child that expands would otherwise make its parent
+        # expand too, and the column took a share of the row, so every
+        # title started somewhere else — "activity is to the left and
+        # update is really to the left".
+        column = Gtk.Box(width_request=28, hexpand=False, halign=Gtk.Align.START)
         lead.set_halign(Gtk.Align.CENTER)
         lead.set_hexpand(True)
         column.append(lead)

@@ -1424,6 +1424,32 @@ def test_waiting_requests_are_one_banner_under_every_pages_header():
         restore()
 
 
+def test_every_sidebar_title_starts_at_the_same_x_and_every_lead_is_centred():
+    # "the different items are not even aligned ... the plus of add person
+    # is spread out and not lined up with the user icons." A 28px lead
+    # column that must not expand, whatever its child asks for.
+    win, restore = _real_window()
+    try:
+        drain()
+        rows = list(win.sidebar.rows.values())
+        lefts = set()
+        centres = set()
+        for row in rows:
+            ok, bounds = row.title.compute_bounds(win.sidebar.list)
+            assert ok
+            lefts.add(round(bounds.get_x()))
+            lead = row.box.get_first_child()
+            ok, lb = lead.get_first_child().compute_bounds(win.sidebar.list)
+            assert ok
+            centres.add(round(lb.get_x() + lb.get_width() / 2))
+        assert len(lefts) == 1, f"titles start at {sorted(lefts)}"
+        assert len(centres) == 1, f"leads are centred at {sorted(centres)}"
+        # And the title starts right after the lead column, not mid-row.
+        assert next(iter(lefts)) < 80
+    finally:
+        restore()
+
+
 def test_a_filter_problem_is_the_amber_badge_on_protection_and_a_healthy_filter_is_quiet():
     win, restore = _real_window()
     try:

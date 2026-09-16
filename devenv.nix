@@ -69,20 +69,11 @@ in
     pkgs.xorriso
   ];
 
-  # Git hooks, installed on entering the shell (devenv runs them with prek).
-  # Every commit ticks the pre-release counter in VERSION so every image,
-  # ISO and VM carries a distinct version and a bug report can say which
-  # build it came from. The hook stages VERSION itself, so the bump lands in
-  # the commit being made. See scripts/version.py.
-  git-hooks.hooks.version-bump = {
-    enable = true;
-    name = "bump the pre-release version";
-    entry = "python3 scripts/version.py bump";
-    language = "system";
-    always_run = true;
-    pass_filenames = false;
-    stages = [ "pre-commit" ];
-  };
+  # There is no version-bump hook any more. VERSION used to be ticked on
+  # every commit, which numbered every commit on every branch; CI now ticks
+  # it once per merge to master (see .github/workflows/ci.yml, "version").
+  # `python3 scripts/version.py bump` is still there for CI and for a
+  # person cutting a release by hand.
 
   enterShell = ''
     echo "kosher-linux dev shell — try: just test | just render | just fedora-vm"

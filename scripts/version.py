@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""The product version, and the pre-release counter that ticks on every commit.
+"""The product version, and the pre-release counter that ticks on every merge.
 
 `VERSION` at the repo root is the one place the number lives: the
 Containerfile copies it into os-release, the ISO is named after it, the
@@ -7,13 +7,14 @@ installer's welcome screen reads it from `.buildstamp`, the admin app's
 Updates page shows it. It reads `MAJOR.MINOR.PATCH-pre.N` between releases
 and a plain `MAJOR.MINOR.PATCH` at a release.
 
-`bump` runs as a git pre-commit hook (devenv's git-hooks, on prek): it
-increments N and stages VERSION, so the bump lands in the commit being made
-and every commit — every image, every ISO, every VM — carries a different
-version. That is what lets a bug report say which build it came from. A
-merge commit is left alone: it introduces no change of its own. A release
-is a person editing VERSION to `X.Y.Z`; the next commit starts
-`X.Y.(Z+1)-pre.1` by itself.
+`bump` is run by CI once for every push to master — every merge — which
+increments N, commits VERSION to master and builds that commit, so every
+image, ISO and release carries a different version and a bug report can say
+which build it came from. It used to run as a pre-commit hook and number
+every commit on every branch, which spent five versions to land a
+five-commit branch. A release is a person editing VERSION to `X.Y.Z`; the
+merge after it starts `X.Y.(Z+1)-pre.1` by itself. Local builds between
+merges share the last merged version; the image's sha tag tells them apart.
 """
 
 from __future__ import annotations

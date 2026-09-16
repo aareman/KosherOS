@@ -82,12 +82,18 @@ def test_the_bump_can_be_switched_off_for_one_commit(tmp_path, monkeypatch):
     assert vt.bump(repo / "VERSION") is None
 
 
-def test_the_hook_is_installed_by_the_dev_shell():
-    nix = (ROOT / "devenv.nix").read_text()
-    assert "git-hooks" in nix
-    assert "scripts/version.py bump" in nix
-    assert "always_run = true" in nix and "pass_filenames = false" in nix
+def test_the_dev_shell_installs_no_version_hook_any_more():
+    """The tick moved from every commit to every merge.
 
+    The pre-commit hook numbered every commit on every branch, which the
+    maintainer called excessive; CI's version job now ticks VERSION once per
+    push to master. So the dev shell must not install the hook, or a branch
+    would be numbered twice over.
+    """
+    nix = (ROOT / "devenv.nix").read_text()
+    assert "git-hooks.hooks.version-bump" not in nix
+    ci = (ROOT / ".github/workflows/ci.yml").read_text()
+    assert "scripts/version.py bump" in ci
 
 def test_the_command_line(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr(vt, "VERSION_FILE", tmp_path / "VERSION")

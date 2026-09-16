@@ -150,3 +150,31 @@ def test_nothing_waits_for_an_event_its_own_token_cannot_fire():
         if isinstance(triggers, dict):
             assert "release" not in triggers, \
                 f"{path.name}: a CI-made release does not fire this"
+
+
+def test_the_version_is_ticked_once_per_merge_by_ci_not_per_commit():
+    """One number per push to master, made by the version job.
+
+    The pre-commit hook numbered every commit on every branch, which the
+    maintainer called excessive. Now the version job ticks VERSION once,
+    pushes the tick to master, and every job that builds or releases works
+    from THAT commit — otherwise the image and the release would name a
+    version whose VERSION file does not say so.
+    """
+    document = yaml.safe_load((ROOT / ".github/workflows/ci.yml").read_text())
+    jobs = document["jobs"]
+    version = jobs["version"]
+    assert version["if"] == "github.event_name == 'push'", "pull requests are not numbered"
+    assert version["concurrency"]["group"] == "version-bump"
+    run = version["steps"][-1]["run"]
+    assert "scripts/version.py bump" in run
+    assert "[skip ci]" in run, "the tick must not start another run"
+    assert "git push" in run and "HEAD:master" in run
+    for name in ("image", "release"):
+        assert "version" in jobs[name]["needs"], name
+    ci = (ROOT / ".github/workflows/ci.yml").read_text()
+    assert "GITHUB_SHA::12" not in ci, "images are tagged with the ticked commit"
+    assert '--target "$SHA"' in ci
+    # And the dev shell no longer installs the hook.
+    nix = (ROOT / "devenv.nix").read_text()
+    assert "git-hooks.hooks.version-bump" not in nix

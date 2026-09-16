@@ -185,6 +185,29 @@ def body_box(face, width, height):
 # below this; beachwear sits far above.
 SKIN_LIMIT = 0.22
 
+# A short skirt on its own. Measured over the whole figure, bare legs under
+# a covered top come to a sixth of the box — under SKIN_LIMIT — and the
+# picture sailed through; "miniskirts seem to get through a lot". So the
+# legs are measured on their own: the middle half of the body box's width,
+# from half way down to well above the feet (the floor is often beige),
+# where a skirt that stops at the thigh leaves most of the region skin.
+LEGS_SKIN_LIMIT = 0.30
+
+
+def legs_box(body):
+    """Where the legs are in an estimated body box: thighs to shins."""
+    x, y, w, h = body
+    return (int(x + 0.25 * w), int(y + 0.5 * h), int(0.5 * w), int(0.35 * h))
+
+
+def shows_too_much(image_bytes: bytes, body) -> bool:
+    """The figure, or its legs alone, past the immodest line."""
+    fraction = skin_fraction(image_bytes, body)
+    if fraction is not None and fraction >= SKIN_LIMIT:
+        return True
+    legs = skin_fraction(image_bytes, legs_box(body))
+    return legs is not None and legs >= LEGS_SKIN_LIMIT
+
 # A body-part detection this weak is not a verdict on its own, but it is
 # enough to say "there is a figure here" for the skin measurement.
 PART_HINT_CONFIDENCE = 0.12
@@ -274,7 +297,7 @@ def hides(media_level: str, verdict: ImageVerdict) -> bool:
 # logic: a family test found a swimsuit thumbnail still "clean" after the
 # skin rule shipped, because its clean verdict from earlier was still in
 # the cache.
-JUDGEMENT_VERSION = 3
+JUDGEMENT_VERSION = 4  # 4: legs measured on their own (short skirts)
 
 
 def digest(data: bytes) -> str:
@@ -818,8 +841,7 @@ class ImageFilter:
                                 verdict.has_person)
         if verdict.level == CLEAN and female:
             for face in female:
-                fraction = skin_fraction(image_bytes, body_box(face, *size))
-                if fraction is not None and fraction >= SKIN_LIMIT:
+                if shows_too_much(image_bytes, body_box(face, *size)):
                     return ImageVerdict(
                         IMMODEST,
                         tuple(body_box(f, *size) for f in female),

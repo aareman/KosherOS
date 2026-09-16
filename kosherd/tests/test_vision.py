@@ -373,6 +373,30 @@ def test_a_figure_from_behind_fully_clothed_stays_clean():
     assert verdict.level == vision.CLEAN
 
 
+def test_bare_legs_under_a_short_skirt_are_caught_even_with_a_covered_top():
+    # Over the whole figure the legs are a sixth of the box and the picture
+    # used to pass; measured on their own they are most of the legs region.
+    photo = _skin_photo(skin_box=(110, 230, 190, 400))
+    face = vision.Detection("FACE_FEMALE", 0.9, (120, 30, 60, 60))
+    body = vision.body_box(face.box, 300, 400)
+    assert vision.skin_fraction(photo, body) < vision.SKIN_LIMIT, "the old measure misses it"
+    verdict = vision.ImageFilter._person_aware(photo, [face], vision.judge([face]))
+    assert verdict.level == vision.IMMODEST
+
+
+def test_a_beige_floor_under_a_clothed_figure_is_not_legs():
+    # Skin-toned only in the bottom strip, below where legs are measured.
+    photo = _skin_photo(skin_box=(0, 350, 300, 400))
+    face = vision.Detection("FACE_FEMALE", 0.9, (120, 30, 60, 60))
+    verdict = vision.ImageFilter._person_aware(photo, [face], vision.judge([face]))
+    assert verdict.level == vision.CLEAN
+
+
+def test_the_legs_region_sits_in_the_lower_middle_of_the_figure():
+    x, y, w, h = vision.legs_box((100, 0, 200, 800))
+    assert (x, y, w, h) == (150, 400, 100, 280)
+
+
 def test_hidden_pictures_cover_the_whole_figure_not_a_fragment():
     # Legs under a short skirt: an exposed-class hit covered only its own
     # box; the rest of the person stayed visible.

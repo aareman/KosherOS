@@ -22,8 +22,9 @@ concurrency:
 jobs:
   version:
     name: Version this merge
-    # One pre-release number per push to master — per merge — rather than
-    # one per commit. The dev shell used to tick VERSION in a pre-commit
+    # One version per push to master — per merge — rather than one per
+    # commit. How far it steps (minor for a feat, patch otherwise, never
+    # major) is scripts/version.py's business, from the commit subjects. The dev shell used to tick VERSION in a pre-commit
     # hook, which numbered every commit on every branch; a five-commit
     # branch spent five versions to land one change, and that was judged
     # excessive. Now CI ticks it once, here, commits the tick to master and
@@ -194,7 +195,7 @@ jobs:
           ref: ${{ needs.version.outputs.sha || github.sha }}
 
       # Two channels. Every push to master becomes :edge — the maintainer's
-      # own daily driver, where every pre-release lands first — plus the
+      # own daily driver, where every build lands first — plus the
       # commit's sha tag and its version tag. :stable (and :latest, which
       # follows it) is never built here: release-stable.yml promotes an
       # existing signed version by hand, so what families run is a build
@@ -293,9 +294,9 @@ jobs:
             --sha "$SHA" --image "$IMAGE" --built "$built" $failed \
             --out release-notes.md
           cat release-notes.md
-          prerelease=""
-          case "$version" in *-pre.*) prerelease="--prerelease" ;; esac
-          gh release create "$tag" $prerelease --target "$SHA" \
+          # Plain 0.x.x now, so the newest build is the latest release
+          # rather than something GitHub hides behind a badge.
+          gh release create "$tag" --target "$SHA" \
             --title "KosherOS $version" --notes-file release-notes.md
 
   docs:

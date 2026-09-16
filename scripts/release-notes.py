@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Write a release's notes from the commits it contains.
 
-    scripts/release-notes.py --version 0.1.0-pre.24 --previous v0.1.0-pre.23 \
+    scripts/release-notes.py --version 0.4.0 --previous v0.3.2 \
         --sha $GITHUB_SHA --image ghcr.io/aareman/kosher-linux --built yes
 
 The notes a person actually reads. One sentence first saying what this build

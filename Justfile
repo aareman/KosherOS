@@ -342,7 +342,7 @@ release-iso CHANNEL="stable": _sudo
         if [ "{{CHANNEL}}" = "stable" ]; then
             echo "Nothing has been promoted to stable yet. Either:" >&2
             echo "  - open Actions -> 'Promote to stable' on GitHub and give it a version" >&2
-            echo "    (for example v0.1.0-pre.021), then run this again; or" >&2
+            echo "    (for example v0.4.0), then run this again; or" >&2
             echo "  - build an installer that follows the edge channel instead:" >&2
             echo "        just release-iso edge" >&2
         else

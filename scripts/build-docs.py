@@ -83,9 +83,8 @@ def newest_first(found: list[dict]) -> list[dict]:
     """Sort by when each was published, not by what GitHub hands back.
 
     GitHub orders releases by comparing the tag as TEXT, which put
-    "pre.9" above "pre.13"; the version counter is zero-padded now so the
-    two orders agree, but the site sorts by date regardless so a future
-    numbering change cannot put the page out of order again.
+    "pre.9" above "pre.13" in the old numbering and will put "0.9.0" above
+    "0.10.0" in this one. Sorting by date sidesteps the question entirely.
     """
     return sorted(found, key=lambda r: (r.get("publishedAt") or "", r.get("tagName") or ""),
                   reverse=True)
@@ -181,7 +180,7 @@ def _cell(text: str) -> str:
 def releases_page(found: list[dict]) -> str:
     found = newest_first(found)
     lines = ["# Releases", "",
-             "Every merge becomes a pre-release on the **edge** channel; a person "
+             "Every merge becomes a release on the **edge** channel; a person "
              "promotes one that has run well to **stable**. Machines on edge take each "
              "build at their next update; stable machines move when a build is promoted. "
              "Any build can be pinned with `bootc switch ghcr.io/aareman/kosher-linux:vVERSION`; "

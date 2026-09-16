@@ -1146,6 +1146,18 @@ def test_the_updates_page_names_the_version_it_would_go_back_to():
     assert page.back_button.get_sensitive()
 
 
+def test_the_deployment_words_name_the_version_and_the_channel_not_the_image_reference():
+    words = computer._deployment_words
+    assert words({"version": "0.1.0-pre.064", "image": "ghcr.io/x/kosher-linux:edge"}) \
+        == "version 0.1.0-pre.064 (edge channel)"
+    assert words({"version": "0.1.0-pre.064", "channel": "stable"}) \
+        == "version 0.1.0-pre.064 (stable channel)"
+    assert words({"version": "0.1.0-pre.064", "image": "ghcr.io/x/kosher-linux@sha256:abc"}) \
+        == "version 0.1.0-pre.064"
+    assert words({"image": "ghcr.io/x/kosher-linux:edge"}) == "ghcr.io/x/kosher-linux:edge"
+    assert words({}) == "unknown" and words(None) == "unknown"
+
+
 def test_without_a_previous_version_the_button_is_off_and_says_why():
     win = FakeWindow(FakeClient(deployment={"booted": {"version": "1"}, "rollback": None,
                                             "staged": None, "rollback_queued": False}))

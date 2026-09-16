@@ -551,13 +551,24 @@ def check_words(info: dict, running: str | None) -> tuple[str, str]:
     return first[:120], first[:24]
 
 
+def _channel_of(image: str | None) -> str | None:
+    """'ghcr.io/x/kosher-linux:edge' -> 'edge'; a digest reference has none."""
+    if not image or "@" in image:
+        return None
+    tail = image.rsplit("/", 1)[-1]
+    return tail.split(":", 1)[1] if ":" in tail else None
+
+
 def _deployment_words(entry: dict | None) -> str:
-    """'version 2026.09.08 (ghcr.io/…/kosheros:stable)' from one deployment
-    record, or 'unknown' when bootc did not say."""
+    """'version 0.1.0-pre.064 (edge channel)' from one deployment record —
+    the version is what a person matches to a release; the channel is a
+    word, not the whole image reference — or 'unknown' when bootc did not
+    say."""
     if not entry:
         return "unknown"
     version = entry.get("version")
     image = entry.get("image")
-    if version and image:
-        return f"version {version} ({image})"
-    return f"version {version}" if version else (image or "unknown")
+    channel = entry.get("channel") or _channel_of(image)
+    if version:
+        return f"version {version}" + (f" ({channel} channel)" if channel else "")
+    return image or "unknown"

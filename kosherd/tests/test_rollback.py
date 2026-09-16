@@ -155,3 +155,31 @@ def test_the_proxy_is_only_required_where_somebody_is_inspected():
     assert "kosher-mitm.service" in body
     assert "filtered" in body, \
         "the proxy check is no longer conditional on somebody being filtered"
+
+
+def test_the_version_shown_is_the_deployments_own_not_the_image_label(monkeypatch, tmp_path):
+    # bootc's "version" is the image's label — Fedora's date on every build
+    # before the label was ours — and the admin app showed that beside the
+    # channel: "shows the :edge label and doesn't show the actual tag
+    # number". The deployment's own VERSION file is the truth.
+    import json
+
+    from kosherd import daemon as daemon_mod
+
+    doc = json.loads(json.dumps(STATUS))
+    doc["status"]["rollback"]["ostree"] = {"checksum": "abc123", "deploySerial": 0,
+                                           "stateroot": "default"}
+    doc["status"]["rollback"]["image"]["image"]["image"] = "ghcr.io/example/kosher-linux:edge"
+    doc["status"]["booted"]["ostree"] = {"checksum": "def456", "deploySerial": 1,
+                                         "stateroot": "default"}
+    tree = tmp_path / "default" / "deploy" / "abc123.0" / "usr" / "share" / "kosher"
+    tree.mkdir(parents=True)
+    (tree / "VERSION").write_text("0.1.0-pre.064\n")
+    monkeypatch.setattr(daemon_mod, "DEPLOY_ROOT", tmp_path)
+    daemon = _daemon(monkeypatch, stdout=json.dumps(doc))
+    status = json.loads(daemon.impl_DeploymentStatus().unpack()[0])
+    assert status["rollback"]["version"] == "0.1.0-pre.064"
+    assert status["rollback"]["channel"] == "edge"
+    # No tree to read (the booted one here): the label is the fallback.
+    assert status["booted"]["version"] == "44.20260910.0"
+    assert status["booted"]["channel"] == "stable"

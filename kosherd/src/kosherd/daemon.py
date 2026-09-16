@@ -495,6 +495,44 @@ def _url_pattern(url: str) -> str:
     return f"{host}{path.rstrip('/') or '/'}"
 
 
+# Where ostree keeps each deployment's tree. A deployment's own
+# /usr/share/kosher/VERSION says which KosherOS it is, whatever its image
+# label says (see _deployment_version).
+DEPLOY_ROOT = Path("/ostree/deploy")
+
+
+def _deployment_version(entry: dict) -> str | None:
+    """The KosherOS version a deployment carries, read from its own tree.
+
+    bootc's `version` for a deployment is the image's OCI version label,
+    and on every build before the label was ours that was Fedora's own
+    ("44.20260915.0"), which the admin app duly showed beside the channel
+    — "return to previous version ... shows the :edge label and doesn't
+    show the actual tag number". The VERSION file has been in every image
+    since the first, so it is read from the deployment itself.
+    """
+    ostree = entry.get("ostree") if isinstance(entry.get("ostree"), dict) else {}
+    checksum = ostree.get("checksum")
+    if not checksum:
+        return None
+    stateroot = ostree.get("stateroot") or "default"
+    deploy = DEPLOY_ROOT / stateroot / "deploy"
+    serial = ostree.get("deploySerial", 0)
+    candidates = [deploy / f"{checksum}.{serial}" / "usr/share/kosher/VERSION"]
+    try:
+        candidates += sorted(deploy.glob(f"{checksum}.*/usr/share/kosher/VERSION"))
+    except OSError:
+        pass
+    for candidate in candidates:
+        try:
+            text = candidate.read_text().strip()
+        except OSError:
+            continue
+        if text:
+            return text
+    return None
+
+
 def _default_categories(mode: str) -> tuple[str, ...]:
     """What an account switched into this mode blocks at the least.
 
@@ -1837,13 +1875,20 @@ class Daemon:
         def describe(entry) -> dict | None:
             if not isinstance(entry, dict):
                 return None
+            from . import updates
+
             image = entry.get("image")
             image = image.get("image") if isinstance(image, dict) else None
             ref = image.get("image") if isinstance(image, dict) else None
             outer = entry.get("image")
-            version = outer.get("version") if isinstance(outer, dict) else None
+            label = outer.get("version") if isinstance(outer, dict) else None
             stamp = outer.get("timestamp") if isinstance(outer, dict) else None
-            return {"image": ref, "version": version, "timestamp": stamp}
+            # The deployment's own VERSION file first; the image label only
+            # when the tree cannot be read (it was Fedora's date on older
+            # builds, and ours from 0.1.0-pre.058 on).
+            version = _deployment_version(entry) or label
+            return {"image": ref, "version": version, "timestamp": stamp,
+                    "channel": updates._channel(ref) if ref else None}
 
         try:
             doc = json.loads(res.stdout)["status"]

@@ -1,4 +1,4 @@
-{ pkgs, ... }:
+{ pkgs, config, ... }:
 
 let
   # inline-snapshot arrives as a test dependency of the portal's HTTP stack,
@@ -14,8 +14,30 @@ let
       });
     };
   };
+  # The nudity model's library is not in nixpkgs. It is a pure-Python
+  # wheel over onnxruntime, OpenCV and NumPy, all of which are; its
+  # declared dependency is the PyPI name of OpenCV, which nixpkgs spells
+  # differently, so that check is switched off rather than satisfied.
+  nudenet = python.pkgs.buildPythonPackage rec {
+    pname = "nudenet";
+    version = "3.4.2";
+    format = "wheel";
+    src = python.pkgs.fetchPypi {
+      inherit pname version format;
+      dist = "py3";
+      python = "py3";
+      hash = "sha256-WTfb2E5djl3gOPCP/qWhu1CghHV3a/K0eVkUzg6vAzE=";
+    };
+    propagatedBuildInputs = with python.pkgs; [ numpy onnxruntime opencv4 pillow ];
+    dontCheckRuntimeDeps = true;
+    doCheck = false;
+  };
 in
 {
+  # Where `just fetch-models` puts the person model, so the daemon and the
+  # tests find it here as they find it under /usr/share/kosher on a machine.
+  env.KOSHER_PERSON_MODEL = "${config.devenv.root}/build/models/yolox_nano.onnx";
+
   # yescrypt hashing for guardian.py (ctypes); production Fedora has this natively.
   env.KOSHERD_LIBCRYPT = "${pkgs.libxcrypt}/lib/libcrypt.so.2";
 
@@ -46,6 +68,13 @@ in
       ps.uvicorn
       ps.httpx # portal tests + the device-side sync client
       ps.pillow # covering regions of a picture (imageedit.py)
+      # The picture filter itself, so it can be run on real pictures here
+      # rather than only in a VM: the nudity model's library, the person
+      # detector's runtime (kosherd/persons.py) and the arrays both use.
+      # The models are fetched on demand: `just fetch-models`.
+      nudenet
+      ps.onnxruntime
+      ps.numpy
       ps.mkdocs # the docs site (just docs), as CI builds it
       ps.mkdocs-material
       ps.pyyaml # parsing the GitHub workflows in the tests

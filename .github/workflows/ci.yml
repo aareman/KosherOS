@@ -32,6 +32,10 @@ jobs:
     # besides, so a token that would cannot loop either. Serialised, so two
     # merges in quick succession take two numbers rather than fighting over
     # one.
+    #
+    # Mind the skip marker: GitHub honours it ANYWHERE in a pushed commit's
+    # message, body included. The commit that introduced this job quoted
+    # it in its own message, and that push got no run at all.
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
     permissions:

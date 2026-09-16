@@ -48,6 +48,16 @@ docs:
 docs-serve:
     python3 scripts/build-docs.py --serve
 
+# Fetch the picture models for local runs of the filter: the person detector
+# (pinned by hash, as the image build pins it) and, through its own library,
+# the nudity model. Nothing else in the dev loop needs them.
+fetch-models:
+    mkdir -p build/models
+    curl -fsSL -o build/models/yolox_nano.onnx \
+        "$(PYTHONPATH=kosherd/src python3 -c 'from kosherd import persons; print(persons.MODEL_URL)')"
+    cd build/models && echo "$(PYTHONPATH=../../kosherd/src python3 -c 'from kosherd import persons; print(persons.MODEL_SHA256)')  yolox_nano.onnx" | sha256sum -c -
+    @echo "person model ready at build/models/yolox_nano.onnx (KOSHER_PERSON_MODEL points here in the dev shell)"
+
 # Run the unit test suites (pure logic — no root, no D-Bus, no VM needed).
 test *ARGS:
     # A missing pyyaml silently skips the workflow tests, which is how three

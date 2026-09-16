@@ -197,6 +197,9 @@ INTROSPECTION_XML = """
     <method name="RemoveUser">
       <arg direction="in" type="i" name="uid"/>
     </method>
+    <method name="ResetPassword">
+      <arg direction="in" type="i" name="uid"/>
+    </method>
     <signal name="PolicyChanged">
       <arg type="i" name="revision"/>
     </signal>
@@ -1599,6 +1602,45 @@ class Daemon:
         self.policy.users.remove(user)
         self._save_and_apply()
         return None
+
+    def impl_ResetPassword(self, uid: int):
+        """Let a supervised account choose a new password at its next sign-in.
+
+        Not "set the password to something": nobody should hand a person a
+        password somebody else has read, and a parent who could set one
+        could also sign in as their child. accountsservice calls this mode
+        SET_AT_LOGIN, and it is how every account here starts life — the
+        login screen asks for a new password and the account belongs to the
+        person again. A forgotten password was otherwise the end of the
+        account: there is no root on this machine to reset it with.
+
+        An administrator's password is their own. Resetting one from here
+        would be the way to take over the other parent's account, so it is
+        refused; an administrator changes theirs in Settings.
+        """
+        user = self.policy.user(uid)
+        if user is None:
+            raise PolicyError(f"uid {uid} is not managed")
+        if user.admin:
+            raise PolicyError(
+                f"{user.username} is an administrator, and an administrator "
+                "changes their own password in Settings")
+        self.connection.call_sync(
+            "org.freedesktop.Accounts", self._accounts_user_path(uid),
+            "org.freedesktop.Accounts.User", "SetPasswordMode",
+            GLib.Variant("(i)", (1,)),  # 1 = SET_AT_LOGIN
+            None, Gio.DBusCallFlags.NONE, -1, None,
+        )
+        log.info("password reset for uid %d; a new one is chosen at sign-in", uid)
+        return None
+
+    def _accounts_user_path(self, uid: int) -> str:
+        return self.connection.call_sync(
+            "org.freedesktop.Accounts", "/org/freedesktop/Accounts",
+            "org.freedesktop.Accounts", "FindUserById",
+            GLib.Variant("(x)", (uid,)),
+            GLib.VariantType("(o)"), Gio.DBusCallFlags.NONE, -1, None,
+        )[0]
 
     def _accounts_create_user(self, username: str, full_name: str) -> int:
         # accountsservice: CreateUser(name, fullname, accountType=0 standard)

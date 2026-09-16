@@ -122,6 +122,11 @@ ACTIONS = {
     "CreateUser": ACTION_MANAGE_USERS,
     "AdoptUser": ACTION_MANAGE_USERS,
     "RemoveUser": ACTION_MANAGE_USERS,
+    # Account management, like creating one: it hands nobody a password and
+    # cannot touch an administrator's (see impl_ResetPassword), so it is not
+    # guardian-gated — a parent should not need the other parent present to
+    # let a child back into their own account.
+    "ResetPassword": ACTION_MANAGE_USERS,
     # The app store is for everyone: browsing and installing from the
     # pre-approved catalog need no admin password (kosherd still checks the
     # per-user can_install_apps flag). Removing affects every user, so it
@@ -193,7 +198,7 @@ CHANGES = frozenset({
     "DismissRequest", "AllowUrl", "EditList", "SetMediaLevel",
     "SetLanguageFilter", "SetYouTube", "SetUserAdmin", "SetLayout",
     "SetCoverStyle", "SetAdBlock", "SetTimeLimits", "SetGuestConfig", "CreateUser",
-    "AdoptUser", "RemoveUser", "SetUserApps", "RemoveApp", "ApproveApp",
+    "AdoptUser", "RemoveUser", "ResetPassword", "SetUserApps", "RemoveApp", "ApproveApp",
     "UnapproveApp", "SetUserCanInstall", "SetCaptiveMode",
     "SetGuardianPassword", "DisableGuardian", "Enrol", "Unenrol",
     # Moving the system in either direction. The log answers "who changed
@@ -209,7 +214,7 @@ PER_USER = frozenset({
     "SetBlockedCategories",
     "ApplyProfile", "SaveProfile", "AllowUrl", "SetMediaLevel",
     "SetLanguageFilter", "SetYouTube", "SetUserAdmin", "SetLayout",
-    "SetCoverStyle", "SetTimeLimits", "RemoveUser", "SetUserApps",
+    "SetCoverStyle", "SetTimeLimits", "RemoveUser", "ResetPassword", "SetUserApps",
     "SetUserCanInstall", "SetCaptiveMode",
 })
 # Changes whose arguments are secrets or too big to be worth keeping.

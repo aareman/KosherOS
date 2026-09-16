@@ -556,6 +556,44 @@ def test_switching_ad_blocking_off_goes_through_the_guardian():
     assert asked == [False]
 
 
+def test_a_supervised_account_can_be_let_back_in_after_a_forgotten_password():
+    # No root on this machine means a forgotten password used to be the end
+    # of the account. Nobody is handed a password: the login screen asks
+    # for a new one.
+    reset = []
+
+    class Recording(FakeClient):
+        def reset_password(self, uid):
+            reset.append(uid)
+
+    win = FakeWindow(Recording())
+    user = a_user()
+    win.policy = {"revision": 1, "users": [user], "guardian": {"enabled": False},
+                  "guest": {"enabled": False}, "adblock": {"enabled": True}}
+    page = detail.UserDetailPage(win, user)
+    drain()
+    page.stack.set_visible_child_name("account")
+    row = _row_named(page, "Reset the password")
+    assert row.get_sensitive()
+    dialog = page._confirm_reset_password(user)
+    dialog.emit("response", "yes")
+    drain()
+    assert reset == [1001]
+
+
+def test_an_administrators_password_is_not_reset_from_here():
+    win = FakeWindow()
+    user = a_user(admin=True)
+    win.policy = {"revision": 1, "users": [user], "guardian": {"enabled": False},
+                  "guest": {"enabled": False}, "adblock": {"enabled": True}}
+    page = detail.UserDetailPage(win, user)
+    drain()
+    page.stack.set_visible_child_name("account")
+    row = _row_named(page, "Reset the password")
+    assert not row.get_sensitive()
+    assert "Settings" in row.get_subtitle()
+
+
 def test_the_guest_is_set_up_by_kind_of_internet_not_preset():
     # Nobody knows who the guest is, so a group is the wrong question; the
     # kind of internet is the right one, and the daemon gives each kind its

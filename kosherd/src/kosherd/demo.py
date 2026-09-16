@@ -387,6 +387,14 @@ class DemoClient:
     def adopt_user(self, username, mode):
         return self.create_user(username, username, mode)
 
+    def reset_password(self, uid):
+        user = self._user(uid)
+        if user.get("admin"):
+            raise RuntimeError(f"{user['username']} is an administrator, and an "
+                               "administrator changes their own password in Settings")
+        user["password_at_login"] = True
+        self._change(uid, "ResetPassword", [uid])
+
     def remove_user(self, uid):
         self.policy["users"] = [u for u in self.policy["users"] if u["uid"] != uid]
         self._change(None, "RemoveUser", [uid])

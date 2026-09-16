@@ -83,6 +83,12 @@ to accept them than one who only ever meets a blocked page.
 
 Signed in as an administrator, the admin app and the system settings never ask for a password; on any other account the admin app asks for an administrator's password once and keeps it for the sitting.
 
+Everyone chooses their own password the first time they sign in, and changes it afterwards in
+Settings under Users. A forgotten one is not the end of the account: a parent resets it from the
+person's Account tab, and the login screen asks them for a new password at their next sign-in.
+Nobody is ever handed a password somebody else has read, and an administrator's own password
+can only be changed by that administrator.
+
 <div class="grid cards" markdown>
 
 - ![One person's page](images/admin-person.png)

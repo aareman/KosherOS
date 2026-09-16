@@ -228,6 +228,10 @@ class DaemonClient:
     def remove_user(self, uid: int) -> None:
         self._call("Profiles", "RemoveUser", "(i)", uid)
 
+    def reset_password(self, uid: int) -> None:
+        """Let this account choose a new password at its next sign-in."""
+        self._call("Profiles", "ResetPassword", "(i)", uid)
+
     # Apps
     def list_catalog(self) -> dict:
         return json.loads(self._call("Apps", "ListCatalog")[0])

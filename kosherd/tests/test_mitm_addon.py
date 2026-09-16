@@ -863,6 +863,21 @@ def test_category_names_map_to_ids_however_youtube_spells_them(addon):
     assert addon.YouTube.category_of(body) == "27"
 
 
+def test_the_microformats_category_is_found_after_a_long_description(addon):
+    # On YouTube's real player JSON the renderer's category sits about nine
+    # thousand characters after the renderer opens (thumbnails, embed HTML,
+    # the description). An earlier "category" key elsewhere must still lose
+    # to it.
+    import json
+
+    long_description = "x" * 9000
+    body = json.dumps({"adPlacements": {"category": "Gaming"},
+                       "microformat": {"playerMicroformatRenderer": {
+                           "description": {"simpleText": long_description},
+                           "category": "Music"}}})
+    assert addon.YouTube.category_of(body) == "10"
+
+
 def test_shorts_are_refused_everywhere_they_play_when_turned_off(addon):
     import json
 

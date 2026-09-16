@@ -623,7 +623,10 @@ class YouTube:
 
         from kosherd.policy import youtube_category_id
 
-        for pattern in (r'"playerMicroformatRenderer"[\s\S]{0,4000}?"category"\s*:\s*"([^"]+)"',
+        # The renderer's own category sits after its thumbnails, embed and
+        # description — nine thousand characters in, on a real response —
+        # so the window is generous; non-greedy, it stops at the first one.
+        for pattern in (r'"playerMicroformatRenderer"[\s\S]{0,60000}?"category"\s*:\s*"([^"]+)"',
                         r'"category"\s*:\s*"([^"]+)"'):
             match = re.search(pattern, body)
             if match:

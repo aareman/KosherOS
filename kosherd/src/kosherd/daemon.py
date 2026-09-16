@@ -262,6 +262,14 @@ INTROSPECTION_XML = """
       <arg direction="out" type="s" name="status_json"/>
     </method>
     <method name="Rollback"/>
+    <signal name="UpdateProgress">
+      <arg type="i" name="percent"/>
+      <arg type="s" name="status"/>
+    </signal>
+    <signal name="UpdateFinished">
+      <arg type="b" name="ok"/>
+      <arg type="s" name="error"/>
+    </signal>
   </interface>
   <interface name="org.kosherlinux.Daemon1.Network">
     <method name="SetCaptiveMode">
@@ -306,6 +314,16 @@ INTROSPECTION_XML = """
     <method name="FinishSetup">
       <arg direction="in" type="s" name="guardian_password"/>
       <arg direction="in" type="s" name="grub_password"/>
+    </method>
+    <method name="NetworkStatus">
+      <arg direction="out" type="s" name="status_json"/>
+    </method>
+    <method name="ListWifi">
+      <arg direction="out" type="s" name="networks_json"/>
+    </method>
+    <method name="ConnectWifi">
+      <arg direction="in" type="s" name="ssid"/>
+      <arg direction="in" type="s" name="password"/>
     </method>
   </interface>
   <interface name="org.kosherlinux.Daemon1.Session">
@@ -1099,7 +1117,10 @@ class Daemon:
         """
         from . import categories
 
-        user = self.policy.user(_uid)
+        # effective_users, not user(): the guest is filtered like anybody
+        # else and was being told it was not, because it is not in the
+        # users list. What enforcement applies to is what this reports on.
+        user = next((u for u in self.policy.effective_users() if u.uid == _uid), None)
         if user is None:
             return GLib.Variant("(s)", (json.dumps({
                 "managed": False,
@@ -1612,10 +1633,42 @@ class Daemon:
         return GLib.Variant("(s)", (res.stdout or res.stderr,))
 
     def impl_ApplyUpdate(self):
-        res = subprocess.run(["bootc", "upgrade"], capture_output=True, text=True)
-        if res.returncode != 0:
-            raise PolicyError(f"bootc upgrade failed: {res.stderr.strip()}")
+        """Start the update and return at once.
+
+        bootc pulls gigabytes; a call that blocked for that long left the
+        admin app with a dead button and no way to tell "still going" from
+        "hung". The pull runs in a thread and reports on the System
+        interface's UpdateProgress signal, then UpdateFinished — including
+        failure, which used to be this method's error and is now a signal
+        like the rest, so a client that has stopped waiting still hears it.
+        """
+        from . import updates
+
+        thread = getattr(self, "_update_thread", None)
+        if thread is not None and thread.is_alive():
+            raise PolicyError("an update is already running")
+        self._update_thread = updates.run_upgrade(self._on_update_progress,
+                                                  self._on_update_finished)
         return None
+
+    def _emit_system_signal(self, name: str, signature: str, args: tuple) -> None:
+        def emit():
+            if self.connection:
+                self.connection.emit_signal(
+                    None, OBJECT_PATH, "org.kosherlinux.Daemon1.System", name,
+                    GLib.Variant(signature, args),
+                )
+            return False
+
+        GLib.idle_add(emit)
+
+    def _on_update_progress(self, percent: int, status: str) -> None:
+        self._emit_system_signal("UpdateProgress", "(is)", (int(percent), str(status)))
+
+    def _on_update_finished(self, ok: bool, error: str) -> None:
+        if not ok:
+            log.error("update failed: %s", error)
+        self._emit_system_signal("UpdateFinished", "(bs)", (bool(ok), str(error)))
 
     def impl_DeploymentStatus(self):
         """Which image is booted, and which one "go back" would return to.
@@ -1776,6 +1829,28 @@ class Daemon:
         self._save_and_apply()
         log.info("first admin created: %s (uid %d)", username, uid)
         return GLib.Variant("(i)", (uid,))
+
+    def impl_NetworkStatus(self):
+        from . import wifi
+
+        return GLib.Variant("(s)", (json.dumps(wifi.status()),))
+
+    def impl_ListWifi(self):
+        from . import wifi
+
+        try:
+            return GLib.Variant("(s)", (json.dumps(wifi.networks()),))
+        except wifi.WifiError as e:
+            raise PolicyError(str(e))
+
+    def impl_ConnectWifi(self, ssid: str, password: str):
+        from . import wifi
+
+        try:
+            wifi.connect(ssid, password)
+        except wifi.WifiError as e:
+            raise PolicyError(str(e))
+        return None
 
     def impl_FinishSetup(self, guardian_password: str, grub_password: str):
         if not any(u.admin for u in self.policy.users):

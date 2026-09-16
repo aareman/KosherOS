@@ -15,7 +15,7 @@ import pytest
 from kosherd import access
 from kosherd.access import ACTIONS
 from kosherd.daemon import Daemon
-from kosherd.policy import Policy, UserPolicy
+from kosherd.policy import GUEST_USERNAME, GuestPolicy, Policy, UserPolicy
 
 
 def _settings(users, uid, **policy_kwargs):
@@ -200,3 +200,25 @@ def test_an_unlimited_account_and_an_administrator_are_told_so():
     settings = _settings([PARENT], uid=1000)
     assert settings["time"]["admin"] is True and settings["time"]["limited"] is False
     assert settings["time"]["daily_minutes"] == 0
+
+
+# ---- the guest ----------------------------------------------------------------
+
+def test_the_guest_is_told_it_is_filtered_not_that_it_is_unmanaged():
+    # The guest is not in the users list, and My Filter was reading that
+    # absence as "this account is not filtered" — on a filtered account.
+    guest = GuestPolicy(enabled=True, uid=1010, mode="filtered",
+                        blocked_categories=["adult", "social"], media_level="immodest",
+                        language_filter="substitute")
+    s = _settings([PARENT], 1010, guest=guest)
+    assert s["managed"] is True
+    assert s["mode"] == "filtered"
+    assert s["username"] == GUEST_USERNAME
+    assert [c["key"] for c in s["blocked_categories"]] == ["adult", "social"]
+    assert s["media_level"] == "immodest"
+    assert s["admin"] is False
+
+
+def test_a_guest_that_is_switched_off_is_still_nobody():
+    guest = GuestPolicy(enabled=False, uid=1010, mode="filtered")
+    assert _settings([PARENT], 1010, guest=guest)["managed"] is False

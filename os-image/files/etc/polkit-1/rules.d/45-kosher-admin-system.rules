@@ -1,5 +1,8 @@
 // Kosher Linux: the everyday system settings a kosher-admin may change,
-// with their OWN password (AUTH_SELF_KEEP), from an active local session.
+// without a password, from an active local session. Being signed in as an
+// administrator is the proof; a prompt for each panel taught the person
+// who set the computer up that it did not trust them, and none of these
+// can weaken the filter.
 //
 // 40-kosher-no-admin.rules removes every polkit admin identity. That is
 // what makes "rebase the OS" and "add a Flatpak remote" unsatisfiable —
@@ -58,6 +61,6 @@ polkit.addRule(function(action, subject) {
         "org.freedesktop.color-manager.install-system-wide"
     ];
     if (everyday.indexOf(action.id) >= 0) {
-        return polkit.Result.AUTH_SELF_KEEP;
+        return polkit.Result.YES;
     }
 });

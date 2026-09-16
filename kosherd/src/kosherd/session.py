@@ -1,8 +1,11 @@
 """Admin and guardian sessions: authenticate once, then work.
 
 Per-change polkit prompts make the admin app unusable, so the app calls
-Unlock() once (one polkit prompt) and kosherd keeps a sliding session for
-that uid. While it is alive, that uid's calls skip the polkit check.
+Unlock() once and kosherd keeps a sliding session for that uid. While it is
+alive, that uid's calls skip the polkit check. For an administrator's own
+signed-in session polkit answers yes without a prompt (49-kosher-admin.rules);
+on any other account Unlock is the one prompt, for an administrator's
+password, and this session is what turns it into a sliding window.
 
 Guardian dual-control works the same way: the password is verified once and
 kept for the same sliding window, so a filter change is not a password quiz.

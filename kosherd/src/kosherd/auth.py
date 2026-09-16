@@ -1,9 +1,11 @@
 """polkit authorization for D-Bus callers.
 
 Every kosherd method maps to a polkit action ID declared in
-/usr/share/polkit-1/actions/org.kosherlinux.policy. The shipped rule grants
-members of kosher-admin AUTH_SELF_KEEP (re-enter their own password); everyone
-else fails, and a separate rule ensures no polkit admin identities exist at all.
+/usr/share/polkit-1/actions/org.kosherlinux.policy. The shipped rule answers
+yes to members of kosher-admin from their own signed-in session and asks
+anyone else at the keyboard for an administrator's password (AUTH_ADMIN_KEEP);
+a separate rule makes kosher-admin the administrators for these actions only,
+so no stock privileged action has anyone who could authorize it.
 """
 
 from __future__ import annotations
@@ -32,8 +34,9 @@ class NotAuthorized(Exception):
 def require(connection: Gio.DBusConnection, sender: str, action_id: str) -> None:
     """Raise NotAuthorized unless polkit authorizes `sender` for `action_id`.
 
-    Interactive: polkit will pop the desktop auth agent for the admin's own
-    password (AUTH_SELF_KEEP) — the call blocks until answered.
+    Interactive: on an account that is not an administrator's, polkit pops
+    the desktop auth agent for an administrator's password — the call blocks
+    until answered. An administrator's own session is answered at once.
     """
     # A caller already running as root has full control of the machine; a
     # polkit check adds nothing. This is also what makes kosherctl usable

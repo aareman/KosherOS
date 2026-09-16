@@ -77,7 +77,7 @@ to accept them than one who only ever meets a blocked page.
 
 ## What the parent sees
 
-The admin app opens with one password and then everything works without another prompt.
+Signed in as an administrator, the admin app and the system settings never ask for a password; on any other account the admin app asks for an administrator's password once and keeps it for the sitting.
 
 <div class="grid cards" markdown>
 

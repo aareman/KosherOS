@@ -1,6 +1,6 @@
 """KosherOS Admin — GTK4/libadwaita client of kosherd.
 
-The window: one password to unlock, then a sidebar down the left with
+The window: unlocked by the admin's own sign-in, then a sidebar down the left with
 everywhere the app goes — the family, each on a full page of their own,
 then the activity feed and this computer's protection, apps and updates —
 and the page itself beside it. Above every page, the two banners that
@@ -102,11 +102,13 @@ class Window(Adw.ApplicationWindow):
 
         self.go_to("activity")
 
-        # Locked state: one password, then everything works.
+        # Locked state. An administrator's own session unlocks without a
+        # prompt; any other account is asked for an administrator's password
+        # once, and kosherd keeps the session for the sitting.
         self.lock_view = Adw.StatusPage(
             icon_name="changes-prevent-symbolic",
             title="KosherOS Admin",
-            description="Unlock once to see the family, answer requests and change settings.")
+            description="Unlock to see the family, answer requests and change settings.")
         unlock_btn = Gtk.Button(label="Unlock", halign=Gtk.Align.CENTER)
         unlock_btn.add_css_class("suggested-action")
         unlock_btn.add_css_class("pill")
@@ -119,10 +121,10 @@ class Window(Adw.ApplicationWindow):
     def _not_an_admin(self) -> bool:
         """True when this account is not in kosher-admin.
 
-        Without it, Unlock falls back to polkit's auth_admin, and KosherOS
-        deliberately has no polkit admin identities — so the desktop shows a
-        password prompt that cannot succeed no matter what is typed. Saying
-        so plainly beats an unanswerable dialog.
+        An administrator's own session is never asked for a password (the
+        polkit rules answer yes). On any other account, Unlock brings up the
+        desktop's prompt for an administrator's password, which is kept for
+        the sitting — so the lock screen says whose password it wants.
         """
         import grp
         import os
@@ -136,10 +138,9 @@ class Window(Adw.ApplicationWindow):
     def _unlock(self) -> None:
         if self._not_an_admin():
             self.lock_view.set_description(
-                "This account is not an administrator of this computer, so it "
-                "cannot change settings here. Ask whoever set the computer up.")
-            self.toasts.set_child(self.lock_view)
-            return
+                "This account is not an administrator of this computer. To see "
+                "the family or change settings here, unlock with an "
+                "administrator's password.")
 
         def on_done(_r):
             self.toasts.set_child(self.content)

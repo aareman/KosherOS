@@ -14,16 +14,19 @@ system network changes).
 
 The only privilege surface is **kosherd**, a root daemon exposing a D-Bus API
 (`org.kosherlinux.Daemon1`). Members of the `kosher-admin` group are granted
-its `org.kosherlinux.*` polkit actions with `AUTH_SELF_KEEP` — they re-enter
-their own password (GNOME's polkit agent handles the prompt) to manage users,
-install catalog apps, connect wifi, or apply updates. kosherd leans on
+its `org.kosherlinux.*` polkit actions outright from their own signed-in
+session — signing in is the proof, and an administrator is never asked for a
+password to manage users, install catalog apps, connect wifi, or apply
+updates. On any other account those actions ask for an administrator's
+password (GNOME's polkit agent handles the prompt), which polkit keeps for
+the sitting and kosherd extends as a sliding session. kosherd leans on
 existing privileged services (accountsservice, flatpak, bootc, NetworkManager)
 instead of reimplementing them. There are otherwise no polkit admin identities
 at all, so every stock action that defaults to `auth_admin` is unsatisfiable —
 except a named list of everyday ones (time zone, language, device name, joining
 a Wi-Fi network, printers, colour profiles) that
-`45-kosher-admin-system.rules` grants back to `kosher-admin` with their own
-password, so GNOME Settings works for the parent without ever reaching
+`45-kosher-admin-system.rules` grants back to `kosher-admin` without a
+prompt, so GNOME Settings works for the parent without ever reaching
 services, packages or the image.
 
 **Guardian dual-control**: optionally, filter-weakening calls

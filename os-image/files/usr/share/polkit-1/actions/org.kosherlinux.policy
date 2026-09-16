@@ -5,9 +5,11 @@
   <vendor>Kosher Linux</vendor>
 
   <!-- All actions default to auth_admin. The image ships a rule making
-       auth_admin unsatisfiable (no admin identities), and a second rule
-       granting kosher-admin members AUTH_SELF_KEEP on org.kosherlinux.* —
-       so these actions are usable by admins and by nobody else. -->
+       auth_admin unsatisfiable for every stock action (kosher-admin are
+       administrators for these actions only), and a second rule answering
+       yes to kosher-admin members from their own signed-in session and
+       asking anyone else at the keyboard for an administrator's password,
+       kept for the sitting (49-kosher-admin.rules). -->
 
   <action id="org.kosherlinux.read-config">
     <description>View filter policy and app catalog</description>

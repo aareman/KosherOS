@@ -74,8 +74,9 @@ Under niri the helper does one thing: copies
 `/usr/share/kosher/desktop/noctalia.toml` to `~/.config/noctalia/config.toml`
 if that does not exist yet, then never touches it again. Noctalia has no
 system-wide configuration layer, and the seed carries the two settings that
-matter — the polkit agent on (without it the admin app's password prompts
-have nowhere to appear) and the KosherOS wallpaper.
+matter — the polkit agent on (without it a password prompt, such as the
+admin app's on an account that is not an administrator's, has nowhere to
+appear) and the KosherOS wallpaper.
 
 ### The image
 

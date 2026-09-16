@@ -74,14 +74,19 @@ def test_it_never_reaches_the_filter_or_the_image():
         # global-dns and wifi.share are named in the explanatory comment as
         # deliberately absent; that is fine so long as they are not granted.
         assert forbidden not in granted(), forbidden
-    # And the shape that would grant everything is not there at all.
+    # And the shape that would grant everything is not there at all: the
+    # one YES sits inside the named list's branch.
     assert 'indexOf("org.freedesktop.NetworkManager.") === 0' not in text
-    assert "return polkit.Result.YES" not in text
+    assert text.count("polkit.Result.YES") == 1
+    assert text.index("everyday.indexOf(action.id) >= 0") < text.index("polkit.Result.YES")
 
 
-def test_it_asks_the_admin_for_their_own_password_and_only_locally():
+def test_it_needs_no_password_in_the_admins_own_session_and_only_locally():
+    # "I should not have to type in my password for everything in settings
+    # multiple times or at all ... its my account." Signing in as the
+    # administrator is the proof; none of these can weaken the filter.
     text = RULE.read_text()
-    assert "AUTH_SELF_KEEP" in text
+    assert "AUTH_SELF_KEEP" not in text and "AUTH_ADMIN" not in text
     assert 'subject.isInGroup("kosher-admin")' in text
     assert "subject.active && subject.local" in text
     # Somebody who is not a kosher-admin gets no answer from this rule at

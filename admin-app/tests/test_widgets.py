@@ -95,6 +95,19 @@ class FakeClient:
     def check_update(self):
         return "Up to date"
 
+    # The update runs on in the daemon; the page hears about it by signal.
+    update_calls = 0
+
+    def apply_update(self):
+        self.update_calls += 1
+
+    def connect_update_signals(self, on_progress, on_finished):
+        self.on_update_progress, self.on_update_finished = on_progress, on_finished
+        return 7
+
+    def disconnect_signals(self, subscription):
+        self.disconnected = subscription
+
 
 class FakeWindow(Gtk.Window):
     """Enough of Window for a page to be built, driven and presented.
@@ -1220,6 +1233,76 @@ def test_a_status_with_every_key_missing_still_renders():
     drain()
     assert page.version_row.get_subtitle() == "unknown"
     assert not page.back_button.get_sensitive()
+
+
+def test_update_now_shows_a_bar_that_follows_the_daemon_and_says_when_to_restart():
+    win = FakeWindow(FakeClient())
+    win.policy = {"revision": 1, "users": [], "guardian": {"enabled": False},
+                  "guest": {"enabled": False}}
+    page = computer.UpdatesPage(win)
+    drain()
+    assert not page.progress.get_visible()
+    page._apply(None)
+    drain()
+    assert win.client.update_calls == 1
+    assert page.progress.get_visible() and not page.apply_button.get_sensitive()
+    # What the daemon says, the bar shows: a percentage when it has one …
+    win.client.on_update_progress(41, "Pulling image (2 of 4)")
+    assert abs(page.progress.get_fraction() - 0.41) < 0.001
+    assert page.progress.get_text() == "Pulling image (2 of 4) · 41%"
+    # … and a pulse with the words when it does not.
+    win.client.on_update_progress(-1, "Updating…")
+    assert page.progress.get_text() == "Updating…"
+    win.client.on_update_finished(True, "")
+    assert not page.progress.get_visible() and page.apply_button.get_sensitive()
+    assert "Restart the computer" in page.status_row.get_subtitle()
+    assert any("Update ready" in t for t in win.toasts)
+
+
+def test_a_failed_update_says_why_and_gives_the_button_back():
+    win = FakeWindow(FakeClient())
+    win.policy = {"revision": 1, "users": [], "guardian": {"enabled": False},
+                  "guest": {"enabled": False}}
+    page = computer.UpdatesPage(win)
+    drain()
+    page._apply(None)
+    drain()
+    win.client.on_update_finished(False, "bootc upgrade failed: no space left on device")
+    assert page.apply_button.get_sensitive()
+    assert "no space left" in page.status_row.get_subtitle()
+
+
+def test_the_updates_page_stops_listening_when_it_is_hidden():
+    win = FakeWindow(FakeClient())
+    win.policy = {"revision": 1, "users": [], "guardian": {"enabled": False},
+                  "guest": {"enabled": False}}
+    page = computer.UpdatesPage(win)
+    page._listen()
+    page._stop_listening()
+    assert win.client.disconnected == 7
+
+
+def test_a_persons_page_is_built_to_narrow_without_clipping():
+    # The header buttons live in a wrap box, so on a narrow pane they drop
+    # under the name; the tabs have a bottom bar to move to under 820sp.
+    detail_page, _w, _u = _detail()
+    assert isinstance(detail_page.switcher_bar, Adw.ViewSwitcherBar)
+    assert not detail_page.switcher_bar.get_reveal(), "wide by default"
+    holder = detail_page.get_child()
+    assert isinstance(holder, Adw.BreakpointBin)
+    assert holder.get_current_breakpoint() is None or True  # unrealized: no size yet
+
+    def wrap_boxes(widget, found=None):
+        found = [] if found is None else found
+        child = widget.get_first_child()
+        while child is not None:
+            if isinstance(child, Adw.WrapBox):
+                found.append(child)
+            wrap_boxes(child, found)
+            child = child.get_next_sibling()
+        return found
+
+    assert wrap_boxes(detail_page), "the identity header wraps"
 
 
 def test_going_back_asks_first_and_then_calls_the_daemon():

@@ -106,13 +106,25 @@ class UserDetailPage(Adw.NavigationPage):
         # directly below, in a space too narrow for it, and crowded the tabs.
         header = Adw.HeaderBar(title_widget=Adw.WindowTitle(title=user["username"],
                                                             subtitle=""))
-        switcher = Adw.ViewSwitcher(stack=self.stack, policy=Adw.ViewSwitcherPolicy.WIDE,
-                                    halign=Gtk.Align.CENTER, margin_top=6, margin_bottom=6)
+        self.switcher = Adw.ViewSwitcher(stack=self.stack,
+                                         policy=Adw.ViewSwitcherPolicy.WIDE,
+                                         halign=Gtk.Align.CENTER, margin_top=6,
+                                         margin_bottom=6)
+        self.switcher_bar = Adw.ViewSwitcherBar(stack=self.stack)
         view = Adw.ToolbarView()
         view.add_top_bar(header)
-        view.add_top_bar(switcher)
+        view.add_top_bar(self.switcher)
+        view.add_bottom_bar(self.switcher_bar)
         view.set_content(self.stack)
-        self.set_child(view)
+        # Under 820sp the tabs go to the bottom bar, icons over short labels,
+        # where seven of them fit on a phone-width pane.
+        holder = Adw.BreakpointBin(width_request=320, height_request=240)
+        holder.set_child(view)
+        narrow = Adw.Breakpoint.new(Adw.BreakpointCondition.parse("max-width: 820sp"))
+        narrow.add_setter(self.switcher, "visible", False)
+        narrow.add_setter(self.switcher_bar, "reveal", True)
+        holder.add_breakpoint(narrow)
+        self.set_child(holder)
         pointer_cursors(self)
 
     def _gated(self, work, done_msg: str) -> None:
@@ -128,8 +140,12 @@ class UserDetailPage(Adw.NavigationPage):
         custom = self.win.policy.get("custom_profiles", [])
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=14)
 
-        who = Gtk.Box(spacing=14)
-        who.append(avatar(user["username"], 56))
+        # A wrap box, not a box: beside the sidebar on a small screen the
+        # buttons ran off the right edge. Now they drop under the name.
+        who = Adw.WrapBox(child_spacing=14, line_spacing=10,
+                          justify=Adw.JustifyMode.SPREAD)
+        identity = Gtk.Box(spacing=14)
+        identity.append(avatar(user["username"], 56))
         names = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, valign=Gtk.Align.CENTER,
                         spacing=4)
         # Name and mode on one line: what this account is called, and what it
@@ -145,9 +161,9 @@ class UserDetailPage(Adw.NavigationPage):
             self.preset_key, self.drift, custom), xalign=0, wrap=True)
         setup.add_css_class("dim-label")
         names.append(setup)
-        who.append(names)
-        actions = Gtk.Box(spacing=6, halign=Gtk.Align.END, hexpand=True,
-                          valign=Gtk.Align.CENTER)
+        identity.append(names)
+        who.append(identity)
+        actions = Gtk.Box(spacing=6, valign=Gtk.Align.CENTER)
         if self.preset_key and labels.drift_sentences(self.drift):
             label = profiles_mod.get(self.preset_key, custom).label
             reset = small_button(f"Reset to {label}")

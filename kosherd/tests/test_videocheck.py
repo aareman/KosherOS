@@ -93,10 +93,28 @@ def test_an_unreadable_clip_is_no_verdict(tmp_path, monkeypatch):
     assert checker.images.judged == 0
 
 
-def test_a_clip_with_no_frames_is_no_verdict(tmp_path, monkeypatch):
+def test_a_clip_with_no_video_in_it_passes_as_nothing_to_judge(tmp_path, monkeypatch):
+    # An initialisation segment or an audio track: no picture to judge.
+    # Refusing it as unreadable broke every DASH player before its first
+    # real segment.
     checker, sample = _checker(tmp_path, frames=())
     monkeypatch.setattr(videocheck, "sample_frames", sample)
-    assert checker.verdict(b"audio-only", videocheck.key("https://x/a", 5)) is None
+    key = videocheck.key("https://x/init.mp4", 5)
+    verdict = checker.verdict(b"init-segment", key)
+    assert verdict.level == CLEAN and not verdict.has_person
+    assert checker.cached(key) == verdict
+    assert checker.images.judged == 0
+
+
+def test_an_undecodable_clip_is_still_no_verdict(tmp_path, monkeypatch):
+    checker, _sample = _checker(tmp_path)
+    monkeypatch.setattr(videocheck, "sample_frames",
+                        lambda data, **kw: (_ for _ in ()).throw(videocheck.Unreadable("codec")))
+    assert checker.verdict(b"hevc", videocheck.key("https://x/h", 5)) is None
+
+
+def test_the_deadline_leaves_room_for_a_slow_machine():
+    assert videocheck.VIDEO_TIMEOUT >= 15
 
 
 def test_the_deadline_is_kept_and_the_worker_still_caches(tmp_path, monkeypatch):

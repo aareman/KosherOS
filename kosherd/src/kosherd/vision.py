@@ -575,8 +575,23 @@ def prepare(image_bytes: bytes) -> tuple[bytes, float]:
         return image_bytes, 1.0
 # Frames judged from an animated picture, spread through it. A GIF or an
 # animated PNG/WebP is a short clip: a clean first frame says nothing about
-# the rest, so it is sampled like one.
+# the rest, so it is sampled like one — and given as many deadlines as it
+# has frames to judge, because four detections inside one picture's
+# deadline timed out on a two-core machine and hid every GIF.
 ANIMATION_FRAMES = 4
+
+
+def looks_animated(image_bytes: bytes) -> bool:
+    """Whether a picture has more than one frame, read from its header."""
+    try:
+        import io
+
+        from PIL import Image
+
+        with Image.open(io.BytesIO(image_bytes)) as im:
+            return bool(getattr(im, "is_animated", False))
+    except Exception:  # noqa: BLE001
+        return False
 
 
 def animation_frames(image_bytes: bytes, max_frames: int = ANIMATION_FRAMES):
@@ -912,8 +927,9 @@ class ImageFilter:
         loop = asyncio.get_running_loop()
         future = loop.run_in_executor(self._executor(), self.judge_bytes,
                                       image_bytes, sha)
+        deadline = self.timeout * (ANIMATION_FRAMES if looks_animated(image_bytes) else 1)
         try:
-            return await asyncio.wait_for(asyncio.shield(future), self.timeout)
+            return await asyncio.wait_for(asyncio.shield(future), deadline)
         except asyncio.TimeoutError:
             self._record(self.timeout * 1000)
             return None

@@ -55,8 +55,10 @@ SAMPLE_FRAMES = 4
 FRAME_SHORT_SIDE = 480
 # A whole clip's judgement — decode plus four detections — must finish in
 # this long or the clip is refused. Generous next to a picture's 2 s: a
-# person waiting for a video to start is already waiting.
-VIDEO_TIMEOUT = 8.0
+# person waiting for a video to start is already waiting, and on a two-core
+# machine four detections after a decode ran past eight seconds, which
+# turned a slow clip into a broken one.
+VIDEO_TIMEOUT = 15.0
 # The most of a clip the proxy will hold in memory to sample it. Short
 # clips on news and social sites are well under this; long films arrive as
 # segments, each judged on its own.
@@ -82,10 +84,25 @@ def key(url: str, total_bytes: int | None) -> str:
     return hashlib.sha256(raw.encode()).hexdigest()
 
 
+class Unreadable(Exception):
+    """The clip could not be opened, or holds video this build cannot
+    decode. Not the same as a clip with no video in it."""
+
+
 def sample_frames(data: bytes, max_frames: int = SAMPLE_FRAMES,
                   short_side: int = FRAME_SHORT_SIDE) -> list[bytes]:
     """Up to `max_frames` keyframes from the clip, spread through it, as
-    small JPEGs. Empty when the container cannot be read at all."""
+    small JPEGs.
+
+    Empty when there is no video to judge: no video stream (an audio
+    track in a video container), or no packets (an initialisation segment,
+    which is the header of a DASH stream and carries no picture). Those
+    used to be refused as unreadable, which broke every DASH player at
+    the modesty levels before its first real segment. Raises Unreadable
+    when the container cannot be opened, or has video packets none of
+    which decode — a codec this build lacks — which is a different thing
+    and stays refused.
+    """
     import av
     from PIL import Image
 
@@ -108,7 +125,11 @@ def sample_frames(data: bytes, max_frames: int = SAMPLE_FRAMES,
         frames.append(out.getvalue())
         return True
 
-    with av.open(io.BytesIO(data)) as container:
+    try:
+        container = av.open(io.BytesIO(data))
+    except Exception as e:  # noqa: BLE001 - PyAV raises several kinds
+        raise Unreadable(f"could not open the clip: {e}") from None
+    with container:
         streams = [s for s in container.streams if s.type == "video"]
         if not streams:
             return []
@@ -147,7 +168,25 @@ def sample_frames(data: bytes, max_frames: int = SAMPLE_FRAMES,
                 step = max(1, len(candidates) // max_frames)
                 for frame in candidates[::step][:max_frames]:
                     keep(frame)
+        if not frames and _has_video_packets(container, stream):
+            raise Unreadable("the clip's video could not be decoded")
     return frames
+
+
+def _has_video_packets(container, stream) -> bool:
+    """Whether the stream carries any data at all — the difference between
+    an initialisation segment (none) and an undecodable clip (some)."""
+    try:
+        container.seek(0, stream=stream, backward=True, any_frame=True)
+    except Exception:  # noqa: BLE001 - some containers cannot rewind
+        pass
+    try:
+        for packet in container.demux(stream):
+            if packet.size:
+                return True
+    except Exception:  # noqa: BLE001 - failing to read is having data
+        return True
+    return False
 
 
 class VideoChecker:
@@ -179,7 +218,13 @@ class VideoChecker:
             log.debug("could not sample the clip", exc_info=True)
             return None
         if not frames:
-            return None
+            # No video in it: an initialisation segment, an audio track.
+            # Nothing to judge and nothing to hide; the segments that carry
+            # pictures are judged on their own as they come.
+            verdict = ImageVerdict(CLEAN, (), False)
+            self.cache.put_video(clip_key, verdict)
+            log.info("a clip with no video in it (a header or an audio track); passed")
+            return verdict
         verdict = combine(self.images.judge_bytes(frame) for frame in frames)
         if verdict is None:
             return None
@@ -224,4 +269,5 @@ class VideoChecker:
             return None
 
 
-__all__ = ["CLEAN", "VideoChecker", "available", "combine", "key", "sample_frames"]
+__all__ = ["CLEAN", "Unreadable", "VideoChecker", "available", "combine", "key",
+           "sample_frames"]

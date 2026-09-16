@@ -151,10 +151,18 @@ is fetched** (`responseheaders`):
 |---|---|---|---|
 | source in a blocked category | refused | refused | refused |
 | verdict already cached | as it says | as it says | refused |
-| clip small enough to hold (≤ 40 MB), first request | held, sampled, then passed or refused | same | refused |
-| too big to hold, or a range from the middle with no verdict yet | passed (as before) | refused (as before) | refused |
+| clip or piece of one small enough to hold (≤ 40 MB) | held, sampled, then passed or refused | same | refused |
+| a header or audio-only segment (nothing to judge) | passed | passed | refused |
+| too big to hold | passed (as before) | refused (as before) | refused |
 | no decoder on this machine | passed (as before) | refused (as before) | refused |
-| could not be read, or missed the 8 s deadline | refused | refused | refused |
+| could not be read (a slice of a plain file, a codec this build lacks), or missed the 15 s deadline | passed, marked unchecked | refused | refused |
+
+A clip that arrives as `application/octet-stream` — CDNs do this — is
+recognised by its address's extension (`.mp4`, `.webm`, `.m4s`, …) and
+treated as video all the same; a `.gif` served that way is a picture. A
+range from the middle of a clip is held and decoded like any other piece
+(a fragment of a DASH stream or a WebM cluster stands on its own); it used
+to be refused unseen, which broke browsers that fetch clips in pieces.
 
 Two things to know. **Large files are not held.** Long-form video on the
 web is almost always segmented (HLS/DASH); the manifest is text that points

@@ -1598,10 +1598,29 @@ def test_a_clip_already_judged_clean_streams_without_being_held(addon):
     assert bad.response.status_code == 403
 
 
-def test_a_range_from_the_middle_of_an_unjudged_clip_is_refused(addon):
+def test_a_range_from_the_middle_of_an_unjudged_clip_is_held_and_tried(addon):
+    # Firefox asks for a clip in pieces and cancels its first request as
+    # soon as it has the header; refusing every later piece outright meant
+    # "breaking and stuck". The piece is held and decoded if it can be.
     flow = _hflow("video/mp4", status=206, content_range="bytes 500000-999999/2000000")
     _filt(addon, media="immodest", videos=_stub_videos()).responseheaders(flow)
-    assert flow.response.status_code == 403
+    assert not getattr(flow.response, "stream", False)
+    assert flow.response.status_code != 403
+
+
+def test_a_clip_that_says_it_is_a_download_is_still_a_clip(addon):
+    # CDNs serve .mp4 and .gif as application/octet-stream; keyed on the
+    # content type alone the filter streamed them through unchecked.
+    clip = _hflow("application/octet-stream", length=5_000_000,
+                  url="https://cdn.example.com/media/clip.mp4?x=1")
+    _filt(addon, media="immodest", videos=_stub_videos()).responseheaders(clip)
+    assert not getattr(clip.response, "stream", False), "held for sampling"
+    gif = _hflow("application/octet-stream", length=50_000,
+                 url="https://cdn.example.com/media/fun.gif")
+    assert addon._is_image(gif) and not addon._is_video(gif)
+    other = _hflow("application/octet-stream", length=50_000,
+                   url="https://cdn.example.com/files/setup.bin")
+    assert not addon._is_image(other) and not addon._is_video(other)
 
 
 def test_a_manifest_passes_where_its_segments_will_be_judged(addon):
@@ -1634,9 +1653,16 @@ def test_a_held_clip_is_refused_or_passed_on_its_frames(addon):
     assert bad.response.status_code == 403
 
     unjudged = _hflow("video/mp4", length=1000)
-    filt = _filt(addon, media="nsfw", videos=_stub_videos(verdict=None))
+    filt = _filt(addon, media="immodest", videos=_stub_videos(verdict=None))
     filt._filter_video(unjudged, 1001)
-    assert unjudged.response.status_code == 403, "could not look: refuse, as for pictures"
+    assert unjudged.response.status_code == 403, "could not look: refuse where unchecked video is"
+    # The mildest level passes what it cannot check, from the body as from
+    # the headers; a clip is not passed by one and refused by the other.
+    mild = _hflow("video/mp4", length=1000)
+    filt = _filt(addon, media="nsfw", videos=_stub_videos(verdict=None))
+    filt._filter_video(mild, 1001)
+    assert mild.response.status_code == 200
+    assert mild.response.headers["x-kosheros"] == "video-unchecked"
 
 
 def test_the_async_video_path_agrees_with_the_sync_one(addon):

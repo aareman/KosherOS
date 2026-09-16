@@ -394,14 +394,37 @@ def _is_search_thumb(host: str) -> bool:
             or host.endswith(".qwant.com") and "pics" in host)
 
 
+# Pictures and clips that arrive without saying what they are: CDNs serve
+# .mp4, .webm and .gif as application/octet-stream, and a filter keyed on
+# the content type alone streamed them through unchecked — "gif/videos
+# getting through and not checked". The address's extension says then.
+OCTET_TYPES = ("application/octet-stream", "binary/octet-stream")
+VIDEO_EXTENSIONS = (".mp4", ".m4v", ".webm", ".mov", ".m4s", ".ts", ".mkv",
+                    ".ogv", ".3gp", ".gifv")
+IMAGE_EXTENSIONS = (".gif", ".png", ".jpg", ".jpeg", ".webp", ".avif", ".bmp")
+
+
+def _path_extension(flow) -> str:
+    try:
+        path = urlsplit(flow.request.pretty_url).path.lower()
+    except Exception:  # noqa: BLE001
+        return ""
+    dot = path.rfind(".")
+    return path[dot:] if dot >= 0 and "/" not in path[dot:] else ""
+
+
 def _is_image(flow) -> bool:
     content_type = (flow.response.headers.get("content-type") or "").lower()
-    return content_type.startswith(IMAGE_TYPES)
+    if content_type.startswith(IMAGE_TYPES):
+        return True
+    return content_type.startswith(OCTET_TYPES) and _path_extension(flow) in IMAGE_EXTENSIONS
 
 
 def _is_video(flow) -> bool:
     content_type = (flow.response.headers.get("content-type") or "").lower()
-    return content_type.startswith(VIDEO_TYPES)
+    if content_type.startswith(VIDEO_TYPES):
+        return True
+    return content_type.startswith(OCTET_TYPES) and _path_extension(flow) in VIDEO_EXTENSIONS
 
 
 def _is_playlist(flow) -> bool:
@@ -810,14 +833,14 @@ class KosherFilter:
         content_type = (flow.response.headers.get("content-type") or "").lower()
         if content_type.startswith(PLAYLIST_TYPES):
             return  # small text; response() decides
-        if content_type.startswith(VIDEO_TYPES):
+        if _is_video(flow):
             decision = self._video_decision(flow, uid)
             if decision == "stream":
                 flow.response.stream = True
             elif decision == "refuse":
                 self._refuse_video(flow, before_body=True)
             return  # "hold": sampled in response()
-        if content_type.startswith(IMAGE_TYPES):
+        if _is_image(flow):
             level = self.policy.media_level_for(uid)
             if level == "none" or self._recently_clean(flow, level):
                 flow.response.stream = True
@@ -1231,18 +1254,21 @@ class KosherFilter:
         uncheckable = "refuse" if level in VIDEO_STRICT_LEVELS else "stream"
         if checker is None or not checker.available:
             return uncheckable
-        first, total = _range_info(flow)
+        _first, total = _range_info(flow)
         cached = checker.cached(videocheck_mod.key(flow.request.pretty_url, total))
         if cached is not None:
             return "refuse" if vision_mod.hides(level, cached) else "stream"
-        if first:
-            # A range from the middle of a clip nobody has judged: there
-            # is no header to decode it from. The first request for a clip
-            # always starts at 0 and gets it judged.
-            return uncheckable
         length = _content_length(flow)
         if length is not None and length > videocheck_mod.VIDEO_MAX_BYTES:
             return uncheckable  # too big to hold for sampling
+        # Held whether or not it starts at byte 0. A range from the middle
+        # used to be refused outright, and a browser that asks for a clip
+        # in pieces — Firefox does, and cancels its first request as soon
+        # as it has the header — never got the clip judged and then got
+        # every piece refused: "breaking and stuck". A fragment of a
+        # fragmented file (DASH, a WebM cluster) decodes on its own and is
+        # judged; a slice of a plain file cannot be read, and _video_settle
+        # treats that as unchecked.
         return "hold"
 
     def _refuse_video(self, flow: http.HTTPFlow, before_body: bool = False) -> None:
@@ -1266,9 +1292,18 @@ class KosherFilter:
                        "x-kosheros": "video-blocked"})
 
     def _video_settle(self, flow: http.HTTPFlow, uid: int, level: str, verdict) -> None:
-        if verdict is None or vision_mod.hides(level, verdict):
-            # Could not look, or looked and saw. Refusing is the safe
-            # direction, as for pictures.
+        if verdict is None:
+            # Could not look: unreadable, or too slow. Refused at the
+            # levels that refuse unchecked video, passed at the mildest —
+            # the same answer the headers give a clip that cannot be
+            # checked, so a clip is not passed from its headers and then
+            # refused from its body.
+            if level in VIDEO_STRICT_LEVELS:
+                self._refuse_video(flow)
+            else:
+                flow.response.headers["x-kosheros"] = "video-unchecked"
+            return
+        if vision_mod.hides(level, verdict):
             self._refuse_video(flow)
             return
         flow.response.headers["x-kosheros"] = f"video-checked={verdict.level}"

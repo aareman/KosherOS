@@ -338,8 +338,16 @@ class UpdatesPage(_Page):
         apply_btn = Gtk.Button(label="Update Now", valign=Gtk.Align.CENTER)
         apply_btn.add_css_class("suggested-action")
         apply_btn.connect("clicked", self._apply)
+        # Shown once an update is staged — by this page or by the timer —
+        # so the restart that finishes the job is one click away rather
+        # than something to go and find elsewhere.
+        self.restart_button = Gtk.Button(label="Restart Now", valign=Gtk.Align.CENTER,
+                                         visible=False)
+        self.restart_button.add_css_class("suggested-action")
+        self.restart_button.connect("clicked", lambda _b: self._confirm_restart())
         self.status_row.add_suffix(check)
         self.status_row.add_suffix(apply_btn)
+        self.status_row.add_suffix(self.restart_button)
         self.apply_button = apply_btn
         group.add(self.status_row)
         # The bar under the row: an update pulls gigabytes, and a button
@@ -394,6 +402,15 @@ class UpdatesPage(_Page):
             self.version_row.set_subtitle(f"Could not read: {status['error']}")
         else:
             self.version_row.set_subtitle(_deployment_words(status.get("booted")))
+        staged = status.get("staged") or None
+        if staged:
+            # The timer, or a previous visit, already fetched an update.
+            self.status_row.set_subtitle(
+                "An update is ready: " + _deployment_words(staged)
+                + ". Restart the computer to start using it.")
+            self.win.update_state = "Update ready — restart to use it"
+            self.restart_button.set_visible(True)
+            self.apply_button.set_visible(False)
         target = status.get("rollback") or None
         self.rollback_target = target
         if status.get("rollback_queued"):
@@ -405,6 +422,15 @@ class UpdatesPage(_Page):
         else:
             self.back_row.set_subtitle("There is no previous version to go back to.")
             self.back_button.set_sensitive(False)
+
+    def _confirm_restart(self):
+        return confirm(self.win, "Restart now?",
+                "The update starts when the computer restarts. Anyone who is "
+                "signed in will be signed out, so make sure nothing is left "
+                "unsaved.", "Restart",
+                lambda: self.win.call(self.win.client.reboot, refresh=False,
+                                      done_msg="Restarting…"),
+                destructive=False)
 
     def _confirm_rollback(self) -> None:
         target = self.rollback_target or {}
@@ -478,6 +504,8 @@ class UpdatesPage(_Page):
             self.status_row.set_subtitle(
                 "The update is ready. Restart the computer to start using it; "
                 "until then everything carries on as it is.")
+            self.restart_button.set_visible(True)
+            self.apply_button.set_visible(False)
             self.win.toast("Update ready — restart to apply")
             self._load_deployment()
         else:

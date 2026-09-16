@@ -309,6 +309,10 @@ class DaemonClient:
     def rollback(self) -> None:
         self._call("System", "Rollback")
 
+    def reboot(self) -> None:
+        """Restart the computer (after an update is staged)."""
+        self._call("System", "Reboot")
+
     # Network
     def set_captive_mode(self, uid: int, minutes: int) -> None:
         self._call("Network", "SetCaptiveMode", "(ii)", uid, minutes)

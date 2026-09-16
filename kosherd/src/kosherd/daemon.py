@@ -262,6 +262,7 @@ INTROSPECTION_XML = """
       <arg direction="out" type="s" name="status_json"/>
     </method>
     <method name="Rollback"/>
+    <method name="Reboot"/>
     <signal name="UpdateProgress">
       <arg type="i" name="percent"/>
       <arg type="s" name="status"/>
@@ -1669,6 +1670,19 @@ class Daemon:
         if not ok:
             log.error("update failed: %s", error)
         self._emit_system_signal("UpdateFinished", "(bs)", (bool(ok), str(error)))
+
+    def impl_Reboot(self):
+        """Restart the computer, for the Restart button after an update.
+
+        Done here rather than by the session: logind lets an active session
+        reboot on its own only while it is the only one, and a family
+        computer often has two people signed in — the stock rule for that
+        case wants a polkit admin, of which this system has none.
+        """
+        res = subprocess.run(["systemctl", "reboot"], capture_output=True, text=True)
+        if res.returncode != 0:
+            raise PolicyError(f"could not restart: {res.stderr.strip()}")
+        return None
 
     def impl_DeploymentStatus(self):
         """Which image is booted, and which one "go back" would return to.

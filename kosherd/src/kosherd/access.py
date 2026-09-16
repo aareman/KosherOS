@@ -145,6 +145,9 @@ ACTIONS = {
     # the filter up. Gating it would mainly risk a broken machine nobody
     # present can repair. See impl_Rollback.
     "Rollback": ACTION_APPLY_UPDATES,
+    # The Restart button after an update. Same action as applying it: a
+    # restart is the second half of the same job.
+    "Reboot": ACTION_APPLY_UPDATES,
     "SetCaptiveMode": ACTION_MANAGE_NETWORK,
     "IsEnabled": ACTION_READ_CONFIG,
     "SetGuardianPassword": ACTION_MANAGE_GUARDIAN,

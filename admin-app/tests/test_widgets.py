@@ -105,6 +105,11 @@ class FakeClient:
         self.on_update_progress, self.on_update_finished = on_progress, on_finished
         return 7
 
+    rebooted = 0
+
+    def reboot(self):
+        self.rebooted += 1
+
     def disconnect_signals(self, subscription):
         self.disconnected = subscription
 
@@ -1257,6 +1262,38 @@ def test_update_now_shows_a_bar_that_follows_the_daemon_and_says_when_to_restart
     assert not page.progress.get_visible() and page.apply_button.get_sensitive()
     assert "Restart the computer" in page.status_row.get_subtitle()
     assert any("Update ready" in t for t in win.toasts)
+
+
+def test_once_an_update_is_ready_restart_is_one_click_away():
+    win = FakeWindow(FakeClient())
+    win.policy = {"revision": 1, "users": [], "guardian": {"enabled": False},
+                  "guest": {"enabled": False}}
+    page = computer.UpdatesPage(win)
+    drain()
+    assert not page.restart_button.get_visible()
+    page._apply(None)
+    drain()
+    win.client.on_update_finished(True, "")
+    assert page.restart_button.get_visible() and not page.apply_button.get_visible()
+    # Restart asks first, then the daemon restarts (not the session, which
+    # a second signed-in account would stop).
+    dialog = page._confirm_restart()
+    assert dialog is not None
+    dialog.emit("response", "yes")
+    drain()
+    assert win.client.rebooted == 1
+
+
+def test_an_update_the_timer_already_staged_offers_restart_on_arrival():
+    win = FakeWindow(FakeClient(deployment={
+        "booted": {"version": "1"}, "rollback": None, "rollback_queued": False,
+        "staged": {"image": "ghcr.io/x/kosheros:edge", "version": "2"}}))
+    win.policy = {"revision": 1, "users": [], "guardian": {"enabled": False},
+                  "guest": {"enabled": False}}
+    page = computer.UpdatesPage(win)
+    drain()
+    assert page.restart_button.get_visible()
+    assert "version 2" in page.status_row.get_subtitle()
 
 
 def test_a_failed_update_says_why_and_gives_the_button_back():

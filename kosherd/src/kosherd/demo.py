@@ -490,6 +490,9 @@ class DemoClient:
         self.network_status = lambda: {"online": True, "kind": "wifi", "name": ssid,
                                        "wifi_hardware": True}
 
+    def reboot(self):
+        self._change(None, "Reboot", [])
+
     def deployment_status(self):
         return {"booted": {"image": "ghcr.io/aareman/kosher-linux:edge", "version": "0.1.0-pre.11",
                            "timestamp": now - 3600},

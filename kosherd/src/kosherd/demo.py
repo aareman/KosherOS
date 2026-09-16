@@ -532,6 +532,10 @@ class DemoClient:
 
     # -- system --------------------------------------------------------------------
 
+    def filter_log(self, lines=200):
+        return ("2026-09-16T10:00:01+0000 kosheros kosher-mitm[812]: blocked a YouTube video (category)\n"
+                "2026-09-16T10:00:07+0000 kosheros kosher-mitm[812]: hid a picture from example.com\n")
+
     def check_update(self):
         return {"ok": True, "available": True, "version": "0.1.0-pre.12", "channel": "edge",
                 "image": "ghcr.io/aareman/kosher-linux:edge", "digest": "sha256:demo",

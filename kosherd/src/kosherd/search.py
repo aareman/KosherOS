@@ -116,6 +116,7 @@ CONTENT_TOLERANCE = {
     "nsfw": content.NSFW,
     "suggestive": content.SUGGESTIVE,
     "immodest": content.IMMODEST,
+    "people": content.IMMODEST,
     "all": content.IMMODEST,
 }
 

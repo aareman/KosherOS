@@ -16,11 +16,19 @@ means reading the connection):
 | `nsfw` | explicit imagery |
 | `suggestive` | explicit and suggestive |
 | `immodest` | also immodest imagery — the frum default |
+| `people` | also any picture with a person in it, whatever they wear |
 | `all` | every remote image; pages render as text |
 
 `all` is the only level that needs no judgement, so it is the only one that
 is exactly right every time. Everything below it depends on a classifier
-and will be wrong sometimes in both directions.
+and will be wrong sometimes in both directions. `people` leans on the one
+thing the models are reliable about — whether there is a person in the
+picture — and asks nothing about what they wear: tight or sheer clothing on
+a covered figure ("comic book super women") has no skin to measure and no
+label to fire, so `immodest` will keep missing it, and a level that
+pretended otherwise would be wrong quietly. Landscapes, products, diagrams
+and text keep showing at `people`; photographs of anyone, in anything, do
+not.
 
 ## How each level is actually enforced
 

@@ -41,6 +41,7 @@ MEDIA_LABELS = {
     "nsfw": "Hide explicit pictures",
     "suggestive": "Hide explicit and suggestive pictures",
     "immodest": "Hide immodest pictures too",
+    "people": "Hide pictures of people too",
     "all": "Hide all pictures from the web",
 }
 MEDIA_HINTS = {
@@ -48,7 +49,11 @@ MEDIA_HINTS = {
     "nsfw": "Hides pictures on pages that read as explicit.",
     "suggestive": "Also hides pictures on pages that read as suggestive.",
     "immodest": "Also hides pictures on pages about immodest dress. The "
-                "strictest setting that still leaves ordinary sites usable.",
+                "strictest setting that still judges each picture.",
+    "people": "Also hides any picture with a person in it, whatever they "
+              "wear. Tight or sheer clothing is not something the filter can "
+              "judge, and this is the honest answer to it: landscapes, "
+              "products, diagrams and text still show.",
     "all": "No pictures from the web at all. Nothing here depends on a "
            "judgement call, which is why it is the only setting that is "
            "right every time.",
@@ -59,6 +64,7 @@ MEDIA_SHORT = {
     "nsfw": "Explicit pictures hidden",
     "suggestive": "Suggestive pictures hidden",
     "immodest": "Immodest pictures hidden",
+    "people": "Pictures of people hidden",
     "all": "No pictures from the web",
 }
 

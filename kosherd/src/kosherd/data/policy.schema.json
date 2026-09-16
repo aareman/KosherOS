@@ -111,6 +111,7 @@
             "nsfw",
             "suggestive",
             "immodest",
+            "people",
             "all"
           ],
           "default": "none",
@@ -348,6 +349,7 @@
             "nsfw",
             "suggestive",
             "immodest",
+            "people",
             "all"
           ],
           "default": "none",

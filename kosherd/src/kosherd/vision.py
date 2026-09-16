@@ -68,6 +68,7 @@ HIDE_AT = {
     "nsfw": NSFW,
     "suggestive": SUGGESTIVE,
     "immodest": IMMODEST,
+    "people": IMMODEST,   # and anyone at all: see hides()
     "all": CLEAN,
 }
 
@@ -184,6 +185,16 @@ def body_box(face, width, height):
 # shoulders and arms. Faces and hands alone in a body-sized region sit far
 # below this; beachwear sits far above.
 SKIN_LIMIT = 0.22
+# The person detector's box is tight around the figure, where a box
+# estimated from a face is a guess with room around it; less of it is
+# background, so a lower fraction means the same thing. Measured on gym
+# photographs in sports bras and leggings that came back clean: 0.17 over a
+# figure lying flat, against 0.30 for the same clothing kneeling.
+FOUND_SKIN_LIMIT = 0.17
+# The centre of a figure's box, for a figure that is wide rather than tall
+# (lying, lunging, bending): the legs region assumes somebody upright, and
+# the whole box is mostly floor. Skin is measured over the middle too.
+CORE = 0.7
 
 # A short skirt on its own. Measured over the whole figure, bare legs under
 # a covered top come to a sixth of the box — under SKIN_LIMIT — and the
@@ -304,12 +315,27 @@ def _person_in(image_bytes: bytes, size) -> tuple | None:
     return found[0][1]
 
 
-def shows_too_much(image_bytes: bytes, body, reference: int | None = None) -> bool:
+def core_box(body):
+    """The middle of a figure's box, CORE of its width and height."""
+    x, y, w, h = body
+    margin = (1 - CORE) / 2
+    return (int(x + margin * w), int(y + margin * h), int(CORE * w), int(CORE * h))
+
+
+def shows_too_much(image_bytes: bytes, body, reference: int | None = None,
+                   found: bool = False) -> bool:
     """The figure, or its legs alone, past the immodest line. `reference`
-    is the face's lightness, used when the picture has no colour."""
+    is the face's lightness, used when the picture has no colour; `found`
+    says the box came from the person detector rather than a face, so it
+    is tight around the figure and its middle is measured as well."""
+    limit = FOUND_SKIN_LIMIT if found else SKIN_LIMIT
     fraction = skin_fraction(image_bytes, body, reference)
-    if fraction is not None and fraction >= SKIN_LIMIT:
+    if fraction is not None and fraction >= limit:
         return True
+    if found:
+        core = skin_fraction(image_bytes, core_box(body), reference)
+        if core is not None and core >= SKIN_LIMIT:
+            return True
     legs = skin_fraction(image_bytes, legs_box(body), reference)
     return legs is not None and legs >= LEGS_SKIN_LIMIT
 
@@ -401,12 +427,24 @@ def in_context(verdict: "ImageVerdict", page_level: str, tolerance: str) -> bool
 
 
 def hides(media_level: str, verdict: ImageVerdict) -> bool:
-    """Would an account at this media level hide this picture?"""
+    """Would an account at this media level hide this picture?
+
+    "people" hides everything "immodest" does and, besides, any picture
+    with a person in it, whatever they wear. Tight or sheer clothing on a
+    covered figure — "sensual tight and/or transparent clothing gets
+    through like comic book super women" — is not something a detector
+    can judge from skin or from labels, and a level that pretended to
+    would be wrong quietly. This one is not: a person is what the models
+    are reliable about, and landscapes, products, diagrams and text keep
+    showing.
+    """
     threshold = HIDE_AT.get(media_level)
     if threshold is None:
         return False
     if threshold == CLEAN:
         return True  # "all": no judgement involved
+    if media_level == "people" and verdict.has_person:
+        return True
     return verdict.at_least(threshold)
 
 
@@ -416,7 +454,7 @@ def hides(media_level: str, verdict: ImageVerdict) -> bool:
 # logic: a family test found a swimsuit thumbnail still "clean" after the
 # skin rule shipped, because its clean verdict from earlier was still in
 # the cache.
-JUDGEMENT_VERSION = 6  # 6: monochrome photographs measured by lightness
+JUDGEMENT_VERSION = 7  # 7: a found figure's tight box and its middle
 
 
 def digest(data: bytes) -> str:
@@ -1001,7 +1039,7 @@ class ImageFilter:
         if verdict.level == CLEAN and not faces:
             person = _person_in(image_bytes, size)
             if person is not None:
-                if shows_too_much(image_bytes, person):
+                if shows_too_much(image_bytes, person, found=True):
                     return ImageVerdict(IMMODEST, (person,), True)
                 return ImageVerdict(CLEAN, (), True)
         return verdict

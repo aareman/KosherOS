@@ -66,6 +66,7 @@ def test_the_verdict_carries_the_regions_worth_covering():
     ("nsfw", [NSFW]),
     ("suggestive", [NSFW, SUGGESTIVE]),
     ("immodest", [NSFW, SUGGESTIVE, IMMODEST]),
+    ("people", [NSFW, SUGGESTIVE, IMMODEST]),
     ("all", [NSFW, SUGGESTIVE, IMMODEST, CLEAN]),
 ])
 def test_each_media_level_hides_what_it_says(level, expect_hidden):
@@ -73,6 +74,20 @@ def test_each_media_level_hides_what_it_says(level, expect_hidden):
         verdict = vision.ImageVerdict(found, ())
         assert vision.hides(level, verdict) == (found in expect_hidden), \
             f"{level} vs {found}"
+
+
+def test_the_people_level_hides_anyone_whatever_they_wear():
+    # "sensual tight and/or transparent clothing gets through like comic
+    # book super women": no skin to measure, no label to fire. The level
+    # above immodest asks only whether there is a person.
+    clothed = vision.ImageVerdict(CLEAN, (), has_person=True)
+    assert vision.hides("people", clothed)
+    assert not vision.hides("immodest", clothed)
+    landscape = vision.ImageVerdict(CLEAN, (), has_person=False)
+    assert not vision.hides("people", landscape)
+    from kosherd.policy import MEDIA_LEVELS
+
+    assert MEDIA_LEVELS.index("immodest") < MEDIA_LEVELS.index("people") < MEDIA_LEVELS.index("all")
 
 
 def test_hide_everything_needs_no_detector_at_all():
@@ -513,6 +528,24 @@ def test_a_terminal_or_a_picture_of_code_is_never_skin(monkeypatch):
     # And a flat diagram in greys is a drawing too.
     flat = _grey_photo(light_box=(60, 30, 240, 400), grain=False)
     assert vision.skin_fraction(flat, (60, 30, 180, 370)) == 0.0
+
+
+def test_a_figure_found_lying_flat_is_measured_over_its_middle_with_a_tighter_limit():
+    # Gym photographs in sports bras and leggings, lying or lunging, came
+    # back clean: the detector's box was mostly floor and the legs region
+    # assumed somebody upright. The detector's box is tight around the
+    # figure, so a lower fraction over it means the same thing, and its
+    # middle is measured too.
+    photo = _skin_photo(skin_box=(135, 104, 265, 158), size=(400, 300))
+    box = (40, 100, 320, 120)  # wide: aspect 2.7; the skin sits above the legs region
+    whole = vision.skin_fraction(photo, box)
+    assert vision.FOUND_SKIN_LIMIT <= whole < vision.SKIN_LIMIT, whole
+    assert not vision.shows_too_much(photo, box), "a face-estimated box keeps the old line"
+    assert vision.shows_too_much(photo, box, found=True)
+    faint = _skin_photo(skin_box=(170, 120, 230, 150), size=(400, 300))
+    assert vision.skin_fraction(faint, box) < vision.FOUND_SKIN_LIMIT
+    assert vision.skin_fraction(faint, vision.core_box(box)) < vision.SKIN_LIMIT
+    assert not vision.shows_too_much(faint, box, found=True), "a little skin is still a little"
 
 
 def test_the_legs_region_sits_in_the_lower_middle_of_the_figure():

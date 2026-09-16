@@ -48,12 +48,16 @@ UNFILTERED_MODES = ("unfiltered",)
 #   suggestive     also hide suggestive imagery
 #   immodest       also hide immodest imagery (the frum default)
 #   all            show no remote images at all
-MEDIA_LEVELS = ("none", "nsfw", "suggestive", "immodest", "all")
+#   people         also hide any picture with a person in it, whatever
+#                  they wear — tight or sheer clothing is not something a
+#                  detector can judge, and this is the honest answer to it
+MEDIA_LEVELS = ("none", "nsfw", "suggestive", "immodest", "people", "all")
 MEDIA_LEVEL_LABELS = {
     "none": "Show all images",
     "nsfw": "Hide explicit images",
     "suggestive": "Hide explicit and suggestive images",
     "immodest": "Hide explicit, suggestive and immodest images",
+    "people": "Hide immodest images and any picture of a person",
     "all": "Hide all images from the web",
 }
 DEFAULT_MEDIA_LEVEL = "none"

@@ -342,12 +342,12 @@ VIDEO_TYPES = ("video/", "application/vnd.apple.mpegurl",
 PLAYLIST_TYPES = ("application/vnd.apple.mpegurl", "application/x-mpegurl",
                   "application/dash+xml")
 # Levels at which a clip is looked at. "all" needs no looking: no video.
-VIDEO_CHECKED_LEVELS = ("nsfw", "suggestive", "immodest")
+VIDEO_CHECKED_LEVELS = ("nsfw", "suggestive", "immodest", "people")
 # Levels at which an UNCHECKABLE clip (no decoder, too big to hold, a
 # mid-stream range with no verdict yet) is refused rather than passed. The
 # mildest level keeps its old behaviour — video passed unchecked there
 # before this existed, and a decoder that is missing must not take it away.
-VIDEO_STRICT_LEVELS = ("all", "immodest", "suggestive")
+VIDEO_STRICT_LEVELS = ("all", "people", "immodest", "suggestive")
 # Kept for callers that still read it: what "no open-web video" meant.
 VIDEO_BLOCKED_LEVELS = VIDEO_STRICT_LEVELS
 
@@ -376,6 +376,7 @@ IMMODEST_SOURCES = {
     "nsfw": frozenset({"adult"}),
     "suggestive": frozenset({"adult", "immodest"}),
     "immodest": frozenset({"adult", "immodest"}),
+    "people": frozenset({"adult", "immodest"}),
 }
 
 
@@ -679,6 +680,7 @@ CONTENT_TOLERANCE = {
     "nsfw": content_mod.NSFW,
     "suggestive": content_mod.SUGGESTIVE,
     "immodest": content_mod.IMMODEST,
+    "people": content_mod.IMMODEST,
     "all": content_mod.IMMODEST,
 }
 # Reading a whole page costs real time on a slow machine, and the character
@@ -1139,7 +1141,7 @@ class KosherFilter:
         # sheer-fabric shots sailed through at "immodest". At the modesty
         # levels, a PERSON in a search thumbnail is reason enough to hide
         # it; a landscape or product shot passes untouched.
-        if level in ("immodest", "suggestive") and verdict.has_person \
+        if level in ("immodest", "suggestive", "people") and verdict.has_person \
                 and _is_search_thumb(flow.request.pretty_host or ""):
             log.info("hid a search thumbnail with a person for uid=%s", uid)
             self._blank_image(flow)

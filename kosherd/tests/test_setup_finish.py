@@ -40,7 +40,9 @@ def test_the_boot_password_is_written_where_grub_reads_it(user_cfg, monkeypatch)
 
     monkeypatch.setattr(d.subprocess, "run", run)
     d.Daemon._set_grub_password("boot-pass-1")
-    assert user_cfg.read_text() == "GRUB2_PASSWORD=grub.pbkdf2.sha512.10000.AB.CD\n"
+    written = user_cfg.read_text()
+    assert written.startswith("GRUB2_PASSWORD=grub.pbkdf2.sha512.10000.AB.CD\n")
+    assert "set timeout_style=hidden" in written, "the quiet-menu lines ride along"
     assert (user_cfg.stat().st_mode & 0o777) == 0o600
     # A writable /boot needs no remount, and none was attempted.
     assert not any(c[0] == "mount" for c in calls)

@@ -363,6 +363,71 @@ UID_AWARE = access.UID_AWARE
 SETUP_STAMP = Path("/var/lib/kosher/setup-complete")
 GRUB_USER_CFG = Path("/boot/grub2/user.cfg")
 
+# What kosherd keeps in user.cfg besides the boot password. GRUB's static
+# preamble sets a visible one-second menu and then sources this file, so
+# these lines win: a silent second in which Shift or Esc opens the menu,
+# and otherwise straight into the system. Hidden, not zero, on purpose —
+# with no countdown there is no moment in which the menu can be reached.
+QUIET_MENU_LINES = ("set timeout_style=hidden", "set timeout=1")
+
+
+def render_grub_user_cfg(existing: str, password_digest: str | None) -> str:
+    """The new user.cfg: the password line (kept from `existing` when no new
+    digest is given, dropped if `existing` has none), then the quiet-menu
+    lines, nothing else of ours duplicated."""
+    kept = None
+    for line in existing.splitlines():
+        if line.startswith("GRUB2_PASSWORD="):
+            kept = line
+    if password_digest is not None:
+        kept = f"GRUB2_PASSWORD={password_digest}"
+    lines = [kept] if kept else []
+    lines += list(QUIET_MENU_LINES)
+    return "\n".join(lines) + "\n"
+
+
+def write_grub_user_cfg(password_digest: str | None = None,
+                        path: Path | None = None) -> bool:
+    """Write user.cfg, remounting the boot partition if it is read-only.
+
+    ostree mounts /boot read-only, so a plain write fails with EROFS and
+    the first person to set a boot password on a real machine saw exactly
+    that. Returns True when something was written, False when the file
+    already said what it should — the usual case at every start.
+    """
+    if path is None:
+        path = GRUB_USER_CFG  # looked up now, so a test can point it elsewhere
+    try:
+        existing = path.read_text()
+    except OSError:
+        existing = ""
+    wanted = render_grub_user_cfg(existing, password_digest)
+    if wanted == existing:
+        return False
+    boot = path.parent.parent
+    remounted = False
+    try:
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(wanted)
+        except OSError as e:
+            if e.errno != errno.EROFS:
+                raise
+            res = subprocess.run(["mount", "-o", "remount,rw", str(boot)],
+                                 capture_output=True, text=True)
+            if res.returncode != 0:
+                raise PolicyError(
+                    f"could not make {boot} writable: {res.stderr.strip()}") from e
+            remounted = True
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(wanted)
+        path.chmod(0o600)
+    finally:
+        if remounted:
+            subprocess.run(["mount", "-o", "remount,ro", str(boot)],
+                           capture_output=True, text=True)
+    return True
+
 ERROR_NAME = "org.kosherlinux.Daemon1.Error"
 
 
@@ -460,6 +525,7 @@ class Daemon:
             apply_policy(self.policy)
         except Exception:
             log.exception("failed to apply policy at startup; baseline rules remain")
+        self._quiet_boot_menu()
         self._apply_mct()
         try:
             apps.write_remote_filter()
@@ -1909,41 +1975,27 @@ class Daemon:
                        if "grub.pbkdf2" in line), None)
         if digest is None:
             raise PolicyError("unexpected grub2-mkpasswd-pbkdf2 output")
-        # ostree mounts /boot read-only, so a plain write fails with EROFS
-        # ("cannot write") and the first person to enable this on a real
-        # machine saw exactly that. Remount for the write and put it back.
-        # bootupd's static grub.cfg sources ${prefix}/user.cfg and sets
-        # prefix to the boot partition's grub2 dir, so this path is the one
-        # GRUB actually reads.
-        boot = GRUB_USER_CFG.parent.parent
-        remounted = False
         try:
-            try:
-                GRUB_USER_CFG.parent.mkdir(parents=True, exist_ok=True)
-                GRUB_USER_CFG.write_text(f"GRUB2_PASSWORD={digest}\n")
-            except OSError as e:
-                if e.errno != errno.EROFS:
-                    raise
-                res = subprocess.run(["mount", "-o", "remount,rw", str(boot)],
-                                     capture_output=True, text=True)
-                if res.returncode != 0:
-                    raise PolicyError(
-                        f"could not make {boot} writable: {res.stderr.strip()}"
-                    ) from e
-                remounted = True
-                GRUB_USER_CFG.parent.mkdir(parents=True, exist_ok=True)
-                GRUB_USER_CFG.write_text(f"GRUB2_PASSWORD={digest}\n")
-            GRUB_USER_CFG.chmod(0o600)
+            write_grub_user_cfg(password_digest=digest)
         except OSError as e:
             raise PolicyError(
                 f"could not write the boot password to {GRUB_USER_CFG}: {e}. "
                 "Turn the boot menu password off for now and set it later in "
-                "KosherOS Admin.") from e
-        finally:
-            if remounted:
-                subprocess.run(["mount", "-o", "remount,ro", str(boot)],
-                               capture_output=True)
+                "KosherOS Admin.")
         log.info("boot menu password set")
+
+    def _quiet_boot_menu(self) -> None:
+        """Keep the boot menu hidden on this machine (see write_grub_user_cfg).
+
+        Done at every start rather than once: bootupd writes its static
+        grub.cfg at install and never again, so the snippet in the image
+        reaches fresh installs only — 'boot menu was not hidden' on a
+        machine that was updated to it. user.cfg is read every boot.
+        """
+        try:
+            write_grub_user_cfg()
+        except (OSError, PolicyError) as e:
+            log.warning("could not quiet the boot menu: %s", e)
 
     # ---- Portal ----------------------------------------------------------
 

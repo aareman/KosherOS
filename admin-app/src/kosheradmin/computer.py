@@ -26,7 +26,8 @@ gi.require_version("Adw", "1")
 from gi.repository import Adw, GLib, Gtk  # noqa: E402
 
 from . import labels  # noqa: E402
-from .common import clear, confirm, error_text, pointer_cursors, run_async, tag  # noqa: E402
+from .common import (banner_slot, clear, confirm, error_text, pointer_cursors,  # noqa: E501
+                     run_async, tag)  # noqa: E402
 from .dialogs import ListEditDialog, guardian_dialog  # noqa: E402
 
 
@@ -71,15 +72,19 @@ def health_rows(status: dict | None) -> list[tuple[str, str, bool]]:
     return rows
 
 
+def health_problems(status: dict | None) -> int:
+    """How many of the health rows are not fine: the sidebar's amber badge."""
+    return sum(1 for _title, _body, ok in health_rows(status) if not ok)
+
+
 def health_summary(status: dict | None) -> tuple[str, bool]:
-    """Two words for the sidebar: what the health is, and whether it is fine."""
-    rows = health_rows(status)
-    problems = [r for r in rows if not r[2]]
+    """Two words for the health, and whether it is fine."""
+    problems = health_problems(status)
     if not problems:
         return "Running", True
-    if len(problems) == 1:
+    if problems == 1:
         return "1 problem", False
-    return f"{len(problems)} problems", False
+    return f"{problems} problems", False
 
 
 class _Page(Adw.NavigationPage):
@@ -90,8 +95,10 @@ class _Page(Adw.NavigationPage):
         self.win = win
         self.prefs = Adw.PreferencesPage()
         self.header = Adw.HeaderBar()
+        self.banner_slot = banner_slot()
         view = Adw.ToolbarView()
         view.add_top_bar(self.header)
+        view.add_top_bar(self.banner_slot)
         view.set_content(self.prefs)
         self.set_child(view)
         # Subclasses fill self.prefs in their __init__; the hand cursor is

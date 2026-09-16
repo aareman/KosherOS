@@ -27,7 +27,7 @@ from kosherd import profiles as profiles_mod  # noqa: E402
 
 from . import labels  # noqa: E402
 from .common import avatar, clear, tag  # noqa: E402
-from .computer import health_summary  # noqa: E402
+from .computer import health_problems  # noqa: E402
 
 # The rows that are always there, below the family.
 ADMIN = (
@@ -69,7 +69,13 @@ class _Row(Gtk.ListBoxRow):
         self.set_cursor_from_name("pointer")
 
     def _pack(self, lead: Gtk.Widget) -> None:
-        self.box.append(lead)
+        # One 28px column for every row's lead, so a face and an icon share
+        # a left edge and the names line up down the whole list.
+        column = Gtk.Box(width_request=28)
+        lead.set_halign(Gtk.Align.CENTER)
+        lead.set_hexpand(True)
+        column.append(lead)
+        self.box.append(column)
         self.box.append(self.title)
         self.box.append(self.status)
         self.box.append(self.badge)
@@ -92,20 +98,21 @@ class SidebarRow(_Row):
 
 
 class PersonRow(_Row):
-    """An account, with its face and the preset it is set up as."""
+    """An account: its face, its name, and a count when somebody is waiting."""
 
     def __init__(self, user: dict, waiting: int, custom=()):
         super().__init__(user_key(user), user["username"], FAMILY_SECTION)
         self.uid = user["uid"]
-        self._pack(avatar(user["username"], 22))
+        self._pack(avatar(user["username"], 24))
         if user.get("guest"):
-            self.say("On" if user.get("enabled", True) else "Off")
+            # Off is the one thing worth saying about the guest here; on,
+            # it is an account like the others.
+            self.say("" if user.get("enabled", True) else "Off")
             return
-        key, _changes = profiles_mod.diff(user, custom)
-        # The preset only, never "Child, with 2 changes": the drift belongs
-        # on the person's own page, and a sidebar that wraps is no sidebar.
-        preset = profiles_mod.get(key, custom).label if key else "Custom"
-        self.say(preset, badge=str(waiting) if waiting else "")
+        # A row says one thing. The preset and how far the account has
+        # drifted from it belong on the person's own page; beside the name
+        # they competed with it, and every row read as two.
+        self.say(badge=str(waiting) if waiting else "")
 
 
 class Sidebar(Adw.NavigationPage):
@@ -250,20 +257,20 @@ class Sidebar(Adw.NavigationPage):
         blocked = sum(counts.get("blocked", 0)
                       for counts in (getattr(win, "summary", None) or {}).values()
                       if isinstance(counts, dict))
-        self.rows["activity"].say(f"{blocked} blocked today" if blocked
-                                  else "Quiet today")
+        # Administration rows carry at most a number: how many were blocked
+        # today, how many things are wrong with the filter (amber), how
+        # many apps are approved. The words are on the pages.
+        self.rows["activity"].say(badge=str(blocked) if blocked else "")
 
-        words, ok = health_summary(getattr(win, "status", None))
-        self.rows["protection"].say("" if not ok else words,
-                                    badge="" if ok else words, badge_class="warn")
+        problems = health_problems(getattr(win, "status", None))
+        self.rows["protection"].say(badge=str(problems) if problems else "",
+                                    badge_class="warn")
 
         approved = getattr(win, "catalog_count", None)
-        self.rows["apps"].say(labels.plural(approved, "app")
-                              if approved is not None else "")
+        self.rows["apps"].say(str(approved) if approved is not None else "")
 
-        # Until somebody checks, the useful thing to say is what this
-        # computer is running; an empty row looks unfinished.
-        booted = (getattr(win, "deployment", None) or {}).get("booted") or {}
-        state = getattr(win, "update_state", None) or (
-            f"Version {booted['version']}" if booted.get("version") else "")
-        self.rows["updates"].say(state[:24])
+        # Updates speaks only when there is something to do; the version
+        # running is on its page.
+        state = getattr(win, "update_state", None) or ""
+        self.rows["updates"].say(state[:24] if ("available" in state or "ready" in state)
+                                 else "")

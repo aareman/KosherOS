@@ -52,7 +52,7 @@ with a content filter that lives on the machine itself and a parent in charge wi
 ## About
 
 <div align="center">
-<img src="docs/images/admin-person.png" alt="KosherOS Admin: the family and the administration pages in a sidebar, one person's page open, a blue banner for waiting requests and an amber one for filter health" width="820">
+<img src="docs/images/admin-person.png" alt="KosherOS Admin: the family and the administration pages in a sidebar, one person's page open, a blue banner for waiting requests under its header" width="820">
 <br><sub>The admin app's home screen. One card per person, what each is protected from, what happened today.</sub>
 </div>
 
@@ -133,9 +133,9 @@ The admin app opens with one password and then everything works without another 
 - **Requests, first.** When someone asks for a blocked page from the block page, a blue banner
   says so and one click answers it: just this page, the whole site, or no. The filter's reason
   travels with the request.
-- **Health, honestly.** If picture checking has backed off or a service is down, an amber banner
-  says exactly what is not being enforced. When all is well the board says so, with the time it
-  was checked.
+- **Health, honestly.** If picture checking has backed off or a service is down, Protection
+  wears an amber count in the sidebar and its page says exactly what is not being enforced.
+  When all is well the page says so, with the time it was checked.
 - **Drift, named.** An account one switch away from *Child* reads as "Child, with 1 change:
   Sports also blocked", with a Reset button, not as "Custom".
 - **Blocks become allows.** Everything the filter did is written to an activity log, a record of

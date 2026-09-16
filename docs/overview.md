@@ -106,8 +106,9 @@ actually working, and then on the things one machine can only answer once — ad
 blocking, the word lists, the guardian password.
 
 Requests come first: when somebody asks for a blocked page from the block page, a blue
-banner says so and one click answers it. Filter health is honest: if picture checking has
-backed off or a service is down, an amber banner says exactly what is not being enforced.
+banner under the page's header says so and one click answers it. Filter health is honest:
+if picture checking has backed off or a service is down, Protection wears an amber count in
+the sidebar and its page says exactly what is not being enforced.
 
 ## How it works
 

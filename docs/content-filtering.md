@@ -144,9 +144,9 @@ So the block page has a button. It records who asked, for what, and why
 (the filter's own reason, "category:video", travels with the request, so
 the admin sees "blocked by Video and streaming" beside it instead of
 guessing which of five settings was responsible). The admin app shows the
-queue as a blue banner across the top of the home screen — "2 requests
-waiting for you" — and each request is answered with one button on its
-row. A request carries no authority of its own — nothing changes until an
+queue as a blue banner under the header of whichever page is open — "2
+requests waiting for you" — and each request is answered with one button on
+its row. A request carries no authority of its own — nothing changes until an
 admin says so — which is exactly what lets the asking be frictionless.
 
 **Nobody has to ask first.** Everything the filter blocks, hides or
@@ -217,9 +217,9 @@ the filter. A stale anchor (the CA regenerated without refreshing the
 trusted copy) gives the identical symptom and is harder to spot, so it is
 checked by comparing the two files rather than by their existence.
 
-All of it appears in the admin app as an amber banner across the top of the
-home screen, with the full list behind its Details button — and when
-nothing is wrong the sidebar says so ("Running" beside Protection),
+All of it appears in the admin app as an amber count beside Protection in
+the sidebar, with the full list first on the Protection page — and when
+nothing is wrong the badge is simply absent and the page says "Running",
 because a healthy machine that says nothing is indistinguishable from one
 that was never checked. `kosherctl status` prints the same; `kosherctl lists` prints what each list holds
 and where it came from.

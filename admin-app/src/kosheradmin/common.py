@@ -32,11 +32,6 @@ CSS = b"""
   background-color: alpha(@accent_fg_color, 0.2);
   color: @accent_fg_color;
 }
-.health-banner > revealer > widget {
-  background-color: @warning_bg_color;
-  color: @warning_fg_color;
-}
-.health-banner > revealer > widget label { color: @warning_fg_color; }
 .chip {
   padding: 3px 10px;
   border-radius: 999px;
@@ -139,6 +134,14 @@ def chip(text: str, *classes: str, icon: str | None = None) -> Gtk.Widget:
         box.append(Gtk.Image(icon_name=icon, pixel_size=14))
     box.append(Gtk.Label(label=text))
     return box
+
+
+def banner_slot() -> Gtk.Box:
+    """Where a page hosts the window's one banner: an empty top bar right
+    under the header, filled by the window when the page is shown. One
+    banner, under the header, rather than two stacked above every page
+    with the window controls pushed a third of the way down."""
+    return Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
 
 
 def tag(text: str, *classes: str) -> Gtk.Label:

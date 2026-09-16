@@ -444,15 +444,17 @@ def test_the_sidebar_holds_the_people_themselves_between_the_two_fixed_groups():
     sections = [row.section for row in _rail_rows(rail)]
     assert sections == ["Family"] * 4 + ["Administration"] * 4
     assert rail.rows["add"].title.get_label() == "Add a person…", "words, not a bare plus"
-    # A person's row says which preset they are set up as, and speaks up
-    # when somebody is waiting on an answer.
+    # A row says one thing. A person's row is the name, plus a count when
+    # somebody is waiting on an answer; the preset is on their page.
     assert rail.rows["user-1001"].title.get_label() == "yosef"
-    assert rail.rows["user-1001"].status.get_label()
+    assert not rail.rows["user-1001"].status.get_visible()
     assert rail.rows["user-1001"].badge.get_label() == "1"
     assert not rail.rows["user-1002"].badge.get_visible()
     assert rail.rows["guest"].status.get_label() == "Off"
-    assert rail.rows["apps"].status.get_label() == "23 apps"
-    assert rail.rows["protection"].status.get_label() == "Running"
+    # Administration rows carry at most a number.
+    assert rail.rows["apps"].status.get_label() == "23"
+    assert not rail.rows["protection"].status.get_visible()
+    assert not rail.rows["protection"].badge.get_visible(), "a healthy filter is quiet"
 
 
 def test_clicking_any_sidebar_row_takes_the_window_there():
@@ -508,7 +510,7 @@ def test_the_sidebar_shows_a_filter_problem_as_an_amber_badge():
     rail.refresh()
     drain()
     assert rail.rows["protection"].badge.get_visible()
-    assert rail.rows["protection"].badge.get_label() == "2 problems"
+    assert rail.rows["protection"].badge.get_label() == "2"
     assert "warn" in rail.rows["protection"].badge.get_css_classes()
 
 
@@ -768,8 +770,10 @@ def test_drift_is_named_and_there_is_a_way_back():
     drain()
     texts = _texts(page)
     assert "Set up as Child, with 2 changes" in texts
-    assert "Sports also blocked" in texts
-    assert any(t.startswith("YouTube: ") and "also blocked" in t for t in texts)
+    # The changes read as one note under the protections, not as chips.
+    note = next(t for t in texts if t.startswith("Changed here: "))
+    assert "Sports also blocked" in note
+    assert "YouTube: " in note and "also blocked" in note
     reset = next(b for b in _buttons(page) if b.get_label() == "Reset to Child")
     reset.emit("clicked")
     drain()
@@ -1329,18 +1333,23 @@ def _real_window():
     return win, restore
 
 
-def test_waiting_requests_are_a_banner_above_every_page_not_a_list():
+def test_waiting_requests_are_one_banner_under_every_pages_header():
     # The user's words: "a blue notification at top: X requests waiting for
-    # you, click to deal with". Above the content pane, whichever page is
-    # open, since the board it used to sit on is gone.
+    # you, click to deal with". It follows the person from page to page,
+    # under each page's header — not above the header, where two stacked
+    # banners pushed the window controls a third of the way down.
     win, restore = _real_window()
     try:
         assert win.requests, "the demo has requests waiting"
         assert win.requests_banner.get_revealed()
         assert win.requests_banner.get_title().endswith("requests waiting for you")
         assert win.requests_banner.has_css_class("requests-banner")
+        assert win.requests_banner.get_parent() is win.nav.get_visible_page().banner_slot
         win.go_to("apps")
         assert win.requests_banner.get_revealed(), "still there on another page"
+        assert win.requests_banner.get_parent() is win.nav.get_visible_page().banner_slot
+        win.go_to("activity")
+        assert win.requests_banner.get_parent() is win.nav.get_visible_page().banner_slot
         win.requests = []
         win.refresh_banners()
         assert not win.requests_banner.get_revealed()
@@ -1348,28 +1357,30 @@ def test_waiting_requests_are_a_banner_above_every_page_not_a_list():
         restore()
 
 
-def test_a_filter_problem_is_an_amber_banner_and_a_healthy_filter_is_quiet():
+def test_a_filter_problem_is_the_amber_badge_on_protection_and_a_healthy_filter_is_quiet():
     win, restore = _real_window()
     try:
-        # The demo daemon has no picture model: a problem.
-        assert win.health_banner.get_revealed()
-        assert win.health_banner.get_title() == "Pictures are being hidden, not checked"
+        # One banner at a time: health is not a second bar over the header.
+        assert not hasattr(win, "health_banner")
+        # The demo daemon has no picture model: a problem, so the sidebar's
+        # Protection row wears an amber count and its page says what.
         rows = computer.health_rows(win.status)
         assert any(not ok for _t, _b, ok in rows)
-        # Details goes to Protection.
-        win.health_banner.emit("button-clicked")
+        badge = win.sidebar.rows["protection"].badge
+        assert badge.get_visible() and badge.get_label().isdigit()
+        assert "warn" in badge.get_css_classes()
+        win.go_to("protection")
         drain()
-        assert win.destination == "protection"
-        # All well: the banner stays down and the sidebar says Running.
+        assert isinstance(win.nav.get_visible_page(), computer.ProtectionPage)
+        # All well: the badge goes and the row says nothing at all.
         win.status = {"pictures": "checking", "detect_ms": 40, "degraded": [], "problems": [],
                       "services": {"kosher-dns.service": "active"}}
         win.refresh_banners()
         win.sidebar.refresh()
-        assert not win.health_banner.get_revealed()
-        assert win.sidebar.rows["protection"].status.get_label() == "Running"
+        assert not win.sidebar.rows["protection"].badge.get_visible()
+        assert not win.sidebar.rows["protection"].status.get_visible()
     finally:
         restore()
-
 
 def test_the_app_opens_on_the_first_person():
     win, restore = _real_window()
@@ -1420,9 +1431,11 @@ def test_the_real_window_walks_every_sidebar_destination():
         # Nothing is ever pushed on top, so no page offers a back button
         # the sidebar has already made meaningless.
         assert win.nav.get_navigation_stack().get_n_items() == 1
-        # The sidebar says how each destination is, without being opened.
-        assert win.sidebar.rows["apps"].status.get_label().endswith("apps")
-        assert win.sidebar.rows["activity"].status.get_label()
+        # The sidebar says how each destination is, without being opened —
+        # in a number, never a sentence.
+        assert win.sidebar.rows["apps"].status.get_label().isdigit()
+        assert win.sidebar.rows["activity"].badge.get_label().isdigit()
+        assert not win.sidebar.rows["activity"].status.get_visible()
     finally:
         admin.DaemonClient = original
         admin.Window._not_an_admin = was_admin
@@ -1453,7 +1466,7 @@ def test_the_guest_row_leads_to_the_turn_on_page_when_off_and_the_real_one_when_
         drain()
         page = win.nav.get_visible_page()
         assert isinstance(page, detail.UserDetailPage) and page.uid == 1010
-        assert win.sidebar.rows["guest"].status.get_label() == "On"
+        assert not win.sidebar.rows["guest"].status.get_visible(), "on, it is just a person"
         # Same key either way, so the selection never jumps when it is
         # switched on from its own page.
         assert win.sidebar.rows["guest"].is_selected()

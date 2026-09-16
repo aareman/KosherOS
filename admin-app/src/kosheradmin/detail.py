@@ -23,7 +23,7 @@ from kosherd import timelimits  # noqa: E402
 from kosherd.policy import MEDIA_LEVELS, MODES, YOUTUBE_CATEGORIES  # noqa: E402
 
 from . import labels  # noqa: E402
-from .common import (avatar, chip, clear, confirm, error_text, mode_badge,  # noqa: E402
+from .common import (banner_slot, avatar, chip, clear, confirm, error_text, mode_badge,  # noqa: E402
                      pointer_cursors, run_async, small_button, submit_on_enter, tag)
 from .dialogs import (RulesDialog, SavePresetDialog, WhitelistDialog, allow_menu,  # noqa: E402
                       confirm_remove_user, request_row)
@@ -106,6 +106,12 @@ class UserDetailPage(Adw.NavigationPage):
         # directly below, in a space too narrow for it, and crowded the tabs.
         header = Adw.HeaderBar(title_widget=Adw.WindowTitle(title=user["username"],
                                                             subtitle=""))
+        # The page's own actions go where GNOME puts them: the header bar,
+        # not a row of buttons beside the name. pack_end packs right to
+        # left, so Save (the primary) is packed first and sits rightmost.
+        for button in reversed(self._header_actions(user)):
+            header.pack_end(button)
+        self.banner_slot = banner_slot()
         self.switcher = Adw.ViewSwitcher(stack=self.stack,
                                          policy=Adw.ViewSwitcherPolicy.WIDE,
                                          halign=Gtk.Align.CENTER, margin_top=6,
@@ -113,6 +119,7 @@ class UserDetailPage(Adw.NavigationPage):
         self.switcher_bar = Adw.ViewSwitcherBar(stack=self.stack)
         view = Adw.ToolbarView()
         view.add_top_bar(header)
+        view.add_top_bar(self.banner_slot)
         view.add_top_bar(self.switcher)
         view.add_bottom_bar(self.switcher_bar)
         view.set_content(self.stack)
@@ -126,6 +133,12 @@ class UserDetailPage(Adw.NavigationPage):
         holder.add_breakpoint(narrow)
         self.set_child(holder)
         pointer_cursors(self)
+        # A rebuild replaced the slot the window's banner was sitting in,
+        # and the old slot took the banner down with it: ask for it back.
+        win = self.win
+        nav = getattr(win, "nav", None)
+        if nav is not None and nav.get_visible_page() is self:
+            win.place_banner(self)
 
     def _gated(self, work, done_msg: str) -> None:
         self.win.with_guardian(lambda pw: self.win.call(lambda: work(pw), done_msg=done_msg))
@@ -135,15 +148,30 @@ class UserDetailPage(Adw.NavigationPage):
     def _overview_tab(self, user: dict) -> list[Adw.PreferencesGroup]:
         return [self._identity_group(user), *self._today_groups(user)]
 
+    def _header_actions(self, user: dict) -> list[Gtk.Button]:
+        """Reset to the preset (when the account has drifted from one) and
+        Save as a preset, left to right."""
+        custom = self.win.policy.get("custom_profiles", [])
+        buttons = []
+        if self.preset_key and labels.drift_sentences(self.drift):
+            label = profiles_mod.get(self.preset_key, custom).label
+            reset = small_button(f"Reset to {label}")
+            reset.connect("clicked", lambda _b: self._gated(
+                lambda pw: self.win.client.apply_profile(user["uid"], self.preset_key, pw),
+                f"{user['username']} → {label}"))
+            buttons.append(reset)
+        save = small_button("Save as a preset…")
+        save.connect("clicked", lambda _b: SavePresetDialog(self.win, user).present(self.win))
+        buttons.append(save)
+        return buttons
+
     def _identity_group(self, user: dict) -> Adw.PreferencesGroup:
         group = Adw.PreferencesGroup()
         custom = self.win.policy.get("custom_profiles", [])
-        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=14)
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
 
-        # A wrap box, not a box: beside the sidebar on a small screen the
-        # buttons ran off the right edge. Now they drop under the name.
-        who = Adw.WrapBox(child_spacing=14, line_spacing=10,
-                          justify=Adw.JustifyMode.SPREAD)
+        # The header row: face, name, mode, one line of context. The
+        # buttons that used to sit beside it are in the header bar.
         identity = Gtk.Box(spacing=14)
         identity.append(avatar(user["username"], 56))
         names = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, valign=Gtk.Align.CENTER,
@@ -162,30 +190,39 @@ class UserDetailPage(Adw.NavigationPage):
         setup.add_css_class("dim-label")
         names.append(setup)
         identity.append(names)
-        who.append(identity)
-        actions = Gtk.Box(spacing=6, valign=Gtk.Align.CENTER)
-        if self.preset_key and labels.drift_sentences(self.drift):
-            label = profiles_mod.get(self.preset_key, custom).label
-            reset = small_button(f"Reset to {label}")
-            reset.connect("clicked", lambda _b: self._gated(
-                lambda pw: self.win.client.apply_profile(user["uid"], self.preset_key, pw),
-                f"{user['username']} → {label}"))
-            actions.append(reset)
-        save = small_button("Save as a preset…")
-        save.connect("clicked", lambda _b: SavePresetDialog(self.win, user).present(self.win))
-        actions.append(save)
-        who.append(actions)
-        box.append(who)
+        box.append(identity)
 
-        chips = Gtk.FlowBox(selection_mode=Gtk.SelectionMode.NONE, column_spacing=6,
-                            row_spacing=6, max_children_per_line=8, homogeneous=False)
-        for icon, text, protects in labels.protection_lines(user):
-            chips.append(chip(text, "blocking" if protects else "open", icon=icon))
+        # The protections, split by what they mean rather than poured into
+        # one wall of seven chips: what is protected on one row, what is
+        # left open (amber) on the next, each row led by its word. A
+        # parent scanning for "what is open?" reads one row.
+        lines = list(labels.protection_lines(user))
         text, protects = labels.time_line(user, self._time_usage(user))
-        chips.append(chip(text, "blocking" if protects else "open", icon="alarm-symbolic"))
-        for sentence in labels.drift_sentences(self.drift):
-            chips.append(chip(sentence, "diff"))
-        box.append(chips)
+        lines.append(("alarm-symbolic", text, protects))
+        for heading, style in (("Protected", "blocking"), ("Left open", "open")):
+            items = [(icon, text) for icon, text, p in lines if p == (style == "blocking")]
+            if not items:
+                continue
+            row = Gtk.Box(spacing=10)
+            lead = Gtk.Label(label=heading, xalign=0, width_request=76,
+                             valign=Gtk.Align.START, margin_top=5)
+            lead.add_css_class("caption-heading")
+            lead.add_css_class("line-open" if style == "open" else "dim-label")
+            row.append(lead)
+            chips = Adw.WrapBox(child_spacing=6, line_spacing=6, hexpand=True)
+            for icon, text in items:
+                chips.append(chip(text, style, icon=icon))
+            row.append(chips)
+            box.append(row)
+        # What was changed here, apart from the preset: a note, not a
+        # protection, so it does not read as one more thing being blocked.
+        notes = labels.drift_sentences(self.drift)
+        if notes:
+            note = Gtk.Label(label="Changed here: " + " · ".join(notes), xalign=0, wrap=True)
+            note.add_css_class("dim-label")
+            note.add_css_class("caption")
+            note.add_css_class("drift-note")
+            box.append(note)
         group.add(box)
         return group
 

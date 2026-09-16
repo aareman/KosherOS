@@ -63,3 +63,10 @@ edge-tiling=true
 
 [org/gnome/desktop/interface]
 enable-hot-corners=false
+
+[org/gnome/settings-daemon/plugins/housekeeping]
+# GNOME asks for a donation to the GNOME Foundation twice a year, as a
+# notification. On a family computer that reads as a strange pop-up asking
+# for money — "weird pop up i just got" — and it is not this product's
+# appeal to make. Off, and locked, like Debian and Ubuntu ship it.
+donation-reminder-enabled=false

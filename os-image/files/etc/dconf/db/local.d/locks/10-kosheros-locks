@@ -5,3 +5,5 @@
 # The set an account has ENABLED is not locked: kosher-layout writes it per
 # account at sign-in (see 20-kosheros-desktop), and dconf locks are global.
 /org/gnome/shell/allow-extension-installation
+# No donation appeals on a family computer (see 20-kosheros-desktop).
+/org/gnome/settings-daemon/plugins/housekeeping/donation-reminder-enabled

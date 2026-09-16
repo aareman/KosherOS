@@ -408,3 +408,13 @@ def test_the_house_icon_is_drawn_in_the_brand_blue_with_a_doorway():
     assert roof[3] == 255 and roof[2] > roof[0], "opaque, and blue"
     assert icon.getpixel((128, 200))[3] == 0, "the doorway is cut out"
     assert icon.getpixel((8, 8))[3] == 0, "transparent corners"
+
+
+def test_gnome_never_asks_the_family_for_a_donation():
+    # "remove gnome asking for a donation. weird pop up i just got." GNOME
+    # Settings Daemon's housekeeping plugin shows the appeal twice a year;
+    # off machine-wide, and locked so nothing turns it back on.
+    cp = _dconf(DESKTOP_DCONF)
+    assert cp["org/gnome/settings-daemon/plugins/housekeeping"]["donation-reminder-enabled"] == "false"
+    locks = (FILES / "etc/dconf/db/local.d/locks/10-kosheros-locks").read_text()
+    assert "/org/gnome/settings-daemon/plugins/housekeeping/donation-reminder-enabled" in locks

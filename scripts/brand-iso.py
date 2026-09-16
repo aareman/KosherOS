@@ -193,14 +193,13 @@ def product_img(dest: Path, src: Path = BRANDING, version: str = VERSION) -> Pat
     return dest
 
 
-def release_name(version: str = VERSION, now: float | None = None,
-                 arch: str | None = None) -> str:
-    """'KosherOS-0.1-20260910-x86_64.iso': what a person sees in Ventoy's
-    menu or a downloads folder, and enough to tell two builds apart."""
+def release_name(version: str = VERSION, arch: str | None = None) -> str:
+    """'KosherOS-0.1.0-pre.37-x86_64.iso': what a person sees in Ventoy's
+    menu or a downloads folder. Every commit has its own version, so the
+    version alone tells two builds apart; the date it used to carry only
+    made the same release look like two files."""
     arch = arch or os.uname().machine
-    day = time.strftime("%Y%m%d", time.localtime(now if now is not None
-                                                  else time.time()))
-    return f"{PRODUCT}-{version}-{day}-{arch}.iso"
+    return f"{PRODUCT}-{version}-{arch}.iso"
 
 
 def rename(iso: Path, version: str = VERSION) -> Path:

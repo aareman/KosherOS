@@ -285,7 +285,8 @@ pulls only the changed layers and stages an atomic reboot.
 | `just portal-run` | run the self-hosted portal locally |
 
 `just vm`, `just iso` and the steps that run podman as root need sudo, so run those in a normal
-terminal. Once a VM is up, a root shell is on port 2223 while `just boot-image` runs.
+terminal. They ask for the password first thing and keep it fresh until they finish, so the
+prompt never appears in the middle of a long build. Once a VM is up, a root shell is on port 2223 while `just boot-image` runs.
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
 

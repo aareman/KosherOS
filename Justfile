@@ -183,7 +183,7 @@ disk-usage:
 
 # Delete VM disks and built images. Keeps the downloaded Fedora base image,
 # so `just fedora-vm` comes back without re-downloading.
-clean:
+clean: _sudo
     -scripts/fedora-vm.sh down
     rm -f build/test-install.qcow2 build/vm/disk.qcow2 build/vm/seed.iso
     sudo rm -rf build/qcow2 build/bootiso
@@ -247,13 +247,27 @@ deploy-admin VM="kosher-gui":
 
 # --- OS image (stage 2) -------------------------------------------------------
 
+# Ask for the sudo password now, before the minutes of image building the
+# sudo recipes start with, instead of surfacing the prompt half-way through
+# when nobody is watching. Then keep the ticket fresh in the background
+# until this `just` run exits, because a cold build outlasts sudo's
+# 15-minute default and the prompt would otherwise come back anyway.
+# Recipes that need root on the host list this as their first dependency.
+_sudo:
+    #!/usr/bin/env bash
+    set -e
+    sudo -v
+    ( while kill -0 "$PPID" 2>/dev/null; do sudo -n -v 2>/dev/null || exit; sleep 60; done ) >/dev/null 2>&1 &
+    disown
+
 # Build the OS image (layer-cached; kosherd is the last layer).
 build:
     podman build -t {{image}} -f os-image/Containerfile .
 
 # Create a bootable qcow2 from the locally built image (bootc-image-builder).
-# Needs sudo: bib must run as root, reading the image from your rootless storage.
-vm: build
+# Needs sudo (asked for up front): bib must run as root, reading the image
+# from your rootless storage.
+vm: _sudo build
     mkdir -p build/podman-home/.config/containers
     printf '{"default":[{"type":"insecureAcceptAnything"}]}' > build/podman-home/.config/containers/policy.json
     key="$(cat ~/.ssh/id_ed25519.pub 2>/dev/null || cat ~/.ssh/id_rsa.pub 2>/dev/null || cat build/vm/id_ed25519.pub)" \
@@ -295,12 +309,24 @@ iso-unattended: (_iso "os-image/iso-config-unattended.toml")
 # it — follow that channel. A disk built from localhost/kosher-linux:dev
 # records THAT as its origin and never finds an update again; every
 # machine installed so far is in that state. Needs sudo like `just iso`.
-release-iso CHANNEL="stable":
+release-iso CHANNEL="stable": _sudo
     #!/usr/bin/env bash
     set -euo pipefail
-    ref="ghcr.io/aareman/kosher-linux:{{CHANNEL}}"
-    if ! podman pull "$ref" 2>/dev/null; then
-        echo "There is no '{{CHANNEL}}' image at ghcr.io/aareman/kosher-linux." >&2
+    # Ctrl-C ends the recipe here, instead of dropping into the
+    # explanation below and blaming a missing image for an interrupted download.
+    trap 'echo; echo "interrupted; run it again to resume the download" >&2; exit 130' INT
+    repo="ghcr.io/aareman/kosher-linux"
+    ref="$repo:{{CHANNEL}}"
+    # Ask the registry what is published before pulling, so "no such
+    # channel" and "the download failed" are told apart: they need
+    # different next steps. An unreachable registry lists nothing and the
+    # pull below then says what went wrong.
+    token=$(curl -sf "https://ghcr.io/token?scope=repository:aareman/kosher-linux:pull" \
+        | python3 -c "import sys,json;print(json.load(sys.stdin).get('token',''))" 2>/dev/null || true)
+    tags=$(curl -sf -H "Authorization: Bearer $token" "https://ghcr.io/v2/aareman/kosher-linux/tags/list" \
+        | python3 -c "import sys,json;print(' '.join(sorted(json.load(sys.stdin).get('tags') or [])))" 2>/dev/null || true)
+    if [ -n "$tags" ] && ! grep -qw -- "{{CHANNEL}}" <<<"$tags"; then
+        echo "There is no '{{CHANNEL}}' image at $repo." >&2
         echo >&2
         if [ "{{CHANNEL}}" = "stable" ]; then
             echo "Nothing has been promoted to stable yet. Either:" >&2
@@ -309,13 +335,17 @@ release-iso CHANNEL="stable":
             echo "  - build an installer that follows the edge channel instead:" >&2
             echo "        just release-iso edge" >&2
         else
+            # Channels and versions only; the per-commit sha tags are noise here.
             echo "Published channels and versions:" >&2
-            token=$(curl -s "https://ghcr.io/token?scope=repository:aareman/kosher-linux:pull" \
-                | python3 -c "import sys,json;print(json.load(sys.stdin).get('token',''))")
-            curl -s -H "Authorization: Bearer $token" \
-                https://ghcr.io/v2/aareman/kosher-linux/tags/list \
-                | python3 -c "import sys,json;print('  ' + ', '.join(t for t in sorted(json.load(sys.stdin).get('tags') or []) if not t.startswith('sha256-')))" >&2 || true
+            tr ' ' '\n' <<<"$tags" | grep -E '^(edge|stable|latest|v[0-9])' | sed 's/^/  /' >&2
         fi
+        exit 1
+    fi
+    # Progress stays visible: this is gigabytes, and a silent pull looks hung.
+    if ! podman pull "$ref"; then
+        echo >&2
+        echo "Could not download $ref. The registry lists it, so the download itself failed" >&2
+        echo "(network, disk, or interrupted). Run this again; podman resumes from the layers it has." >&2
         exit 1
     fi
     version="$(podman run --rm "$ref" cat /usr/share/kosher/VERSION | tr -d '[:space:]')"
@@ -324,7 +354,7 @@ release-iso CHANNEL="stable":
     python3 scripts/brand-iso.py build/bootiso/install.iso --version "$version"
     echo "Copy the KosherOS-*.iso in build/bootiso onto a USB stick or Ventoy. Machines installed from it follow the {{CHANNEL}} channel."
 
-_iso config: build
+_iso config: _sudo build
     just _iso_from {{image}} {{config}}
     just brand-iso
 
@@ -345,7 +375,7 @@ _iso_from ref config:
 
 # Brand the installer ISO bib already wrote (product.img with the name,
 # stylesheet and logo) and give it its release name,
-# KosherOS-<version>-<date>-<arch>.iso; install.iso links to it. `just iso`
+# KosherOS-<version>-<arch>.iso; install.iso links to it. `just iso`
 # runs this last; run it alone to redo the branding without rebuilding.
 brand-iso:
     python3 scripts/brand-iso.py build/bootiso/install.iso
@@ -356,7 +386,7 @@ brand-iso:
 # complete, persistent system that boots like an installed one.
 # (This is not a live ISO — see docs/branding.md and the readme; a true
 # "try then click Install" live image is still missing.)
-usb-image: build
+usb-image: _sudo build
     mkdir -p build/podman-home/.config/containers
     printf '{"default":[{"type":"insecureAcceptAnything"}]}' > build/podman-home/.config/containers/policy.json
     key="$(cat ~/.ssh/id_ed25519.pub 2>/dev/null || cat ~/.ssh/id_rsa.pub 2>/dev/null || cat build/vm/id_ed25519.pub)" \

@@ -251,15 +251,18 @@ devenv shell      # or let direnv do it on cd
 just test         # the unit suites: about fifteen seconds, no root, no VM
 ```
 
-Every merge carries its own version. `VERSION` at the repo root reads
-`0.1.0-pre.N` between releases, and CI ticks `N` once for every push to
-master — committing the tick to master and building that commit — so each
-released image and ISO can be told apart and a bug report can say which
-build it came from. The number reaches os-release, the installer's welcome
-screen, the ISO's file name and the admin app's Updates page. A release is
-a person editing `VERSION` to a plain `X.Y.Z`; the merge after it starts the
-following pre-release series by itself. After a merge, `git pull` before
-your next push: master has CI's version commit on it.
+Every merge carries its own version, plain `0.x.x` semver. CI writes the
+next number once for every push to master — committing it to master and
+building that commit — so each released image and ISO can be told apart and
+a bug report can say which build it came from. The number reaches
+os-release, the installer's welcome screen, the ISO's file name and the
+admin app's Updates page.
+
+How far it steps comes from the merge's own commit subjects: a `feat` moves
+the minor, anything else moves the patch, and a breaking change moves the
+minor too, which is what a zero major version is for. The major never moves
+on its own — 1.0.0 is a decision, made by editing `VERSION`. After a merge,
+`git pull` before your next push: master has CI's version commit on it.
 
 The daemons are ordinary Python projects. Most work needs no image at all:
 

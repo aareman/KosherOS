@@ -106,8 +106,8 @@ it. The ISO is named after the version inside the image. Still to confirm:
 
 **3. Channels — built.** ✅ Two channels, decided by the user: **`:edge`**
 is published by CI on every push to master (with the commit-sha tag and
-the `v<VERSION>` tag, plus a GitHub pre-release), and is the maintainer's
-own daily driver where every pre-release lands first. **`:stable`** is
+the `v<VERSION>` tag, plus a GitHub release), and is the maintainer's own
+daily driver where every build lands first. **`:stable`** is
 never built by a push: the "Promote to stable" workflow
 (`.github/workflows/release-stable.yml`, run by hand with a version tag)
 copies the exact signed image for that version to `:stable` and `:latest`,

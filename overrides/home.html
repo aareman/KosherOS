@@ -66,9 +66,10 @@
     <div class="ko-pillars ko-col ko-col--wide">
       <div class="ko-pillar ko-reveal">
         <h2>Complete out of the box</h2>
-        <p>A parent installs it, picks a preset for each person, and is finished. The category
-          lists, the word lists and the picture filter ship whole. Adding a site or a word is
-          possible; it is never homework.</p>
+        <p>A parent installs it, puts each person in a group of their own naming &mdash; or
+          leaves the strict default &mdash; and is finished. The category lists, the word lists
+          and the picture filter ship whole. Adding a site or a word is possible; it is never
+          homework.</p>
       </div>
       <div class="ko-pillar ko-reveal" style="--d:.08s">
         <h2>Local first</h2>
@@ -84,22 +85,21 @@
     </div>
   </section>
 
-  <!-- One choice per account, shown as the card the admin app really draws. -->
+  <!-- Groups the family names, shown as the card the admin app really draws. -->
   <section class="ko-band ko-band--tint">
     <div class="ko-preset ko-col ko-reveal">
       <div>
-      <p class="ko-eyebrow">One choice per account</p>
-      <h2 class="ko-display ko-h2">Say who this account is for. That is the setup.</h2>
-      <p class="ko-lede">A preset sets the web, the pictures, the language, YouTube and
-        the apps together, so a parent answers one question instead of twenty. Anything under it
-        can still be changed afterwards.</p>
-      <div class="ko-preset__chips" role="tablist" aria-label="Presets">
-        <button class="ko-chip" role="tab" data-preset="young" aria-selected="false">Young child</button>
-        <button class="ko-chip" role="tab" data-preset="child" aria-selected="true">Child</button>
-        <button class="ko-chip" role="tab" data-preset="teen" aria-selected="false">Teenager</button>
-        <button class="ko-chip" role="tab" data-preset="adult" aria-selected="false">Adult</button>
-        <button class="ko-chip" role="tab" data-preset="basic" aria-selected="false">Basic protection</button>
-        <button class="ko-chip" role="tab" data-preset="open" aria-selected="false">No filtering</button>
+      <p class="ko-eyebrow">Groups the family names</p>
+      <h2 class="ko-display ko-h2">Tune one account. Name it. Put the others in.</h2>
+      <p class="ko-lede">Nothing ready-made ships &mdash; <em>Child</em> means something different
+        in every home. A group carries the web, the pictures, the language, YouTube and the apps
+        together; change it and every account in it changes. These four are examples a family
+        might make.</p>
+      <div class="ko-preset__chips" role="tablist" aria-label="Example groups">
+        <button class="ko-chip" role="tab" data-group="little" aria-selected="false">Little ones</button>
+        <button class="ko-chip" role="tab" data-group="kids" aria-selected="true">Kids</button>
+        <button class="ko-chip" role="tab" data-group="teens" aria-selected="false">Teens</button>
+        <button class="ko-chip" role="tab" data-group="grownups" aria-selected="false">Grown-ups</button>
       </div>
       </div>
 
@@ -108,8 +108,8 @@
         <div class="ko-card__head">
           <span class="ko-card__avatar" data-field="initial">S</span>
           <span>
-            <span class="ko-card__name" data-field="name">shmuli</span>
-            <span class="ko-card__mode" data-field="mode">Child</span>
+            <span class="ko-card__name" data-field="name">yosef</span>
+            <span class="ko-card__mode" data-field="mode">Kids</span>
           </span>
           <span class="ko-card__badge" data-field="badge">Filtered internet</span>
         </div>
@@ -238,7 +238,8 @@ just try</code></pre>
       </li>
       <li class="ko-reveal" style="--d:.16s">
         <h3>Set up the family</h3>
-        <p>The first boot runs the setup wizard: one account per person, one preset each. To
+        <p>The first boot runs the setup wizard: an account per person, each in a group of the
+          family's naming or on the strict default. To
           install on real hardware instead, <code>just release-iso</code> builds an installer that
           follows the stable channel and updates itself.</p>
       </li>

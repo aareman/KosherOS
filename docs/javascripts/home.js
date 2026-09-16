@@ -3,8 +3,9 @@
  * 1. A reveal as each section arrives, once, and never if the reader has
  *    asked for less motion.
  * 2. A slow drift on the painting while the hero scrolls away.
- * 3. The preset chooser, which draws the same card the admin app draws:
- *    every line is one of the six shipped presets, not a mock-up, and the
+ * 3. The group chooser, which draws the same card the admin app draws:
+ *    every line is one of four groups a family might make (the sample
+ *    family's), not a mock-up, and the
  *    blue/amber dot means what it means in the app.
  */
 (function () {
@@ -59,12 +60,13 @@
     drift();
   }
 
-  /* ---------------------------------------------------- preset chooser */
+  /* ----------------------------------------------------- group chooser */
 
-  // held: the filter is holding this line. open: it is not.
-  var PRESETS = {
-    young: {
-      name: "shmuli", initial: "S", mode: "Young child",
+  // held: the filter is holding this line. open: it is not. Four groups a
+  // family might make — the sample family's — not anything that ships.
+  var GROUPS = {
+    little: {
+      name: "shmuli", initial: "S", mode: "Little ones",
       badge: "Approved sites only", badgeState: "held",
       who: "The youngest in the house, where the whole web is too much.",
       rows: {
@@ -75,20 +77,20 @@
         apps: ["Only apps a parent chose", "held"]
       }
     },
-    child: {
-      name: "yosef", initial: "Y", mode: "Child",
+    kids: {
+      name: "yosef", initial: "Y", mode: "Kids",
       badge: "Filtered internet", badgeState: "held",
-      who: "School age, with room to grow into the next setting.",
+      who: "School age. Also what an account in no group gets.",
       rows: {
         web: ["Adult, gambling, dating, social and video blocked", "held"],
         pictures: ["Immodest pictures hidden", "held"],
         language: ["Bad language replaced", "held"],
-        youtube: ["Strict: entertainment and gaming blocked", "held"],
+        youtube: ["Strict: entertainment, gaming, music and Shorts blocked", "held"],
         apps: ["Only apps a parent chose", "held"]
       }
     },
-    teen: {
-      name: "rivky", initial: "R", mode: "Teenager",
+    teens: {
+      name: "rivky", initial: "R", mode: "Teens",
       badge: "Filtered internet", badgeState: "held",
       who: "More of the web, the same guardrails.",
       rows: {
@@ -99,8 +101,8 @@
         apps: ["Can install approved apps", "open"]
       }
     },
-    adult: {
-      name: "avi", initial: "A", mode: "Adult",
+    grownups: {
+      name: "avi", initial: "A", mode: "Grown-ups",
       badge: "Filtered internet", badgeState: "held",
       who: "A grown-up who wants the filter on for themselves.",
       rows: {
@@ -110,35 +112,10 @@
         youtube: ["Moderate", "held"],
         apps: ["Can install approved apps", "open"]
       }
-    },
-    basic: {
-      name: "miriam", initial: "M", mode: "Basic protection",
-      badge: "Nothing decrypted", badgeState: "open",
-      who: "The lightest setting that still helps: no connection is opened.",
-      rows: {
-        web: ["Known bad sites blocked at DNS, safe search forced", "held"],
-        pictures: ["Shown", "open"],
-        language: ["Left alone", "open"],
-        youtube: ["Moderate", "held"],
-        apps: ["Can install approved apps", "open"]
-      }
-    },
-    open: {
-      name: "guest", initial: "G", mode: "No filtering",
-      badge: "Open", badgeState: "open",
-      who: "Nothing is filtered on this account. Ads are still blocked.",
-      rows: {
-        web: ["Open", "open"],
-        pictures: ["Shown", "open"],
-        language: ["Left alone", "open"],
-        youtube: ["Open", "open"],
-        apps: ["Can install approved apps", "open"]
-      }
     }
   };
   var AVATARS = {
-    young: "#c4577a", child: "#8e6fd4", teen: "#d97b3c",
-    adult: "#c4577a", basic: "#d98b2b", open: "#3aa3c4"
+    little: "#c4577a", kids: "#8e6fd4", teens: "#d97b3c", grownups: "#3aa3c4"
   };
 
   var chips = Array.prototype.slice.call(document.querySelectorAll(".ko-chip"));
@@ -147,22 +124,22 @@
     var field = function (name) { return card.querySelector('[data-field="' + name + '"]'); };
 
     var show = function (key, animate) {
-      var preset = PRESETS[key];
-      if (!preset) return;
-      field("name").textContent = preset.name;
-      field("initial").textContent = preset.initial;
+      var group = GROUPS[key];
+      if (!group) return;
+      field("name").textContent = group.name;
+      field("initial").textContent = group.initial;
       field("initial").style.background = AVATARS[key];
-      field("mode").textContent = preset.mode;
-      field("who").textContent = preset.who;
+      field("mode").textContent = group.mode;
+      field("who").textContent = group.who;
       var badge = field("badge");
-      badge.textContent = preset.badge;
-      badge.setAttribute("data-state", preset.badgeState === "open" ? "open" : "held");
+      badge.textContent = group.badge;
+      badge.setAttribute("data-state", group.badgeState === "open" ? "open" : "held");
 
       var i = 0;
-      Object.keys(preset.rows).forEach(function (row) {
+      Object.keys(group.rows).forEach(function (row) {
         var el = card.querySelector('[data-row="' + row + '"]');
         if (!el) return;
-        var value = preset.rows[row];
+        var value = group.rows[row];
         el.querySelector("dd").textContent = value[0];
         el.setAttribute("data-state", value[1]);
         if (!animate || calm.matches) return;
@@ -179,7 +156,7 @@
         other.setAttribute("aria-selected", String(other === chip));
         other.tabIndex = other === chip ? 0 : -1;
       });
-      show(chip.dataset.preset, animate);
+      show(chip.dataset.group, animate);
     };
 
     chips.forEach(function (chip, index) {

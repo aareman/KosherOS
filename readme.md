@@ -61,13 +61,13 @@ with a content filter that lives on the machine itself and a parent in charge wi
 Most kosher filters are a service you subscribe to and a browser you are told to use. KosherOS is an
 operating system. The filter runs on the machine, works for every browser and every app, cannot be
 uninstalled by the person it applies to, and is configured by a parent in the family's own words:
-*Child*, *Teenager*, *hide immodest pictures*, *replace bad language with a milder word*.
+*hide immodest pictures*, *replace bad language with a milder word*.
 
 Three ideas hold it together:
 
-- **Complete out of the box.** A parent installs it, picks a preset for each account, and is done.
-  The category lists, word lists and picture filter ship whole; adding a site or a word is
-  possible, but never required.
+- **Complete out of the box.** A parent installs it, puts each person in a group of their own
+  naming — or leaves the strict default — and is done. The category lists, word lists and picture
+  filter ship whole; adding a site or a word is possible, but never required.
 - **Local first.** Filtering happens on the device, on modest hardware, with no account and no
   subscription. Nothing about what the family reads leaves the house.
 - **Locked, not hidden.** There is no root. The root filesystem is read-only and updates are
@@ -84,17 +84,19 @@ nothing here assumes the filtered person is a child.
 
 ### What a family gets
 
-**One choice per account.** Each account is set up as a preset, and the preset sets everything
-under it. Any of it can still be changed afterwards.
+**Groups the family names.** Nothing ready-made ships: *Child* means something different in
+every home. A parent tunes one account, saves it as a group, and puts the others in it; change the
+group and every account in it changes. An account in no group gets the strict default. The groups
+below are examples of what a family might make (they are the sample family's), not something the
+system decides for them.
 
-| Preset | Web | Pictures | Language | YouTube | Apps |
+| Group | Web | Pictures | Language | YouTube | Apps |
 |---|---|---|---|---|---|
-| **Young child** | only an approved list of sites | none from the web | replaced | none | chosen by the parent |
-| **Child** | filtered: adult, gambling, dating, social, video and more blocked | immodest hidden | replaced | strict, entertainment and gaming blocked | chosen by the parent |
-| **Teenager** | filtered: adult and gambling blocked, news and approved video allowed | immodest hidden | replaced | moderate | can install approved apps |
-| **Adult** | filtered: adult content and filter bypasses blocked | immodest hidden | left alone | moderate | can install approved apps |
-| **Basic protection** | known bad sites blocked at DNS, safe search forced, nothing decrypted | shown | left alone | moderate | can install approved apps |
-| **No filtering** | open | shown | left alone | open | can install approved apps |
+| **Default** (no group) | filtered: adult, gambling, dating, social, video and more blocked | immodest hidden | replaced | strict; entertainment, gaming, music and Shorts blocked | chosen by the parent |
+| **Little ones** | only an approved list of sites | none from the web | replaced | none | chosen by the parent |
+| **Kids** | filtered: adult, gambling, dating, social, video and more blocked | immodest hidden | replaced | strict; entertainment, gaming, music and Shorts blocked | chosen by the parent |
+| **Teens** | filtered: adult and gambling blocked, news and approved video allowed | immodest hidden | replaced | moderate | can install approved apps |
+| **Grown-ups** | filtered: adult content and filter bypasses blocked | immodest hidden | left alone | moderate | can install approved apps |
 
 **Filtering that reads the page, not just the address.** In the filtered modes the machine
 inspects the connection locally, so it can block a *page* rather than a whole site, clean up
@@ -111,8 +113,8 @@ whitelist user can finally *see* what the whitelist contains. Searches inside la
 suggestions, are filtered too. See [docs/search.md](docs/search.md).
 
 **Apps from an allowlist.** The KosherOS Store installs from upstream Flathub, limited to the
-apps a parent has approved. A guest account can be switched on, given its own preset, and is wiped
-at sign-out.
+apps a parent has approved. A guest account can be switched on, given its own kind of internet,
+and is wiped at sign-out.
 
 **A window for the person being filtered.** *My Filter* is a read-only app on every account that
 says, in plain language, what applies to you. A child who can see the rules is likelier to accept
@@ -123,7 +125,7 @@ them than one who only ever meets a blocked page.
 The admin app opens with one password and then everything works without another prompt.
 
 <div align="center">
-<img src="docs/images/admin-person.png" alt="One person's page: protection as chips, the preset and how far the account drifted from it, what was blocked today with an Allow button" width="49%">
+<img src="docs/images/admin-person.png" alt="One person's page: protection as chips, the group and how far the account drifted from it, what was blocked today with an Allow button" width="49%">
 <img src="docs/images/admin-activity.png" alt="The activity tab: what the filter blocked, hid or refused, newest first, with people as filters" width="49%">
 <br><sub>Left: one person's page. Right: the activity tab, the filter's own diary.</sub>
 </div>
@@ -235,8 +237,8 @@ just usb-image    # a raw disk image to write to a USB stick with dd
 ```
 
 The first boot asks for the administrator's name and password, an optional guardian password, and
-a boot password, then lands on the desktop. From there, open **KosherOS Admin**, add a person and
-pick a preset.
+a boot password, then lands on the desktop. From there, open **KosherOS Admin**, add a person,
+and either leave the strict default or save their tuned settings as a group for the others.
 
 ### Develop on it
 
@@ -331,7 +333,7 @@ as "built and tested", not "proven in a home".
 - [x] **Installable ISO** and a first-boot wizard: admin account, guardian, boot password, firmware checklist
 - [x] **Portal**: signed policy sync, signed list updates and a signed catalogue manifest; remote support and a web UI still to come
 - [x] **Filtered mode**: local TLS interception with path-level allow and block rules
-- [x] **Real content filtering**: category lists, presets, page-content scoring, shop department rules, picture detection with region covering, video keyframes, YouTube limits, Pi-hole style ad blocking, request-and-approve from the block page
+- [x] **Real content filtering**: category lists, groups, page-content scoring, shop department rules, picture detection with region covering, video keyframes, YouTube limits, Pi-hole style ad blocking, request-and-approve from the block page
 - [x] **Filtered search** ([docs/search.md](docs/search.md))
 - [x] **My Filter**: a read-only settings viewer on every account
 - [x] **Admin app redesign**: the family board, the activity log, requests as a banner, drift named and reversible, a full page per person

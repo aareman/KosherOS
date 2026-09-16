@@ -47,14 +47,18 @@ otherwise, so it is harmless on an account that is not inspected.
 
 ## Accounts and filtering
 
-| Preset | Web | Pictures | Language | YouTube | Apps |
+No presets ship. An account is in one of the family's own groups or in none; a group
+is saved from a tuned account and every account in it follows when the group changes.
+What an account gets by its kind of internet, before any group:
+
+| Kind of internet | Web | Pictures | Language | YouTube | Apps |
 |---|---|---|---|---|---|
-| Young child | only an approved list of sites | none from the web | replaced | none | chosen by the parent |
-| Child | filtered; adult, gambling, dating, social, video and more blocked | immodest hidden | replaced | strict, entertainment and gaming blocked | chosen by the parent |
-| Teenager | filtered; adult and gambling blocked | immodest hidden | replaced | moderate | can install approved apps |
-| Adult | filtered; adult content and filter bypasses blocked | immodest hidden | left alone | moderate | can install approved apps |
+| Filtered internet (the default for a new account) | adult, gambling, dating, social, video and more blocked | immodest hidden | replaced | strict; entertainment, gaming, music and Shorts blocked | chosen by the parent |
+| Approved sites only | only an approved list of sites | none from the web | replaced | none | chosen by the parent |
 | Basic protection | known bad sites blocked at DNS, safe search forced | shown | left alone | moderate | can install approved apps |
+| No internet | nothing | none from the web | replaced | none | chosen by the parent |
 | No filtering | open | shown | left alone | open | can install approved apps |
+| The first administrator | adult, gambling, dating and filter bypasses blocked | shown | left alone | open | can install approved apps |
 
 **Approved-site lists.** A Whitelist only account can switch on ready-made
 lists rather than typing domains: **Torah study** (Sefaria, YUTorah,

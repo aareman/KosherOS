@@ -349,7 +349,7 @@ as they were, and no category limit did anything.)
 
 **Shorts.** Not a category — a short can be in any of them — but a kind of
 video all the same, and the one no category limit reaches. It is a switch
-of its own in the same list, on in the Child preset. Off means the
+of its own in the same list, on by default. Off means the
 `/shorts` pages are refused, the reel endpoints and the ordinary player
 are answered "cannot be played" when the page asking is a short, and the
 Shorts shelves and reel links are taken out of the feeds.

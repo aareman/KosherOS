@@ -16,7 +16,7 @@ and it takes effect at that account's next sign-in.
 Filtering is identical under all three. It is per-uid at the network layer
 (nftables, dnsmasq, the proxy), so which program draws the windows cannot
 weaken it; that is also why changing the layout is an admin action with no
-guardian password. The layout is deliberately **not** part of the presets
+guardian password. The layout is deliberately **not** part of a group
 (a protection level does not imply a window manager) and the guest account
 always gets the classic desktop.
 
@@ -34,7 +34,7 @@ apps need) is built on it. A custom shell would take a year or more to be
 less reliable than GNOME is today, and that year would come out of the
 filter, which is the product. The pieces that ARE ours are small and
 app-shaped: the sign-in helper, the admin app, and (planned) a full-screen
-big-tiles launcher for the young-child preset on top of gnome-kiosk.
+big-tiles launcher for approved-sites-only accounts on top of gnome-kiosk.
 
 ## How it works
 
@@ -136,7 +136,7 @@ AppIndicator and PaperWM against the new shell version before shipping.
 Noctalia covers the shell layer well: bar, dock, launcher, control centre,
 notifications, lock screen, idle, OSDs, wallpaper, clipboard, tray, polkit
 agent. The plumbing a full session needs is only partly there, which is
-why this layout is opt-in and never a preset default:
+why this layout is opt-in and never a group's default:
 
 - **Display and input configuration** are text (niri's `output` and `input`
   blocks); GNOME Settings runs under niri but its Displays, Keyboard

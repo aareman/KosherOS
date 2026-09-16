@@ -48,18 +48,22 @@ def test_the_front_page_is_the_landing_template_and_everything_it_names_exists()
         assert (ROOT / asset).is_file(), asset
 
 
-def test_the_landing_pages_presets_are_the_shipped_ones():
-    # The chooser on the front page draws real presets, not marketing ones:
-    # every chip is a row of the overview's preset table, in the same words.
+def test_the_landing_pages_groups_are_the_overviews_examples_and_nothing_ships():
+    # The chooser on the front page draws the same example groups the
+    # overview tables — the sample family's — in the same words. No preset
+    # is offered as shipped anywhere on the site.
     template = (ROOT / "overrides/home.html").read_text()
     overview = (ROOT / "docs/overview.md").read_text()
-    chips = re.findall(r'data-preset="[a-z]+"[^>]*>([^<]+)</button>', template)
-    assert len(chips) == 6
+    chips = re.findall(r'data-group="[a-z]+"[^>]*>([^<]+)</button>', template)
+    assert len(chips) == 4
     for chip in chips:
         assert f"| **{chip}** |" in overview, chip
     script = (ROOT / "docs/javascripts/home.js").read_text()
-    for key in re.findall(r'data-preset="([a-z]+)"', template):
+    for key in re.findall(r'data-group="([a-z]+)"', template):
         assert re.search(rf"^\s+{key}: \{{", script, re.M), key
+    for page in (template, overview, (ROOT / "readme.md").read_text()):
+        assert "picks a preset" not in page and "| **Child** |" not in page
+    assert "| **Default** (no group) |" in overview, "the strict default is documented"
 
 
 def test_the_landing_page_moves_only_for_people_who_want_motion():

@@ -27,9 +27,9 @@ parent in the family's own words: *Child*, *Teenager*, *hide immodest pictures*,
 
 Three ideas hold it together.
 
-**Complete out of the box.** A parent installs it, picks a preset for each account, and
-is done. The category lists, word lists and picture filter ship whole; adding a site or a
-word is possible, but never required.
+**Complete out of the box.** A parent installs it, puts each person in a group of their own
+naming — or leaves the strict default — and is done. The category lists, word lists and
+picture filter ship whole; adding a site or a word is possible, but never required.
 
 **Local first.** Filtering happens on the device, on modest hardware, with no account and
 no subscription. Nothing about what the family reads leaves the house.
@@ -41,17 +41,20 @@ other spouse's) is required on top for any change that weakens the filter.
 
 ## What a family gets
 
-One choice per account. Each account is set up as a preset, and the preset sets everything
-under it; any of it can still be changed afterwards.
+Groups the family names. Nothing ready-made ships: *Child* means something different in
+every home. A parent tunes one account, saves it as a group, and puts the others in it; change
+the group and every account in it changes. An account in no group gets the strict default,
+and each kind of internet comes with complete settings of its own. The groups below are
+examples of what a family might make (they are the sample family's), not something the system
+decides for them.
 
-| Preset | Web | Pictures | Language | YouTube | Apps |
+| Group | Web | Pictures | Language | YouTube | Apps |
 |---|---|---|---|---|---|
-| **Young child** | only an approved list of sites | none from the web | replaced | none | chosen by the parent |
-| **Child** | filtered: adult, gambling, dating, social, video and more blocked | immodest hidden | replaced | strict, entertainment and gaming blocked | chosen by the parent |
-| **Teenager** | filtered: adult and gambling blocked, news and approved video allowed | immodest hidden | replaced | moderate | can install approved apps |
-| **Adult** | filtered: adult content and filter bypasses blocked | immodest hidden | left alone | moderate | can install approved apps |
-| **Basic protection** | known bad sites blocked at DNS, safe search forced, nothing decrypted | shown | left alone | moderate | can install approved apps |
-| **No filtering** | open | shown | left alone | open | can install approved apps |
+| **Default** (no group) | filtered: adult, gambling, dating, social, video and more blocked | immodest hidden | replaced | strict; entertainment, gaming, music and Shorts blocked | chosen by the parent |
+| **Little ones** | only an approved list of sites | none from the web | replaced | none | chosen by the parent |
+| **Kids** | filtered: adult, gambling, dating, social, video and more blocked | immodest hidden | replaced | strict; entertainment, gaming, music and Shorts blocked | chosen by the parent |
+| **Teens** | filtered: adult and gambling blocked, news and approved video allowed | immodest hidden | replaced | moderate | can install approved apps |
+| **Grown-ups** | filtered: adult content and filter bypasses blocked | immodest hidden | left alone | moderate | can install approved apps |
 
 **Filtering that reads the page, not just the address.** In the filtered modes the machine
 inspects the connection locally, so it can block a *page* rather than a whole site, clean
@@ -84,7 +87,7 @@ Signed in as an administrator, the admin app and the system settings never ask f
 - ![One person's page](images/admin-person.png)
 
     **One person, one page.** The filter mode as a badge, the protection as chips, how far
-    the account has drifted from its preset with a way back, what was blocked today with an
+    the account has drifted from its group with a way back, what was blocked today with an
     Allow button beside it.
 
 - ![The activity page](images/admin-activity.png)
@@ -98,8 +101,8 @@ Signed in as an administrator, the admin app and the system settings never ask f
 ![The Protection page: is the filter working, what applies to everyone, and who may change
 it](images/admin-protection.png)
 
-**Everyone is one click away.** The sidebar lists the family by name, each with the
-preset they are set up as and a badge when they are waiting on an answer, and below them
+**Everyone is one click away.** The sidebar lists the family by name, with a badge when
+somebody is waiting on an answer, and below them
 *Administration*: the activity feed and what is not about one person, in three pages —
 Protection, Apps and Updates. Protection opens on whether the filter is
 actually working, and then on the things one machine can only answer once — ad and tracker

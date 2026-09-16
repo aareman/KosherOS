@@ -223,17 +223,19 @@ def cmd_admin(args) -> int:
 def cmd_profile(args) -> int:
     c = _client()
     if args.action == "list":
-        for p in c.list_profiles():
-            mark = " (default)" if p.get("default") else ""
-            mark += " (yours)" if p.get("custom") else ""
-            print(f"  {p['key']:<24} {p['label']}{mark}")
+        listed = c.list_profiles()
+        if not listed:
+            print("  no groups yet: `kosherctl group save <uid> <name>` makes one "
+                  "from an account's settings")
+        for p in listed:
+            print(f"  {p['key']:<24} {p['label']}")
             if p.get("description"):
                 print(f"                           {p['description']}")
         return 0
     if args.action == "delete":
-        key = args.profile or args.uid  # `profile delete custom-x`
+        key = args.profile or args.uid  # `group delete custom-x`
         c.delete_profile(key, _guardian_pw(args))
-        print(f"deleted preset {key}")
+        print(f"deleted group {key}; its members keep their settings")
         return 0
     try:
         uid = int(args.uid)
@@ -242,10 +244,11 @@ def cmd_profile(args) -> int:
         return 2
     if args.action == "save":
         key = c.save_profile(uid, args.profile, "", _guardian_pw(args))
-        print(f"saved uid {uid}'s settings as preset {key}")
+        print(f"saved uid {uid}'s settings as group {key}; every account in it follows")
         return 0
-    c.apply_profile(uid, args.profile, _guardian_pw(args))
-    print(f"uid {uid} set to the {args.profile} profile")
+    key = "" if args.profile in ("", "none") else args.profile
+    c.apply_profile(uid, key, _guardian_pw(args))
+    print(f"uid {uid} put in group {key}" if key else f"uid {uid} taken out of its group")
     return 0
 
 
@@ -884,13 +887,16 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("--guardian-password")
     s.set_defaults(func=cmd_admin)
 
-    s = sub.add_parser("profile", help="apply, save or delete a profile (preset)")
+    s = sub.add_parser("group", aliases=["profile"],
+                       help="put an account in a group, save its settings as one, "
+                            "or delete a group")
     s.add_argument("action", choices=["list", "set", "save", "delete"])
-    # `delete` takes only a preset key, so the first positional is not
+    # `delete` takes only a group key, so the first positional is not
     # always a uid; it is checked as one only where a uid is meant.
     s.add_argument("uid", nargs="?", default="0",
-                   help="account uid (set/save); the preset key for delete")
-    s.add_argument("profile", nargs="?", default="")
+                   help="account uid (set/save); the group key for delete")
+    s.add_argument("profile", nargs="?", default="",
+                   help="group key (set) or name (save); `none` takes the account out")
     s.add_argument("--guardian-password")
     s.set_defaults(func=cmd_profile)
 

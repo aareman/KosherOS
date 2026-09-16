@@ -427,10 +427,11 @@ def _fill(listbox: Gtk.ListBox, terms, empty: str, on_undo) -> None:
 
 
 class SavePresetDialog(Adw.Dialog):
-    """Name the settings of one account so they can be applied to others."""
+    """Name the settings of one account as a group, so other accounts can be
+    put in it — and follow it when it changes."""
 
     def __init__(self, win, user: dict):
-        super().__init__(title=f"Save preset from {user['username']}",
+        super().__init__(title=f"Save a group from {user['username']}",
                          content_width=460)
         self.win = win
         self.user = user
@@ -445,8 +446,11 @@ class SavePresetDialog(Adw.Dialog):
         group = Adw.PreferencesGroup(
             description="Everything on this account — filter mode, blocked "
                         "content, pictures, language, YouTube, app installs — "
-                        "becomes a preset you can pick for any account.")
-        self.name = Adw.EntryRow(title="Preset name")
+                        "becomes a group. Put other accounts in it and they get "
+                        "these settings; change the group later and they all "
+                        "change. Saving an existing group's name updates that "
+                        "group for everyone in it.")
+        self.name = Adw.EntryRow(title="Group name")
         self.description = Adw.EntryRow(title="Description (optional)")
         group.add(self.name)
         group.add(self.description)
@@ -472,7 +476,7 @@ class SavePresetDialog(Adw.Dialog):
         self.win.with_guardian(lambda pw: self.win.call(
             lambda: self.win.client.save_profile(
                 self.user["uid"], label, description, pw),
-            done_msg=f"Saved preset “{label}”"))
+            done_msg=f"Saved the {label} group"))
         self.close()
 
 
@@ -730,21 +734,26 @@ def add_person_dialog(win, adopt_mode: bool) -> Adw.AlertDialog | None:
         full.connect("changed", on_full)
         name.connect("changed", on_name)
 
-    # A profile, not a bare filter mode: an account created with a mode
-    # and nothing else has to be configured eight more times, which is
-    # how accounts end up half set up.
+    # One of the family's groups, or a kind of internet with its complete
+    # settings: an account created with a bare mode and nothing else had
+    # to be configured eight more times, which is how accounts end up
+    # half set up. The first group is the default when there are groups;
+    # Filtered internet otherwise.
+    from kosherd.policy import MODES
+
     custom = win.policy.get("custom_profiles", [])
-    all_profiles = profiles_mod.all_profiles(custom)
-    keys = [p.key for p in all_profiles]
+    groups = profiles_mod.all_profiles(custom)
+    keys = [g.key for g in groups] + list(MODES)
+    hints = {g.key: g.description or f"The {g.label} group's settings" for g in groups}
+    hints.update({m: profiles_mod.for_mode(m).description for m in MODES})
     mode = Adw.ComboRow(
         title="Set up as",
-        model=Gtk.StringList.new(
-            [p.label + (" (yours)" if p.key.startswith(profiles_mod.CUSTOM_PREFIX) else "")
-             for p in all_profiles]))
-    mode.set_selected(keys.index(profiles_mod.DEFAULT_PROFILE))
-    mode.set_subtitle(profiles_mod.get(profiles_mod.DEFAULT_PROFILE).description)
+        model=Gtk.StringList.new([f"{g.label} group" for g in groups]
+                                 + [labels.MODE_LABELS[m] for m in MODES]))
+    mode.set_selected(0 if groups else keys.index("filtered"))
+    mode.set_subtitle(hints[keys[mode.get_selected()]])
     mode.connect("notify::selected", lambda c, _p: mode.set_subtitle(
-        profiles_mod.get(keys[c.get_selected()], custom).description))
+        hints[keys[c.get_selected()]]))
     group.add(mode)
     box.append(group)
     dialog.set_extra_child(box)

@@ -28,7 +28,7 @@ def test_a_bad_username_is_refused_before_any_account_is_made(monkeypatch):
     monkeypatch.setattr(daemon, "_accounts_create_user",
                         lambda u, f: created.append(u) or 1001)
     with pytest.raises(PolicyError) as raised:
-        daemon.impl_CreateUser("eli sha", "Eli", "child")
+        daemon.impl_CreateUser("eli sha", "Eli", "filtered")
     assert "not a valid username" in str(raised.value)
     assert created == []
     assert daemon.policy.users == []
@@ -39,7 +39,7 @@ def test_capitals_are_fine(monkeypatch):
     monkeypatch.setattr(daemon, "_accounts_create_user", lambda u, f: 1001)
     monkeypatch.setattr(daemon, "_save_and_apply", lambda: None)
     monkeypatch.setattr("pwd.getpwnam", lambda name: (_ for _ in ()).throw(KeyError(name)))
-    daemon.impl_CreateUser("Elisha", "Elisha", "child")
+    daemon.impl_CreateUser("Elisha", "Elisha", "filtered")
     assert daemon.policy.users[0].username == "Elisha"
 
 
@@ -52,7 +52,7 @@ def test_a_save_that_fails_removes_the_account_it_just_made(monkeypatch):
                         lambda: (_ for _ in ()).throw(PolicyError("schema said no")))
     monkeypatch.setattr("pwd.getpwnam", lambda name: (_ for _ in ()).throw(KeyError(name)))
     with pytest.raises(PolicyError):
-        daemon.impl_CreateUser("elisha", "Elisha", "child")
+        daemon.impl_CreateUser("elisha", "Elisha", "filtered")
     assert deleted == [1001]
 
 

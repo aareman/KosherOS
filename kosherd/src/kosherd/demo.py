@@ -44,13 +44,56 @@ def _shipped_catalog() -> list[dict]:
              "summary": "Browse the web", "categories": ["Network", "WebBrowser"]}]
 
 
+# The sample family's groups: made by the family, as they would be. The
+# grown-ups are in none; they have the filter on for themselves.
+KIDS = profiles.Profile(
+    key="custom-kids", label="Kids",
+    description="School age: the open web with content filtering.",
+    mode="filtered", blocked_categories=profiles.DEFAULTS.blocked_categories,
+    media_level="immodest", language_filter="substitute",
+    youtube={"restrict": "strict", "blocked_categories": ["24", "20", "10", "shorts"]},
+    can_install_apps=False)
+TEENS = profiles.Profile(
+    key="custom-teens", label="Teens",
+    description="More of the web, the same guardrails.",
+    mode="filtered",
+    blocked_categories=tuple(sorted({*profiles.for_mode("dnsfilter").blocked_categories,
+                                     "immodest", "violence", "drugs"})),
+    media_level="immodest", language_filter="substitute",
+    youtube={"restrict": "moderate"}, can_install_apps=True)
+LITTLE_ONES = profiles.Profile(
+    key="custom-little-ones", label="Little ones",
+    description="Approved sites only, no pictures from the web.",
+    mode="whitelist", blocked_categories=profiles.for_mode("whitelist").blocked_categories,
+    media_level="all", language_filter="substitute",
+    youtube={"restrict": "strict", "allowed_channels": []}, can_install_apps=False)
+GROWN_UP = profiles.Profile(
+    key="", label="", description="", mode="filtered",
+    blocked_categories=tuple(sorted({*profiles.for_mode("dnsfilter").blocked_categories,
+                                     "immodest"})),
+    media_level="immodest", language_filter="off",
+    youtube={"restrict": "moderate"}, can_install_apps=True)
+DEMO_GROUPS = (LITTLE_ONES, KIDS, TEENS)
+
+
+def _settings_for(key):
+    """A demo group's settings, a filter mode's defaults, or the grown-ups'."""
+    if key == "grown-up":
+        return GROWN_UP
+    for group in DEMO_GROUPS:
+        if group.key == key:
+            return group
+    return profiles.for_mode(key)
+
+
 def _user(uid, name, key, admin=False, **kw):
-    p = profiles.get(key)
+    p = _settings_for(key)
     u = {"uid": uid, "username": name, "mode": p.mode, "admin": admin, "whitelist": [],
          "rules": [], "apps": [], "blocked_categories": list(p.blocked_categories),
          "media_level": p.media_level, "language_filter": p.language_filter,
          "youtube": dict(p.youtube), "can_install_apps": p.can_install_apps,
-         "layout": "classic", "cover_style": "frost", "time": {}}
+         "layout": "classic", "cover_style": "frost", "time": {},
+         "profile": p.key or None}
     u.update(kw)
     return u
 
@@ -59,23 +102,22 @@ class DemoClient:
     """Every method the real DaemonClient has, answered from memory."""
 
     def __init__(self):
-        child = profiles.get("child")
         self.policy = {
             "revision": 3, "guardian": {"enabled": True}, "adblock": {"enabled": True},
-            "custom_profiles": [],
+            "custom_profiles": [profiles.to_dict(g) for g in DEMO_GROUPS],
             "users": [
-                _user(1000, "avi", "adult", admin=True),
-                _user(1001, "miriam", "adult", admin=True),
-                _user(1002, "yosef", "child",
-                      blocked_categories=sorted({*child.blocked_categories, "sports"}),
+                _user(1000, "avi", "grown-up", admin=True),
+                _user(1001, "miriam", "grown-up", admin=True),
+                _user(1002, "yosef", "custom-kids",
+                      blocked_categories=sorted({*KIDS.blocked_categories, "sports"}),
                       youtube={"restrict": "strict", "blocked_categories": ["24", "20", "10", "17", "shorts"]},
                       rules=[{"action": "allow", "pattern": "chabad.org"},
                              {"action": "block", "pattern": "youtube.com/shorts*"}],
                       time={"daily_minutes": 120,
                             "allowed": timelimits.SCHEDULE_PRESETS["after_school"]}),
-                _user(1003, "rivky", "teen",
+                _user(1003, "rivky", "custom-teens",
                       time={"allowed": timelimits.SCHEDULE_PRESETS["not_late"]}),
-                _user(1004, "shmuli", "young_child",
+                _user(1004, "shmuli", "custom-little-ones",
                       whitelist_bundles=["torah"],
                       whitelist=["chinuch.org", "ourfamily.example"],
                       time={"daily_minutes": 60}),
@@ -292,26 +334,33 @@ class DemoClient:
         return 2
 
     def apply_profile(self, uid, key, pw=""):
-        p = profiles.get(key, self.policy["custom_profiles"])
         u = self._user(uid)
-        u.update(mode=p.mode, blocked_categories=list(p.blocked_categories),
-                 media_level=p.media_level, language_filter=p.language_filter,
-                 youtube=dict(p.youtube))
-        if "can_install_apps" in u:
-            u["can_install_apps"] = p.can_install_apps
+        if not key:
+            u["profile"] = None
+            self._change(uid, "ApplyProfile", [uid, key])
+            return
+        p = profiles.get(key, self.policy["custom_profiles"])
+        profiles.apply(u, p)
+        u["profile"] = key
         self._change(uid, "ApplyProfile", [uid, key])
 
     def list_profiles(self): return profiles.describe(self.policy["custom_profiles"])
 
     def save_profile(self, uid, label, description="", pw=""):
-        preset = profiles.to_dict(profiles.from_user(self._user(uid), label, description))
+        group = profiles.from_user(self._user(uid), label, description)
         self.policy["custom_profiles"] = [p for p in self.policy["custom_profiles"]
-                                          if p["key"] != preset["key"]] + [preset]
+                                          if p["key"] != group.key] + [profiles.to_dict(group)]
+        self._user(uid)["profile"] = group.key
+        for member in profiles.members(self.policy["users"], group.key):
+            profiles.apply(member, group)
         self._change(uid, "SaveProfile", [uid, label])
+        return group.key
 
     def delete_profile(self, key, pw=""):
         self.policy["custom_profiles"] = [p for p in self.policy["custom_profiles"]
                                           if p["key"] != key]
+        for member in profiles.members(self.policy["users"], key):
+            member["profile"] = None
         self._change(None, "DeleteProfile", [key])
 
     def list_categories(self):
@@ -324,10 +373,14 @@ class DemoClient:
 
     def create_user(self, username, full_name, mode):
         uid = max(u["uid"] for u in self.policy["users"]) + 1
-        key = mode if mode in {p.key for p in profiles.PROFILES} else "child"
-        self.policy["users"].append(_user(uid, username, key) if mode in
-                                    {p.key for p in profiles.PROFILES}
-                                    else {**_user(uid, username, key), "mode": mode})
+        groups = {p["key"] for p in self.policy["custom_profiles"]}
+        if mode in groups:
+            user = _user(uid, username, "filtered")
+            profiles.apply(user, profiles.get(mode, self.policy["custom_profiles"]))
+            user["profile"] = mode
+        else:
+            user = _user(uid, username, mode)
+        self.policy["users"].append(user)
         self._change(None, "CreateUser", [username])
         return uid
 
@@ -343,13 +396,12 @@ class DemoClient:
         g["enabled"] = enabled
         if enabled:
             g.setdefault("uid", 1010)
-        if mode in {p.key for p in profiles.PROFILES}:
-            p = profiles.get(mode)
-            g.update(mode=p.mode, blocked_categories=list(p.blocked_categories),
-                     media_level=p.media_level, language_filter=p.language_filter,
-                     youtube=dict(p.youtube))
-        else:
-            g["mode"] = mode
+        groups = {p["key"] for p in self.policy["custom_profiles"]}
+        p = (profiles.get(mode, self.policy["custom_profiles"]) if mode in groups
+             else profiles.for_mode(mode))
+        g.update(mode=p.mode, blocked_categories=list(p.blocked_categories),
+                 media_level=p.media_level, language_filter=p.language_filter,
+                 youtube=dict(p.youtube))
         g["whitelist"] = sorted(whitelist)
         self._change(None, "SetGuestConfig", [enabled, mode])
 

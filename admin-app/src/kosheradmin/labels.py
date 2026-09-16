@@ -117,7 +117,7 @@ LAYOUT_HINTS = {
 }
 LAYOUT_ORDER = ("classic", "tiling", "advanced")
 
-PROFILE_CUSTOM = "Custom"
+NO_GROUP = "No group"
 
 # -- time -----------------------------------------------------------------------
 
@@ -351,7 +351,8 @@ def change_sentence(event: dict, users_by_uid: dict | None = None) -> tuple[str,
     if method == "SetFilterMode":
         what = f"{who}: filter mode → {MODE_LABELS.get(arg(1), arg(1))}"
     elif method == "ApplyProfile":
-        what = f"{who}: set up as {_preset_label(arg(1), users_by_uid)}"
+        what = (f"{who}: put in the {_preset_label(arg(1), users_by_uid)} group"
+                if arg(1) else f"{who}: taken out of their group")
     elif method == "SetBlockedCategories":
         cats = arg(1) or []
         what = f"{who}: {plural(len(cats), 'kind')} of site blocked"
@@ -379,9 +380,9 @@ def change_sentence(event: dict, users_by_uid: dict | None = None) -> tuple[str,
     elif method == "DismissRequest":
         what = "A request was turned down"
     elif method == "SaveProfile":
-        what = f"Preset “{arg(1)}” saved from {who}"
+        what = f"Group “{arg(1)}” saved from {who}; every account in it follows"
     elif method == "DeleteProfile":
-        what = f"Preset {_preset_label(arg(0), users_by_uid)} deleted"
+        what = f"Group {_preset_label(arg(0), users_by_uid)} deleted"
     elif method == "EditList":
         what = f"Word list edited ({_list_title(arg(0))})"
     elif method == "SetAdBlock":
@@ -390,7 +391,8 @@ def change_sentence(event: dict, users_by_uid: dict | None = None) -> tuple[str,
         what = f"{who}: time → {time_summary(arg(1) if isinstance(arg(1), dict) else {})}"
     elif method == "SetGuestConfig":
         what = "Guest account " + ("turned on" if arg(0) else "turned off") + \
-            (f", set up as {_preset_label(arg(1), users_by_uid)}" if arg(0) and arg(1) else "")
+            (f", {MODE_LABELS.get(arg(1)) or _preset_label(arg(1), users_by_uid)}"
+             if arg(0) and arg(1) else "")
     elif method == "CreateUser":
         what = f"Account {arg(0)} created"
     elif method == "AdoptUser":
@@ -426,6 +428,7 @@ def change_sentence(event: dict, users_by_uid: dict | None = None) -> tuple[str,
 
 
 def _preset_label(key, users_by_uid) -> str:
+    """A group's name from its key, or the key when the group is gone."""
     from kosherd import profiles
 
     try:
@@ -441,7 +444,7 @@ def _list_title(name) -> str:
     return str(name)
 
 
-# -- how an account departs from its preset -------------------------------------
+# -- how an account departs from its group --------------------------------------
 
 def drift_sentences(changes: list[dict]) -> list[str]:
     """profiles.diff() changes, each as one short line."""
@@ -484,16 +487,16 @@ def _youtube_drift(before: dict, after: dict) -> list[str]:
 
 
 def setup_sentence(key: str | None, changes: list[dict], custom=()) -> str:
-    """'Child' / 'Child, with 2 changes' / 'Custom settings'."""
+    """'In the Kids group' / 'In the Kids group, with 2 changes' / 'Not in a group'."""
     from kosherd import profiles
 
     if key is None:
-        return "Custom settings"
+        return "Not in a group"
     label = profiles.get(key, custom).label
     n = len(drift_sentences(changes))
     if not n:
-        return label
-    return f"{label}, with {plural(n, 'change')}"
+        return f"In the {label} group"
+    return f"In the {label} group, with {plural(n, 'change')}"
 
 
 # -- the four lines on a card, in a fixed order --------------------------------

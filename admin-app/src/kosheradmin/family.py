@@ -40,22 +40,23 @@ def guest_user(policy: dict) -> dict | None:
             "admin": False, "apps": [], "can_install_apps": False}
 
 
-# The guest's kinds of internet, each with the preset whose content settings
-# go with it. Filtered means the Child preset: a guest is a stranger to the
-# filter, and the strict answer is the one that is right without knowing them.
+# The guest's kinds of internet. The daemon gives each kind its complete
+# content settings (profiles.MODE_DEFAULTS): a guest is a stranger to the
+# filter, and the strict answer is the one that is right without knowing
+# them. Kept as a map so the page's order is explicit.
 GUEST_KINDS = {
     "none": "none",
-    "whitelist": "young_child",
-    "dnsfilter": "dns_only",
-    "filtered": "child",
+    "whitelist": "whitelist",
+    "dnsfilter": "dnsfilter",
+    "filtered": "filtered",
     "unfiltered": "unfiltered",
 }
 GUEST_KIND_HINTS = {
     "none": "No web at all for whoever signs in as the guest.",
     "whitelist": "Only the approved sites below, no pictures from the web, no YouTube.",
     "dnsfilter": "Known bad sites blocked and safe search forced; pages and pictures not checked.",
-    "filtered": "Filtered like a child's account: adult, gambling, social and video "
-                "blocked, immodest pictures hidden, bad language replaced.",
+    "filtered": "Filtered, strictly: adult, gambling, social and video blocked, "
+                "immodest pictures hidden, bad language replaced.",
     "unfiltered": "Nothing filtered for the guest.",
 }
 
@@ -97,10 +98,9 @@ class GuestPage(_Page):
         group.add(switch)
 
         # The guest is set up by the KIND of internet it gets, not by a
-        # preset: nobody knows who the guest is, so "Child" or "Teenager"
-        # is the wrong question. Each kind maps to the preset that carries
-        # sensible content settings for it (GUEST_KINDS), so a filtered
-        # guest still gets pictures, language and YouTube handled.
+        # group: nobody knows who the guest is. Each kind carries complete
+        # content settings on the daemon's side, so a filtered guest still
+        # gets pictures, language and YouTube handled.
         kinds = list(GUEST_KINDS)
         mode_row = Adw.ComboRow(
             title="Start the guest off with",

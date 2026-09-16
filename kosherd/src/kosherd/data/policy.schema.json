@@ -330,6 +330,10 @@
           "default": true,
           "description": "May this user install apps from the approved catalog through the KosherOS app store? Everything installable is pre-approved by the admin, so this is on by default, including for supervised users."
         },
+        "profile": {
+          "type": "string",
+          "description": "The group this account is in: a key in custom_profiles. Explicit membership, so a change to the group reaches the account; absent when the account is in no group."
+        },
         "blocked_categories": {
           "type": "array",
           "items": {

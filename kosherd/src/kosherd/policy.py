@@ -219,9 +219,16 @@ class UserPolicy:
     # Empty means no daily limit and always allowed — the default, so a
     # family that never opens the Time tab is not surprised by a sign-out.
     time: dict = field(default_factory=dict)
+    # The group this account is in (a key in Policy.custom_profiles), or
+    # None. Explicit, never inferred from matching settings: an account may
+    # differ from its group and still belong to it, and a change to the
+    # group reaches it (see profiles.py).
+    profile: str | None = None
 
     def to_dict(self) -> dict:
         d: dict = {"uid": self.uid, "username": self.username, "mode": self.mode}
+        if self.profile:
+            d["profile"] = self.profile
         if self.admin:
             d["admin"] = True
         if self.whitelist:
@@ -404,6 +411,7 @@ class Policy:
                     layout=u.get("layout", DEFAULT_LAYOUT),
                     cover_style=u.get("cover_style", DEFAULT_COVER_STYLE),
                     time=dict(u.get("time", {})),
+                    profile=u.get("profile") or None,
                 )
                 for u in doc["users"]
             ],

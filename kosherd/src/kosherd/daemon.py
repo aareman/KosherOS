@@ -492,11 +492,13 @@ def _url_pattern(url: str) -> str:
 
 
 def _default_categories(mode: str) -> tuple[str, ...]:
-    """What a new account of this mode blocks before anyone configures it.
+    """What an account switched into this mode blocks at the least.
 
-    An admin who creates an account and walks away should still get a
-    filter; "filtered" that filters nothing is the worst outcome, because
-    it looks protected and is not.
+    An admin who moves an account into a filtering mode and walks away
+    should still get a filter; "filtered" that filters nothing is the worst
+    outcome, because it looks protected and is not. (A NEW account gets the
+    complete defaults for its kind of internet — see profiles.MODE_DEFAULTS;
+    this is the floor under an existing one that changes mode.)
     """
     from .categories import DEFAULT_BLOCKED
 
@@ -1236,18 +1238,18 @@ class Daemon:
     def impl_ListProfiles(self):
         from . import profiles
 
-        described = profiles.describe(self.policy.custom_profiles)
-        for entry in described:
-            entry["default"] = entry["key"] == profiles.DEFAULT_PROFILE
-        return GLib.Variant("(s)", (json.dumps(described),))
+        return GLib.Variant("(s)", (json.dumps(profiles.describe(self.policy.custom_profiles)),))
 
     def impl_SaveProfile(self, uid: int, label: str, description: str,
                          _guardian_pw: str):
-        """Snapshot an account's current settings as a named preset.
+        """Save an account's current settings as a group, and put it in.
 
-        The everyday path to a good preset: tune one child's account until
-        it is right, save it, apply it to the others. Saving the same label
-        again replaces that preset.
+        The everyday path to a good group: tune one account until it is
+        right, save it, put the others in it. Saving a name that already
+        exists is how a group is edited — and every account in the group
+        takes the new settings, which is the point of a group over a
+        one-time preset. (A failure part-way is put back by the dispatcher,
+        which snapshots the policy before every call.)
         """
         from . import profiles
 
@@ -1255,47 +1257,46 @@ class Daemon:
         if user is None:
             raise PolicyError(f"uid {uid} is not managed")
         if not label.strip():
-            raise PolicyError("a preset needs a name")
+            raise PolicyError("a group needs a name")
         if len(label.strip()) > 60:
-            raise PolicyError("keep the preset name under 60 characters")
-        preset = profiles.from_user(user, label, description)
-        if preset.key in profiles.BY_KEY:
-            raise PolicyError(f"'{label}' is a built-in profile; pick another name")
-        previous = list(self.policy.custom_profiles)
+            raise PolicyError("keep the group name under 60 characters")
+        group = profiles.from_user(user, label, description)
         self.policy.custom_profiles = [
-            c for c in previous if c.get("key") != preset.key
-        ] + [profiles.to_dict(preset)]
-        try:
+            c for c in self.policy.custom_profiles if c.get("key") != group.key
+        ] + [profiles.to_dict(group)]
+        if hasattr(user, "profile"):
+            user.profile = group.key
+        followed = 0
+        for member in profiles.members(self.policy.users, group.key):
+            if member is not user:
+                profiles.apply(member, group)
+                followed += 1
+        if followed:
+            self._save_and_apply()
+        else:
             self._save_only()
-        except Exception:
-            # Never leave memory ahead of disk: a failed save (schema,
-            # disk) must not make the daemon believe in a preset the
-            # policy file does not hold.
-            self.policy.custom_profiles = previous
-            raise
-        log.info("saved preset %s from uid %d", preset.key, uid)
-        return GLib.Variant("(s)", (preset.key,))
+        log.info("saved group %s from uid %d; %d other members updated",
+                 group.key, uid, followed)
+        return GLib.Variant("(s)", (group.key,))
 
     def impl_DeleteProfile(self, key: str, _guardian_pw: str):
+        """Delete a group. Its members keep their settings and are simply
+        in no group afterwards."""
         from . import profiles
 
-        if not key.startswith(profiles.CUSTOM_PREFIX):
-            raise PolicyError("built-in profiles cannot be deleted")
-        previous = list(self.policy.custom_profiles)
-        remaining = [c for c in previous if c.get("key") != key]
-        if len(remaining) == len(previous):
-            raise PolicyError(f"no preset {key!r}")
+        remaining = [c for c in self.policy.custom_profiles if c.get("key") != key]
+        if len(remaining) == len(self.policy.custom_profiles):
+            raise PolicyError(f"no group {key!r}")
         self.policy.custom_profiles = remaining
-        try:
-            self._save_only()
-        except Exception:
-            self.policy.custom_profiles = previous
-            raise
+        for member in profiles.members(self.policy.users, key):
+            member.profile = None
+        self._save_only()
         return None
 
     def _save_only(self) -> None:
         """Persist and announce a policy change that alters no enforcement
-        (a preset saved or deleted): no ruleset render, no proxy restart."""
+        (a group saved or deleted, an account leaving one): no ruleset
+        render, no proxy restart."""
         policy_mod.save(self.policy)
         if self.connection:
             self.connection.emit_signal(
@@ -1304,25 +1305,29 @@ class Daemon:
             )
 
     def impl_ApplyProfile(self, uid: int, profile_key: str, _guardian_pw: str):
+        """Put an account in a group: it takes the group's settings and
+        follows the group from then on. Also the way back for an account
+        that has drifted. An empty key takes the account out of its group,
+        leaving its settings as they are."""
         from . import profiles
 
         user = self.policy.account(uid)
         if user is None:
             raise PolicyError(f"uid {uid} is not managed")
+        if not profile_key:
+            if getattr(user, "profile", None):
+                user.profile = None
+                self._save_only()
+            return None
         try:
             profile = profiles.get(profile_key, self.policy.custom_profiles)
         except KeyError as e:
             raise PolicyError(str(e)) from None
-
-        user.mode = profile.mode
-        user.blocked_categories = list(profile.blocked_categories)
-        user.media_level = profile.media_level
-        user.language_filter = profile.language_filter
-        user.youtube = dict(profile.youtube)
-        if hasattr(user, "can_install_apps"):  # the guest installs nothing
-            user.can_install_apps = profile.can_install_apps
+        profiles.apply(user, profile)
+        if hasattr(user, "profile"):
+            user.profile = profile_key
         self._save_and_apply()
-        log.info("applied profile %s to uid %d", profile_key, uid)
+        log.info("uid %d put in group %s", uid, profile_key)
         return None
 
     def impl_ListCategories(self):
@@ -1374,27 +1379,27 @@ class Daemon:
         return None
 
     @staticmethod
-    def _new_user(uid: int, username: str, mode: str, custom=()) -> UserPolicy:
+    def _new_user(uid: int, username: str, mode: str, custom=(),
+                  admin: bool = False) -> UserPolicy:
         """A new account's starting settings.
 
-        `mode` may name a ready-made profile instead of a bare filter mode,
-        which is what the admin app sends: creating an account and then
-        setting eight things one at a time is how accounts end up half
-        configured.
+        `mode` may name a group instead of a bare filter mode, which is
+        what the admin app sends when the family has groups: creating an
+        account and then setting eight things one at a time is how
+        accounts end up half configured. A bare mode gets that kind of
+        internet's complete default settings, for the same reason.
         """
         from . import profiles as profiles_mod
 
+        user = UserPolicy(uid=uid, username=username, mode=mode)
         if mode in {p.key for p in profiles_mod.all_profiles(custom)}:
-            profile = profiles_mod.get(mode, custom)
-            return UserPolicy(
-                uid=uid, username=username, mode=profile.mode,
-                blocked_categories=list(profile.blocked_categories),
-                media_level=profile.media_level,
-                language_filter=profile.language_filter,
-                youtube=dict(profile.youtube),
-                can_install_apps=profile.can_install_apps)
-        return UserPolicy(uid=uid, username=username, mode=mode,
-                          blocked_categories=list(_default_categories(mode)))
+            profiles_mod.apply(user, profiles_mod.get(mode, custom))
+            user.profile = mode
+        elif admin and mode == "filtered":
+            profiles_mod.apply(user, profiles_mod.ADMIN_DEFAULTS)
+        else:
+            profiles_mod.apply(user, profiles_mod.for_mode(mode))
+        return user
 
     def impl_CreateUser(self, username: str, full_name: str, mode: str):
         import pwd
@@ -1403,7 +1408,7 @@ class Daemon:
 
         if mode not in MODES and mode not in {
                 p.key for p in profiles_mod.all_profiles(self.policy.custom_profiles)}:
-            raise PolicyError(f"unknown mode or profile {mode!r}")
+            raise PolicyError(f"unknown mode or group {mode!r}")
         # Everything that can be checked is checked BEFORE the account exists.
         # The account used to be created first and refused by the policy
         # afterwards, which left a user on the machine that nothing managed.
@@ -1441,23 +1446,20 @@ class Daemon:
 
         from . import profiles as profiles_mod
 
-        # A profile key rather than a bare mode, so a guest can be set up
-        # in one choice like anybody else. Without this the guest was the
-        # one account with no picture, language or YouTube settings at
+        # A group key or a bare kind of internet; either way the guest gets
+        # the complete settings that go with it. Without this the guest was
+        # the one account with no picture, language or YouTube settings at
         # all — a hole in exactly the account nobody is watching.
         custom = self.policy.custom_profiles
         if mode in {p.key for p in profiles_mod.all_profiles(custom)}:
             profile = profiles_mod.get(mode, custom)
-            g = self.policy.guest
-            g.mode = profile.mode
-            g.blocked_categories = list(profile.blocked_categories)
-            g.media_level = profile.media_level
-            g.language_filter = profile.language_filter
-            g.youtube = dict(profile.youtube)
-            mode = profile.mode
-        elif mode not in MODES:
-            raise PolicyError(f"unknown mode or profile {mode!r}")
+        elif mode in MODES:
+            profile = profiles_mod.for_mode(mode)
+        else:
+            raise PolicyError(f"unknown mode or group {mode!r}")
         g = self.policy.guest
+        profiles_mod.apply(g, profile)
+        mode = profile.mode
         if enabled:
             try:
                 uid = pwd.getpwnam(policy_mod.GUEST_USERNAME).pw_uid
@@ -1494,7 +1496,7 @@ class Daemon:
 
         if mode not in MODES and mode not in {
                 p.key for p in profiles_mod.all_profiles(self.policy.custom_profiles)}:
-            raise PolicyError(f"unknown mode or profile {mode!r}")
+            raise PolicyError(f"unknown mode or group {mode!r}")
         try:
             uid = pwd.getpwnam(username).pw_uid
         except KeyError:
@@ -1947,7 +1949,7 @@ class Daemon:
         # NO categories: the first real family test found gambling, dating
         # and VPN sites all open for the admin — "filtered" that filtered
         # nothing, on the one account every machine has.
-        admin = self._new_user(uid, username, "filtered")
+        admin = self._new_user(uid, username, "filtered", admin=True)
         admin.admin = True
         self.policy.users.append(admin)
         self._save_and_apply()

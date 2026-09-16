@@ -204,6 +204,17 @@ def a_user(**overrides):
     return user
 
 
+# The family's own group, made from the sample account's settings, for the
+# tests about membership and drift. Nothing ready-made ships.
+KIDS_KEY = "custom-kids"
+
+
+def kids_group():
+    from kosherd import profiles
+
+    return profiles.to_dict(profiles.from_user(a_user(), "Kids", "School age"))
+
+
 def _rows(widget, found=None):
     found = [] if found is None else found
     child = widget.get_first_child()
@@ -546,9 +557,9 @@ def test_switching_ad_blocking_off_goes_through_the_guardian():
 
 
 def test_the_guest_is_set_up_by_kind_of_internet_not_preset():
-    # Nobody knows who the guest is, so "Child" or "Teenager" is the wrong
-    # question; the kind of internet is the right one, and each kind still
-    # carries sensible content settings through the preset it maps to.
+    # Nobody knows who the guest is, so a group is the wrong question; the
+    # kind of internet is the right one, and the daemon gives each kind its
+    # complete content settings.
     sent = {}
 
     class Recording(FakeClient):
@@ -566,7 +577,7 @@ def test_the_guest_is_set_up_by_kind_of_internet_not_preset():
     assert options[combo.get_selected()] == "Whitelist only"
     combo.set_selected(options.index("Filtered internet"))
     drain()
-    assert sent == {"enabled": True, "mode": "child"}
+    assert sent == {"enabled": True, "mode": "filtered"}
 
 
 def test_an_enabled_guest_opens_the_same_page_as_anyone_without_an_apps_tab():
@@ -746,7 +757,7 @@ def test_the_detail_page_has_seven_tabs_and_starts_on_the_overview():
 def test_every_setting_made_the_move():
     page, _w, _u = _detail()
     titles = {r.get_title() for r in _rows(page)}
-    for title in ("Set up as", "Filter mode", "Approved sites", "Page rules",
+    for title in ("Group", "Filter mode", "Approved sites", "Page rules",
                   "Pictures and video", "Bad language", "Restricted Mode",
                   "Can install approved apps", "Allow Wi-Fi sign-in",
                   "Administrator", "Layout", "Remove This Account…"):
@@ -761,30 +772,66 @@ def test_drift_is_named_and_there_is_a_way_back():
             applied.update(uid=uid, key=key)
 
     win = FakeWindow(Recording())
-    user = a_user(blocked_categories=[*a_user()["blocked_categories"], "sports"],
+    user = a_user(profile=KIDS_KEY,
+                  blocked_categories=[*a_user()["blocked_categories"], "sports"],
                   youtube={"restrict": "strict",
                            "blocked_categories": ["24", "20", "10", "17", "shorts"]})
-    win.policy = {"revision": 1, "users": [user], "guardian": {"enabled": False},
+    win.policy = {"revision": 1, "users": [user], "custom_profiles": [kids_group()],
+                  "guardian": {"enabled": False},
                   "guest": {"enabled": False}, "adblock": {"enabled": True}}
     page = detail.UserDetailPage(win, user)
     drain()
     texts = _texts(page)
-    assert "Set up as Child, with 2 changes" in texts
+    assert "In the Kids group, with 2 changes" in texts
     # The changes read as one note under the protections, not as chips.
     note = next(t for t in texts if t.startswith("Changed here: "))
     assert "Sports also blocked" in note
     assert "YouTube: " in note and "also blocked" in note
-    reset = next(b for b in _buttons(page) if b.get_label() == "Reset to Child")
+    reset = next(b for b in _buttons(page) if b.get_label() == "Reset to Kids")
     reset.emit("clicked")
     drain()
-    assert applied == {"uid": 1001, "key": "child"}
+    assert applied == {"uid": 1001, "key": KIDS_KEY}
 
 
-def test_an_account_on_its_preset_has_no_reset_button():
+def test_a_drifted_member_can_give_its_group_the_change():
+    # "should be able to update one and apply to all consumers": the other
+    # way to close the gap is to push this account's settings to the group.
+    saved = {}
+
+    class Recording(FakeClient):
+        def save_profile(self, uid, label, description, pw):
+            saved.update(uid=uid, label=label, description=description)
+            return KIDS_KEY
+
+    win = FakeWindow(Recording())
+    user = a_user(profile=KIDS_KEY, media_level="all")
+    win.policy = {"revision": 1, "users": [user], "custom_profiles": [kids_group()],
+                  "guardian": {"enabled": False},
+                  "guest": {"enabled": False}, "adblock": {"enabled": True}}
+    page = detail.UserDetailPage(win, user)
+    drain()
+    push = next(b for b in _buttons(page) if b.get_label() == "Update Kids from here")
+    push.emit("clicked")
+    drain()
+    assert saved == {"uid": 1001, "label": "Kids", "description": "School age"}
+
+
+def test_an_account_on_its_group_has_no_reset_button():
+    page, _w, _u = _detail(custom_profiles=[kids_group()], profile=KIDS_KEY)
+    assert not any(b.get_label() and (b.get_label().startswith("Reset to")
+                                      or b.get_label().startswith("Update "))
+                   for b in _buttons(page))
+    assert "In the Kids group" in _texts(page)
+
+
+def test_an_account_in_no_group_says_so_and_offers_to_save_one():
     page, _w, _u = _detail()
+    assert "Not in a group" in _texts(page)
     assert not any(b.get_label() and b.get_label().startswith("Reset to")
                    for b in _buttons(page))
-    assert "Set up as Child" in _texts(page)
+    assert any(b.get_label() == "Save as a group…" for b in _buttons(page))
+    combo = _row_named(page, "Group")
+    assert combo.get_model().get_string(combo.get_selected()) == "No group"
 
 
 def test_the_protection_strip_has_the_four_lines():
@@ -867,7 +914,6 @@ def test_the_category_grid_is_on_the_page_with_preset_all_and_none():
     assert not page.checks["gambling"].get_active()
     labels_ = [b.get_label() for b in _buttons(page) if b.get_label()]
     assert "All" in labels_ and "None" in labels_
-    assert any(l.endswith(" preset") for l in labels_)
 
     page.checks["gambling"].set_active(True)
     drain()
@@ -878,10 +924,11 @@ def test_the_category_grid_is_on_the_page_with_preset_all_and_none():
     assert saved[-1] == ["ads", "adult", "gambling", "sports"]
 
 
-def test_the_grid_marks_what_every_preset_blocks_and_what_was_added_here():
-    page, _w, _u = _detail(blocked_categories=[*a_user()["blocked_categories"], "sports"])
+def test_the_grid_marks_what_is_blocked_by_default_and_what_was_added_here():
+    page, _w, _u = _detail(custom_profiles=[kids_group()], profile=KIDS_KEY,
+                           blocked_categories=[*a_user()["blocked_categories"], "sports"])
     texts = _texts(page.grid)
-    assert "every preset" in texts
+    assert "on by default" in texts
     assert "added here" in texts
     assert "for everyone" in texts       # ads, the machine-wide Pi-hole setting
 
@@ -1025,21 +1072,41 @@ def test_removing_an_account_asks_first():
     assert removed == []
 
 
-def test_the_detail_page_offers_the_familys_presets():
+def test_the_detail_page_offers_the_familys_groups_and_no_group():
     from kosherd import profiles
 
     user = a_user(mode="filtered", blocked_categories=["adult", "sports"],
                   media_level="immodest")
-    preset = profiles.to_dict(profiles.from_user(user, "Mine"))
-    page, _w, _u = _detail(custom_profiles=[preset], blocked_categories=["adult", "sports"],
-                           media_level="immodest")
-    combo = _row_named(page, "Set up as")
+    mine = profiles.to_dict(profiles.from_user(user, "Mine"))
+    page, _w, _u = _detail(custom_profiles=[mine, kids_group()], profile="custom-mine",
+                           blocked_categories=["adult", "sports"], media_level="immodest")
+    combo = _row_named(page, "Group")
     labels_ = [combo.get_model().get_string(i)
                for i in range(combo.get_model().get_n_items())]
-    assert "Mine (yours)" in labels_
-    assert labels_[combo.get_selected()] == "Mine (yours)"
-    assert "Delete This Preset…" in {r.get_title() for r in _rows(page)}
-    assert "Set up as Mine" in _texts(page)
+    assert labels_ == ["Mine", "Kids", "No group"], "the family's groups, nothing shipped"
+    assert labels_[combo.get_selected()] == "Mine"
+    assert "Delete This Group…" in {r.get_title() for r in _rows(page)}
+    assert "In the Mine group" in _texts(page)
+
+
+def test_choosing_no_group_takes_the_account_out_and_keeps_its_settings():
+    applied = []
+
+    class Recording(FakeClient):
+        def apply_profile(self, uid, key, pw):
+            applied.append((uid, key))
+
+    win = FakeWindow(Recording())
+    user = a_user(profile=KIDS_KEY)
+    win.policy = {"revision": 1, "users": [user], "custom_profiles": [kids_group()],
+                  "guardian": {"enabled": False},
+                  "guest": {"enabled": False}, "adblock": {"enabled": True}}
+    page = detail.UserDetailPage(win, user)
+    drain()
+    combo = _row_named(page, "Group")
+    combo.set_selected(combo.get_model().get_n_items() - 1)  # No group
+    drain()
+    assert applied == [(1001, "")]
 
 
 # -- the words -------------------------------------------------------------------

@@ -1,7 +1,7 @@
 """One person, one full page.
 
 The top answers "how is Yosef protected?" before any setting is touched:
-the preset and how far the account has drifted from it, and the protection
+the group and how far the account has drifted from it, and the protection
 as a strip of chips. Then six tabs with room to breathe. The first tab is
 what happened, not a form — what was blocked today, with Allow on each
 row, and who changed what.
@@ -56,12 +56,13 @@ def hint_under(group: Adw.PreferencesGroup, text: str) -> Gtk.Label:
     return label
 
 
-def every_preset_blocks() -> set[str]:
-    """Categories every built-in preset that blocks anything blocks. Labelled
-    on the grid so a parent knows those are not the ones to think about."""
-    sets = [set(p.blocked_categories) for p in profiles_mod.PROFILES
-            if p.blocked_categories]
-    return set.intersection(*sets) if sets else set()
+def default_blocks() -> set[str]:
+    """Categories every filtering account blocks unless somebody unblocks
+    them. Labelled on the grid so a parent knows those are not the ones to
+    think about."""
+    from kosherd.categories import DEFAULT_BLOCKED
+
+    return set(DEFAULT_BLOCKED)
 
 
 class UserDetailPage(Adw.NavigationPage):
@@ -149,18 +150,28 @@ class UserDetailPage(Adw.NavigationPage):
         return [self._identity_group(user), *self._today_groups(user)]
 
     def _header_actions(self, user: dict) -> list[Gtk.Button]:
-        """Reset to the preset (when the account has drifted from one) and
-        Save as a preset, left to right."""
+        """The page's actions, left to right. When the account has drifted
+        from its group there are two ways to close the gap: put the account
+        back, or give the whole group what was changed here — "update one
+        and apply to all". Save as a group is always there."""
         custom = self.win.policy.get("custom_profiles", [])
         buttons = []
         if self.preset_key and labels.drift_sentences(self.drift):
-            label = profiles_mod.get(self.preset_key, custom).label
-            reset = small_button(f"Reset to {label}")
+            group = profiles_mod.get(self.preset_key, custom)
+            reset = small_button(f"Reset to {group.label}")
             reset.connect("clicked", lambda _b: self._gated(
                 lambda pw: self.win.client.apply_profile(user["uid"], self.preset_key, pw),
-                f"{user['username']} → {label}"))
+                f"{user['username']} → {group.label}"))
             buttons.append(reset)
-        save = small_button("Save as a preset…")
+            push = small_button(f"Update {group.label} from here")
+            push.set_tooltip_text(f"Give every account in the {group.label} group "
+                                  f"{user['username']}'s settings")
+            push.connect("clicked", lambda _b: self._gated(
+                lambda pw: self.win.client.save_profile(user["uid"], group.label,
+                                                        group.description, pw),
+                f"{group.label} updated from {user['username']}"))
+            buttons.append(push)
+        save = small_button("Save as a group…")
         save.connect("clicked", lambda _b: SavePresetDialog(self.win, user).present(self.win))
         buttons.append(save)
         return buttons
@@ -185,8 +196,8 @@ class UserDetailPage(Adw.NavigationPage):
         text, protects = labels.mode_badge(user)
         title_row.append(mode_badge(text, protects, big=True))
         names.append(title_row)
-        setup = Gtk.Label(label="Set up as " + labels.setup_sentence(
-            self.preset_key, self.drift, custom), xalign=0, wrap=True)
+        setup = Gtk.Label(label=labels.setup_sentence(self.preset_key, self.drift, custom),
+                          xalign=0, wrap=True)
         setup.add_css_class("dim-label")
         names.append(setup)
         identity.append(names)
@@ -214,7 +225,7 @@ class UserDetailPage(Adw.NavigationPage):
                 chips.append(chip(text, style, icon=icon))
             row.append(chips)
             box.append(row)
-        # What was changed here, apart from the preset: a note, not a
+        # What was changed here, apart from the group: a note, not a
         # protection, so it does not read as one more thing being blocked.
         notes = labels.drift_sentences(self.drift)
         if notes:
@@ -393,34 +404,44 @@ class UserDetailPage(Adw.NavigationPage):
     def _mode_group(self, user: dict) -> Adw.PreferencesGroup:
         group = Adw.PreferencesGroup(title="How the internet is filtered")
         custom = self.win.policy.get("custom_profiles", [])
-        profiles = profiles_mod.all_profiles(custom)
-        keys = [p.key for p in profiles]
-        current = profiles_mod.matching(user, custom)
+        groups = profiles_mod.all_profiles(custom)
+        keys = [g.key for g in groups]
+        current = user.get("profile") if user.get("profile") in keys else None
+        # The family's groups, then No group. Nothing ready-made: "Child"
+        # means something different in every home, so the family names its
+        # own, and an account is in one of theirs or in none.
         profile_row = Adw.ComboRow(
-            title="Set up as",
-            model=Gtk.StringList.new(
-                [p.label + (" (yours)" if p.key.startswith(profiles_mod.CUSTOM_PREFIX) else "")
-                 for p in profiles] + [labels.PROFILE_CUSTOM]))
+            title="Group",
+            model=Gtk.StringList.new([g.label for g in groups] + [labels.NO_GROUP]))
         profile_row.set_selected(keys.index(current) if current else len(keys))
-        profile_hint = (profiles_mod.get(current, custom).description if current
-                        else "These settings do not match any preset exactly; the "
-                             "changes are listed on the Overview tab.")
+        if current:
+            profile_hint = (profiles_mod.get(current, custom).description
+                            or f"This account follows the {profiles_mod.get(current, custom).label} "
+                               "group: change the group and it changes too.")
+        elif groups:
+            profile_hint = ("Not in a group. Pick one to give this account the group's "
+                            "settings and have it follow the group from then on.")
+        else:
+            profile_hint = ("No groups yet. Tune this account, then Save as a group… "
+                            "in the header to name its settings and give them to others.")
 
         def on_profile(combo, _p):
             index = combo.get_selected()
-            if index >= len(keys):
-                return  # "Custom" is a readout, not a thing you can pick
-            key = keys[index]
-            if key == current:
+            key = keys[index] if index < len(keys) else ""
+            if key == (current or ""):
                 return
-            self._gated(lambda pw: self.win.client.apply_profile(user["uid"], key, pw),
-                        f"{user['username']} → {profiles_mod.get(key, custom).label}")
+            if key:
+                self._gated(lambda pw: self.win.client.apply_profile(user["uid"], key, pw),
+                            f"{user['username']} → {profiles_mod.get(key, custom).label}")
+            else:
+                self._gated(lambda pw: self.win.client.apply_profile(user["uid"], "", pw),
+                            f"{user['username']} is in no group; settings kept")
 
         profile_row.connect("notify::selected", on_profile)
         group.add(profile_row)
 
-        if current and current.startswith(profiles_mod.CUSTOM_PREFIX):
-            delete_row = Adw.ButtonRow(title="Delete This Preset…")
+        if current:
+            delete_row = Adw.ButtonRow(title="Delete This Group…")
             delete_row.add_css_class("destructive-action")
             delete_row.connect("activated", lambda *_: self._confirm_delete_preset(current))
             group.add(delete_row)
@@ -465,8 +486,8 @@ class UserDetailPage(Adw.NavigationPage):
         custom = self.win.policy.get("custom_profiles", [])
         if self.preset_key:
             label = profiles_mod.get(self.preset_key, custom).label
-            preset_btn = small_button(f"{label} preset")
-            preset_btn.set_tooltip_text(f"Block what the {label} preset blocks")
+            preset_btn = small_button(f"{label} group")
+            preset_btn.set_tooltip_text(f"Block what the {label} group blocks")
             preset_btn.connect("clicked", lambda _b: self._set_categories(
                 set(profiles_mod.get(self.preset_key, custom).blocked_categories)))
             suffix.append(preset_btn)
@@ -489,7 +510,7 @@ class UserDetailPage(Adw.NavigationPage):
 
         added = {name for change in self.drift if change.get("field") == "blocked_categories"
                  for name in change.get("added", [])}
-        floor = every_preset_blocks()
+        floor = default_blocks()
         adblock = self.win.policy.get("adblock", {}).get("enabled", True)
         grid = self.grid
 
@@ -513,7 +534,7 @@ class UserDetailPage(Adw.NavigationPage):
                 elif name == "ads" and adblock:
                     line.append(tag("for everyone"))
                 elif name in floor:
-                    line.append(tag("every preset"))
+                    line.append(tag("on by default"))
                 check.set_child(line)
                 check.connect("toggled", self._on_category, name)
                 self.checks[name] = check
@@ -1164,8 +1185,9 @@ class UserDetailPage(Adw.NavigationPage):
     def _confirm_delete_preset(self, key: str) -> None:
         custom = self.win.policy.get("custom_profiles", [])
         label = profiles_mod.get(key, custom).label
-        confirm(self.win, f"Delete the preset “{label}”?",
-                "Accounts set up with it keep their settings; only the preset itself goes.",
+        confirm(self.win, f"Delete the {label} group?",
+                "The accounts in it keep their settings and are simply in no group "
+                "afterwards.",
                 "Delete",
                 lambda: self._gated(lambda pw: self.win.client.delete_profile(key, pw),
-                                    f"Deleted preset “{label}”"))
+                                    f"Deleted the {label} group"))

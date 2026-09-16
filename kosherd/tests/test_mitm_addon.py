@@ -958,6 +958,31 @@ def test_a_video_whose_kind_cannot_be_read_does_not_play_where_kinds_are_limited
     assert addon.KosherFilter._youtube_verdict("<html></html>", [], ["24"]) is None
 
 
+def test_the_journal_says_why_a_youtube_video_played(addon, caplog):
+    # "youtube still not blocking" is impossible to chase without knowing
+    # whether the proxy saw the video and what it made of it. Three lines
+    # answer it: no limits reached the proxy, no body to read, or the kind
+    # it read and the kinds turned off.
+    import json
+    import logging
+
+    caplog.set_level(logging.INFO)
+    filt = _yt_filter(addon, {})
+    filt._filter_youtube(_player_flow(addon, "{}"), 1001)
+    assert "no YouTube limits are set for uid=1001" in caplog.text
+
+    caplog.clear()
+    filt = _yt_filter(addon, {"blocked_categories": ["24"]})
+    body = json.dumps({"microformat": {"playerMicroformatRenderer": {"category": "Music"}}})
+    filt._filter_youtube(_player_flow(addon, body), 1001)
+    assert "its kind is 10" in caplog.text and "'24'" in caplog.text
+
+    caplog.clear()
+    flow = _player_flow(addon, "")
+    filt._filter_youtube(flow, 1001)
+    assert "had no body to read" in caplog.text
+
+
 def test_an_account_with_no_youtube_limits_is_left_alone(addon):
     import json
 

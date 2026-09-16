@@ -1439,10 +1439,17 @@ class KosherFilter:
         settings = self.policy.youtube_for(uid)
         allowed = settings.get("allowed_channels") or []
         blocked = settings.get("blocked_categories") or []
+        path = flow.request.path or ""
         if not allowed and not blocked:
+            # Said once per video rather than once per request: when a
+            # person reports "YouTube still is not blocking", the first
+            # thing to learn is whether the account's limits reached the
+            # proxy at all, and this is the line that answers it.
+            if YouTube.is_player_api(path):
+                log.info("a YouTube video played: no YouTube limits are set for uid=%s "
+                         "(the rules file has %s)", uid, settings or "nothing for this account")
             return
 
-        path = flow.request.path or ""
         no_shorts = YouTube.SHORTS_KIND in blocked
         if YouTube.is_player_api(path) or (no_shorts and YouTube.is_reel_api(path)):
             if no_shorts and YouTube.playing_a_short(flow):
@@ -1529,9 +1536,13 @@ class KosherFilter:
         """
         body = flow.response.get_text(strict=False) or ""
         if not body:
+            log.info("a YouTube player answer had no body to read (%s); the video played",
+                     (flow.request.path or "").split("?", 1)[0])
             return
         why = self._youtube_verdict(body, allowed, blocked, strict_unknown=True)
         if not why:
+            log.info("a YouTube video played: its kind is %s; kinds turned off: %s",
+                     YouTube.category_of(body) or "unreadable", sorted(blocked) or "none")
             return
         reason = ("Only approved channels can be watched on this computer"
                   if "approved channels" in why

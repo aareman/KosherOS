@@ -392,6 +392,129 @@ def test_a_beige_floor_under_a_clothed_figure_is_not_legs():
     assert verdict.level == vision.CLEAN
 
 
+def _grey_photo(light_box=None, size=(300, 400), background=40, light=170,
+                tint=None, mode="RGB", grain=True):
+    """A black-and-white photograph: dark ground, a lighter rectangle where
+    a figure's skin would be, with film grain so it has a photograph's
+    spread of grey levels. `tint` makes it sepia; mode "L" saves it as a
+    true greyscale file; grain=False draws it flat, like a diagram."""
+    import io
+    import random
+
+    from PIL import Image, ImageDraw
+
+    def shade(v):
+        v = max(0, min(255, v))
+        if tint is None:
+            return (v, v, v)
+        return (min(255, v + tint[0]), v, max(0, v - tint[1]))
+
+    im = Image.new("RGB", size, shade(background))
+    draw = ImageDraw.Draw(im)
+    if light_box:
+        draw.rectangle(light_box, fill=shade(light))
+    if grain:
+        rng = random.Random(7)
+        px = im.load()
+        for yy in range(size[1]):
+            for xx in range(size[0]):
+                r, g, b = px[xx, yy]
+                d = rng.randint(-22, 22)
+                px[xx, yy] = shade(r + d) if tint is None else (
+                    max(0, min(255, r + d)), max(0, min(255, g + d)), max(0, min(255, b + d)))
+    if mode == "L":
+        im = im.convert("L")
+    out = io.BytesIO(); im.save(out, "PNG")
+    return out.getvalue()
+
+
+def _code_screenshot(size=(300, 400)):
+    """A terminal: light text lines on a near-black ground, two grey levels."""
+    import io
+
+    from PIL import Image, ImageDraw
+
+    im = Image.new("RGB", size, (18, 18, 18))
+    draw = ImageDraw.Draw(im)
+    for row in range(10, size[1], 14):
+        draw.rectangle((12, row, 12 + (row * 7) % 220 + 40, row + 6), fill=(200, 200, 200))
+    out = io.BytesIO(); im.save(out, "PNG")
+    return out.getvalue()
+
+
+def test_black_and_white_and_sepia_are_monochrome_and_colour_is_not():
+    assert vision.is_monochrome(_grey_photo((60, 60, 240, 400)))
+    assert vision.is_monochrome(_grey_photo((60, 60, 240, 400), mode="L"))
+    assert vision.is_monochrome(_grey_photo((60, 60, 240, 400), tint=(18, 14)))
+    assert vision.is_monochrome(_code_screenshot())
+    assert not vision.is_monochrome(_skin_photo(skin_box=(60, 60, 240, 400)))
+    # A flat single-colour picture is not "monochrome": its chroma sits far
+    # from neutral, so the colour gate still applies to it.
+    assert not vision.is_monochrome(_skin_photo(skin_box=None))
+
+
+def test_a_black_and_white_figure_with_bare_skin_is_promoted():
+    # "black and white or monochromatic images aren't detected well": the
+    # colour gate saw no skin at all in them. Face and body share a
+    # lightness; the picture is measured by that.
+    photo = _grey_photo(light_box=(60, 30, 240, 400))
+    face = vision.Detection("FACE_FEMALE", 0.9, (120, 30, 60, 60))
+    assert vision.skin_fraction(photo, vision.body_box(face.box, 300, 400)) > vision.SKIN_LIMIT
+    verdict = vision.ImageFilter._person_aware(photo, [face], vision.judge([face]))
+    assert verdict.level == vision.IMMODEST
+
+
+def test_a_black_and_white_figure_in_dark_clothing_stays_clean():
+    # The face is light; the body below it is dark cloth, nothing like the
+    # face's lightness.
+    photo = _grey_photo(light_box=(120, 30, 180, 90))  # the face only
+    face = vision.Detection("FACE_FEMALE", 0.9, (120, 30, 60, 60))
+    verdict = vision.ImageFilter._person_aware(photo, [face], vision.judge([face]))
+    assert verdict.level == vision.CLEAN
+
+
+def test_a_sepia_figure_is_measured_like_a_black_and_white_one():
+    photo = _grey_photo(light_box=(60, 30, 240, 400), tint=(18, 14))
+    face = vision.Detection("FACE_FEMALE", 0.9, (120, 30, 60, 60))
+    assert vision.ImageFilter._person_aware(photo, [face], vision.judge([face])).level \
+        == vision.IMMODEST
+    clothed = _grey_photo(light_box=(120, 30, 180, 90), tint=(18, 14))
+    assert vision.ImageFilter._person_aware(clothed, [face], vision.judge([face])).level \
+        == vision.CLEAN
+
+
+def test_the_person_detector_is_asked_about_a_black_and_white_picture(monkeypatch):
+    from kosherd import persons
+
+    # No face: the figure the detector finds is measured by the mid band
+    # photographed skin falls in, so bare legs in a B&W shot are caught.
+    photo = _grey_photo(light_box=(110, 200, 190, 400))
+    monkeypatch.setattr(persons, "default", lambda: _Finds((90, 40, 120, 360)))
+    verdict = vision.ImageFilter._person_aware(photo, [], vision.judge([]))
+    assert verdict.level == vision.IMMODEST and verdict.has_person
+
+
+def test_a_terminal_or_a_picture_of_code_is_never_skin(monkeypatch):
+    # "the monochrome detection should not clobber tui images and code":
+    # light text on a dark ground sits in the skin band, but it has a
+    # drawing's few grey levels, not a photograph's spread. Even a stray
+    # person detection over it measures nothing.
+    from kosherd import persons
+
+    shot = _code_screenshot()
+    assert vision.skin_fraction(shot, (0, 0, 300, 400)) == 0.0
+    assert vision.skin_fraction(shot, (0, 0, 300, 400), reference=200) == 0.0
+    monkeypatch.setattr(persons, "default", lambda: _Finds((20, 20, 260, 360)))
+    verdict = vision.ImageFilter._person_aware(shot, [], vision.judge([]))
+    assert verdict.level == vision.CLEAN
+    face = vision.Detection("FACE_FEMALE", 0.3, (120, 30, 60, 60))
+    assert vision.ImageFilter._person_aware(shot, [face], vision.judge([face])).level \
+        == vision.CLEAN
+    # And a flat diagram in greys is a drawing too.
+    flat = _grey_photo(light_box=(60, 30, 240, 400), grain=False)
+    assert vision.skin_fraction(flat, (60, 30, 180, 370)) == 0.0
+
+
 def test_the_legs_region_sits_in_the_lower_middle_of_the_figure():
     x, y, w, h = vision.legs_box((100, 0, 200, 800))
     assert (x, y, w, h) == (150, 400, 100, 280)

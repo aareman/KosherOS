@@ -200,6 +200,96 @@ def legs_box(body):
     return (int(x + 0.25 * w), int(y + 0.5 * h), int(0.5 * w), int(0.35 * h))
 
 
+# A picture with (almost) no colour — black and white, or sepia — defeats
+# the YCbCr gate: every pixel has the same chroma, so either nothing reads
+# as skin or everything does, and "black and white or monochromatic
+# images aren't detected well". Chroma spread below MONO_CHROMA_SPREAD with
+# the average chroma near neutral (under MONO_CHROMA_OFFSET; a sepia tint
+# is a small constant offset, a blue sky is a large one) means colour
+# cannot be used, and lightness is measured instead: in a monochrome
+# photograph skin is the lightness of the face, so pixels within
+# MONO_SKIN_TOLERANCE of the face's median lightness count as skin, and
+# with no face to refer to the mid band photographed skin falls in.
+MONO_CHROMA_SPREAD = 8.0
+MONO_CHROMA_OFFSET = 30.0
+MONO_SKIN_TOLERANCE = 28
+MONO_SKIN_BAND = (95, 215)
+# Lightness is only measured over a region that looks like a photograph.
+# A terminal, a screenshot of code or a diagram is monochrome too, and its
+# light text on a dark ground sits squarely in the skin band — "the
+# monochrome detection should not clobber tui images and code". A
+# photograph has hundreds of distinct grey levels; drawn text has a few
+# dozen, and one of them owns most of the pixels.
+PHOTO_MIN_LEVELS = 64
+PHOTO_MAX_ONE_LEVEL = 0.5
+
+
+def _chroma(im) -> tuple[float, float]:
+    """(spread, offset) of the picture's chroma: how much Cb and Cr vary,
+    and how far their average sits from neutral grey."""
+    small = im.convert("RGB").convert("YCbCr")
+    small.thumbnail((64, 64))
+    data = list(small.getdata())
+    n = max(1, len(data))
+    mean_cb = sum(cb for _y, cb, _cr in data) / n
+    mean_cr = sum(cr for _y, _cb, cr in data) / n
+    spread = (sum(abs(cb - mean_cb) for _y, cb, _cr in data)
+              + sum(abs(cr - mean_cr) for _y, _cb, cr in data)) / n
+    return spread, abs(mean_cb - 128) + abs(mean_cr - 128)
+
+
+def _is_monochrome(im) -> bool:
+    spread, offset = _chroma(im)
+    return spread < MONO_CHROMA_SPREAD and offset < MONO_CHROMA_OFFSET
+
+
+def is_monochrome(image_bytes: bytes) -> bool:
+    """Black and white, or a single tint such as sepia."""
+    try:
+        import io
+
+        from PIL import Image
+
+        with Image.open(io.BytesIO(image_bytes)) as im:
+            return _is_monochrome(im)
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def looks_photographic(lightnesses) -> bool:
+    """Whether a sampled region has a photograph's spread of grey levels
+    rather than a drawing's few (text, a terminal, a chart)."""
+    values = list(lightnesses)
+    if not values:
+        return False
+    counts: dict[int, int] = {}
+    for v in values:
+        counts[v] = counts.get(v, 0) + 1
+    return (len(counts) >= PHOTO_MIN_LEVELS
+            and max(counts.values()) / len(values) <= PHOTO_MAX_ONE_LEVEL)
+
+
+def face_lightness(image_bytes: bytes, face) -> int | None:
+    """The median lightness of the middle of a face box: what skin looks
+    like in this picture, for a monochrome measurement."""
+    try:
+        import io
+
+        from PIL import Image
+
+        with Image.open(io.BytesIO(image_bytes)) as im:
+            x, y, w, h = face
+            region = im.convert("RGB").convert("YCbCr").crop(
+                (int(x + w * 0.25), int(y + h * 0.25),
+                 int(x + w * 0.75), int(y + h * 0.75)))
+            if region.width < 2 or region.height < 2:
+                return None
+            values = sorted(Y for Y, _cb, _cr in region.getdata())
+            return values[len(values) // 2]
+    except Exception:  # noqa: BLE001
+        return None
+
+
 def _person_in(image_bytes: bytes, size) -> tuple | None:
     """The best person box the person detector finds, or None: no model,
     nobody, or too little skin-toned area for it to matter either way."""
@@ -214,12 +304,13 @@ def _person_in(image_bytes: bytes, size) -> tuple | None:
     return found[0][1]
 
 
-def shows_too_much(image_bytes: bytes, body) -> bool:
-    """The figure, or its legs alone, past the immodest line."""
-    fraction = skin_fraction(image_bytes, body)
+def shows_too_much(image_bytes: bytes, body, reference: int | None = None) -> bool:
+    """The figure, or its legs alone, past the immodest line. `reference`
+    is the face's lightness, used when the picture has no colour."""
+    fraction = skin_fraction(image_bytes, body, reference)
     if fraction is not None and fraction >= SKIN_LIMIT:
         return True
-    legs = skin_fraction(image_bytes, legs_box(body))
+    legs = skin_fraction(image_bytes, legs_box(body), reference)
     return legs is not None and legs >= LEGS_SKIN_LIMIT
 
 # A body-part detection this weak is not a verdict on its own, but it is
@@ -239,25 +330,39 @@ def _union_grown(boxes, width, height, grow: float = 1.0):
     return (left, top, right - left, bottom - top)
 
 
-def skin_fraction(image_bytes: bytes, box) -> float | None:
-    """How much of `box` is skin-toned, by the classic YCbCr gate."""
+def skin_fraction(image_bytes: bytes, box, reference: int | None = None) -> float | None:
+    """How much of `box` is skin-toned: by the classic YCbCr gate in a
+    colour picture, by lightness in a monochrome photograph (see MONO_*),
+    and nothing at all in a monochrome drawing — text, a terminal, code."""
     try:
         import io
 
         from PIL import Image
 
         with Image.open(io.BytesIO(image_bytes)) as im:
+            mono = _is_monochrome(im)
             x, y, w, h = box
-            region = im.convert("YCbCr").crop(
+            region = im.convert("RGB").convert("YCbCr").crop(
                 (x, y, min(x + w, im.width), min(y + h, im.height)))
             if region.width < 8 or region.height < 8:
                 return None
             # Sample down: precision is not needed to measure a fraction.
-            region = region.resize((min(96, region.width),
-                                    min(96, region.height)))
-            data = region.getdata()
-            skin = sum(1 for (Y, cb, cr) in data
-                       if Y > 60 and 77 <= cb <= 127 and 133 <= cr <= 173)
+            # Nearest, not smoothed: smoothing invents grey levels between
+            # a drawing's few, and a terminal would pass for a photograph.
+            region = region.resize((min(96, region.width), min(96, region.height)),
+                                   Image.Resampling.NEAREST)
+            data = list(region.getdata())
+            if mono:
+                if not looks_photographic(Y for Y, _cb, _cr in data):
+                    return 0.0
+                if reference is not None:
+                    low, high = reference - MONO_SKIN_TOLERANCE, reference + MONO_SKIN_TOLERANCE
+                else:
+                    low, high = MONO_SKIN_BAND
+                skin = sum(1 for (Y, _cb, _cr) in data if Y > 60 and low <= Y <= high)
+            else:
+                skin = sum(1 for (Y, cb, cr) in data
+                           if Y > 60 and 77 <= cb <= 127 and 133 <= cr <= 173)
             return skin / max(1, len(data))
     except Exception:  # noqa: BLE001 - a measurement, never a crash
         return None
@@ -311,7 +416,7 @@ def hides(media_level: str, verdict: ImageVerdict) -> bool:
 # logic: a family test found a swimsuit thumbnail still "clean" after the
 # skin rule shipped, because its clean verdict from earlier was still in
 # the cache.
-JUDGEMENT_VERSION = 5  # 5: a person detector where the nudity model saw no face
+JUDGEMENT_VERSION = 6  # 6: monochrome photographs measured by lightness
 
 
 def digest(data: bytes) -> str:
@@ -855,7 +960,8 @@ class ImageFilter:
                                 verdict.has_person)
         if verdict.level == CLEAN and female:
             for face in female:
-                if shows_too_much(image_bytes, body_box(face, *size)):
+                reference = face_lightness(image_bytes, face)
+                if shows_too_much(image_bytes, body_box(face, *size), reference):
                     return ImageVerdict(
                         IMMODEST,
                         tuple(body_box(f, *size) for f in female),

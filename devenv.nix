@@ -18,6 +18,11 @@ let
   # wheel over onnxruntime, OpenCV and NumPy, all of which are; its
   # declared dependency is the PyPI name of OpenCV, which nixpkgs spells
   # differently, so that check is switched off rather than satisfied.
+  # The models' runtime is opt-in: onnxruntime is not in the binary cache
+  # for this pinned nixpkgs and compiles from source for the better part of
+  # an hour, which nobody should pay to run the unit tests. Enter the shell
+  # with KOSHER_DEV_MODELS=1 to have it (once; nix keeps the result).
+  wantModels = builtins.getEnv "KOSHER_DEV_MODELS" == "1";
   nudenet = python.pkgs.buildPythonPackage rec {
     pname = "nudenet";
     version = "3.4.2";
@@ -68,16 +73,17 @@ in
       ps.uvicorn
       ps.httpx # portal tests + the device-side sync client
       ps.pillow # covering regions of a picture (imageedit.py)
-      # The picture filter itself, so it can be run on real pictures here
-      # rather than only in a VM: the nudity model's library, the person
-      # detector's runtime (kosherd/persons.py) and the arrays both use.
-      # The models are fetched on demand: `just fetch-models`.
-      nudenet
-      ps.onnxruntime
-      ps.numpy
       ps.mkdocs # the docs site (just docs), as CI builds it
       ps.mkdocs-material
       ps.pyyaml # parsing the GitHub workflows in the tests
+    ] ++ pkgs.lib.optionals wantModels [
+      # The picture filter itself, so it can be run on real pictures here
+      # rather than only in a VM: the nudity model's library, the person
+      # detector's runtime (kosherd/persons.py) and the arrays both use.
+      # The models themselves are fetched by `just fetch-models`.
+      nudenet
+      ps.onnxruntime
+      ps.numpy
     ]))
     pkgs.just
     # GTK4 + libadwaita so the admin app's widgets can actually be built in

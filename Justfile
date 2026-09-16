@@ -57,6 +57,7 @@ fetch-models:
         "$(PYTHONPATH=kosherd/src python3 -c 'from kosherd import persons; print(persons.MODEL_URL)')"
     cd build/models && echo "$(PYTHONPATH=../../kosherd/src python3 -c 'from kosherd import persons; print(persons.MODEL_SHA256)')  yolox_nano.onnx" | sha256sum -c -
     @echo "person model ready at build/models/yolox_nano.onnx (KOSHER_PERSON_MODEL points here in the dev shell)"
+    @echo "the runtime is opt-in: enter the shell with KOSHER_DEV_MODELS=1 devenv shell (compiles onnxruntime once)"
 
 # Run the unit test suites (pure logic — no root, no D-Bus, no VM needed).
 test *ARGS:

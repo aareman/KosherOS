@@ -1,0 +1,63 @@
+// Kosher Linux: the everyday system settings a kosher-admin may change,
+// with their OWN password (AUTH_SELF_KEEP), from an active local session.
+//
+// 40-kosher-no-admin.rules removes every polkit admin identity. That is
+// what makes "rebase the OS" and "add a Flatpak remote" unsatisfiable —
+// but it also made the time zone, the language, Wi-Fi and printers
+// unsatisfiable, and GNOME Settings told the very person who set the
+// computer up that "some settings are locked". This rule names, one by
+// one, the stock actions that cannot weaken the filter, and grants those
+// and only those. Anything not named here stays impossible.
+//
+// What is deliberately NOT here, and why:
+//   - anything about DNS (NetworkManager.settings.modify.global-dns):
+//     resolv.conf is pinned to the kosher resolver, NetworkManager runs
+//     with dns=none, and the firewall sends every port-53 packet there
+//     regardless — but there is no reason to hand out the switch.
+//   - Wi-Fi hotspot sharing (NetworkManager.wifi.share.*): traffic that
+//     is only passing through this machine is not this machine's, and
+//     the per-account filter does not see it.
+//   - anything that starts, stops or edits services, packages, images or
+//     the boot menu. Those go through kosherd's own actions or nowhere.
+polkit.addRule(function(action, subject) {
+    if (!(subject.isInGroup("kosher-admin") && subject.active && subject.local)) {
+        return polkit.Result.NOT_HANDLED;
+    }
+    var everyday = [
+        // Settings > Date & Time
+        "org.freedesktop.timedate1.set-timezone",
+        "org.freedesktop.timedate1.set-time",
+        "org.freedesktop.timedate1.set-ntp",
+        "org.freedesktop.timedate1.set-local-rtc",
+        // Settings > Region & Language, Keyboard
+        "org.freedesktop.locale1.set-locale",
+        "org.freedesktop.locale1.set-keyboard",
+        // Settings > About > Device Name
+        "org.freedesktop.hostname1.set-static-hostname",
+        "org.freedesktop.hostname1.set-hostname",
+        "org.freedesktop.hostname1.set-machine-info",
+        // Settings > Wi-Fi and Network: joining a network, remembering it
+        // for everyone on this computer, switching the radios.
+        "org.freedesktop.NetworkManager.network-control",
+        "org.freedesktop.NetworkManager.enable-disable-network",
+        "org.freedesktop.NetworkManager.enable-disable-wifi",
+        "org.freedesktop.NetworkManager.enable-disable-wwan",
+        "org.freedesktop.NetworkManager.wifi.scan",
+        "org.freedesktop.NetworkManager.settings.modify.own",
+        "org.freedesktop.NetworkManager.settings.modify.system",
+        "org.freedesktop.NetworkManager.settings.modify.hostname",
+        // Settings > Printers
+        "org.opensuse.cupspkhelper.mechanism.all-edit",
+        // Settings > Displays > Color
+        "org.freedesktop.color-manager.create-device",
+        "org.freedesktop.color-manager.create-profile",
+        "org.freedesktop.color-manager.delete-device",
+        "org.freedesktop.color-manager.delete-profile",
+        "org.freedesktop.color-manager.modify-device",
+        "org.freedesktop.color-manager.modify-profile",
+        "org.freedesktop.color-manager.install-system-wide"
+    ];
+    if (everyday.indexOf(action.id) >= 0) {
+        return polkit.Result.AUTH_SELF_KEEP;
+    }
+});

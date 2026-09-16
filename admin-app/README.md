@@ -7,32 +7,25 @@ again.
 
 ## What it shows
 
-A **sidebar** (`sidebar.py`) down the left holds everywhere the app goes.
-At the top, the two views of the whole house: Overview and Activity.
-Then **Family**: one row per account, the guest last, each with its face,
-the preset it is set up as and a badge when somebody is waiting on an
-answer — the people an admin came to configure, in front of them on every
-page. Then **This computer**: Protection, Apps, Updates. Every row carries
-its own state on the right, so the sidebar answers "is anything wrong?"
-before it is clicked. Every destination replaces the content pane rather
-than pushing onto it, so nothing carries a back button the sidebar has
-already made meaningless. A + in the sidebar header adds a person. Under
-700sp it collapses to one pane at a time.
+A **sidebar** (`sidebar.py`) down the left holds everywhere the app goes,
+in two sections. **Family** first: a labelled "Add a person…" row (a bare
++ was not clear), then one row per account with its face, the preset it
+is set up as and a badge when somebody is waiting on an answer, the guest
+last. Then **Administration**: Activity, Protection, Apps, Updates. Every
+row carries its own state on the right, so the sidebar answers "is
+anything wrong?" before it is clicked. The app opens on the first person.
+Every destination replaces the content pane rather than pushing onto it,
+so nothing carries a back button the sidebar has already made
+meaningless. Under 700sp it collapses to one pane at a time.
 
-The **Overview** (`family.py`) is the home screen: one card per account
-with the preset it is set up as (and how far it has drifted: "Child, with
-2 changes"), the same four lines of protection in the same order — web,
-pictures, video, apps — and what the filter did for that account today.
-The guest is a card like the others, dashed while off. A card goes where
-that person's sidebar row goes.
+There is no overview board any more — the cards duplicated the sidebar and
+the family said so. Two banners sit above the content pane on every page
+and appear only when they have something to say: waiting requests (blue —
+"2 requests waiting for you", one button opens them with their answers
+inline) and filter health (amber; its Details goes to Protection).
 
-Two banners sit above the board and appear only when they have something
-to say: waiting requests (blue — "2 requests waiting for you", one button
-opens them with their answers inline) and filter health (amber; its
-Details goes to Protection).
-
-**This computer** (`computer.py`) is three pages, not the row of tiles it
-used to be. *Protection* opens on whether the filter is actually working —
+**Administration** (`computer.py`) is three pages beside the feed, not the
+row of tiles it once was. *Protection* opens on whether the filter is actually working —
 the health rows are the page's first group, whatever they say, with Check
 again beside them — then what applies to everyone and says so: ad and
 tracker blocking (machine-wide because it is rendered into this computer's

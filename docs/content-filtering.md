@@ -219,7 +219,7 @@ checked by comparing the two files rather than by their existence.
 
 All of it appears in the admin app as an amber banner across the top of the
 home screen, with the full list behind its Details button — and when
-nothing is wrong the board says so ("Filter running · checked 10:42"),
+nothing is wrong the sidebar says so ("Running" beside Protection),
 because a healthy machine that says nothing is indistinguishable from one
 that was never checked. `kosherctl status` prints the same; `kosherctl lists` prints what each list holds
 and where it came from.
@@ -418,7 +418,7 @@ not given the list twice.
 
 Machine-wide, on by default. It is not content filtering, so it applies to
 unfiltered accounts too; switching it **off** is the guardian-gated act
-(`SetAdBlock`, the switch on the Protection page under "This computer" in
+(`SetAdBlock`, the switch on the Protection page under "Administration" in
 the admin app, `kosherctl adblock off`), because an ad network is also where
 immodest imagery arrives uninvited. It sits there, under "Applies to
 everyone", rather than on a person's page, because one resolver cannot

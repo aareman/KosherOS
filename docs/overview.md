@@ -14,9 +14,8 @@ without anyone having root. Powered by Fedora.
 [Releases](releases.md){ .md-button } [What works](supported.md){ .md-button }
 [How it is built](architecture.md){ .md-button }
 
-![The admin app: a sidebar listing every person in the family and this computer's own
-pages, one card per person, a blue banner for waiting requests, an amber one for filter
-health](images/admin-family-board.png)
+![The admin app: a sidebar listing every person in the family and the administration
+pages, with one person's page open](images/admin-person.png)
 
 ## The idea
 
@@ -100,8 +99,8 @@ it](images/admin-protection.png)
 
 **Everyone is one click away.** The sidebar lists the family by name, each with the
 preset they are set up as and a badge when they are waiting on an answer, and below them
-*This computer*: what is not about one person, in three pages — Protection, Apps and
-Updates. Protection opens on whether the filter is
+*Administration*: the activity feed and what is not about one person, in three pages —
+Protection, Apps and Updates. Protection opens on whether the filter is
 actually working, and then on the things one machine can only answer once — ad and tracker
 blocking, the word lists, the guardian password.
 

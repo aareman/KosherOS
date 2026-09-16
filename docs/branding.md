@@ -12,8 +12,10 @@ The logo is `branding/logo.png` (1316×1088 with alpha, source `logo.xcf`).
 `branding/rasters.py`, run at image build, makes every raster from the two
 artwork files:
 
-- the boot-splash logo and the classic desktop's Apps button (256 px,
-  fitted in a square), and the admin app's icon in hicolor at 48–512 px,
+- the boot-splash logo (256 px, fitted in a square), a house in the brand
+  blue for the classic desktop's Apps button (drawn by `rasters.py`, not a
+  bitmap: the mark is the admin app's icon and read as "admin" on the
+  taskbar), and the admin app's icon in hicolor at 48–512 px,
   named `org.kosherlinux.Admin` — the one app that IS the product carries
   the mark; the Store and Setup keep stock icons until they get their own;
 - the **login-screen lockup**: the logo with "KosherOS" set beside it in an

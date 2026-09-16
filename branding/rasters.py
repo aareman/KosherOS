@@ -7,7 +7,7 @@ what it makes. Pillow only — it is already in the image for the picture
 filter.
 
 From branding/logo.png:
-  - the boot splash logo and the classic desktop's start button (256 px,
+  - the boot splash logo (256 px; the start button is a house of its own,
     fitted in a square, transparent padding);
   - the login-screen lockup: the logo with the word "KosherOS" beside it.
     GDM's logo key takes one image and draws it at native size, and a
@@ -76,6 +76,39 @@ def fitted(src: Image.Image, size: int) -> Image.Image:
     canvas = Image.new("RGBA", (size, size), (0, 0, 0, 0))
     canvas.paste(im, ((size - im.width) // 2, (size - im.height) // 2))
     return canvas
+
+
+# The brand blue, from the logo's shield: light at the top, deep below.
+BRAND_BLUE_TOP = (59, 130, 246, 255)
+BRAND_BLUE_BOTTOM = (29, 78, 216, 255)
+
+
+def home_icon(size: int = 256) -> Image.Image:
+    """A house in the brand blue: the taskbar's Apps button.
+
+    The KosherOS mark is the admin app's own icon, and the same mark on
+    the taskbar said "admin" rather than "your apps" — the user asked for
+    "just a home / house icon for the apps", in the branding colour. Drawn
+    here rather than shipped as a bitmap so every size comes from one
+    description: a roof, a body with a doorway cut out, a chimney, filled
+    with the logo's own gradient.
+    """
+    s = size / 256
+    mask = Image.new("L", (size, size), 0)
+    draw = ImageDraw.Draw(mask)
+    draw.polygon([(128 * s, 34 * s), (16 * s, 134 * s), (240 * s, 134 * s)], fill=255)
+    draw.rounded_rectangle([52 * s, 118 * s, 204 * s, 224 * s], radius=14 * s, fill=255)
+    draw.rounded_rectangle([170 * s, 52 * s, 198 * s, 112 * s], radius=6 * s, fill=255)
+    draw.rounded_rectangle([104 * s, 158 * s, 152 * s, 224 * s], radius=8 * s, fill=0)
+    fill = Image.new("RGBA", (size, size), BRAND_BLUE_BOTTOM)
+    top, bottom = BRAND_BLUE_TOP, BRAND_BLUE_BOTTOM
+    for y in range(size):
+        t = y / max(1, size - 1)
+        colour = tuple(int(top[i] + (bottom[i] - top[i]) * t) for i in range(4))
+        ImageDraw.Draw(fill).line([(0, y), (size, y)], fill=colour)
+    icon = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+    icon.paste(fill, (0, 0), mask)
+    return icon
 
 
 def lockup(src: Image.Image, height: int = 72, gap: int = 14,
@@ -233,6 +266,8 @@ def build(src_dir: Path, out: Path, version: str = "0") -> list[Path]:
     logo = Image.open(src_dir / "logo.png").convert("RGBA")
     save(fitted(logo, 256), "usr/share/plymouth/themes/kosheros/logo.png")
     save(fitted(logo, 256), "usr/share/pixmaps/kosheros-logo.png")
+    # The taskbar's Apps button: a house, not the mark (see home_icon).
+    save(home_icon(256), "usr/share/pixmaps/kosheros-home.png")
     save(lockup(logo), "usr/share/pixmaps/kosheros-logo-login.png")
     # The admin app's icon is the KosherOS mark: it is the one app that IS
     # the product. Named by app id, which is how GNOME finds an app's icon.

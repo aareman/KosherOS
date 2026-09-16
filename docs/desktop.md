@@ -9,7 +9,7 @@ and it takes effect at that account's next sign-in.
 
 | layout | what it is | who it is for |
 |---|---|---|
-| `classic` (default) | GNOME with a taskbar along the bottom (Dash to Panel), an **Apps** button (ArcMenu: the KosherOS mark plus the word, on a filled pill, opening a Windows-style menu with pinned apps, an all-apps list and search), tray icons, minimise/maximise buttons, one workspace, no hot corner, no Activities overview at sign-in | almost everyone |
+| `classic` (default) | GNOME with a taskbar along the bottom (Dash to Panel), an **Apps** button (ArcMenu: a house in the brand blue plus the word, on a cream pill, opening a Windows-style menu with pinned apps, an all-apps list and search), tray icons, minimise/maximise buttons, one workspace, no hot corner, no Activities overview at sign-in | almost everyone |
 | `tiling` | GNOME as GNOME ships it, plus PaperWM's scrolling tiling; same lock screen, GNOME Settings, portals and accessibility | keyboard-driven power users who still want a supported desktop |
 | `advanced` | a separate login-screen session: the niri compositor with the Noctalia shell (bar, launcher, notifications, lock screen, control centre, polkit agent), configured by text files the user owns | people who already run a tiling compositor and want theirs |
 
@@ -91,8 +91,10 @@ appear) and the KosherOS wallpaper.
   `ARCMENU_REF`) builds it and only the result is copied in. Its schema
   installs into the shared schema directory, which the build recompiles. A
   picture alone did not tell anyone where the apps were, so the button says
-  "Apps"; if a build ships without ArcMenu, Dash to Panel's own apps button
-  with the KosherOS mark is the fallback.
+  "Apps"; the icon is a house in the brand blue rather than the KosherOS
+  mark, which is the admin app's icon and read as "admin" on the taskbar. If
+  a build ships without ArcMenu, Dash to Panel's own apps button with the
+  same house is the fallback.
 - **Hebrew out of the box.** Every account gets English first and Hebrew
   second (`30-kosheros-input`), the login screen the same (`gdm.d`), and the
   advanced session reads `us,il` from the system keymap in
@@ -111,7 +113,7 @@ appear) and the KosherOS wallpaper.
 - `/etc/dconf/db/local.d/20-kosheros-desktop` is the classic layout as the
   machine-wide default, so a desktop is right before the helper has ever
   run. Dash to Panel is told not to open the Activities overview at sign-in
-  and to use the KosherOS logo as its start button.
+  and to use the house as its start button.
 - `/etc/niri/config.kdl` is niri's system-wide fallback (used until an
   account writes `~/.config/niri/config.kdl`; copy it there to customise).
   It is niri's default keymap with the shell wired in: `spawn-at-startup

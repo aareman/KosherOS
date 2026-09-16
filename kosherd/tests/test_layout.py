@@ -240,7 +240,7 @@ def test_the_machine_wide_default_is_the_classic_layout():
     assert cp["org/gnome/mutter"]["dynamic-workspaces"] == "false"
 
 
-def test_the_start_button_is_the_kosheros_mark_and_says_apps():
+def test_the_start_button_is_a_house_in_the_brand_blue_and_says_apps():
     cp = _dconf(DESKTOP_DCONF)
     arc = cp["org/gnome/shell/extensions/arcmenu"]
     # A picture alone did not tell anyone where the apps were.
@@ -249,10 +249,14 @@ def test_the_start_button_is_the_kosheros_mark_and_says_apps():
     # A filled button, so it stands out from the taskbar's other icons.
     assert arc["menu-button-bg-color"].startswith("(true,")
     assert arc["menu-layout"] == "'windows'"
-    for key in ("menu-button-icon",):
-        icon = arc[key].strip("'")
-        # Produced at build by branding/rasters.py from the real logo.
-        assert icon.lstrip("/") in (ROOT / "branding/rasters.py").read_text()
+    # A house, not the KosherOS mark: the mark is the admin app's icon and
+    # read as "admin" on the taskbar. Drawn at build by branding/rasters.py.
+    icon = arc["menu-button-icon"].strip("'")
+    assert icon.endswith("kosheros-home.png")
+    assert icon.lstrip("/") in (ROOT / "branding/rasters.py").read_text()
+    # In the brand blue, on a pill it can be seen against.
+    assert "rgb(29,78,216)" in arc["menu-button-fg-color"]
+    assert "rgba(59,110,200" not in arc["menu-button-bg-color"]
     # And the fallback, should ArcMenu be missing from a build.
     fallback = cp["org/gnome/shell/extensions/dash-to-panel"]["show-apps-icon-file"].strip("'")
     assert fallback == arc["menu-button-icon"].strip("'")
@@ -390,3 +394,17 @@ def test_the_schema_copies_agree_on_the_layout():
                  ROOT / "kosherd/src/kosherd/data/policy.schema.json"):
         schema = json.loads(path.read_text())
         assert schema["$defs"]["user"]["properties"]["layout"]["enum"] == list(LAYOUTS)
+
+
+def test_the_house_icon_is_drawn_in_the_brand_blue_with_a_doorway():
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("rasters", ROOT / "branding/rasters.py")
+    rasters = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(rasters)
+    icon = rasters.home_icon(256)
+    assert icon.size == (256, 256) and icon.mode == "RGBA"
+    roof = icon.getpixel((128, 100))
+    assert roof[3] == 255 and roof[2] > roof[0], "opaque, and blue"
+    assert icon.getpixel((128, 200))[3] == 0, "the doorway is cut out"
+    assert icon.getpixel((8, 8))[3] == 0, "transparent corners"

@@ -142,6 +142,7 @@ ACTIONS = {
     "ApproveApp": ACTION_INSTALL_APPS,
     "UnapproveApp": ACTION_INSTALL_APPS,
     "CheckUpdate": ACTION_READ_CONFIG,
+    "FilterLog": ACTION_READ_CONFIG,
     "ApplyUpdate": ACTION_APPLY_UPDATES,
     "DeploymentStatus": ACTION_READ_CONFIG,
     # Going back to the previously booted image. Not guardian-gated: the

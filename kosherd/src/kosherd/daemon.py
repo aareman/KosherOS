@@ -266,6 +266,10 @@ INTROSPECTION_XML = """
     <method name="CheckUpdate">
       <arg direction="out" type="s" name="status"/>
     </method>
+    <method name="FilterLog">
+      <arg direction="in" type="i" name="lines"/>
+      <arg direction="out" type="s" name="text"/>
+    </method>
     <method name="ApplyUpdate"/>
     <method name="DeploymentStatus">
       <arg direction="out" type="s" name="status_json"/>
@@ -1733,6 +1737,25 @@ class Daemon:
         self._emit_app_signal("AppFinished", "(sbs)", (ref, ok, error))
 
     # ---- System ----------------------------------------------------------
+
+    # The services whose journal an administrator may read. Nobody on a
+    # KosherOS machine has root, so "look at the log" needs a door here.
+    LOGGED_UNITS = ("kosher-mitm", "kosherd", "kosher-dns")
+
+    def impl_FilterLog(self, lines: int):
+        """The filter's recent journal lines, for an administrator.
+
+        There is no sudo on the machine, so the person asked to "check the
+        log" could not; this reads it for them. Read-only, and only the
+        filter's own units — not the whole journal.
+        """
+        count = max(1, min(int(lines) or 200, 2000))
+        argv = ["journalctl", "--no-pager", "-o", "short-iso", "-n", str(count)]
+        for unit in self.LOGGED_UNITS:
+            argv += ["-u", unit]
+        res = subprocess.run(argv, capture_output=True, text=True)
+        text = res.stdout if res.returncode == 0 else (res.stderr or res.stdout)
+        return GLib.Variant("(s)", (text,))
 
     def impl_CheckUpdate(self):
         """Is there a newer image, and which version is it: JSON with

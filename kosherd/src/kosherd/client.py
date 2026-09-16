@@ -287,6 +287,10 @@ class DaemonClient:
         )
 
     # System
+    def filter_log(self, lines: int = 200) -> str:
+        """The filter services' recent journal lines (no root needed)."""
+        return self._call("System", "FilterLog", "(i)", int(lines))[0]
+
     def check_update(self) -> dict:
         """Whether a newer image exists and which version it is: keys
         `available`, `version`, `channel`, `image`, `digest`, `raw`, `ok`."""

@@ -35,6 +35,24 @@ def _guardian_pw(args) -> str:
     return ""
 
 
+def cmd_log(args) -> int:
+    """The filter's recent journal, filtered by a pattern if given: what a
+    person is asked for when a block does not happen, on a machine with
+    no root to run journalctl."""
+    import re
+
+    text = _client().filter_log(args.lines)
+    pattern = re.compile(args.grep, re.I) if args.grep else None
+    shown = 0
+    for line in text.splitlines():
+        if pattern is None or pattern.search(line):
+            print(line)
+            shown += 1
+    if pattern is not None and not shown:
+        print(f"(nothing matching {args.grep!r} in the last {args.lines} lines)")
+    return 0
+
+
 def cmd_status(args) -> int:
     pol = _client().get_policy()
     print(f"policy revision {pol['revision']} (source: {pol['source']}, "
@@ -841,6 +859,10 @@ def main(argv: list[str] | None = None) -> int:
     sub = p.add_subparsers(dest="command", required=True)
 
     sub.add_parser("status", help="show managed users and their filter modes").set_defaults(func=cmd_status)
+    s = sub.add_parser("log", help="the filter's recent journal lines, no root needed")
+    s.add_argument("-n", "--lines", type=int, default=200, help="how many lines (default 200)")
+    s.add_argument("-g", "--grep", default="", help="show only lines matching this pattern")
+    s.set_defaults(func=cmd_log)
     sub.add_parser("get-policy", help="dump the full policy JSON").set_defaults(func=cmd_get_policy)
 
     s = sub.add_parser("set-mode", help="change a user's filter mode")

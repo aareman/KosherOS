@@ -283,7 +283,10 @@ rolls, so a machine that was briefly busy recovers on its own.
 or `no_model` — and kosherd reports it, with which services should be
 running and are not, through `FilterStatus`. The admin app shows it as an
 amber count beside Protection in the sidebar and spells it out first on the
-Protection page, and `kosherctl status` prints it.
+Protection page, and `kosherctl status` prints it. When a block that should have
+happened did not, `kosherctl log -g youtube` (or any pattern) prints the filter
+services' recent journal lines through kosherd — there is no root on the machine
+to run `journalctl` with.
 
 This matters more than it looks. A filter that has quietly stopped doing
 something is worse than one that never did it, because the family is

@@ -791,7 +791,12 @@ def test_a_blocked_category_is_stopped_in_the_player_api(addon):
     filt._filter_youtube(flow, 1001)
     answer = json.loads(flow.response.text)
     assert answer["playabilityStatus"]["status"] == "ERROR"
-    assert "turned off" in answer["playabilityStatus"]["reason"]
+    # One decision, one wording: the app's message names KosherOS the way
+    # the block page does, and gives the same reason and the same way out.
+    assert answer["playabilityStatus"]["reason"] == "Blocked by KosherOS"
+    detail = answer["playabilityStatus"]["errorScreen"][
+        "playerErrorMessageRenderer"]["subreason"]["simpleText"]
+    assert "turned off" in detail and "ask the administrator" in detail.lower()
 
 
 def test_an_unapproved_channel_is_stopped_in_the_player_api(addon):
@@ -887,7 +892,8 @@ def test_shorts_are_refused_everywhere_they_play_when_turned_off(addon):
     reel.request.path = "/youtubei/v1/reel/reel_item_watch"
     filt._filter_youtube(reel, 1001)
     assert json.loads(reel.response.text)["playabilityStatus"]["status"] == "ERROR"
-    assert "Shorts" in json.loads(reel.response.text)["playabilityStatus"]["reason"]
+    assert "Shorts" in json.loads(reel.response.text)["playabilityStatus"][
+        "errorScreen"]["playerErrorMessageRenderer"]["subreason"]["simpleText"]
     # The ordinary player, asked from a /shorts page.
     body = json.dumps({"microformat": {"playerMicroformatRenderer": {"category": "Music"}}})
     short = _player_flow(addon, body)
@@ -1930,3 +1936,59 @@ def test_a_failed_note_never_fails_the_block(addon, tmp_path):
     flow = _request_flow("https://example.com/x")
     filt._block(flow, "https://example.com/x", "", why="rule:example.com")
     assert flow.response.status_code == 403
+
+
+# -- the preview that plays on hover ---------------------------------------------
+
+def test_hovering_a_thumbnail_no_longer_plays_the_video(addon):
+    # The feed carries its own little player and a moving thumbnail, and
+    # both start on hover without the player API being asked at all —
+    # "youtube thumbnail previews play on hover even for blocked videos".
+    import json
+
+    feed = {"contents": [{"videoRenderer": {
+        "videoId": "v1",
+        "title": "A video",
+        "thumbnail": {"thumbnails": [{"url": "https://i.ytimg.com/vi/v1/hq.jpg"}]},
+        "inlinePlaybackRenderer": {"videoId": "v1"},
+        "movingThumbnailRenderer": {"movingThumbnailDetails": {"thumbnails": []}},
+    }}]}
+    filt = _yt_filter(addon, {"blocked_categories": ["24"]})
+    flow = _player_flow(addon, json.dumps(feed))
+    flow.request.path = "/youtubei/v1/browse"
+    filt._filter_youtube(flow, 1001)
+    kept = json.loads(flow.response.text)["contents"][0]["videoRenderer"]
+    assert kept["videoId"] == "v1" and kept["title"] == "A video", "still in the feed"
+    assert kept["thumbnail"], "still a picture"
+    assert "inlinePlaybackRenderer" not in kept
+    assert "movingThumbnailRenderer" not in kept
+    assert flow.response.headers["x-kosheros"] == "youtube-feed-filtered"
+
+
+def test_an_animated_preview_picture_is_hidden_for_an_account_that_limits_youtube(addon):
+    import asyncio
+
+    filt = _yt_filter(addon, {"blocked_categories": ["24"]})
+    flow = _hflow("image/webp", url="https://i.ytimg.com/an_webp/v1/mqdefault_6s.webp",
+                  length=4000)
+    flow.request.path = "/an_webp/v1/mqdefault_6s.webp"
+    # Not streamed past the filter, whatever the account's picture setting.
+    filt.responseheaders(flow)
+    assert not getattr(flow.response, "stream", False)
+    asyncio.run(filt.response(flow))
+    assert flow.response.headers.get("x-kosheros") == "image-hidden"
+
+
+def test_an_ordinary_thumbnail_is_not_a_preview(addon):
+    assert addon.YouTube.is_moving_thumbnail("i.ytimg.com", "/an_webp/v1/mqdefault_6s.webp")
+    assert addon.YouTube.is_moving_thumbnail("i9.ytimg.com", "/vi_webp/v1/mqdefault_6s.webp")
+    assert not addon.YouTube.is_moving_thumbnail("i.ytimg.com", "/vi/v1/hqdefault.jpg")
+    assert not addon.YouTube.is_moving_thumbnail("example.com", "/an_webp/x.webp")
+
+
+def test_an_account_with_no_youtube_limits_keeps_its_previews(addon):
+    filt = _yt_filter(addon, {})
+    flow = _hflow("image/webp", url="https://i.ytimg.com/an_webp/v1/mqdefault_6s.webp")
+    flow.request.path = "/an_webp/v1/mqdefault_6s.webp"
+    assert filt._youtube_preview_refused(flow, 1001) is False
+

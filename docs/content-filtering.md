@@ -379,6 +379,31 @@ YouTube's own "cannot be played" shape rather than as a block page. That
 response is consumed by the player, not read by a person: a 403 spins
 forever, and an HTML page where JSON was expected is a broken app.
 
+### What a person sees, and why it is not always the same frame
+
+A video opened by its address is a page, and gets the KosherOS block page
+with its "ask for this page" form. A video clicked inside the app is a
+player answer, and gets YouTube's own error frame. The frame differs
+because the request differs; the **words are the same** — "Blocked by
+KosherOS", then the reason and "you can ask the administrator of this
+computer for it. Nothing changes until they say yes." Both are written to
+the activity log either way.
+
+A third message is not ours at all: with Restricted Mode on, YouTube
+blocks some videos by itself and says so in its own words. Nothing on this
+machine can make that one look like ours, which is the price of having a
+floor under the per-account rules.
+
+### The preview that plays on hover
+
+Hovering a thumbnail plays the video: the feed carries an inline player
+and a moving thumbnail, and neither asks the player API whether it may.
+For any account with YouTube limits those keys are taken out of the feed —
+keys, not entries, so the video keeps its picture and its title and only
+the part that plays on hover goes — and the animated preview picture
+itself (`an_webp` on the thumbnail host) is hidden if a client asks for one
+anyway.
+
 ### The feeds, for approved-channel accounts only
 
 An account limited to a few channels would otherwise get a home page full

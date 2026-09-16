@@ -475,6 +475,21 @@ class YouTube:
     SHORTS_KEYS = frozenset({"reelShelfRenderer", "reelItemRenderer",
                              "shortsLockupViewModel", "reelWatchEndpoint"})
 
+    # Hovering a thumbnail plays the video, quietly and without ever asking
+    # the player whether it may: the feed carries an inline player and a
+    # moving thumbnail, and both start on hover — "youtube thumbnail
+    # previews play on hover even for blocked videos". These keys are taken
+    # out of the feed, so a thumbnail is a picture again.
+    PREVIEW_KEYS = frozenset({
+        "inlinePlaybackRenderer", "movingThumbnailRenderer",
+        "movingThumbnailDetails", "animatedThumbnailRenderer",
+        "richGridMovingThumbnailRenderer", "onHoverInlinePlaybackRenderer",
+    })
+    # And the pictures those previews are: an animated WebP of the video
+    # itself, served from the thumbnail host. A backstop for a client that
+    # asks for one anyway.
+    PREVIEW_PATHS = ("/an_webp/", "/an_/")
+
     # The feeds: the home page, search results, the sidebar of suggestions.
     # Only pruned for an account limited to approved channels, and only
     # then because the alternative is a wall of videos that all fail to
@@ -536,6 +551,33 @@ class YouTube:
         if isinstance(node, list):
             return any(YouTube.mentions_shorts(v, depth + 1) for v in node)
         return False
+
+    @staticmethod
+    def is_moving_thumbnail(host: str, path: str) -> bool:
+        """An animated preview of a video, not a thumbnail of one."""
+        if not _is_search_thumb(host or ""):
+            return False
+        path = (path or "").split("?", 1)[0]
+        return (any(part in path for part in YouTube.PREVIEW_PATHS)
+                or "_6s." in path)
+
+    @staticmethod
+    def prune_previews(node, depth: int = 0):
+        """Take the hover players out of a feed.
+
+        Keys, not list entries: the video stays in the feed as a picture
+        and a title, and only the part that plays it on hover goes. A feed
+        whose entries were dropped instead would hide videos the account
+        may perfectly well watch.
+        """
+        if depth > 24:
+            return node
+        if isinstance(node, dict):
+            return {k: YouTube.prune_previews(v, depth + 1)
+                    for k, v in node.items() if k not in YouTube.PREVIEW_KEYS}
+        if isinstance(node, list):
+            return [YouTube.prune_previews(item, depth + 1) for item in node]
+        return node
 
     @staticmethod
     def prune_shorts(node, depth: int = 0):
@@ -618,16 +660,27 @@ class YouTube:
     # What the app shows when a video genuinely cannot be played. Reusing
     # YouTube's own shape means the page renders a normal message instead
     # of spinning forever or showing a broken player.
+    #
+    # The first line names KosherOS. A person who opens a video by its
+    # address gets our block page and knows who stopped it; a person who
+    # clicks one inside the app gets this, in YouTube's own frame, and
+    # used to see only "turned off on this computer" — the same decision
+    # wearing two faces, which reads as the filter being inconsistent. The
+    # words below are the block page's words.
+    BLOCKED_TITLE = "Blocked by KosherOS"
+    ASK_LINE = ("You can ask the administrator of this computer for it. "
+                "Nothing changes until they say yes.")
+
     @staticmethod
     def unplayable(reason: str) -> dict:
+        detail = reason.rstrip(".") + ". " + YouTube.ASK_LINE
         return {
             "playabilityStatus": {
                 "status": "ERROR",
-                "reason": reason,
+                "reason": YouTube.BLOCKED_TITLE,
                 "errorScreen": {"playerErrorMessageRenderer": {
-                    "reason": {"simpleText": reason},
-                    "subreason": {"simpleText":
-                                  "Ask the administrator of this computer."},
+                    "reason": {"simpleText": YouTube.BLOCKED_TITLE},
+                    "subreason": {"simpleText": detail},
                 }},
             },
             "videoDetails": {},
@@ -843,6 +896,9 @@ class KosherFilter:
                 self._refuse_video(flow, before_body=True)
             return  # "hold": sampled in response()
         if _is_image(flow):
+            if YouTube.is_moving_thumbnail(flow.request.pretty_host or "",
+                                           getattr(flow.request, "path", "") or ""):
+                return  # response() decides: it may be a video in a picture
             level = self.policy.media_level_for(uid)
             if level == "none" or self._recently_clean(flow, level):
                 flow.response.stream = True
@@ -868,6 +924,8 @@ class KosherFilter:
             return  # let through as it arrived; there is no body to read
 
         if _is_image(flow):
+            if self._youtube_preview_refused(flow, uid):
+                return
             await self._filter_image_async(flow, uid)
             return
 
@@ -884,6 +942,23 @@ class KosherFilter:
             return
 
         self._filter_page(flow, uid)
+
+    def _youtube_limited(self, uid: int) -> bool:
+        """Whether this account has YouTube limits of any kind."""
+        settings = self.policy.youtube_for(uid)
+        return bool(settings.get("allowed_channels") or settings.get("blocked_categories"))
+
+    def _youtube_preview_refused(self, flow: http.HTTPFlow, uid: int) -> bool:
+        """Hide an animated preview of a video for an account that limits
+        YouTube. True when the response has been answered."""
+        if not YouTube.is_moving_thumbnail(flow.request.pretty_host or "",
+                                           getattr(flow.request, "path", "") or ""):
+            return False
+        if not self._youtube_limited(uid):
+            return False
+        log.info("hid a YouTube hover preview for uid=%s", uid)
+        self._blank_image(flow)
+        return True
 
     def _blocked_shop_search(self, url: str) -> str | None:
         """A search typed into a shop's own box.
@@ -1458,7 +1533,10 @@ class KosherFilter:
                 return
             self._filter_youtube_player(flow, allowed, blocked)
             return
-        if (allowed or no_shorts) and YouTube.is_feed_api(path):
+        if YouTube.is_feed_api(path):
+            # Every feed, not only the ones whose entries need dropping:
+            # the hover players come out for any account with YouTube
+            # limits, since a preview answers to none of them.
             self._filter_youtube_feed(flow, set(allowed), no_shorts)
             return
         if not any(path.startswith(p) for p in YouTube.WATCH_PATHS):
@@ -1519,6 +1597,7 @@ class KosherFilter:
         pruned = YouTube.prune_feed(document, allowed) if allowed else document
         if no_shorts:
             pruned = YouTube.prune_shorts(pruned)
+        pruned = YouTube.prune_previews(pruned)
         if pruned == document:
             return
         flow.response.text = json.dumps(pruned, separators=(",", ":"))

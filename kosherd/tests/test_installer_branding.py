@@ -204,3 +204,30 @@ def test_a_stale_shell_falls_back_to_nix(monkeypatch):
     brand._xorriso_runner()(["-version"])
     assert calls[0][:5] == ["nix", "shell", "nixpkgs#xorriso", "-c", "xorriso"]
 
+
+
+def test_the_boot_menu_is_hidden_but_reachable():
+    """Boot straight in; the menu stays one keypress away.
+
+    The user: "the boot choice options screen should be hidden by default
+    and just go straight to boot the os". Hidden with a one-second silent
+    countdown, not timeout 0: with no countdown at all there is no moment
+    in which Shift or Esc can open the menu, and a machine that will not
+    start becomes a machine that cannot be reached.
+    """
+    cfg = (ROOT / "os-image/files/usr/lib/bootupd/grub2-static/configs.d"
+           / "09_kosheros_quiet.cfg").read_text()
+    assert "set timeout_style=hidden" in cfg
+    assert "set timeout=1" in cfg
+    assert "set timeout=0" not in cfg
+    containerfile = (ROOT / "os-image/Containerfile").read_text()
+    assert "GRUB_TIMEOUT_STYLE=hidden" in containerfile
+
+
+def test_the_person_model_is_fetched_by_hash():
+    from kosherd import persons
+
+    containerfile = (ROOT / "os-image/Containerfile").read_text()
+    assert persons.MODEL_URL in containerfile
+    assert persons.MODEL_SHA256 in containerfile
+    assert str(persons.MODEL_PATH) in containerfile or "/usr/share/kosher/models/yolox_nano.onnx" in containerfile

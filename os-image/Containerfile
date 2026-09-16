@@ -117,6 +117,15 @@ RUN python3 -m pip install --prefix=/usr mitmproxy
 # what covers a detected region instead of blanking the whole picture.
 RUN python3 -m pip install --prefix=/usr nudenet onnxruntime pillow \
     || echo "WARNING: no image model; picture filtering will hide pictures"
+# A person detector beside it (kosherd/persons.py): the nudity model labels
+# parts and has no class for legs, so a skirt photographed from the hips
+# down came back empty. YOLOX-Nano says where the figure is, and the skin
+# measurement runs on that. 3.5 MB, Apache-2.0, ~40 ms on a laptop CPU.
+# Pinned by hash: a model is code that runs on every picture a child sees.
+RUN mkdir -p /usr/share/kosher/models \
+    && curl -fsSL -o /usr/share/kosher/models/yolox_nano.onnx \
+         https://github.com/Megvii-BaseDetection/YOLOX/releases/download/0.1.1rc0/yolox_nano.onnx \
+    && echo "c789161ed43c8269fcd4e67c67eeeb4e80c622da2eb296a20bc6007bd18a0b7d  /usr/share/kosher/models/yolox_nano.onnx" | sha256sum -c -
 # PyAV: FFmpeg's libraries as a wheel, with the H.264, VP9 and AV1 decoders
 # that Fedora's own ffmpeg-free leaves out. The proxy samples a few
 # keyframes from a clip and judges them like pictures (kosherd/videocheck).
@@ -240,7 +249,9 @@ RUN true \
          -o /usr/share/plymouth/themes/kosheros/bar-fill.png \
     && plymouth-set-default-theme kosheros \
     # bootc images have no /etc/default/grub; create it for the menu title.
-    && printf 'GRUB_DISTRIBUTOR="KosherOS"\nGRUB_TIMEOUT=1\n' > /etc/default/grub \
+    # (The timeout GRUB actually uses is set in the static config,
+    # configs.d/09_kosheros_quiet.cfg; this file is documentation.)
+    && printf 'GRUB_DISTRIBUTOR="KosherOS"\nGRUB_TIMEOUT=1\nGRUB_TIMEOUT_STYLE=hidden\n' > /etc/default/grub \
     # systemd.show_status=auto surfaces "Starting ..." lines to Plymouth, so
     # the splash reports what a slow boot is waiting on instead of just
     # sitting there looking hung. The rest keep the text console blank:

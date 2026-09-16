@@ -83,3 +83,11 @@ been read at the source. Those are the remaining gaps in this audit.
 "Fedora" is a trademark of Red Hat. KosherOS is a remix, not a Fedora
 product, and its use of the name is governed by Fedora's trademark
 guidelines — which bear directly on the "powered by Fedora" branding.
+
+
+## Picture models
+
+| component | licence | used for |
+|---|---|---|
+| [NudeNet](https://github.com/notAI-tech/NudeNet) (model and library, via PyPI) | **MIT** | labelling body parts in pictures (`kosherd/vision.py`) |
+| [YOLOX-Nano](https://github.com/Megvii-BaseDetection/YOLOX) `yolox_nano.onnx`, release 0.1.1rc0 | **Apache-2.0** | finding the person in a picture the nudity model saw no face in (`kosherd/persons.py`); fetched at image build, pinned by SHA-256 |

@@ -1432,16 +1432,26 @@ class KosherFilter:
                                           else "category"))
 
     @staticmethod
-    def _youtube_verdict(body: str, allowed: list, blocked: list) -> str | None:
-        """Why this video may not be watched, or None."""
+    def _youtube_verdict(body: str, allowed: list, blocked: list,
+                         strict_unknown: bool = False) -> str | None:
+        """Why this video may not be watched, or None.
+
+        `strict_unknown`: a video whose category cannot be read counts as
+        blocked. Right for the player JSON, where the microformat always
+        names one and its absence means something is being hidden; wrong
+        for a page's HTML, which may simply not carry it.
+        """
         if allowed:
             channel_id, handle = YouTube.channel_of(body)
             if not ({channel_id, handle} & set(allowed)):
                 return " because only approved channels are allowed"
-        if blocked:
+        kinds = set(blocked) - {YouTube.SHORTS_KIND}
+        if kinds:
             category = YouTube.category_of(body)
-            if category and category in blocked:
+            if category and category in kinds:
                 return " because that kind of video is turned off"
+            if category is None and strict_unknown:
+                return " because the video's kind could not be checked"
         return None
 
     def _filter_youtube_feed(self, flow: http.HTTPFlow, allowed: set,
@@ -1480,7 +1490,7 @@ class KosherFilter:
         body = flow.response.get_text(strict=False) or ""
         if not body:
             return
-        why = self._youtube_verdict(body, allowed, blocked)
+        why = self._youtube_verdict(body, allowed, blocked, strict_unknown=True)
         if not why:
             return
         reason = ("Only approved channels can be watched on this computer"

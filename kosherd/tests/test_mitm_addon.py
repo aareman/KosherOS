@@ -923,6 +923,26 @@ def test_youtube_thumbnails_count_as_search_thumbnails(addon):
     assert not addon._is_search_thumb("www.youtube.com")
 
 
+def test_a_video_whose_kind_cannot_be_read_does_not_play_where_kinds_are_limited(addon):
+    # The player JSON always names a category; when it does not, the safe
+    # reading for an account that limits kinds is that this one is hidden.
+    import json
+
+    filt = _yt_filter(addon, {"blocked_categories": ["24"]})
+    flow = _player_flow(addon, json.dumps({"videoDetails": {"channelId": "UC1"}}))
+    filt._filter_youtube(flow, 1001)
+    assert json.loads(flow.response.text)["playabilityStatus"]["status"] == "ERROR"
+    # Only Shorts turned off is not a kind limit: an ordinary video with no
+    # readable category still plays.
+    filt = _yt_filter(addon, {"blocked_categories": ["shorts"]})
+    flow = _player_flow(addon, json.dumps({"videoDetails": {"channelId": "UC1"}}))
+    filt._filter_youtube(flow, 1001)
+    assert "playabilityStatus" not in flow.response.text
+    # And a watch PAGE without a readable category is left to the player
+    # call that follows it, rather than blocked on the doubt.
+    assert addon.KosherFilter._youtube_verdict("<html></html>", [], ["24"]) is None
+
+
 def test_an_account_with_no_youtube_limits_is_left_alone(addon):
     import json
 

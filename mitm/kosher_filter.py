@@ -503,7 +503,14 @@ class YouTube:
     # an approved channel is not that channel's video.
     CHANNEL_KEYS = ("ownerText", "longBylineText", "shortBylineText")
 
-    HOSTS = ("youtube.com", "youtube-nocookie.com", "youtubekids.com")
+    # The API hosts as well as the site. YouTube's clients call the same
+    # /youtubei/v1/* endpoints on googleapis.com — the resolver knows it and
+    # points them at Restricted Mode — and a request that went there was
+    # answered with no category, channel or Shorts rule applied at all,
+    # because this list was the site only. Exact hosts, never
+    # "googleapis.com": that would be every Google API.
+    HOSTS = ("youtube.com", "youtube-nocookie.com", "youtubekids.com",
+             "youtubei.googleapis.com", "youtube.googleapis.com")
 
     @staticmethod
     def applies(host: str) -> bool:

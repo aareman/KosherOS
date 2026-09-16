@@ -374,8 +374,11 @@ is ever parsed again. A filter that reads only the HTML therefore checks
 the first video a child opens and nothing they click afterwards — which is
 almost all of them.
 
-So the rules are applied to the player API, and the block is returned in
-YouTube's own "cannot be played" shape rather than as a block page. That
+So the rules are applied to the player API — on the site's own hosts and on
+`youtubei.googleapis.com`, where the clients call the same endpoints and
+where an answer used to go out with no rule applied at all — and the block
+is returned in YouTube's own "cannot be played" shape rather than as a
+block page. That
 response is consumed by the player, not read by a person: a 403 spins
 forever, and an HTML page where JSON was expected is a broken app.
 

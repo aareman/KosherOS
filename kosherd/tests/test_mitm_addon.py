@@ -964,6 +964,30 @@ def test_a_video_whose_kind_cannot_be_read_does_not_play_where_kinds_are_limited
     assert addon.KosherFilter._youtube_verdict("<html></html>", [], ["24"]) is None
 
 
+def test_the_youtube_rules_cover_its_api_hosts_and_nothing_else_of_googles(addon):
+    # The clients call the same /youtubei/v1/* endpoints on googleapis.com,
+    # and the resolver points those at Restricted Mode — so they are
+    # YouTube, and a player answer from there was going out unfiltered.
+    import json
+
+    applies = addon.YouTube.applies
+    for host in ("www.youtube.com", "m.youtube.com", "music.youtube.com",
+                 "www.youtube-nocookie.com", "youtubekids.com",
+                 "youtubei.googleapis.com", "youtube.googleapis.com"):
+        assert applies(host), host
+    for host in ("googleapis.com", "storage.googleapis.com", "google.com",
+                 "youtube.com.attacker.example", "notyoutube.com"):
+        assert not applies(host), host
+    # And a video refused on the site is refused from the API host too.
+    filt = _yt_filter(addon, {"blocked_categories": ["10"]})
+    body = json.dumps({"microformat": {"playerMicroformatRenderer": {"category": "Music"}}})
+    flow = _player_flow(addon, body)
+    flow.request.pretty_host = "youtubei.googleapis.com"
+    flow.request.pretty_url = "https://youtubei.googleapis.com/youtubei/v1/player"
+    filt._filter_youtube(flow, 1001)
+    assert json.loads(flow.response.text)["playabilityStatus"]["status"] == "ERROR"
+
+
 def test_the_journal_says_why_a_youtube_video_played(addon, caplog):
     # "youtube still not blocking" is impossible to chase without knowing
     # whether the proxy saw the video and what it made of it. Three lines

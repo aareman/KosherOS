@@ -88,13 +88,40 @@ within seconds of the page.
 This closes most of the catalogue case and none of the general one. A
 family that wants tzniut enforced strictly should still choose **hide all
 pictures**, which needs no judgement and is therefore the only setting
-that is right every time. The sections below on a tzniut classifier remain
-the plan for the rest; nothing in them has been built.
+that is right every time.
 
-A skin-tone heuristic would be the obvious next idea and is deliberately
-not used: skin detection works measurably better on some skin tones than
-others, and a filter that is stricter with some families than others
-because of that is not a filter this project should ship.
+### Measuring skin over a figure
+
+Hands-on family testing then found the misses the labels cannot see —
+beachwear, bare shoulders and arms, legs under a short skirt — and the
+level was strengthened with a skin measurement, used with care: never
+over a whole picture, only over a **figure**. The whole body is estimated
+from a detected face (or from the union of detected parts when there is
+no face), and the fraction of skin-toned pixels in that box, by the
+classic YCbCr gate, promotes a "clean" picture to immodest past
+`SKIN_LIMIT`. Legs are measured on their own as well (`LEGS_SKIN_LIMIT`,
+the lower middle of the body box), because a covered top dilutes bare legs
+below the whole-figure line and short skirts were getting through.
+
+A skirt photographed from the hips down has no face and no labelled part,
+so none of that ran and the picture passed — on Amazon's own grid for
+that search, eleven of sixty-two. A skin rule with no figure to anchor it
+was measured and rejected: against a hundred and fifty beige products,
+any threshold that caught most of the legs hid three quarters of the
+furniture. What was missing was "is there a person here", so a **person
+detector** answers it: YOLOX-Nano (`kosherd/persons.py`, Apache-2.0,
+3.5 MB, about forty milliseconds), asked only when the nudity model found
+no face and the picture has enough skin-toned area to matter. Its box is
+what the skin measurement then runs on. On that grid it recovered ten of
+the eleven.
+
+Two limits of the colour gate are known and stated rather than hidden.
+It sees some skin tones better than others, so it is stricter with some
+families than others; that is why it is only ever applied inside a
+detected figure, never used to *find* one. And khaki reads as skin to it:
+of twenty-five photographs of men modelling khaki trousers, six are
+hidden at this level. The sections below on a tzniut classifier remain
+the plan for the rest.
 
 ## Video
 

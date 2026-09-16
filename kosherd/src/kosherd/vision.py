@@ -200,6 +200,20 @@ def legs_box(body):
     return (int(x + 0.25 * w), int(y + 0.5 * h), int(0.5 * w), int(0.35 * h))
 
 
+def _person_in(image_bytes: bytes, size) -> tuple | None:
+    """The best person box the person detector finds, or None: no model,
+    nobody, or too little skin-toned area for it to matter either way."""
+    from . import persons as persons_mod
+
+    whole = skin_fraction(image_bytes, (0, 0, *size))
+    if whole is None or whole < persons_mod.WORTH_ASKING:
+        return None
+    found = persons_mod.default().detect(image_bytes)
+    if not found:
+        return None
+    return found[0][1]
+
+
 def shows_too_much(image_bytes: bytes, body) -> bool:
     """The figure, or its legs alone, past the immodest line."""
     fraction = skin_fraction(image_bytes, body)
@@ -297,7 +311,7 @@ def hides(media_level: str, verdict: ImageVerdict) -> bool:
 # logic: a family test found a swimsuit thumbnail still "clean" after the
 # skin rule shipped, because its clean verdict from earlier was still in
 # the cache.
-JUDGEMENT_VERSION = 4  # 4: legs measured on their own (short skirts)
+JUDGEMENT_VERSION = 5  # 5: a person detector where the nudity model saw no face
 
 
 def digest(data: bytes) -> str:
@@ -858,4 +872,14 @@ class ImageFilter:
             fraction = skin_fraction(image_bytes, figure)
             if fraction is not None and fraction >= SKIN_LIMIT:
                 return ImageVerdict(IMMODEST, (figure,), True)
+        # Nothing to hang a body on — no face, and either no part at all or
+        # nothing that said "too much". A skirt photographed from the hips
+        # down is exactly this: legs are not a class. Ask the person
+        # detector where the figure is, and measure the skin over that.
+        if verdict.level == CLEAN and not faces:
+            person = _person_in(image_bytes, size)
+            if person is not None:
+                if shows_too_much(image_bytes, person):
+                    return ImageVerdict(IMMODEST, (person,), True)
+                return ImageVerdict(CLEAN, (), True)
         return verdict

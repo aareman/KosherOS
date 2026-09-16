@@ -397,6 +397,70 @@ def test_the_legs_region_sits_in_the_lower_middle_of_the_figure():
     assert (x, y, w, h) == (150, 400, 100, 280)
 
 
+class _Finds:
+    """A stand-in person detector: says there is a person here."""
+
+    def __init__(self, box):
+        self.box = box
+
+    def detect(self, data, threshold=0.5):
+        return [(0.9, self.box)] if self.box else []
+
+
+def test_a_hips_down_skirt_shot_is_caught_when_the_person_detector_finds_the_figure(monkeypatch):
+    # No face, no labelled part: the nudity model returns nothing and the
+    # picture used to pass. The person detector says where the figure is,
+    # and the legs region of that box is mostly skin.
+    from kosherd import persons
+
+    photo = _skin_photo(skin_box=(110, 200, 190, 400))       # legs, centred, lower half
+    monkeypatch.setattr(persons, "default", lambda: _Finds((90, 40, 120, 360)))
+    verdict = vision.ImageFilter._person_aware(photo, [], vision.judge([]))
+    assert verdict.level == vision.IMMODEST
+    assert verdict.regions == ((90, 40, 120, 360),)
+    assert verdict.has_person
+
+
+def test_a_clothed_figure_found_by_the_person_detector_counts_as_a_person_but_stays_clean(monkeypatch):
+    from kosherd import persons
+
+    # Enough skin in the frame (a bare arm at the edge) for the detector to
+    # be asked at all; the figure it finds is clothed.
+    photo = _skin_photo(skin_box=(0, 0, 120, 120))
+    monkeypatch.setattr(persons, "default", lambda: _Finds((90, 40, 120, 360)))
+    verdict = vision.ImageFilter._person_aware(photo, [], vision.judge([]))
+    assert verdict.level == vision.CLEAN
+    assert verdict.has_person, "a search thumbnail with this in it is still hidden"
+
+
+def test_the_person_detector_is_not_asked_about_a_picture_with_no_skin_in_it(monkeypatch):
+    from kosherd import persons
+
+    asked = []
+
+    class Counting(_Finds):
+        def detect(self, data, threshold=0.5):
+            asked.append(1)
+            return super().detect(data, threshold)
+
+    monkeypatch.setattr(persons, "default", lambda: Counting((0, 0, 100, 100)))
+    verdict = vision.ImageFilter._person_aware(_skin_photo(None), [], vision.judge([]))
+    assert verdict.level == vision.CLEAN and not asked
+
+
+def test_no_person_model_means_the_old_answer_not_a_crash(monkeypatch):
+    from kosherd import persons
+
+    class Missing:
+        def detect(self, data, threshold=0.5):
+            return None
+
+    monkeypatch.setattr(persons, "default", lambda: Missing())
+    photo = _skin_photo(skin_box=(110, 200, 190, 400))
+    verdict = vision.ImageFilter._person_aware(photo, [], vision.judge([]))
+    assert verdict.level == vision.CLEAN and not verdict.has_person
+
+
 def test_hidden_pictures_cover_the_whole_figure_not_a_fragment():
     # Legs under a short skirt: an exposed-class hit covered only its own
     # box; the rest of the person stayed visible.

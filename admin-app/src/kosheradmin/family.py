@@ -1,12 +1,10 @@
-"""The family board: the home screen.
+"""The guest account's own page, and the shape the rest of the app sees it in.
 
-One card per person, each the same four lines in the same order (web,
-pictures, video, apps) so the eye compares across children, with what
-happened today at the bottom. Above it, two banners that appear only when
-they have something to say: the requests waiting for an answer (blue, the
-one thing anyone is blocked on) and the filter's health (amber, the one
-thing that is dangerous), whose Details goes to Protection in the sidebar.
-Everything that is not about a person lives there now, in computer.py.
+The family board that used to live here — one card per person — is gone:
+the sidebar lists the family by name, and the family said the cards
+duplicated it. What is left is the guest: `guest_user` turns the policy's
+guest block into the same dict a user has, so every filter tab works on
+it, and `GuestPage` is what a guest that is switched off opens onto.
 """
 
 from __future__ import annotations
@@ -17,178 +15,9 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 from gi.repository import Adw, Gtk  # noqa: E402
 
-from kosherd import profiles as profiles_mod  # noqa: E402
-
 from . import labels  # noqa: E402
-from .common import (avatar, clear, icon_line, mode_badge,  # noqa: E402
-                     pointer_cursors, tag)
 from .computer import _Page, health_rows  # noqa: E402,F401  (re-exported)
-from .dialogs import RequestsDialog, WhitelistDialog  # noqa: E402
-
-
-class FamilyPage(Gtk.Box):
-    def __init__(self, win):
-        super().__init__(orientation=Gtk.Orientation.VERTICAL)
-        self.win = win
-
-        # The user asked for "a blue notification at the top: X requests
-        # waiting for you, click to deal with" — not a list group.
-        self.requests_banner = Adw.Banner(button_label="Deal with them")
-        self.requests_banner.add_css_class("requests-banner")
-        self.requests_banner.connect("button-clicked", lambda _b: self.open_requests())
-        self.append(self.requests_banner)
-
-        self.health_banner = Adw.Banner(button_label="Details")
-        self.health_banner.add_css_class("health-banner")
-        self.health_banner.connect("button-clicked",
-                                   lambda _b: self.win.go_to("protection"))
-        self.append(self.health_banner)
-
-        # Not an Adw.PreferencesPage: its clamp is 600px, which is one card
-        # wide. The board wants three across, so it gets its own clamp.
-        self.body = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=28,
-                            margin_top=22, margin_bottom=28, margin_start=18,
-                            margin_end=18)
-        clamp = Adw.Clamp(maximum_size=1080, tightening_threshold=900)
-        clamp.set_child(self.body)
-        self.scroller = Gtk.ScrolledWindow(vexpand=True,
-                                           hscrollbar_policy=Gtk.PolicyType.NEVER)
-        self.scroller.set_child(clamp)
-        self.append(self.scroller)
-
-        # No group title: the sidebar row and the header bar both already
-        # say Family, and a third one only pushed the cards down. The
-        # filter's health, which used to be a chip up here, is on the
-        # sidebar's Protection row where it shows on every page.
-        self.family_group = Adw.PreferencesGroup()
-        self.cards = Gtk.FlowBox(selection_mode=Gtk.SelectionMode.NONE,
-                                 min_children_per_line=1, max_children_per_line=3,
-                                 column_spacing=12, row_spacing=12, homogeneous=True,
-                                 activate_on_single_click=True)
-        self.cards.connect("child-activated", self._on_card)
-        self.family_group.add(self.cards)
-        self.body.append(self.family_group)
-
-
-    def scroller_to_end(self) -> None:
-        adjustment = self.scroller.get_vadjustment()
-        adjustment.set_value(adjustment.get_upper())
-
-    # -- data -> widgets ------------------------------------------------------------
-
-    def refresh(self) -> None:
-        win = self.win
-        waiting = win.requests
-        n = len(waiting)
-        if n:
-            self.requests_banner.set_title(
-                f"{labels.plural(n, 'request')} waiting for you")
-            self.requests_banner.set_revealed(True)
-        else:
-            self.requests_banner.set_revealed(False)
-
-        problems = [r for r in health_rows(win.status) if not r[2]]
-        if problems:
-            self.health_banner.set_title(problems[0][0])
-        self.health_banner.set_revealed(bool(problems))
-
-        clear(self.cards)
-        by_uid: dict[int, int] = {}
-        for request in waiting:
-            by_uid[request["uid"]] = by_uid.get(request["uid"], 0) + 1
-        custom = win.policy.get("custom_profiles", [])
-        # One height for every card, the guest's included. A homogeneous
-        # FlowBox gives every child the same cell, but a card that asks for
-        # less did not fill it; a vertical size group makes them all ask
-        # for the tallest one's height.
-        self.card_heights = Gtk.SizeGroup(mode=Gtk.SizeGroupMode.VERTICAL)
-        time_usage = getattr(win, "time_usage", None) or {}
-        for user in win.policy.get("users", []):
-            counts = (win.summary or {}).get(str(user["uid"]))
-            card = person_card(user, counts, by_uid.get(user["uid"], 0), custom,
-                               time_usage.get(str(user["uid"])))
-            self.card_heights.add_widget(card)
-            child = Gtk.FlowBoxChild()
-            child.set_child(card)
-            child.user = user
-            self.cards.append(child)
-        guest_box = guest_card(win.policy.get("guest") or {"enabled": False}, custom)
-        self.card_heights.add_widget(guest_box)
-        guest = Gtk.FlowBoxChild()
-        guest.set_child(guest_box)
-        guest.user = None
-        self.cards.append(guest)
-
-        pointer_cursors(self)
-
-    # -- actions ------------------------------------------------------------------------
-
-    def _on_card(self, _box, child) -> None:
-        # The same place the sidebar's row for that person goes: on for a
-        # guest that is switched on, the page that turns it on for one
-        # that is not.
-        user = getattr(child, "user", None)
-        self.win.go_to("guest" if user is None else f"user-{user['uid']}")
-
-    def open_requests(self) -> RequestsDialog:
-        dialog = RequestsDialog(self.win, self.win.requests)
-        dialog.present(self.win)
-        return dialog
-
-
-
-# -- cards ---------------------------------------------------------------------------------
-
-def person_card(user: dict, counts: dict | None, waiting: int, custom=(),
-                time_usage: dict | None = None) -> Gtk.Box:
-    box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10, width_request=240)
-    box.add_css_class("card")
-    box.add_css_class("person-card")
-
-    who = Gtk.Box(spacing=10)
-    who.append(avatar(user["username"], 36))
-    names = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
-    name = Gtk.Label(label=user["username"], xalign=0, ellipsize=3)
-    name.add_css_class("heading")
-    names.append(name)
-    key, changes = profiles_mod.diff(user, custom)
-    setup = labels.setup_sentence(key, changes, custom)
-    if user.get("admin"):
-        setup = "Admin · " + setup
-    sub = Gtk.Label(label=setup, xalign=0, ellipsize=3)
-    sub.add_css_class("dim-label")
-    sub.add_css_class("caption")
-    names.append(sub)
-    who.append(names)
-    box.append(who)
-
-    # The filter mode, big and coloured: the one thing a parent should be
-    # able to read across the room, and amber when the account is not
-    # being filtered at all.
-    text, protects = labels.mode_badge(user)
-    box.append(mode_badge(text, protects))
-
-    lines = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
-    for icon, text, protects in labels.protection_lines(user):
-        lines.append(icon_line(icon, text, protects))
-    # The fifth line: today's time, "1 h 20 min used of 2 h", amber when
-    # nothing limits it.
-    text, protects = labels.time_line(user, time_usage)
-    lines.append(icon_line("alarm-symbolic", text, protects))
-    box.append(lines)
-
-    foot = Gtk.Box(spacing=6, margin_top=2)
-    foot.append(Gtk.Separator(hexpand=True, visible=False))
-    today = Gtk.Label(label=labels.today_sentence(counts), xalign=0, hexpand=True,
-                      ellipsize=3)
-    today.add_css_class("dim-label")
-    today.add_css_class("caption")
-    foot.append(today)
-    if waiting:
-        foot.append(tag(labels.plural(waiting, "request"), "acc"))
-    box.append(Gtk.Separator())
-    box.append(foot)
-    return box
+from .dialogs import WhitelistDialog  # noqa: E402
 
 
 def guest_user(policy: dict) -> dict | None:
@@ -209,41 +38,6 @@ def guest_user(policy: dict) -> dict | None:
             "cover_style": guest.get("cover_style", "frost"),
             "time": dict(guest.get("time", {})),
             "admin": False, "apps": [], "can_install_apps": False}
-
-
-def guest_card(guest: dict, custom=()) -> Gtk.Box:
-    # The same size as every other card: the box fills its cell and the
-    # content is centred inside it, instead of the box shrinking to fit.
-    box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8,
-                  valign=Gtk.Align.FILL, halign=Gtk.Align.FILL, width_request=240)
-    box.add_css_class("card")
-    box.add_css_class("person-card")
-    enabled = guest.get("enabled", False)
-    if not enabled:
-        box.add_css_class("guest-off")
-    box.append(Gtk.Box(vexpand=True))
-    box.append(avatar("Guest", 36))
-    name = Gtk.Label(label="Guest", halign=Gtk.Align.CENTER)
-    name.add_css_class("heading")
-    box.append(name)
-    if enabled:
-        badge, protects = labels.mode_badge(guest)
-        box.append(mode_badge(badge, protects))
-        text = "On. Passwordless; everything is wiped at sign-out."
-    else:
-        text = "Off. Passwordless, wiped at sign-out."
-    sub = Gtk.Label(label=text, halign=Gtk.Align.CENTER, wrap=True, justify=2)
-    sub.add_css_class("dim-label")
-    sub.add_css_class("caption")
-    box.append(sub)
-    hint = Gtk.Label(label="Configure like any account" if enabled else "Turn on",
-                     halign=Gtk.Align.CENTER)
-    hint.add_css_class("accent")
-    hint.add_css_class("caption")
-    box.append(hint)
-    box.append(Gtk.Box(vexpand=True))
-    return box
-
 
 
 # The guest's kinds of internet, each with the preset whose content settings

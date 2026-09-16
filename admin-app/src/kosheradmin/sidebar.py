@@ -1,16 +1,18 @@
 """The sidebar: where everything in the app is, in one column.
 
-Three groups, because there are three kinds of thing here. At the top,
-the two views of the whole house: the Overview board and the activity
-feed. Then **Family** — one row per account, the guest last — because the
-people are what an admin came to configure, and hunting for a child by
-clicking their card on a board is a worse way to reach them than having
-their name in the sidebar the whole time. Then **This computer**: what
-protects everyone, what may be installed, what version runs.
+Two groups. **Family** first — a row to add a person, then one row per
+account, the guest last — because the people are what an admin came to
+configure. Then **Administration**: the activity feed, what protects
+everyone, what may be installed, what version runs.
 
-Every row carries its own state on the right — how many people, which
-preset, whether anyone is waiting, whether the filter is running — so the
-sidebar answers most of "is anything wrong?" without being clicked.
+There is no overview page any more. The board of cards duplicated this
+list, and the family said so; the sidebar row and the person's own page
+are the two things that remain. The waiting-requests and filter-health
+banners that used to sit on the board sit above every page now.
+
+Every row carries its own state on the right — which preset, whether
+anyone is waiting, whether the filter is running — so the sidebar answers
+most of "is anything wrong?" without being clicked.
 """
 
 from __future__ import annotations
@@ -19,7 +21,7 @@ import gi
 
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
-from gi.repository import Adw, Gio, Gtk  # noqa: E402
+from gi.repository import Adw, Gdk, Gio, Gtk  # noqa: E402
 
 from kosherd import profiles as profiles_mod  # noqa: E402
 
@@ -27,21 +29,19 @@ from . import labels  # noqa: E402
 from .common import avatar, clear, tag  # noqa: E402
 from .computer import health_summary  # noqa: E402
 
-# The rows that are always there, above and below the family.
-TOP = (
-    ("overview", "Overview", "go-home-symbolic"),
+# The rows that are always there, below the family.
+ADMIN = (
     ("activity", "Activity", "document-open-recent-symbolic"),
-)
-COMPUTER = (
     ("protection", "Protection", "security-high-symbolic"),
     ("apps", "Apps", "view-grid-symbolic"),
     ("updates", "Updates", "software-update-available-symbolic"),
 )
 FAMILY_SECTION = "Family"
-COMPUTER_SECTION = "This computer"
+ADMIN_SECTION = "Administration"
+ADD_KEY = "add"
 
 # Kept for anything that wants the fixed destinations in one tuple.
-DESTINATIONS = TOP + COMPUTER
+DESTINATIONS = ADMIN
 
 
 def user_key(user: dict) -> str:
@@ -116,6 +116,7 @@ class Sidebar(Adw.NavigationPage):
         self.win = win
         self.rows: dict[str, _Row] = {}
         self._selecting = False
+        self._add_popover: Gtk.PopoverMenu | None = None
 
         self.list = Gtk.ListBox(selection_mode=Gtk.SelectionMode.SINGLE)
         self.list.add_css_class("navigation-sidebar")
@@ -128,12 +129,11 @@ class Sidebar(Adw.NavigationPage):
 
         header = Adw.HeaderBar()
         header.set_title_widget(Adw.WindowTitle(title="KosherOS", subtitle="Admin"))
-        add_menu = Gio.Menu()
-        add_menu.append("Create User Account…", "win.create-user")
-        add_menu.append("Adopt Existing User…", "win.adopt-user")
-        add = Gtk.MenuButton(icon_name="list-add-symbolic", menu_model=add_menu,
-                             tooltip_text="Add a person")
-        header.pack_start(add)
+        # The two ways to add somebody, offered from the "Add a person…" row
+        # at the top of the family (a bare + in the header was not clear).
+        self.add_menu = Gio.Menu()
+        self.add_menu.append("Create User Account…", "win.create-user")
+        self.add_menu.append("Adopt Existing User…", "win.adopt-user")
         lock = Gtk.Button(icon_name="changes-prevent-symbolic",
                           tooltip_text="Lock now")
         lock.connect("clicked", lambda _b: win.lock())
@@ -173,7 +173,36 @@ class Sidebar(Adw.NavigationPage):
     def _on_selected(self, _list, row) -> None:
         if row is None or self._selecting:
             return
+        if row.key == ADD_KEY:
+            # A choice, not a destination: offer the two ways to add a person
+            # and leave the selection where it was.
+            self.offer_add(row)
+            self.select(getattr(self.win, "destination", ""))
+            return
         self.win.go_to(row.key)
+
+    def offer_add(self, row) -> Gtk.PopoverMenu:
+        """The two ways to add a person, popped up beside their row.
+
+        One popover for the sidebar's lifetime, parented to the list (which
+        outlives the rows, rebuilt on every refresh) and pointed at the row
+        when asked: a popover parented to a row that is later disposed is
+        how GTK4 crashes. Not popped up at all when the list is in no window
+        yet — the tests build the sidebar bare.
+        """
+        if self._add_popover is None:
+            self._add_popover = Gtk.PopoverMenu.new_from_model(self.add_menu)
+            self._add_popover.set_parent(self.list)
+            self._add_popover.set_has_arrow(True)
+        ok, bounds = row.compute_bounds(self.list)
+        if ok:
+            rect = Gdk.Rectangle()
+            rect.x, rect.y = int(bounds.origin.x), int(bounds.origin.y)
+            rect.width, rect.height = int(bounds.size.width), int(bounds.size.height)
+            self._add_popover.set_pointing_to(rect)
+        if self.list.get_root() is not None:
+            self._add_popover.popup()
+        return self._add_popover
 
     # -- what the rows say ----------------------------------------------------------
 
@@ -191,8 +220,9 @@ class Sidebar(Adw.NavigationPage):
         clear(self.list)
         self.rows = {}
 
-        for key, title, icon in TOP:
-            self._add(SidebarRow(key, title, icon))
+        add = SidebarRow(ADD_KEY, "Add a person…", "list-add-symbolic", FAMILY_SECTION)
+        add.title.add_css_class("accent")
+        self._add(add)
 
         waiting: dict[int, int] = {}
         for request in getattr(win, "requests", None) or []:
@@ -204,12 +234,12 @@ class Sidebar(Adw.NavigationPage):
         guest.update(guest=True, username="Guest", uid=guest.get("uid", -2))
         self._add(PersonRow(guest, 0))
 
-        for key, title, icon in COMPUTER:
-            self._add(SidebarRow(key, title, icon, COMPUTER_SECTION))
+        for key, title, icon in ADMIN:
+            self._add(SidebarRow(key, title, icon, ADMIN_SECTION))
 
         self._say_computer()
         self._selecting = False
-        self.select(getattr(win, "destination", "overview"))
+        self.select(getattr(win, "destination", ""))
 
     def _add(self, row: _Row) -> None:
         self.rows[row.key] = row
@@ -222,10 +252,6 @@ class Sidebar(Adw.NavigationPage):
                       if isinstance(counts, dict))
         self.rows["activity"].say(f"{blocked} blocked today" if blocked
                                   else "Quiet today")
-
-        people = len((getattr(win, "policy", None) or {}).get("users", []))
-        self.rows["overview"].say(labels.plural(people, "person", "people")
-                                  if people else "Nobody yet")
 
         words, ok = health_summary(getattr(win, "status", None))
         self.rows["protection"].say("" if not ok else words,

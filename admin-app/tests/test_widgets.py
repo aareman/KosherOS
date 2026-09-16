@@ -165,6 +165,12 @@ class FakeWindow(Gtk.Window):
     def pop_to_root(self):
         self.went_to.append("root")
 
+    def go_home(self):
+        self.went_to.append("home")
+
+    def refresh_banners(self):
+        pass
+
     def lock(self):
         self.went_to.append("lock")
 
@@ -297,23 +303,6 @@ def test_the_save_preset_dialog_needs_a_name():
 
 # -- the family board -----------------------------------------------------------
 
-def a_board(users=None, **state):
-    client_overrides = {k: state.pop(k) for k in ("status", "requests", "activity",
-                                                  "summary", "installed", "catalog")
-                        if k in state}
-    win = FakeWindow(FakeClient(**client_overrides), **state)
-    win.policy = {"revision": 1, "users": users if users is not None else [a_user()],
-                  "guardian": {"enabled": False}, "adblock": {"enabled": True},
-                  "guest": {"enabled": False, "mode": "whitelist", "whitelist": []}}
-    win.requests = client_overrides.get("requests", [])
-    win.status = client_overrides.get("status", win.client.filter_status())
-    win.summary = client_overrides.get("summary", {})
-    page = family.FamilyPage(win)
-    page.refresh()
-    drain()
-    return win, page
-
-
 def _children(flowbox):
     found = []
     child = flowbox.get_first_child()
@@ -323,38 +312,17 @@ def _children(flowbox):
     return found
 
 
-def test_the_board_has_a_card_per_person_and_one_for_the_guest():
-    from kosherd import profiles
-
-    users = []
-    for i, profile in enumerate(profiles.PROFILES):
-        users.append(a_user(uid=1001 + i, username=f"u{i}", mode=profile.mode,
-                            blocked_categories=list(profile.blocked_categories),
-                            media_level=profile.media_level,
-                            language_filter=profile.language_filter,
-                            youtube=dict(profile.youtube),
-                            can_install_apps=profile.can_install_apps))
-    win, page = a_board(users)
-    assert len(_children(page.cards)) == len(users) + 1
-
-
-def test_the_mode_is_a_badge_on_the_card_and_the_persons_page():
+def test_the_mode_is_a_badge_on_the_persons_page():
     # The most important thing to see, so it is drawn rather than read:
     # blue while the account is filtered, amber when it is not.
-    win, page = a_board([a_user(mode="filtered"), a_user(uid=1002, username="avi",
-                                                          mode="unfiltered")])
-    cards = _children(page.cards)
-    filtered = next(w for w in _walk(cards[0]) if w.has_css_class("mode-badge"))
-    assert filtered.get_label() == "Filtered internet"
-    assert not filtered.has_css_class("open")
-    unfiltered = next(w for w in _walk(cards[1]) if w.has_css_class("mode-badge"))
-    assert unfiltered.get_label() == "Not filtered"
-    assert unfiltered.has_css_class("open")
-
     detail_page, _w, _u = _detail(mode="whitelist")
     badge = next(w for w in _walk(detail_page) if w.has_css_class("mode-badge"))
     assert badge.get_label() == "Approved sites only"
     assert badge.has_css_class("big"), "the person's page shows it large"
+    assert not badge.has_css_class("open")
+    open_page, _w, _u = _detail(mode="unfiltered")
+    open_badge = next(w for w in _walk(open_page) if w.has_css_class("mode-badge"))
+    assert open_badge.has_css_class("open")
 
 
 def test_what_is_blocked_reads_blue_and_what_is_open_reads_amber():
@@ -384,66 +352,6 @@ def _walk(widget, found=None):
 
 def _chip_text(chip):
     return " ".join(w.get_label() for w in _walk(chip) if isinstance(w, Gtk.Label))
-
-
-def test_a_card_has_the_four_lines_in_a_fixed_order():
-    win, page = a_board([a_user()])
-    card = _children(page.cards)[0]
-    texts = _texts(card)
-    web = next(i for i, t in enumerate(texts) if t.startswith("Filtered internet"))
-    pictures = next(i for i, t in enumerate(texts) if "pictures" in t.lower())
-    video = next(i for i, t in enumerate(texts) if t.startswith("YouTube"))
-    apps = next(i for i, t in enumerate(texts) if "app" in t.lower())
-    assert web < pictures < video < apps
-
-
-def test_a_card_names_the_preset_and_its_drift():
-    user = a_user()
-    win, page = a_board([user])
-    assert any("Child" in t and "change" not in t for t in _texts(_children(page.cards)[0]))
-    drifted = a_user(blocked_categories=[*user["blocked_categories"], "sports"])
-    win, page = a_board([drifted])
-    assert any(t == "Child, with 1 change" for t in _texts(_children(page.cards)[0]))
-
-
-def test_a_card_says_what_happened_today():
-    win, page = a_board([a_user()], summary={"1001": {"blocked": 14, "pictures": 2,
-                                                       "searches": 0, "last": 1}})
-    texts = _texts(_children(page.cards)[0])
-    assert any(t.startswith("14 blocked, pictures hidden on 2 pages today") for t in texts)
-    win, page = a_board([a_user()], summary={})
-    assert "Nothing blocked today" in _texts(_children(page.cards)[0])
-
-
-def test_clicking_a_card_goes_where_that_persons_sidebar_row_goes():
-    # The board and the sidebar are two doors to the same page, so a card
-    # navigates to the person's destination rather than pushing a page of
-    # its own on top.
-    win, page = a_board([a_user()])
-    cards = _children(page.cards)
-    page._on_card(page.cards, cards[0])
-    assert win.went_to == ["user-1001"]
-    page._on_card(page.cards, cards[1])
-    assert win.went_to[-1] == "guest"
-
-
-def test_waiting_requests_are_a_banner_not_a_list():
-    # The user's words: "a blue notification at top: X requests waiting for
-    # you, click to deal with".
-    win, page = a_board([a_user()], requests=[])
-    assert not page.requests_banner.get_revealed()
-
-    win, page = a_board([a_user()], requests=[
-        {"id": "a" * 32, "uid": 1001, "username": "yosef",
-         "url": "https://example.com/needed", "note": "for school",
-         "mode": "filtered", "asked": 0, "why": "category:video"},
-        {"id": "b" * 32, "uid": 1001, "username": "yosef",
-         "url": "https://other.example/", "note": "", "mode": "filtered", "asked": 0}])
-    assert page.requests_banner.get_revealed()
-    assert page.requests_banner.get_title() == "2 requests waiting for you"
-    assert page.requests_banner.has_css_class("requests-banner")
-    # ...and the card carries the count too.
-    assert "2 requests" in _texts(_children(page.cards)[0])
 
 
 def test_the_requests_dialog_shows_why_and_answers_inline():
@@ -491,28 +399,6 @@ def test_a_whitelist_request_offers_only_the_whole_site():
     assert [b.get_label() for b in _buttons(row)] == ["Allow chinuch.org", "No"]
 
 
-def test_health_speaks_when_it_is_fine_too():
-    # The board stays quiet when there is nothing wrong; the sidebar is
-    # where a healthy filter says so, on every page rather than only here.
-    win, page = a_board([a_user()])
-    assert not page.health_banner.get_revealed()
-    rail = sidebar.Sidebar(win)
-    rail.refresh()
-    drain()
-    assert rail.rows["protection"].status.get_label() == "Running"
-    assert not rail.rows["protection"].badge.get_visible()
-
-
-def test_a_problem_is_an_amber_banner_with_the_details_behind_it():
-    win, page = a_board([a_user()], status={"pictures": "no_model", "detect_ms": None,
-                                            "degraded": ["kosher-dns.service"],
-                                            "problems": [], "services": {}})
-    assert page.health_banner.get_revealed()
-    assert page.health_banner.get_title() == "Pictures are being hidden, not checked"
-    rows = family.health_rows(win.status)
-    assert [ok for _t, _b, ok in rows] == [False, False]
-
-
 def test_every_reportable_problem_produces_a_row():
     rows = family.health_rows({"pictures": "too_slow", "detect_ms": 620,
                                "degraded": ["kosher-mitm.service"],
@@ -553,11 +439,11 @@ def test_the_sidebar_holds_the_people_themselves_between_the_two_fixed_groups():
                                   "mode": "filtered", "url": "https://x.test/a",
                                   "asked": 0}])
     keys = [row.key for row in _rail_rows(rail)]
-    assert keys == ["overview", "activity", "user-1001", "user-1002", "guest",
-                    "protection", "apps", "updates"]
+    assert keys == ["add", "user-1001", "user-1002", "guest",
+                    "activity", "protection", "apps", "updates"]
     sections = [row.section for row in _rail_rows(rail)]
-    assert sections == [None, None, "Family", "Family", "Family",
-                        "This computer", "This computer", "This computer"]
+    assert sections == ["Family"] * 4 + ["Administration"] * 4
+    assert rail.rows["add"].title.get_label() == "Add a person…", "words, not a bare plus"
     # A person's row says which preset they are set up as, and speaks up
     # when somebody is waiting on an answer.
     assert rail.rows["user-1001"].title.get_label() == "yosef"
@@ -565,17 +451,32 @@ def test_the_sidebar_holds_the_people_themselves_between_the_two_fixed_groups():
     assert rail.rows["user-1001"].badge.get_label() == "1"
     assert not rail.rows["user-1002"].badge.get_visible()
     assert rail.rows["guest"].status.get_label() == "Off"
-    assert rail.rows["overview"].status.get_label() == "2 people"
     assert rail.rows["apps"].status.get_label() == "23 apps"
     assert rail.rows["protection"].status.get_label() == "Running"
 
 
 def test_clicking_any_sidebar_row_takes_the_window_there():
     win, rail = a_rail([a_user()])
-    for key in ("updates", "user-1001", "guest", "overview"):
+    for key in ("updates", "user-1001", "guest", "activity"):
         rail.list.select_row(rail.rows[key])
         drain()
         assert win.went_to[-1] == key
+
+
+def test_add_a_person_offers_the_two_ways_and_is_not_a_destination():
+    win, rail = a_rail([a_user()])
+    win.destination = "user-1001"
+    rail.select("user-1001")
+    rail.list.select_row(rail.rows["add"])
+    drain()
+    assert win.went_to == [], "choosing Add a person navigates nowhere"
+    assert rail.rows["user-1001"].is_selected(), "the selection stays where it was"
+    popover = rail.offer_add(rail.rows["add"])
+    model = popover.get_menu_model()
+    actions = [model.get_item_attribute_value(i, "action", None).get_string()
+               for i in range(model.get_n_items())]
+    assert actions == ["win.create-user", "win.adopt-user"]
+    popover.popdown()
 
 
 def test_rebuilding_the_sidebar_is_not_a_click_and_keeps_the_selection():
@@ -686,38 +587,6 @@ def test_an_enabled_guest_opens_the_same_page_as_anyone_without_an_apps_tab():
     for title in ("Filter mode", "Pictures and video", "Bad language", "Restricted Mode",
                   "Page rules"):
         assert title in titles, title
-
-
-def test_the_guest_keeps_one_destination_whether_it_is_on_or_off():
-    # One key either way, so turning the guest on does not move the
-    # selection out from under whoever just turned it on; the window
-    # decides which page that key means.
-    win, page = a_board([])
-    cards = _children(page.cards)
-    page._on_card(page.cards, cards[-1])
-    assert win.went_to[-1] == "guest"
-    win.policy["guest"] = {"enabled": True, "uid": 1010, "mode": "whitelist"}
-    page._on_card(page.cards, cards[-1])
-    assert win.went_to[-1] == "guest"
-    assert family.guest_user({"guest": {"enabled": False}}) is None
-
-
-def test_the_guest_card_fills_its_cell_like_the_others():
-    card = family.guest_card({"enabled": False})
-    assert card.get_valign() == Gtk.Align.FILL
-    assert card.get_halign() == Gtk.Align.FILL
-    person = family.person_card(a_user(), None, 0)
-    assert card.get_size_request()[0] == person.get_size_request()[0]
-
-
-def test_every_card_on_the_board_shares_one_height():
-    win, page = a_board([a_user(), a_user(uid=1002, username="rivky")])
-    cards = [c.get_child() for c in _children(page.cards)]
-    grouped = list(page.card_heights.get_widgets())
-    assert len(grouped) == len(cards) == 3
-    assert page.card_heights.get_mode() == Gtk.SizeGroupMode.VERTICAL
-    heights = {c.measure(Gtk.Orientation.VERTICAL, 260)[0] for c in cards}
-    assert len(heights) == 1, heights
 
 
 def test_a_username_is_suggested_from_the_full_name_and_checked():
@@ -1030,8 +899,6 @@ def test_no_preferences_page_is_nested_in_a_scrolled_window():
 
     page, win, user = _detail()
     assert not offenders(page)
-    win2, board = a_board([a_user()])
-    assert not offenders(board)
     win3, activity = a_feed([])
     assert not offenders(activity)
 
@@ -1426,12 +1293,10 @@ def test_the_demo_family_drives_every_screen():
     win.status = client.filter_status()
     win.summary = client.activity_summary()
     win.time_usage = client.time_usage()
-    board = family.FamilyPage(win)
-    board.refresh()
+    rail = sidebar.Sidebar(win)
+    rail.refresh()
     drain()
-    assert len(_children(board.cards)) == 6
-    assert any("used of 2 h" in t for t in _texts(board)), "yosef's card shows today's time"
-    assert board.requests_banner.get_revealed()
+    assert len([r for r in _rail_rows(rail) if r.key.startswith("user-")]) == 5
     for user in win.policy["users"]:
         page = detail.UserDetailPage(win, user)
         drain()
@@ -1444,6 +1309,77 @@ def test_the_demo_family_drives_every_screen():
     client.set_media_level(1002, "all", "")
     assert client.list_activity()[0]["method"] == "SetMediaLevel"
     assert client.get_policy()["users"][2]["media_level"] == "all"
+
+
+def _real_window():
+    """The actual Window on the demo daemon, with the admin check patched out.
+    Returns (window, restore) — call restore() when done."""
+    from kosherd.demo import DemoClient
+
+    original, admin.DaemonClient = admin.DaemonClient, DemoClient
+    was_admin = admin.Window._not_an_admin
+    admin.Window._not_an_admin = lambda self: False
+    win = admin.Window()
+    drain()
+
+    def restore():
+        admin.DaemonClient = original
+        admin.Window._not_an_admin = was_admin
+
+    return win, restore
+
+
+def test_waiting_requests_are_a_banner_above_every_page_not_a_list():
+    # The user's words: "a blue notification at top: X requests waiting for
+    # you, click to deal with". Above the content pane, whichever page is
+    # open, since the board it used to sit on is gone.
+    win, restore = _real_window()
+    try:
+        assert win.requests, "the demo has requests waiting"
+        assert win.requests_banner.get_revealed()
+        assert win.requests_banner.get_title().endswith("requests waiting for you")
+        assert win.requests_banner.has_css_class("requests-banner")
+        win.go_to("apps")
+        assert win.requests_banner.get_revealed(), "still there on another page"
+        win.requests = []
+        win.refresh_banners()
+        assert not win.requests_banner.get_revealed()
+    finally:
+        restore()
+
+
+def test_a_filter_problem_is_an_amber_banner_and_a_healthy_filter_is_quiet():
+    win, restore = _real_window()
+    try:
+        # The demo daemon has no picture model: a problem.
+        assert win.health_banner.get_revealed()
+        assert win.health_banner.get_title() == "Pictures are being hidden, not checked"
+        rows = computer.health_rows(win.status)
+        assert any(not ok for _t, _b, ok in rows)
+        # Details goes to Protection.
+        win.health_banner.emit("button-clicked")
+        drain()
+        assert win.destination == "protection"
+        # All well: the banner stays down and the sidebar says Running.
+        win.status = {"pictures": "checking", "detect_ms": 40, "degraded": [], "problems": [],
+                      "services": {"kosher-dns.service": "active"}}
+        win.refresh_banners()
+        win.sidebar.refresh()
+        assert not win.health_banner.get_revealed()
+        assert win.sidebar.rows["protection"].status.get_label() == "Running"
+    finally:
+        restore()
+
+
+def test_the_app_opens_on_the_first_person():
+    win, restore = _real_window()
+    try:
+        first = win.policy["users"][0]
+        assert win.destination == f"user-{first['uid']}"
+        page = win.nav.get_visible_page()
+        assert isinstance(page, detail.UserDetailPage) and page.uid == first["uid"]
+    finally:
+        restore()
 
 
 def test_the_real_window_walks_every_sidebar_destination():
@@ -1465,6 +1401,8 @@ def test_the_real_window_walks_every_sidebar_destination():
         drain()
         assert win.policy["users"], "the demo family loaded"
         for row in _rail_rows(win.sidebar):
+            if row.key == sidebar.ADD_KEY:
+                continue
             win.go_to(row.key)
             drain()
             page = win.nav.get_visible_page()
@@ -1484,11 +1422,7 @@ def test_the_real_window_walks_every_sidebar_destination():
         assert win.nav.get_navigation_stack().get_n_items() == 1
         # The sidebar says how each destination is, without being opened.
         assert win.sidebar.rows["apps"].status.get_label().endswith("apps")
-        assert win.sidebar.rows["overview"].status.get_label().endswith("people")
-        # The health banner's Details is the Protection page.
-        win.family_page.health_banner.emit("button-clicked")
-        drain()
-        assert win.destination == "protection"
+        assert win.sidebar.rows["activity"].status.get_label()
     finally:
         admin.DaemonClient = original
         admin.Window._not_an_admin = was_admin
@@ -1528,39 +1462,6 @@ def test_the_guest_row_leads_to_the_turn_on_page_when_off_and_the_real_one_when_
         admin.Window._not_an_admin = was_admin
 
 
-def test_adding_a_person_is_in_the_sidebar_header_where_the_people_are():
-    from kosherd.demo import DemoClient
-
-    original, admin.DaemonClient = admin.DaemonClient, DemoClient
-    was_admin = admin.Window._not_an_admin
-    admin.Window._not_an_admin = lambda self: False
-    try:
-        win = admin.Window()
-        drain()
-        def menu_buttons(widget, found=None):
-            found = [] if found is None else found
-            child = widget.get_first_child()
-            while child is not None:
-                if isinstance(child, Gtk.MenuButton):
-                    found.append(child)
-                menu_buttons(child, found)
-                child = child.get_next_sibling()
-            return found
-
-        menus = menu_buttons(win.sidebar)
-        assert menus, "the sidebar header has the Add button"
-        model = menus[0].get_menu_model()
-        actions = [model.get_item_attribute_value(i, "action", None).get_string()
-                   for i in range(model.get_n_items())]
-        assert actions == ["win.create-user", "win.adopt-user"]
-        # And the window really has them, so the menu is not a dead end.
-        for action in actions:
-            assert win.lookup_action(action.removeprefix("win.")) is not None
-    finally:
-        admin.DaemonClient = original
-        admin.Window._not_an_admin = was_admin
-
-
 def test_a_removed_account_falls_back_to_the_overview():
     from kosherd.demo import DemoClient
 
@@ -1576,18 +1477,34 @@ def test_a_removed_account_falls_back_to_the_overview():
         win.policy["users"] = [u for u in win.policy["users"] if u["uid"] != gone]
         win.refresh_open_detail()
         drain()
-        assert win.destination == "overview"
+        assert win.destination == f"user-{win.policy['users'][0]['uid']}", "home is the first person"
     finally:
         admin.DaemonClient = original
         admin.Window._not_an_admin = was_admin
 
 
+def test_the_time_line_reads_in_the_familys_words():
+    from kosherd import timelimits
+
+    limited = a_user(time={"daily_minutes": 120})
+    text, protects = labels.time_line(limited, {"used": 80 * 60, "limit": 7200, "left": 2400,
+                                                 "limited": True, "signed_in": True})
+    assert protects and text == "1 h 20 min used of 2 h"
+    text, protects = labels.time_line(limited, None)
+    assert protects and text == "0 min used of 2 h"
+    text, protects = labels.time_line(a_user(), None)
+    assert not protects and text == "No daily limit"
+    text, protects = labels.time_line(a_user(admin=True), None)
+    assert not protects and "administrator" in text
+    text, _p = labels.time_line(a_user(time={"allowed": timelimits.SCHEDULE_PRESETS["weekdays"]}),
+                                {"used": 600})
+    assert text.startswith("10 min today, no daily limit")
+
+
 # -- the cursor says what can be clicked ----------------------------------------------
 
-def test_cards_sidebar_rows_and_acting_rows_get_the_hand_cursor():
-    win, page = a_board([a_user()])
-    for child in _children(page.cards):
-        assert child.get_cursor() is not None and child.get_cursor().get_name() == "pointer"
+def test_sidebar_rows_and_acting_rows_get_the_hand_cursor():
+    win, _rail = a_rail([a_user()])
     for row in sidebar.Sidebar(win).rows.values():
         assert row.get_cursor().get_name() == "pointer"
     detail_page, _w, _u = _detail()
@@ -1976,32 +1893,6 @@ def test_the_keyboard_moves_a_cursor_and_space_flips_the_hour():
     assert widget.cell(1, 9) == "0"
     assert changes[-1][0][9] == "0", "column 1 as shown is Monday in the policy"
     assert not widget._on_key(None, Gdk.KEY_a, 0, 0)
-
-
-def test_the_card_carries_a_fifth_line_for_time():
-    from kosherd import timelimits
-
-    limited = a_user(time={"daily_minutes": 120})
-    win, page = a_board([limited, a_user(uid=1002, username="rivky")],
-                        time_usage={"1001": {"used": 80 * 60, "limit": 7200, "left": 2400,
-                                             "limited": True, "signed_in": True}})
-    cards = _children(page.cards)
-    texts = _texts(cards[0])
-    assert "1 h 20 min used of 2 h" in texts
-    apps = next(i for i, t in enumerate(texts) if "app" in t.lower())
-    clock = texts.index("1 h 20 min used of 2 h")
-    assert apps < clock, "after the four fixed lines"
-    assert "No daily limit" in _texts(cards[1])
-    # Amber when nothing limits, blue when something does.
-    text, protects = labels.time_line(limited, None)
-    assert protects and text == "0 min used of 2 h"
-    text, protects = labels.time_line(a_user(), None)
-    assert not protects and text == "No daily limit"
-    text, protects = labels.time_line(a_user(admin=True), None)
-    assert not protects and "administrator" in text
-    text, _p = labels.time_line(a_user(time={"allowed": timelimits.SCHEDULE_PRESETS["weekdays"]}),
-                                {"used": 600})
-    assert text.startswith("10 min today, no daily limit")
 
 
 def test_a_time_event_reads_in_the_feed_and_on_the_overview():

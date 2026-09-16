@@ -1,9 +1,10 @@
 """KosherOS Admin — GTK4/libadwaita client of kosherd.
 
 The window: one password to unlock, then a sidebar down the left with
-everywhere the app goes — the family board and the activity feed, then
-this computer's own protection, apps and updates — and the page itself
-beside it, with each person opening onto a full page of their own. Every
+everywhere the app goes — the family, each on a full page of their own,
+then the activity feed and this computer's protection, apps and updates —
+and the page itself beside it. Above every page, the two banners that
+speak only when they must: requests waiting, and the filter's health. Every
 mutating call runs in a worker thread (the desktop polkit agent may
 prompt, which blocks the call); UI updates hop back via GLib.idle_add.
 
@@ -24,10 +25,9 @@ from kosherd.client import DaemonClient  # noqa: E402
 
 from . import labels  # noqa: E402
 from .common import error_text, load_css, run_async, submit_on_enter  # noqa: E402
-from .computer import AppsPage, ProtectionPage, UpdatesPage  # noqa: E402
+from .computer import AppsPage, ProtectionPage, UpdatesPage, health_rows  # noqa: E402
 from .detail import UserDetailPage  # noqa: E402
-from .dialogs import add_person_dialog  # noqa: E402
-from .family import FamilyPage  # noqa: E402
+from .dialogs import RequestsDialog, add_person_dialog  # noqa: E402
 from .feed import ActivityPage  # noqa: E402
 from .sidebar import Sidebar  # noqa: E402
 
@@ -52,24 +52,39 @@ class Window(Adw.ApplicationWindow):
         self.update_state: str | None = None
         self.deployment: dict | None = None
         self.guardian_ok = False
-        self.destination = "overview"
+        self.destination = "activity"
+        self._landed = False
 
         self.toasts = Adw.ToastOverlay()
         self.set_content(self.toasts)
 
         # Pages must not talk to the daemon before Unlock, or their calls
         # race the unlock prompt.
-        self.family_page = FamilyPage(self)
         self.activity_page = ActivityPage(self)
+
+        # The banners: above every page, not on one of them. The user asked
+        # for "a blue notification at the top: X requests waiting for you,
+        # click to deal with", and a problem with the filter is the one
+        # amber thing that must not wait for a particular page to be opened.
+        self.requests_banner = Adw.Banner(button_label="Deal with them")
+        self.requests_banner.add_css_class("requests-banner")
+        self.requests_banner.connect("button-clicked", lambda _b: self.show_requests())
+        self.health_banner = Adw.Banner(button_label="Details")
+        self.health_banner.add_css_class("health-banner")
+        self.health_banner.connect("button-clicked", lambda _b: self.go_to("protection"))
 
         # A navigation view inside the content pane, so configuring one
         # person gets a full page of its own — with the sidebar still
         # there — instead of an expander squeezed into the list.
-        self.nav = Adw.NavigationView()
+        self.nav = Adw.NavigationView(vexpand=True)
+        column = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        column.append(self.requests_banner)
+        column.append(self.health_banner)
+        column.append(self.nav)
         self.sidebar = Sidebar(self)
         self.split = Adw.NavigationSplitView(
             sidebar=self.sidebar,
-            content=Adw.NavigationPage(child=self.nav, title="KosherOS Admin"),
+            content=Adw.NavigationPage(child=column, title="KosherOS Admin"),
             min_sidebar_width=210, max_sidebar_width=280,
             sidebar_width_fraction=0.24)
         self.content = self.split
@@ -85,7 +100,7 @@ class Window(Adw.ApplicationWindow):
             action.connect("activate", lambda _a, _p, a=adopt: add_person_dialog(self, a))
             self.add_action(action)
 
-        self.go_to("overview")
+        self.go_to("activity")
 
         # Locked state: one password, then everything works.
         self.lock_view = Adw.StatusPage(
@@ -161,14 +176,6 @@ class Window(Adw.ApplicationWindow):
         page and the computer's three pages all read something on the way
         in.
         """
-        if key == "overview":
-            if not hasattr(self, "_overview_nav_page"):
-                view = Adw.ToolbarView()
-                view.add_top_bar(Adw.HeaderBar())
-                view.set_content(self.family_page)
-                self._overview_nav_page = Adw.NavigationPage(
-                    child=view, title="Overview", tag="overview")
-            return self._overview_nav_page
         if key == "activity":
             if not hasattr(self, "_activity_nav_page"):
                 view = Adw.ToolbarView()
@@ -216,6 +223,30 @@ class Window(Adw.ApplicationWindow):
 
         self.go_to(user_key(user))
 
+    def home_key(self) -> str:
+        """Where the app opens: the first person, since the people are what
+        an admin came for; the activity feed when there is nobody yet."""
+        users = self.policy.get("users") or []
+        return f"user-{users[0]['uid']}" if users else "activity"
+
+    def go_home(self) -> None:
+        self.go_to(self.home_key())
+
+    def show_requests(self) -> RequestsDialog:
+        dialog = RequestsDialog(self, self.requests)
+        dialog.present(self)
+        return dialog
+
+    def refresh_banners(self) -> None:
+        n = len(self.requests or [])
+        if n:
+            self.requests_banner.set_title(f"{labels.plural(n, 'request')} waiting for you")
+        self.requests_banner.set_revealed(bool(n))
+        problems = [r for r in health_rows(self.status) if not r[2]]
+        if problems:
+            self.health_banner.set_title(problems[0][0])
+        self.health_banner.set_revealed(bool(problems))
+
     def show_activity(self, uid: int) -> None:
         """Jump to the activity page, narrowed to one person."""
         self.go_to("activity")
@@ -234,7 +265,7 @@ class Window(Adw.ApplicationWindow):
                 if guest is not None and guest["uid"] == page.uid:
                     fresh = guest
             if fresh is None:
-                self.go_to("overview")  # the account was removed
+                self.go_home()  # the account was removed
             else:
                 page.rebuild(fresh)
         elif hasattr(page, "refresh") and page is getattr(self, "open_computer_page", None):
@@ -280,9 +311,14 @@ class Window(Adw.ApplicationWindow):
         def on_done(result):
             (self.policy, self.requests, self.status, self.summary, self.time_usage,
              self.catalog_count, self.deployment) = result
-            self.family_page.refresh()
+            self.refresh_banners()
             self.sidebar.refresh()
-            if self.destination == "activity":
+            if not self._landed:
+                # The first load: open on the first person rather than the
+                # placeholder the window started on.
+                self._landed = True
+                self.go_home()
+            elif self.destination == "activity":
                 self.activity_page.refresh()
             self.refresh_open_detail()
             if then:

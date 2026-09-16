@@ -340,7 +340,25 @@ levers, and the important part is *where* they are applied.
 
 **Per category.** YouTube labels every video with one of fifteen
 categories, and a parent can turn any of them off — block Entertainment
-and Gaming, keep Education.
+and Gaming, keep Education. The settings keep a category's id (`10`);
+YouTube's player JSON names it (`Music`, and `Howto & Style` where the
+table says How-to); the proxy maps the name to the id, however it is
+spelled, and reads the microformat's category rather than the first
+`"category"` key it meets. (For a while it compared the name with the id
+as they were, and no category limit did anything.)
+
+**Shorts.** Not a category — a short can be in any of them — but a kind of
+video all the same, and the one no category limit reaches. It is a switch
+of its own in the same list, on in the Child preset. Off means the
+`/shorts` pages are refused, the reel endpoints and the ordinary player
+are answered "cannot be played" when the page asking is a short, and the
+Shorts shelves and reel links are taken out of the feeds.
+
+**Thumbnails.** At the modesty picture levels YouTube's thumbnails
+(`i.ytimg.com`) are treated as image-search thumbnails are: small pictures
+of the whole web from a host the family cannot curate, hidden whenever a
+person is in them rather than judged one by one at a size the detector
+cannot judge reliably.
 
 **Per channel.** An approved-channel list, which when it has anything in
 it is the whole allowance: only those channels play.

@@ -7,19 +7,24 @@ again.
 
 ## What it shows
 
-A **sidebar** (`sidebar.py`) down the left holds everywhere the app goes,
-in two sections. *The family* is per person: the board and the activity
-feed. *This computer* is the rest: Protection, Apps, Updates. Each row
-carries its own state on the right — how many people, how many apps,
-whether the filter is running — so the sidebar answers "is anything
-wrong?" before it is clicked. Under 700sp it collapses to one pane at a
-time.
+A **sidebar** (`sidebar.py`) down the left holds everywhere the app goes.
+At the top, the two views of the whole house: Overview and Activity.
+Then **Family**: one row per account, the guest last, each with its face,
+the preset it is set up as and a badge when somebody is waiting on an
+answer — the people an admin came to configure, in front of them on every
+page. Then **This computer**: Protection, Apps, Updates. Every row carries
+its own state on the right, so the sidebar answers "is anything wrong?"
+before it is clicked. Every destination replaces the content pane rather
+than pushing onto it, so nothing carries a back button the sidebar has
+already made meaningless. A + in the sidebar header adds a person. Under
+700sp it collapses to one pane at a time.
 
-The **family board** (`family.py`) is the home screen: one card per
-account with the preset it is set up as (and how far it has drifted:
-"Child, with 2 changes"), the same four lines of protection in the same
-order — web, pictures, video, apps — and what the filter did for that
-account today. The guest is a card like the others, dashed while off.
+The **Overview** (`family.py`) is the home screen: one card per account
+with the preset it is set up as (and how far it has drifted: "Child, with
+2 changes"), the same four lines of protection in the same order — web,
+pictures, video, apps — and what the filter did for that account today.
+The guest is a card like the others, dashed while off. A card goes where
+that person's sidebar row goes.
 
 Two banners sit above the board and appear only when they have something
 to say: waiting requests (blue — "2 requests waiting for you", one button
@@ -40,8 +45,8 @@ hid or refused, and what the admins changed, newest first. Who and when
 are chosen from the header bar, so the feed keeps the full width and the
 app has one sidebar rather than two. A blocked page has Allow on the row.
 
-A card opens the person's **page** (`detail.py`), pushed inside the
-content pane so the sidebar stays put: an overview (the
+A person's **page** (`detail.py`) fills the content pane with the sidebar
+beside it: an overview (the
 protection as chips, drift with a Reset button, blocked today with Allow,
 changes with who made them), then Filtering (the category grid on the
 page, with preset / All / None), Pictures, YouTube, Apps and

@@ -130,6 +130,11 @@ ACTIONS = {
     "ListInstalled": ACTION_USE_STORE,
     "InstallApp": ACTION_USE_STORE,
     "ListInstalledDetails": ACTION_READ_CONFIG,
+    # Updating an installed, approved app is for everyone the store is for:
+    # it widens nothing, and the newer build is the safer one to be on.
+    "ListAppUpdates": ACTION_USE_STORE,
+    "UpdateApp": ACTION_USE_STORE,
+    "UpdateAllApps": ACTION_USE_STORE,
     "RemoveApp": ACTION_INSTALL_APPS,
     "SetUserApps": ACTION_INSTALL_APPS,
     "SetUserCanInstall": ACTION_INSTALL_APPS,

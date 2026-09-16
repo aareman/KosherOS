@@ -430,6 +430,30 @@ def resolve_remote_ref(app_id: str) -> str:
     return matches[0].format_ref()
 
 
+def available_updates() -> list[dict]:
+    """Installed apps with a newer build on the remote.
+
+    [{ref, name, version, commit, latest}] — `version` is the app's own,
+    from its appdata, when it declares one; `commit`/`latest` are the short
+    ostree commits, which is what a person can compare when it does not.
+    """
+    if Flatpak is None:
+        return []
+    installation = Flatpak.Installation.new_system(None)
+    found = []
+    for r in installation.list_installed_refs_for_update(None):
+        if r.get_kind() != Flatpak.RefKind.APP:
+            continue
+        found.append({
+            "ref": r.get_name(),
+            "name": r.get_appdata_name() or r.get_name(),
+            "version": r.get_appdata_version() or "",
+            "commit": (r.get_commit() or "")[:12],
+            "latest": (r.get_latest_commit() or "")[:12],
+        })
+    return sorted(found, key=lambda e: e["name"].lower())
+
+
 def available_refs() -> set[str]:
     """App ids the remote actually offers for this architecture."""
     installation = Flatpak.Installation.new_system(None)
@@ -471,6 +495,11 @@ class AppManager:
 
     def remove(self, ref: str) -> None:
         self._enqueue(ref, self._do_remove)
+
+    def update(self, ref: str) -> None:
+        """Bring one installed app up to the remote's build. Queued like an
+        install, reported on the same signals."""
+        self._enqueue(ref, self._do_update)
 
     def _enqueue(self, ref: str, work) -> None:
         with self._lock:
@@ -535,6 +564,12 @@ class AppManager:
         transaction = self._transaction(ref)
         transaction.add_install(REMOTE, full_ref, None)
         self._on_progress(ref, 0, "Starting…")
+        transaction.run(None)
+
+    def _do_update(self, ref: str) -> None:
+        transaction = self._transaction(ref)
+        transaction.add_update(installed_ref_string(ref), None, None)
+        self._on_progress(ref, 0, "Updating…")
         transaction.run(None)
 
     def _do_remove(self, ref: str) -> None:

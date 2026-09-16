@@ -258,6 +258,18 @@ class DaemonClient:
     def unapprove_app(self, ref: str) -> None:
         self._call("Apps", "UnapproveApp", "(s)", ref)
 
+    def list_app_updates(self) -> list[dict]:
+        """Installed apps with a newer build available: ref, name, version,
+        commit, latest."""
+        return json.loads(self._call("Apps", "ListAppUpdates")[0])
+
+    def update_app(self, ref: str) -> None:
+        self._call("Apps", "UpdateApp", "(s)", ref)
+
+    def update_all_apps(self) -> int:
+        """Queue an update for every app that has one. Returns how many."""
+        return self._call("Apps", "UpdateAllApps")[0]
+
     def connect_app_signals(self, on_progress, on_finished) -> int:
         """Subscribe to install progress. Returns a subscription id."""
 

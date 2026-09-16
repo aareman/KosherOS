@@ -157,3 +157,16 @@ def test_removal_is_not_limited_to_approved_apps(manager):
     manager.remove("com.spotify.Client")
     manager.recorder.wait()
     assert manager.recorder.finished[0][1] is True
+
+
+def test_an_update_is_queued_like_an_install_and_reported_on_the_same_signals():
+    from kosherd import apps
+
+    seen = []
+    done = []
+    manager = apps.AppManager(lambda *a: seen.append(a), lambda *a: done.append(a))
+    manager._do_update = lambda ref: seen.append((ref, 50, "Updating…"))  # no flatpak here
+    manager.update("org.example.App")
+    manager._worker.join(timeout=5)
+    assert ("org.example.App", 50, "Updating…") in seen
+    assert done == [("org.example.App", True, "")]

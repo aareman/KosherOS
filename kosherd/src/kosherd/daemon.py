@@ -242,6 +242,15 @@ INTROSPECTION_XML = """
     <method name="UnapproveApp">
       <arg direction="in" type="s" name="ref"/>
     </method>
+    <method name="ListAppUpdates">
+      <arg direction="out" type="s" name="updates_json"/>
+    </method>
+    <method name="UpdateApp">
+      <arg direction="in" type="s" name="ref"/>
+    </method>
+    <method name="UpdateAllApps">
+      <arg direction="out" type="i" name="queued"/>
+    </method>
     <signal name="AppProgress">
       <arg type="s" name="ref"/>
       <arg type="i" name="percent"/>
@@ -1647,6 +1656,34 @@ class Daemon:
             username = str(_uid)
         apps.record_install(ref, _uid, username)
         return None
+
+    def impl_ListAppUpdates(self):
+        try:
+            found = apps.available_updates()
+        except Exception as e:  # noqa: BLE001 - "could not look" is an empty list, said
+            log.warning("could not list app updates: %s", e)
+            found = []
+        return GLib.Variant("(s)", (json.dumps(found),))
+
+    def impl_UpdateApp(self, ref: str):
+        """Update one installed app. Not gated on can_install_apps: an
+        update widens nothing, and a newer build of an approved app is the
+        safer one to be running."""
+        self.app_manager.update(ref)
+        return None
+
+    def impl_UpdateAllApps(self):
+        queued = 0
+        pending = self.app_manager.pending
+        for entry in apps.available_updates():
+            if entry["ref"] in pending:
+                continue
+            try:
+                self.app_manager.update(entry["ref"])
+                queued += 1
+            except apps.AppError as e:
+                log.warning("could not queue %s: %s", entry["ref"], e)
+        return GLib.Variant("(i)", (queued,))
 
     def impl_RemoveApp(self, ref: str):
         self.app_manager.remove(ref)

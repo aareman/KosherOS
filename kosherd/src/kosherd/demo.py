@@ -417,6 +417,44 @@ class DemoClient:
 
         GLib.timeout_add(250, tick)
 
+    # -- updates: the first two installed apps have a newer build ------------------
+
+    def list_app_updates(self):
+        pending = getattr(self, "_updated", set())
+        out = []
+        for app in self.installed[:2]:
+            if app["ref"] in pending:
+                continue
+            out.append({"ref": app["ref"], "name": app["name"], "version": "2.1",
+                        "commit": "a1b2c3d4e5f6", "latest": "f6e5d4c3b2a1"})
+        return out
+
+    def update_app(self, ref):
+        """Pretend to update: progress over a second, then finished."""
+        from gi.repository import GLib
+
+        steps = [(15, "Downloading"), (55, "Downloading"), (90, "Updating…"), (100, "Done")]
+
+        def tick(i=0):
+            if i < len(steps):
+                percent, status = steps[i]
+                if self._on_progress:
+                    self._on_progress(ref, percent, status)
+                GLib.timeout_add(250, tick, i + 1)
+            else:
+                self.__dict__.setdefault("_updated", set()).add(ref)
+                if self._on_finished:
+                    self._on_finished(ref, True, "")
+            return False
+
+        GLib.timeout_add(250, tick)
+
+    def update_all_apps(self):
+        refs = [u["ref"] for u in self.list_app_updates()]
+        for ref in refs:
+            self.update_app(ref)
+        return len(refs)
+
     def remove_app(self, ref):
         from gi.repository import GLib
 

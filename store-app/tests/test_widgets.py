@@ -68,7 +68,9 @@ def test_it_opens_on_the_categories(window):
     assert window.stack.get_visible_child_name() == "home"
     assert not window.back.get_visible()
     tiles = [c.key for c in _children(window.tiles)]
-    assert tiles[0] == "installed" and tiles[-1] == "all"
+    # Updates first when there are any (the demo has two), Installed next,
+    # everything last.
+    assert tiles[:2] == ["updates", "installed"] and tiles[-1] == "all"
     assert "internet" in tiles and "games" in tiles
     assert str(len(window.catalog)) in window.home_subtitle.get_label()
 
@@ -91,7 +93,7 @@ def test_the_sidebar_lists_every_category_with_a_count(window):
     drain()
     rows = _children(window.sidebar)
     keys = [r.key for r in rows]
-    assert keys[:2] == ["all", "installed"]
+    assert keys[:3] == ["all", "updates", "installed"]
     assert "internet" in keys and "develop" in keys
     counts = window.shelf_counts()
     assert counts["all"] == len(window.catalog)
@@ -171,8 +173,11 @@ def test_the_installed_category_shows_what_is_installed(window):
     drain()
     shown = window.shown_apps()
     assert {a["ref"] for a in shown} <= window.installed
-    assert all(c.get_child().button.get_label() == "Remove"
+    # An installed app's button removes it — unless a newer build is
+    # waiting, in which case the one button on the card is the update.
+    assert all(c.get_child().button.get_label() in ("Remove", "Update")
                for c in _children(window.grid))
+    assert any(c.get_child().button.get_label() == "Remove" for c in _children(window.grid))
 
 
 def test_a_search_with_no_matches_says_so(window):
@@ -261,3 +266,49 @@ def test_a_user_who_may_not_install_sees_why(monkeypatch):
                  if c.get_child().state == "installed"]
     for card in installed:   # removing is an admin's job
         assert not card.button.get_sensitive()
+
+
+# -- updates ----------------------------------------------------------------------------
+
+def test_the_store_offers_updates_one_by_one_and_all_at_once(window):
+    # "app store should have an updater section (update individually,
+    # update all, etc.)". The pretend daemon says two installed apps have a
+    # newer build.
+    assert len(window.updates) == 2
+    tiles = [c.get_child() for c in _children(window.tiles)]
+    assert tiles[0].key == "updates" if hasattr(tiles[0], "key") else True
+    home_keys = [c.key for c in _children(window.tiles)]
+    assert home_keys[0] == "updates", "an update is the first thing a store says"
+    window.show_shelf("updates")
+    drain()
+    cards = list(window.cards.values())
+    assert len(cards) == 2
+    assert all(c.state == "update" and c.button.get_label() == "Update" for c in cards)
+    assert "Version 2.1" in cards[0].button.get_tooltip_text()
+    assert window.update_all.get_visible()
+    # One app on its own …
+    cards[0]._on_clicked(None)
+    assert cards[0].state == "working"
+    for _ in range(12):
+        drain()
+        import time; time.sleep(0.15)
+    # … the demo finishes it, the store reloads, and one update is left.
+    assert len(window.updates) == 1
+    # … and the rest all at once.
+    window.show_shelf("updates")
+    drain()
+    window._update_all()
+    for _ in range(12):
+        drain()
+        import time; time.sleep(0.15)
+    assert window.updates == {}
+    assert window.empty.get_title() == "Everything is up to date"
+    assert not window.update_all.get_visible()
+
+
+def test_an_app_with_no_update_keeps_its_ordinary_button(window):
+    window.show_shelf("installed")
+    drain()
+    states = {ref: card.state for ref, card in window.cards.items()}
+    assert set(states.values()) == {"update", "installed"}
+    assert sum(1 for s in states.values() if s == "update") == 2

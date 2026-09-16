@@ -52,7 +52,7 @@ with a content filter that lives on the machine itself and a parent in charge wi
 ## About
 
 <div align="center">
-<img src="docs/images/admin-person.png" alt="The KosherOS Admin home screen: one card per person, a blue banner for waiting requests, an amber one for filter health" width="820">
+<img src="docs/images/admin-person.png" alt="KosherOS Admin: the family and the administration pages in a sidebar, one person's page open, a blue banner for waiting requests and an amber one for filter health" width="820">
 <br><sub>The admin app's home screen. One card per person, what each is protected from, what happened today.</sub>
 </div>
 

@@ -396,13 +396,16 @@ def test_a_card_says_what_happened_today():
     assert "Nothing blocked today" in _texts(_children(page.cards)[0])
 
 
-def test_clicking_a_card_opens_the_persons_page_and_the_guest_opens_its_own():
+def test_clicking_a_card_goes_where_that_persons_sidebar_row_goes():
+    # The board and the sidebar are two doors to the same page, so a card
+    # navigates to the person's destination rather than pushing a page of
+    # its own on top.
     win, page = a_board([a_user()])
     cards = _children(page.cards)
     page._on_card(page.cards, cards[0])
-    assert win.pushed == [("detail", 1001)]
+    assert win.went_to == ["user-1001"]
     page._on_card(page.cards, cards[1])
-    assert isinstance(win.pushed[1], family.GuestPage)
+    assert win.went_to[-1] == "guest"
 
 
 def test_waiting_requests_are_a_banner_not_a_list():
@@ -503,28 +506,78 @@ def test_every_reportable_problem_produces_a_row():
     assert "620" in rows[0][1]
 
 
-def test_the_sidebar_lists_the_people_and_the_computer_and_says_how_each_is():
-    win = FakeWindow(FakeClient(), catalog_count=23)
-    win.policy = {"revision": 1, "users": [a_user(), a_user(uid=1002, username="rivky")],
+def _rail_rows(rail):
+    """Just the rows: a ListBox also parents the section headers."""
+    return [c for c in _children(rail.list) if hasattr(c, "key")]
+
+
+def a_rail(users=None, **state):
+    win = FakeWindow(FakeClient(), **state)
+    win.policy = {"revision": 1,
+                  "users": users if users is not None else [a_user()],
                   "guardian": {"enabled": False}, "adblock": {"enabled": True},
-                  "guest": {"enabled": False}}
-    win.requests = [{"id": "a" * 32, "uid": 1001, "username": "yosef", "mode": "filtered",
-                     "url": "https://x.test/a", "asked": 0}]
+                  "guest": state.pop("guest", {"enabled": False})}
+    win.requests = state.get("requests", [])
     rail = sidebar.Sidebar(win)
     rail.refresh()
     drain()
-    assert [key for key, _t, _i, _s in sidebar.DESTINATIONS] == \
-        ["family", "activity", "protection", "apps", "updates"]
-    sections = [s for _k, _t, _i, s in sidebar.DESTINATIONS if s]
-    assert sections == ["The family", "This computer"]
-    assert rail.rows["family"].status.get_label() == "2 people"
-    assert rail.rows["family"].badge.get_label() == "1"      # one request waiting
+    return win, rail
+
+
+def test_the_sidebar_holds_the_people_themselves_between_the_two_fixed_groups():
+    # The user asked for the family in the sidebar rather than only as
+    # cards: every account is a row of its own, the guest last, between
+    # the whole-house views above and the computer below.
+    win, rail = a_rail([a_user(), a_user(uid=1002, username="rivky", mode="dnsfilter")],
+                       catalog_count=23,
+                       requests=[{"id": "a" * 32, "uid": 1001, "username": "yosef",
+                                  "mode": "filtered", "url": "https://x.test/a",
+                                  "asked": 0}])
+    keys = [row.key for row in _rail_rows(rail)]
+    assert keys == ["overview", "activity", "user-1001", "user-1002", "guest",
+                    "protection", "apps", "updates"]
+    sections = [row.section for row in _rail_rows(rail)]
+    assert sections == [None, None, "Family", "Family", "Family",
+                        "This computer", "This computer", "This computer"]
+    # A person's row says which preset they are set up as, and speaks up
+    # when somebody is waiting on an answer.
+    assert rail.rows["user-1001"].title.get_label() == "yosef"
+    assert rail.rows["user-1001"].status.get_label()
+    assert rail.rows["user-1001"].badge.get_label() == "1"
+    assert not rail.rows["user-1002"].badge.get_visible()
+    assert rail.rows["guest"].status.get_label() == "Off"
+    assert rail.rows["overview"].status.get_label() == "2 people"
     assert rail.rows["apps"].status.get_label() == "23 apps"
     assert rail.rows["protection"].status.get_label() == "Running"
-    # Clicking a row takes the window there.
-    rail.list.select_row(rail.rows["updates"])
+
+
+def test_clicking_any_sidebar_row_takes_the_window_there():
+    win, rail = a_rail([a_user()])
+    for key in ("updates", "user-1001", "guest", "overview"):
+        rail.list.select_row(rail.rows[key])
+        drain()
+        assert win.went_to[-1] == key
+
+
+def test_rebuilding_the_sidebar_is_not_a_click_and_keeps_the_selection():
+    # refresh() runs after every change, and it rebuilds the rows. If that
+    # looked like a selection the app would navigate away from whatever
+    # the admin was doing.
+    win, rail = a_rail([a_user()])
+    win.destination = "user-1001"
+    rail.refresh()
     drain()
-    assert win.went_to == ["updates"]
+    assert win.went_to == [], "rebuilding navigated somewhere"
+    assert rail.rows["user-1001"].is_selected()
+
+
+def test_an_account_that_is_gone_leaves_nothing_selected():
+    win, rail = a_rail([a_user()])
+    win.destination = "user-4242"
+    rail.refresh()
+    drain()
+    assert rail.list.get_selected_row() is None
+    assert win.went_to == []
 
 
 def test_the_sidebar_shows_a_filter_problem_as_an_amber_badge():
@@ -616,14 +669,17 @@ def test_an_enabled_guest_opens_the_same_page_as_anyone_without_an_apps_tab():
         assert title in titles, title
 
 
-def test_the_guest_card_routes_to_turn_on_when_off_and_to_the_page_when_on():
+def test_the_guest_keeps_one_destination_whether_it_is_on_or_off():
+    # One key either way, so turning the guest on does not move the
+    # selection out from under whoever just turned it on; the window
+    # decides which page that key means.
     win, page = a_board([])
     cards = _children(page.cards)
     page._on_card(page.cards, cards[-1])
-    assert isinstance(win.pushed[-1], family.GuestPage)
+    assert win.went_to[-1] == "guest"
     win.policy["guest"] = {"enabled": True, "uid": 1010, "mode": "whitelist"}
     page._on_card(page.cards, cards[-1])
-    assert win.pushed[-1] == ("detail", 1010)
+    assert win.went_to[-1] == "guest"
     assert family.guest_user({"guest": {"enabled": False}}) is None
 
 
@@ -1234,11 +1290,11 @@ def test_the_demo_family_drives_every_screen():
 def test_the_real_window_walks_every_sidebar_destination():
     """The window, not a stand-in.
 
-    Every page has its own test, but the thing that broke when the app
-    grew a sidebar was the wiring between them — which page the content
-    pane holds, which row is lit, and whether a person still pushes on
-    top. So this builds the actual Window against the demo daemon and
-    walks it.
+    Every page has its own test, but the thing that breaks when the app
+    rearranges is the wiring between them — which page the content pane
+    holds and which row is lit. So this builds the actual Window against
+    the demo daemon and walks every row the sidebar offers, the people
+    included.
     """
     from kosherd.demo import DemoClient
 
@@ -1249,28 +1305,119 @@ def test_the_real_window_walks_every_sidebar_destination():
         win = admin.Window()
         drain()
         assert win.policy["users"], "the demo family loaded"
-        for key, title, _icon, _section in sidebar.DESTINATIONS:
-            win.go_to(key)
+        for row in _rail_rows(win.sidebar):
+            win.go_to(row.key)
             drain()
             page = win.nav.get_visible_page()
-            assert page is not None, key
-            assert win.sidebar.rows[key].is_selected(), key
-            assert win.destination == key
+            assert page is not None, row.key
+            assert win.sidebar.rows[row.key].is_selected(), row.key
+            assert win.destination == row.key
+        # A person's row lands on that person's own page, by name.
+        for user in win.policy["users"]:
+            win.go_to(f"user-{user['uid']}")
+            drain()
+            page = win.nav.get_visible_page()
+            assert isinstance(page, detail.UserDetailPage)
+            assert page.uid == user["uid"]
+            assert page.get_title() == user["username"]
+        # Nothing is ever pushed on top, so no page offers a back button
+        # the sidebar has already made meaningless.
+        assert win.nav.get_navigation_stack().get_n_items() == 1
         # The sidebar says how each destination is, without being opened.
         assert win.sidebar.rows["apps"].status.get_label().endswith("apps")
-        assert win.sidebar.rows["family"].status.get_label().endswith("people")
-        # A person pushes on top of the board, and backs out to it.
-        win.go_to("family")
-        win.open_user_detail(win.policy["users"][0])
-        drain()
-        assert isinstance(win.nav.get_visible_page(), detail.UserDetailPage)
-        win.pop_to_root()
-        drain()
-        assert win.nav.get_visible_page().get_tag() == "family"
-        # The health banner's Details is the Protection page now.
+        assert win.sidebar.rows["overview"].status.get_label().endswith("people")
+        # The health banner's Details is the Protection page.
         win.family_page.health_banner.emit("button-clicked")
         drain()
         assert win.destination == "protection"
+    finally:
+        admin.DaemonClient = original
+        admin.Window._not_an_admin = was_admin
+
+
+def test_the_guest_row_leads_to_the_turn_on_page_when_off_and_the_real_one_when_on():
+    from kosherd.demo import DemoClient
+
+    original, admin.DaemonClient = admin.DaemonClient, DemoClient
+    was_admin = admin.Window._not_an_admin
+    admin.Window._not_an_admin = lambda self: False
+    try:
+        win = admin.Window()
+        drain()
+        win.policy["guest"] = {"enabled": False, "mode": "whitelist", "whitelist": []}
+        win.sidebar.refresh()
+        win.go_to("guest")
+        drain()
+        assert isinstance(win.nav.get_visible_page(), family.GuestPage)
+        assert win.sidebar.rows["guest"].status.get_label() == "Off"
+
+        win.policy["guest"] = {"enabled": True, "uid": 1010, "mode": "whitelist",
+                               "whitelist": [], "blocked_categories": [],
+                               "media_level": "none", "language_filter": "off",
+                               "youtube": {}, "rules": [], "time": {}}
+        win.sidebar.refresh()
+        win.go_to("guest")
+        drain()
+        page = win.nav.get_visible_page()
+        assert isinstance(page, detail.UserDetailPage) and page.uid == 1010
+        assert win.sidebar.rows["guest"].status.get_label() == "On"
+        # Same key either way, so the selection never jumps when it is
+        # switched on from its own page.
+        assert win.sidebar.rows["guest"].is_selected()
+    finally:
+        admin.DaemonClient = original
+        admin.Window._not_an_admin = was_admin
+
+
+def test_adding_a_person_is_in_the_sidebar_header_where_the_people_are():
+    from kosherd.demo import DemoClient
+
+    original, admin.DaemonClient = admin.DaemonClient, DemoClient
+    was_admin = admin.Window._not_an_admin
+    admin.Window._not_an_admin = lambda self: False
+    try:
+        win = admin.Window()
+        drain()
+        def menu_buttons(widget, found=None):
+            found = [] if found is None else found
+            child = widget.get_first_child()
+            while child is not None:
+                if isinstance(child, Gtk.MenuButton):
+                    found.append(child)
+                menu_buttons(child, found)
+                child = child.get_next_sibling()
+            return found
+
+        menus = menu_buttons(win.sidebar)
+        assert menus, "the sidebar header has the Add button"
+        model = menus[0].get_menu_model()
+        actions = [model.get_item_attribute_value(i, "action", None).get_string()
+                   for i in range(model.get_n_items())]
+        assert actions == ["win.create-user", "win.adopt-user"]
+        # And the window really has them, so the menu is not a dead end.
+        for action in actions:
+            assert win.lookup_action(action.removeprefix("win.")) is not None
+    finally:
+        admin.DaemonClient = original
+        admin.Window._not_an_admin = was_admin
+
+
+def test_a_removed_account_falls_back_to_the_overview():
+    from kosherd.demo import DemoClient
+
+    original, admin.DaemonClient = admin.DaemonClient, DemoClient
+    was_admin = admin.Window._not_an_admin
+    admin.Window._not_an_admin = lambda self: False
+    try:
+        win = admin.Window()
+        drain()
+        gone = win.policy["users"][-1]["uid"]
+        win.go_to(f"user-{gone}")
+        drain()
+        win.policy["users"] = [u for u in win.policy["users"] if u["uid"] != gone]
+        win.refresh_open_detail()
+        drain()
+        assert win.destination == "overview"
     finally:
         admin.DaemonClient = original
         admin.Window._not_an_admin = was_admin
@@ -1307,11 +1454,10 @@ def test_turning_the_guest_on_opens_its_page():
     win = FakeWindow(Recording())
     win.policy = {"revision": 1, "users": [], "guardian": {"enabled": False},
                   "guest": {"enabled": False, "mode": "whitelist", "whitelist": []}}
-    win.nav = type("Nav", (), {"pop_to_tag": lambda self, tag: None})()
     page = family.GuestPage(win)
     _row_named(page, "Guest account").set_active(True)
     drain()
-    assert win.pushed[-1] == ("detail", 1010)
+    assert win.went_to[-1] == "guest"
 
 
 

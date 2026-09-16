@@ -1,15 +1,16 @@
 """The sidebar: where everything in the app is, in one column.
 
-Two sections, because there are two kinds of thing to set here. "The
-family" is per person — the board and the diary. "This computer" is the
-rest: what protects everyone, what may be installed, what version runs.
-They used to be a row of five small tiles at the bottom of the family
-board, below the fold, which made the whole machine look like an
-afterthought next to the people.
+Three groups, because there are three kinds of thing here. At the top,
+the two views of the whole house: the Overview board and the activity
+feed. Then **Family** — one row per account, the guest last — because the
+people are what an admin came to configure, and hunting for a child by
+clicking their card on a board is a worse way to reach them than having
+their name in the sidebar the whole time. Then **This computer**: what
+protects everyone, what may be installed, what version runs.
 
-Each row carries its own state on the right — how many people, how many
-apps, whether the filter is running — so the sidebar answers most of
-"is anything wrong?" without being clicked.
+Every row carries its own state on the right — how many people, which
+preset, whether anyone is waiting, whether the filter is running — so the
+sidebar answers most of "is anything wrong?" without being clicked.
 """
 
 from __future__ import annotations
@@ -18,39 +19,60 @@ import gi
 
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
-from gi.repository import Adw, Gtk  # noqa: E402
+from gi.repository import Adw, Gio, Gtk  # noqa: E402
+
+from kosherd import profiles as profiles_mod  # noqa: E402
 
 from . import labels  # noqa: E402
-from .common import tag  # noqa: E402
+from .common import avatar, clear, tag  # noqa: E402
 from .computer import health_summary  # noqa: E402
 
-# key, title, icon, section heading above it (None: same section as above)
-DESTINATIONS = (
-    ("family", "Family", "system-users-symbolic", "The family"),
-    ("activity", "Activity", "document-open-recent-symbolic", None),
-    ("protection", "Protection", "security-high-symbolic", "This computer"),
-    ("apps", "Apps", "view-grid-symbolic", None),
-    ("updates", "Updates", "software-update-available-symbolic", None),
+# The rows that are always there, above and below the family.
+TOP = (
+    ("overview", "Overview", "go-home-symbolic"),
+    ("activity", "Activity", "document-open-recent-symbolic"),
 )
+COMPUTER = (
+    ("protection", "Protection", "security-high-symbolic"),
+    ("apps", "Apps", "view-grid-symbolic"),
+    ("updates", "Updates", "software-update-available-symbolic"),
+)
+FAMILY_SECTION = "Family"
+COMPUTER_SECTION = "This computer"
+
+# Kept for anything that wants the fixed destinations in one tuple.
+DESTINATIONS = TOP + COMPUTER
 
 
-class SidebarRow(Gtk.ListBoxRow):
-    def __init__(self, key: str, title: str, icon: str):
+def user_key(user: dict) -> str:
+    """The sidebar key for an account. The guest keeps one key whether it
+    is on or off, so turning it on does not move the selection."""
+    return "guest" if user.get("guest") else f"user-{user['uid']}"
+
+
+class _Row(Gtk.ListBoxRow):
+    """One destination: something on the left, a word or two on the right."""
+
+    def __init__(self, key: str, title: str, section: str | None):
         super().__init__()
         self.key = key
-        box = Gtk.Box(spacing=12, margin_top=8, margin_bottom=8,
-                      margin_start=6, margin_end=6)
-        box.append(Gtk.Image(icon_name=icon, pixel_size=16))
-        box.append(Gtk.Label(label=title, xalign=0, hexpand=True, ellipsize=3))
+        self.section = section
+        self.box = Gtk.Box(spacing=12, margin_top=6, margin_bottom=6,
+                           margin_start=6, margin_end=6)
+        self.title = Gtk.Label(label=title, xalign=0, hexpand=True, ellipsize=3)
         self.status = Gtk.Label(xalign=1, visible=False)
         self.status.add_css_class("dim-label")
         self.status.add_css_class("caption")
-        box.append(self.status)
         self.badge = tag("", "acc")
         self.badge.set_visible(False)
-        box.append(self.badge)
-        self.set_child(box)
+        self.set_child(self.box)
         self.set_cursor_from_name("pointer")
+
+    def _pack(self, lead: Gtk.Widget) -> None:
+        self.box.append(lead)
+        self.box.append(self.title)
+        self.box.append(self.status)
+        self.box.append(self.badge)
 
     def say(self, text: str = "", badge: str = "", badge_class: str = "acc") -> None:
         self.status.set_label(text)
@@ -63,22 +85,40 @@ class SidebarRow(Gtk.ListBoxRow):
         self.badge.set_visible(bool(badge))
 
 
+class SidebarRow(_Row):
+    def __init__(self, key: str, title: str, icon: str, section: str | None = None):
+        super().__init__(key, title, section)
+        self._pack(Gtk.Image(icon_name=icon, pixel_size=16))
+
+
+class PersonRow(_Row):
+    """An account, with its face and the preset it is set up as."""
+
+    def __init__(self, user: dict, waiting: int, custom=()):
+        super().__init__(user_key(user), user["username"], FAMILY_SECTION)
+        self.uid = user["uid"]
+        self._pack(avatar(user["username"], 22))
+        if user.get("guest"):
+            self.say("On" if user.get("enabled", True) else "Off")
+            return
+        key, _changes = profiles_mod.diff(user, custom)
+        # The preset only, never "Child, with 2 changes": the drift belongs
+        # on the person's own page, and a sidebar that wraps is no sidebar.
+        preset = profiles_mod.get(key, custom).label if key else "Custom"
+        self.say(preset, badge=str(waiting) if waiting else "")
+
+
 class Sidebar(Adw.NavigationPage):
     """The navigation pane of the split view."""
 
     def __init__(self, win):
         super().__init__(title="KosherOS Admin", tag="sidebar")
         self.win = win
-        self.rows: dict[str, SidebarRow] = {}
+        self.rows: dict[str, _Row] = {}
         self._selecting = False
 
         self.list = Gtk.ListBox(selection_mode=Gtk.SelectionMode.SINGLE)
         self.list.add_css_class("navigation-sidebar")
-        for key, title, icon, section in DESTINATIONS:
-            row = SidebarRow(key, title, icon)
-            row.section = section
-            self.rows[key] = row
-            self.list.append(row)
         self.list.set_header_func(self._header)
         self.list.connect("row-selected", self._on_selected)
 
@@ -88,6 +128,12 @@ class Sidebar(Adw.NavigationPage):
 
         header = Adw.HeaderBar()
         header.set_title_widget(Adw.WindowTitle(title="KosherOS", subtitle="Admin"))
+        add_menu = Gio.Menu()
+        add_menu.append("Create User Account…", "win.create-user")
+        add_menu.append("Adopt Existing User…", "win.adopt-user")
+        add = Gtk.MenuButton(icon_name="list-add-symbolic", menu_model=add_menu,
+                             tooltip_text="Add a person")
+        header.pack_start(add)
         lock = Gtk.Button(icon_name="changes-prevent-symbolic",
                           tooltip_text="Lock now")
         lock.connect("clicked", lambda _b: win.lock())
@@ -97,6 +143,7 @@ class Sidebar(Adw.NavigationPage):
         view.add_top_bar(header)
         view.set_content(scroller)
         self.set_child(view)
+        self.refresh()
 
     @staticmethod
     def _header(row, before) -> None:
@@ -106,19 +153,21 @@ class Sidebar(Adw.NavigationPage):
             row.set_header(None)
             return
         label = Gtk.Label(label=section.upper(), xalign=0, margin_start=14,
-                          margin_top=14 if before is not None else 8,
-                          margin_bottom=2)
+                          margin_top=14, margin_bottom=2)
         label.add_css_class("caption-heading")
         label.add_css_class("dim-label")
         row.set_header(label)
 
+    # -- selection -----------------------------------------------------------------
+
     def select(self, key: str) -> None:
         """Move the selection without acting on it (the window already has)."""
         row = self.rows.get(key)
-        if row is None or row.is_selected():
-            return
         self._selecting = True
-        self.list.select_row(row)
+        if row is None:
+            self.list.unselect_all()
+        elif not row.is_selected():
+            self.list.select_row(row)
         self._selecting = False
 
     def _on_selected(self, _list, row) -> None:
@@ -126,31 +175,69 @@ class Sidebar(Adw.NavigationPage):
             return
         self.win.go_to(row.key)
 
+    # -- what the rows say ----------------------------------------------------------
+
     def refresh(self) -> None:
-        """Everything the rows say, from what the window last loaded."""
+        """Rebuild from what the window last loaded.
+
+        The people come and go, so the list is rebuilt rather than patched;
+        it is a dozen rows. Selection is restored afterwards from the
+        window's current destination, with the signal muted throughout so
+        rebuilding never looks like a click.
+        """
         win = self.win
-        people = len(win.policy.get("users", []))
-        waiting = len(win.requests or [])
-        self.rows["family"].say(
-            labels.plural(people, "person", "people") if people else "Nobody yet",
-            badge=str(waiting) if waiting else "")
+        policy = getattr(win, "policy", None) or {}
+        self._selecting = True
+        clear(self.list)
+        self.rows = {}
 
+        for key, title, icon in TOP:
+            self._add(SidebarRow(key, title, icon))
+
+        waiting: dict[int, int] = {}
+        for request in getattr(win, "requests", None) or []:
+            waiting[request["uid"]] = waiting.get(request["uid"], 0) + 1
+        custom = policy.get("custom_profiles", [])
+        for user in policy.get("users", []):
+            self._add(PersonRow(user, waiting.get(user["uid"], 0), custom))
+        guest = dict(policy.get("guest") or {"enabled": False})
+        guest.update(guest=True, username="Guest", uid=guest.get("uid", -2))
+        self._add(PersonRow(guest, 0))
+
+        for key, title, icon in COMPUTER:
+            self._add(SidebarRow(key, title, icon, COMPUTER_SECTION))
+
+        self._say_computer()
+        self._selecting = False
+        self.select(getattr(win, "destination", "overview"))
+
+    def _add(self, row: _Row) -> None:
+        self.rows[row.key] = row
+        self.list.append(row)
+
+    def _say_computer(self) -> None:
+        win = self.win
         blocked = sum(counts.get("blocked", 0)
-                      for counts in (win.summary or {}).values()
+                      for counts in (getattr(win, "summary", None) or {}).values()
                       if isinstance(counts, dict))
-        self.rows["activity"].say(f"{blocked} blocked today" if blocked else "Quiet today")
+        self.rows["activity"].say(f"{blocked} blocked today" if blocked
+                                  else "Quiet today")
 
-        words, ok = health_summary(win.status)
+        people = len((getattr(win, "policy", None) or {}).get("users", []))
+        self.rows["overview"].say(labels.plural(people, "person", "people")
+                                  if people else "Nobody yet")
+
+        words, ok = health_summary(getattr(win, "status", None))
         self.rows["protection"].say("" if not ok else words,
-                                    badge="" if ok else words,
-                                    badge_class="warn")
+                                    badge="" if ok else words, badge_class="warn")
 
-        approved = win.catalog_count
-        self.rows["apps"].say(labels.plural(approved, "app") if approved is not None else "")
+        approved = getattr(win, "catalog_count", None)
+        self.rows["apps"].say(labels.plural(approved, "app")
+                              if approved is not None else "")
 
         # Until somebody checks, the useful thing to say is what this
         # computer is running; an empty row looks unfinished.
         booted = (getattr(win, "deployment", None) or {}).get("booted") or {}
-        state = win.update_state or (f"Version {booted['version']}"
-                                     if booted.get("version") else "")
+        state = getattr(win, "update_state", None) or (
+            f"Version {booted['version']}" if booted.get("version") else "")
         self.rows["updates"].say(state[:24])

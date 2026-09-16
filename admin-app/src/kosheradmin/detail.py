@@ -1102,7 +1102,7 @@ class UserDetailPage(Adw.NavigationPage):
                 lambda: self.win.client.set_guest_config(
                     False, user["mode"], user.get("whitelist", []), pw),
                 done_msg="Guest account is off"))
-            self.win.pop_to_root()
+            self.win.go_to("overview")
 
         switch.connect("notify::active", on_toggle)
         group.add(switch)

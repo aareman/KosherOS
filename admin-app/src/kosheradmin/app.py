@@ -52,7 +52,7 @@ class Window(Adw.ApplicationWindow):
         self.update_state: str | None = None
         self.deployment: dict | None = None
         self.guardian_ok = False
-        self.destination = "family"
+        self.destination = "overview"
 
         self.toasts = Adw.ToastOverlay()
         self.set_content(self.toasts)
@@ -85,7 +85,7 @@ class Window(Adw.ApplicationWindow):
             action.connect("activate", lambda _a, _p, a=adopt: add_person_dialog(self, a))
             self.add_action(action)
 
-        self.go_to("family")
+        self.go_to("overview")
 
         # Locked state: one password, then everything works.
         self.lock_view = Adw.StatusPage(
@@ -142,7 +142,9 @@ class Window(Adw.ApplicationWindow):
 
     def go_to(self, key: str) -> None:
         """Show one of the sidebar's destinations, replacing whatever the
-        content pane was showing (a person's page included)."""
+        content pane was showing. Every destination is a replacement, never
+        a push: the sidebar is the way back, so there is nothing to go back
+        to and no back button to promise it."""
         self.destination = key
         self.nav.replace([self._destination_page(key)])
         self.sidebar.select(key)
@@ -155,23 +157,18 @@ class Window(Adw.ApplicationWindow):
         """The page for a sidebar row.
 
         The board and the feed are long-lived (they hold a selection and a
-        scroll position); the computer's three pages are built fresh, since
-        each of them asks the daemon something on the way in.
+        scroll position); everything else is built fresh, since a person's
+        page and the computer's three pages all read something on the way
+        in.
         """
-        if key == "family":
-            if not hasattr(self, "_family_nav_page"):
+        if key == "overview":
+            if not hasattr(self, "_overview_nav_page"):
                 view = Adw.ToolbarView()
-                header = Adw.HeaderBar()
-                add_menu = Gio.Menu()
-                add_menu.append("Create User Account…", "win.create-user")
-                add_menu.append("Adopt Existing User…", "win.adopt-user")
-                header.pack_end(Gtk.MenuButton(label="Add a person", menu_model=add_menu,
-                                               always_show_arrow=True))
-                view.add_top_bar(header)
+                view.add_top_bar(Adw.HeaderBar())
                 view.set_content(self.family_page)
-                self._family_nav_page = Adw.NavigationPage(
-                    child=view, title="Family", tag="family")
-            return self._family_nav_page
+                self._overview_nav_page = Adw.NavigationPage(
+                    child=view, title="Overview", tag="overview")
+            return self._overview_nav_page
         if key == "activity":
             if not hasattr(self, "_activity_nav_page"):
                 view = Adw.ToolbarView()
@@ -184,22 +181,40 @@ class Window(Adw.ApplicationWindow):
                 self._activity_nav_page = Adw.NavigationPage(
                     child=view, title="Activity", tag="activity")
             return self._activity_nav_page
+        if key == "guest" or key.startswith("user-"):
+            return self._person_page(key)
         page = {"protection": ProtectionPage, "apps": AppsPage,
                 "updates": UpdatesPage}[key](self)
         self.open_computer_page = page
         return page
 
+    def _person_page(self, key: str) -> Adw.NavigationPage:
+        """One account's page, or — for a guest that is switched off — the
+        page that turns it on, since there is nothing yet to configure."""
+        from .family import GuestPage, guest_user
+
+        if key == "guest":
+            guest = guest_user(self.policy)
+            return UserDetailPage(self, guest) if guest else GuestPage(self)
+        uid = int(key.removeprefix("user-"))
+        user = next((u for u in self.policy.get("users", []) if u["uid"] == uid), None)
+        if user is None:  # removed while it was open
+            return self._destination_page("overview")
+        return UserDetailPage(self, user)
+
     def push(self, page: Adw.NavigationPage) -> None:
         self.nav.push(page)
 
     def pop_to_root(self) -> None:
-        """Back out of a pushed page to whatever the sidebar points at."""
-        self.nav.pop_to_tag(self.destination)
+        """Back out of anything pushed on top of the current destination."""
+        stack = self.nav.get_navigation_stack()
+        if stack.get_n_items():
+            self.nav.pop_to_page(stack.get_item(0))
 
     def open_user_detail(self, user: dict) -> None:
-        if self.destination != "family":
-            self.go_to("family")
-        self.nav.push(UserDetailPage(self, user))
+        from .sidebar import user_key
+
+        self.go_to(user_key(user))
 
     def show_activity(self, uid: int) -> None:
         """Jump to the activity page, narrowed to one person."""
@@ -219,7 +234,7 @@ class Window(Adw.ApplicationWindow):
                 if guest is not None and guest["uid"] == page.uid:
                     fresh = guest
             if fresh is None:
-                self.pop_to_root()  # the account was removed
+                self.go_to("overview")  # the account was removed
             else:
                 page.rebuild(fresh)
         elif hasattr(page, "refresh") and page is getattr(self, "open_computer_page", None):

@@ -124,15 +124,11 @@ class FamilyPage(Gtk.Box):
     # -- actions ------------------------------------------------------------------------
 
     def _on_card(self, _box, child) -> None:
+        # The same place the sidebar's row for that person goes: on for a
+        # guest that is switched on, the page that turns it on for one
+        # that is not.
         user = getattr(child, "user", None)
-        if user is None:
-            guest = guest_user(self.win.policy)
-            if guest is None:
-                self.win.push(GuestPage(self.win))   # off: turn it on first
-            else:
-                self.win.open_user_detail(guest)     # on: a page like anyone's
-        else:
-            self.win.open_user_detail(user)
+        self.win.go_to("guest" if user is None else f"user-{user['uid']}")
 
     def open_requests(self) -> RequestsDialog:
         dialog = RequestsDialog(self.win, self.win.requests)
@@ -288,10 +284,8 @@ class GuestPage(_Page):
         wl_domains = guest.get("whitelist", [])
 
         def open_guest_page():
-            fresh = guest_user(win.policy)
-            if fresh is not None:
-                win.pop_to_root()
-                win.open_user_detail(fresh)
+            if guest_user(win.policy) is not None:
+                win.go_to("guest")
 
         def push(enabled, new_mode, domains):
             win.with_guardian(lambda pw: win.call(

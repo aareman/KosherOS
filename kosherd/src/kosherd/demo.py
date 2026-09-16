@@ -68,7 +68,7 @@ class DemoClient:
                 _user(1001, "miriam", "adult", admin=True),
                 _user(1002, "yosef", "child",
                       blocked_categories=sorted({*child.blocked_categories, "sports"}),
-                      youtube={"restrict": "strict", "blocked_categories": ["24", "20", "10", "17"]},
+                      youtube={"restrict": "strict", "blocked_categories": ["24", "20", "10", "17", "shorts"]},
                       rules=[{"action": "allow", "pattern": "chabad.org"},
                              {"action": "block", "pattern": "youtube.com/shorts*"}],
                       time={"daily_minutes": 120,

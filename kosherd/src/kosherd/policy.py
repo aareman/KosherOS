@@ -80,7 +80,30 @@ YOUTUBE_CATEGORIES = {
     "20": "Gaming", "22": "People & Blogs", "23": "Comedy",
     "24": "Entertainment", "25": "News & Politics", "26": "How-to & Style",
     "27": "Education", "28": "Science & Technology", "29": "Nonprofits",
+    # Not a YouTube category but a kind of video all the same: the
+    # vertical endless feed, which no category limit reaches because a
+    # short can be in any category. Blocking it refuses the /shorts pages,
+    # the reel endpoints and the player when a short is what is playing,
+    # and takes the Shorts shelves out of the feeds.
+    "shorts": "Shorts",
 }
+
+# YouTube's payloads name a category ("Music", "Howto & Style") where the
+# settings keep its id ("10", "26"); this reads either. Matched with the
+# punctuation and case taken out, because YouTube writes "Howto" and the
+# table writes "How-to".
+_CATEGORY_KEY = {"".join(ch for ch in label.lower() if ch.isalnum()): code
+                 for code, label in YOUTUBE_CATEGORIES.items()}
+
+
+def youtube_category_id(value: str | None) -> str | None:
+    """A category id from an id or a name, or None for neither."""
+    if not value:
+        return None
+    text = str(value).strip()
+    if text in YOUTUBE_CATEGORIES:
+        return text
+    return _CATEGORY_KEY.get("".join(ch for ch in text.lower() if ch.isalnum()))
 
 # How the desktop is laid out for this account. A preference, not a
 # protection: the filter is per-uid at the network layer and does not care

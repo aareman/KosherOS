@@ -382,8 +382,13 @@ IMMODEST_SOURCES = {
 # The thumbnail hosts of the big image searches. Not page images — these
 # serve nothing but shrunken copies of arbitrary web imagery.
 def _is_search_thumb(host: str) -> bool:
+    """Aggregated small pictures of the whole web, too small to judge
+    reliably and from a host the family cannot curate: image search, and
+    YouTube's video thumbnails, which at the modesty levels are the worst
+    of what a child sees on the site."""
     host = host.lower()
     return (host.endswith("mm.bing.net")
+            or host == "i.ytimg.com" or host.endswith(".ytimg.com")
             or (host.startswith("encrypted-tbn") and host.endswith(".gstatic.com"))
             or host == "external-content.duckduckgo.com"
             or host.endswith(".qwant.com") and "pics" in host)
@@ -437,6 +442,14 @@ class YouTube:
     # opens and nothing they click afterwards. This is where the real
     # enforcement has to happen.
     PLAYER_PATHS = ("/youtubei/v1/player", "/youtubei/v1/reel/reel_item_watch")
+    # The endpoints that only Shorts use: the reel player and the endless
+    # sequence behind it. Refused outright when Shorts are turned off.
+    REEL_PATHS = ("/youtubei/v1/reel/",)
+    SHORTS_KIND = "shorts"
+    # How a feed entry says it is a short, by shape: a Shorts shelf, a reel
+    # item, the newer lockup, or any entry whose link is a reel link.
+    SHORTS_KEYS = frozenset({"reelShelfRenderer", "reelItemRenderer",
+                             "shortsLockupViewModel", "reelWatchEndpoint"})
 
     # The feeds: the home page, search results, the sidebar of suggestions.
     # Only pruned for an account limited to approved channels, and only
@@ -465,6 +478,54 @@ class YouTube:
     def is_player_api(path: str) -> bool:
         path = (path or "").split("?", 1)[0]
         return any(path.startswith(p) for p in YouTube.PLAYER_PATHS)
+
+    @staticmethod
+    def is_reel_api(path: str) -> bool:
+        path = (path or "").split("?", 1)[0]
+        return any(path.startswith(p) for p in YouTube.REEL_PATHS)
+
+    @staticmethod
+    def is_shorts_page(path: str) -> bool:
+        return (path or "").split("?", 1)[0].startswith("/shorts")
+
+    @staticmethod
+    def playing_a_short(flow) -> bool:
+        """Is this player request for a short? The web app plays shorts
+        through the same /player call as everything else; what tells them
+        apart is the page the app is on, which same-origin requests carry
+        in their referer."""
+        path = flow.request.path or ""
+        if YouTube.is_reel_api(path):
+            return True
+        referer = (flow.request.headers.get("referer") or "")
+        return "/shorts/" in referer or referer.rstrip("/").endswith("/shorts")
+
+    @staticmethod
+    def mentions_shorts(node, depth: int = 0) -> bool:
+        """Does this feed entry carry a Shorts shape anywhere in it?"""
+        if depth > 12:
+            return False
+        if isinstance(node, dict):
+            if node.keys() & YouTube.SHORTS_KEYS:
+                return True
+            return any(YouTube.mentions_shorts(v, depth + 1) for v in node.values())
+        if isinstance(node, list):
+            return any(YouTube.mentions_shorts(v, depth + 1) for v in node)
+        return False
+
+    @staticmethod
+    def prune_shorts(node, depth: int = 0):
+        """Take the Shorts out of a feed: shelves, reel items and lockups.
+        Only list entries are dropped, never a dict's keys, so the app's
+        structure stays what it expects."""
+        if depth > 24:
+            return node
+        if isinstance(node, list):
+            return [YouTube.prune_shorts(item, depth + 1) for item in node
+                    if not (isinstance(item, dict) and YouTube.mentions_shorts(item))]
+        if isinstance(node, dict):
+            return {k: YouTube.prune_shorts(v, depth + 1) for k, v in node.items()}
+        return node
 
     @staticmethod
     def is_feed_api(path: str) -> bool:
@@ -550,14 +611,27 @@ class YouTube:
 
     @staticmethod
     def category_of(body: str) -> str | None:
-        """The video's category id, read from the watch page."""
+        """The video's category id, from the player JSON or the watch page.
+
+        YouTube says "Music", the settings say "10": the name is mapped to
+        its id, and an id is taken as it is. The microformat's category is
+        preferred over any other "category" key in the body, since that is
+        the one that describes the video; the first match used to be taken,
+        and it was not always that one.
+        """
         import re
 
-        match = re.search(r'"category"\s*:\s*"([^"]+)"', body)
-        if match:
-            return match.group(1)
+        from kosherd.policy import youtube_category_id
+
+        for pattern in (r'"playerMicroformatRenderer"[\s\S]{0,4000}?"category"\s*:\s*"([^"]+)"',
+                        r'"category"\s*:\s*"([^"]+)"'):
+            match = re.search(pattern, body)
+            if match:
+                found = youtube_category_id(match.group(1))
+                if found:
+                    return found
         match = re.search(r'categoryId["\\:\s]+(\d+)', body)
-        return match.group(1) if match else None
+        return youtube_category_id(match.group(1)) if match else None
 
     @staticmethod
     def channel_of(body: str) -> tuple[str | None, str | None]:
@@ -1329,17 +1403,26 @@ class KosherFilter:
             return
 
         path = flow.request.path or ""
-        if YouTube.is_player_api(path):
+        no_shorts = YouTube.SHORTS_KIND in blocked
+        if YouTube.is_player_api(path) or (no_shorts and YouTube.is_reel_api(path)):
+            if no_shorts and YouTube.playing_a_short(flow):
+                self._refuse_youtube_player(flow, "Shorts are turned off on this computer",
+                                            "shorts")
+                return
             self._filter_youtube_player(flow, allowed, blocked)
             return
-        if allowed and YouTube.is_feed_api(path):
-            self._filter_youtube_feed(flow, set(allowed))
+        if (allowed or no_shorts) and YouTube.is_feed_api(path):
+            self._filter_youtube_feed(flow, set(allowed), no_shorts)
             return
         if not any(path.startswith(p) for p in YouTube.WATCH_PATHS):
             return
 
         content_type = (flow.response.headers.get("content-type") or "").lower()
         if "text/html" not in content_type:
+            return
+        if no_shorts and YouTube.is_shorts_page(path):
+            self._block(flow, flow.request.pretty_url,
+                        " because Shorts are turned off", why="youtube:shorts")
             return
         body = flow.response.get_text(strict=False) or ""
         why = self._youtube_verdict(body, allowed, blocked)
@@ -1361,7 +1444,8 @@ class KosherFilter:
                 return " because that kind of video is turned off"
         return None
 
-    def _filter_youtube_feed(self, flow: http.HTTPFlow, allowed: set) -> None:
+    def _filter_youtube_feed(self, flow: http.HTTPFlow, allowed: set,
+                             no_shorts: bool = False) -> None:
         """Take videos out of the feeds that this account cannot play.
 
         Playback is already blocked; this is about what a child SEES. A
@@ -1375,7 +1459,9 @@ class KosherFilter:
             document = json.loads(body)
         except ValueError:
             return
-        pruned = YouTube.prune_feed(document, allowed)
+        pruned = YouTube.prune_feed(document, allowed) if allowed else document
+        if no_shorts:
+            pruned = YouTube.prune_shorts(pruned)
         if pruned == document:
             return
         flow.response.text = json.dumps(pruned, separators=(",", ":"))
@@ -1400,11 +1486,17 @@ class KosherFilter:
         reason = ("Only approved channels can be watched on this computer"
                   if "approved channels" in why
                   else "That kind of video is turned off on this computer")
-        log.info("blocked a YouTube video (%s)", why.strip())
+        self._refuse_youtube_player(flow, reason, "channel" if "channels" in why
+                                    else "category")
+
+    def _refuse_youtube_player(self, flow: http.HTTPFlow, reason: str, kind: str) -> None:
+        log.info("blocked a YouTube video (%s)", kind)
         flow.response.text = json.dumps(YouTube.unplayable(reason))
         flow.response.headers["content-type"] = "application/json"
         flow.response.headers["x-kosheros"] = "youtube-blocked"
         flow.response.headers.pop("content-length", None)
+        self._note(activity_mod.BLOCK, flow, url=self._page_of(flow),
+                   why=f"youtube:{kind}")
 
     def _block(self, flow: http.HTTPFlow, url: str, because: str,
                why: str = "") -> None:

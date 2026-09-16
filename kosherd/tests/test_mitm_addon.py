@@ -832,6 +832,97 @@ def test_the_answer_is_json_the_player_understands(addon):
     assert answer["videoDetails"] == {}
 
 
+def test_a_category_named_the_way_youtube_names_it_is_stopped(addon):
+    # The settings keep ids ("10"); YouTube's player JSON says "Music".
+    # Nothing ever matched, and every category limit was a no-op.
+    import json
+
+    filt = _yt_filter(addon, {"blocked_categories": ["24", "20"]})
+    body = json.dumps({"videoDetails": {"channelId": "UC1"},
+                       "microformat": {"playerMicroformatRenderer": {
+                           "category": "Entertainment", "title": {"simpleText": "x"}}}})
+    flow = _player_flow(addon, body)
+    filt._filter_youtube(flow, 1001)
+    assert json.loads(flow.response.text)["playabilityStatus"]["status"] == "ERROR"
+
+    allowed = _player_flow(addon, json.dumps({"microformat": {
+        "playerMicroformatRenderer": {"category": "Music"}}}))
+    filt._filter_youtube(allowed, 1001)
+    assert "playabilityStatus" not in allowed.response.text, "Music is allowed"
+
+
+def test_category_names_map_to_ids_however_youtube_spells_them(addon):
+    assert addon.YouTube.category_of('{"category":"Music"}') == "10"
+    assert addon.YouTube.category_of('{"category":"Howto & Style"}') == "26"
+    assert addon.YouTube.category_of('{"category":"24"}') == "24"
+    assert addon.YouTube.category_of('{"category":"Not A Category"}') is None
+    # The microformat's category wins over another "category" key earlier
+    # in the body.
+    body = ('{"adPlacements":{"category":"Gaming"},'
+            '"microformat":{"playerMicroformatRenderer":{"category":"Education"}}}')
+    assert addon.YouTube.category_of(body) == "27"
+
+
+def test_shorts_are_refused_everywhere_they_play_when_turned_off(addon):
+    import json
+
+    filt = _yt_filter(addon, {"blocked_categories": ["shorts"]})
+    # The reel player.
+    reel = _player_flow(addon, json.dumps({"microformat": {"category": "Music"}}))
+    reel.request.path = "/youtubei/v1/reel/reel_item_watch"
+    filt._filter_youtube(reel, 1001)
+    assert json.loads(reel.response.text)["playabilityStatus"]["status"] == "ERROR"
+    assert "Shorts" in json.loads(reel.response.text)["playabilityStatus"]["reason"]
+    # The ordinary player, asked from a /shorts page.
+    body = json.dumps({"microformat": {"playerMicroformatRenderer": {"category": "Music"}}})
+    short = _player_flow(addon, body)
+    short.request.headers = {"referer": "https://www.youtube.com/shorts/abc123"}
+    filt._filter_youtube(short, 1001)
+    assert json.loads(short.response.text)["playabilityStatus"]["status"] == "ERROR"
+    # The same request from a watch page plays: Music is not blocked.
+    watch = _player_flow(addon, body)
+    watch.request.headers = {"referer": "https://www.youtube.com/watch?v=abc123"}
+    filt._filter_youtube(watch, 1001)
+    assert "playabilityStatus" not in watch.response.text
+
+
+def test_the_shorts_page_itself_is_blocked_when_turned_off(addon):
+    filt = _yt_filter(addon, {"blocked_categories": ["shorts"]})
+    flow = _player_flow(addon, "<html>short</html>")
+    flow.request.path = "/shorts/abc123"
+    flow.request.pretty_url = "https://www.youtube.com/shorts/abc123"
+    flow.response.headers["content-type"] = "text/html"
+    filt._filter_youtube(flow, 1001)
+    assert flow.response.status_code == 403
+    assert b"Shorts are turned off" in flow.response.content
+
+
+def test_shorts_shelves_and_reel_links_are_pruned_from_the_feeds(addon):
+    import json
+
+    filt = _yt_filter(addon, {"blocked_categories": ["shorts"]})
+    feed = {"contents": [
+        {"videoRenderer": {"videoId": "v1", "title": {"runs": [{"text": "A shiur"}]}}},
+        {"reelShelfRenderer": {"items": [{"reelItemRenderer": {"videoId": "s1"}}]}},
+        {"richItemRenderer": {"content": {"shortsLockupViewModel": {"entityId": "s2"}}}},
+        {"videoRenderer": {"videoId": "v2", "navigationEndpoint": {
+            "reelWatchEndpoint": {"videoId": "v2"}}}},
+        {"videoRenderer": {"videoId": "v3"}},
+    ]}
+    flow = _player_flow(addon, json.dumps(feed))
+    flow.request.path = "/youtubei/v1/browse"
+    filt._filter_youtube(flow, 1001)
+    kept = json.loads(flow.response.text)["contents"]
+    assert [next(iter(item.values())).get("videoId") for item in kept] == ["v1", "v3"]
+    assert flow.response.headers["x-kosheros"] == "youtube-feed-filtered"
+
+
+def test_youtube_thumbnails_count_as_search_thumbnails(addon):
+    assert addon._is_search_thumb("i.ytimg.com")
+    assert addon._is_search_thumb("i9.ytimg.com")
+    assert not addon._is_search_thumb("www.youtube.com")
+
+
 def test_an_account_with_no_youtube_limits_is_left_alone(addon):
     import json
 

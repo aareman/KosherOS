@@ -186,7 +186,7 @@ def a_user(**overrides):
                                    "proxy", "social", "video", "immodest",
                                    "violence", "drugs"],
             "media_level": "immodest", "language_filter": "substitute",
-            "youtube": {"restrict": "strict", "blocked_categories": ["24", "20", "10"]},
+            "youtube": {"restrict": "strict", "blocked_categories": ["24", "20", "10", "shorts"]},
             "can_install_apps": False}
     user.update(overrides)
     return user
@@ -886,7 +886,7 @@ def test_drift_is_named_and_there_is_a_way_back():
     win = FakeWindow(Recording())
     user = a_user(blocked_categories=[*a_user()["blocked_categories"], "sports"],
                   youtube={"restrict": "strict",
-                           "blocked_categories": ["24", "20", "10", "17"]})
+                           "blocked_categories": ["24", "20", "10", "17", "shorts"]})
     win.policy = {"revision": 1, "users": [user], "guardian": {"enabled": False},
                   "guest": {"enabled": False}, "adblock": {"enabled": True}}
     page = detail.UserDetailPage(win, user)
@@ -912,7 +912,7 @@ def test_the_protection_strip_has_the_four_lines():
     page, _w, _u = _detail()
     texts = _texts(page)
     for expected in ("Filtered internet · 10 kinds of site blocked",
-                     "Immodest pictures hidden", "YouTube strict, 3 kinds blocked",
+                     "Immodest pictures hidden", "YouTube strict, 4 kinds blocked",
                      "All apps"):
         assert expected in texts, expected
 

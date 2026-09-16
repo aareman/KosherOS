@@ -202,3 +202,9 @@ def test_a_families_own_preset_can_be_the_nearest():
     assert key == "custom-yeshiva-bochur"
     assert changes[0]["removed"] == ["games"]
 
+
+
+def test_a_child_gets_no_shorts_out_of_the_box():
+    from kosherd import profiles
+
+    assert "shorts" in profiles.get("child").youtube["blocked_categories"]

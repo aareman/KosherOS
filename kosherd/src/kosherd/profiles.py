@@ -62,7 +62,7 @@ PROFILES = (
                                          "immodest", "violence", "drugs"})),
         media_level="immodest",
         language_filter="substitute",
-        youtube={"restrict": "strict", "blocked_categories": ["24", "20", "10"]},
+        youtube={"restrict": "strict", "blocked_categories": ["24", "20", "10", "shorts"]},
         can_install_apps=False,
     ),
     Profile(

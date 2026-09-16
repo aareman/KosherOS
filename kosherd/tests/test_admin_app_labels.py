@@ -95,7 +95,11 @@ def test_youtube_categories_are_worth_showing():
     # Codes are YouTube's, so they must not be renumbered on a whim; the
     # labels are what a parent reads in the dialog.
     assert "27" in YOUTUBE_CATEGORIES and YOUTUBE_CATEGORIES["27"] == "Education"
-    assert all(code.isdigit() and label for code, label in YOUTUBE_CATEGORIES.items())
+    # Every kind is a YouTube category id, except Shorts, which is a kind of
+    # video rather than a category and has its own key.
+    assert all((code.isdigit() or code == "shorts") and label
+               for code, label in YOUTUBE_CATEGORIES.items())
+    assert YOUTUBE_CATEGORIES["shorts"] == "Shorts"
 
 
 def test_every_reportable_picture_state_has_something_to_say(constants):

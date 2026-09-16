@@ -18,7 +18,13 @@ its `org.kosherlinux.*` polkit actions with `AUTH_SELF_KEEP` — they re-enter
 their own password (GNOME's polkit agent handles the prompt) to manage users,
 install catalog apps, connect wifi, or apply updates. kosherd leans on
 existing privileged services (accountsservice, flatpak, bootc, NetworkManager)
-instead of reimplementing them.
+instead of reimplementing them. There are otherwise no polkit admin identities
+at all, so every stock action that defaults to `auth_admin` is unsatisfiable —
+except a named list of everyday ones (time zone, language, device name, joining
+a Wi-Fi network, printers, colour profiles) that
+`45-kosher-admin-system.rules` grants back to `kosher-admin` with their own
+password, so GNOME Settings works for the parent without ever reaching
+services, packages or the image.
 
 **Guardian dual-control**: optionally, filter-weakening calls
 (`SetFilterMode`, `SetWhitelist`, `SetUrlRules`, `SetGuestConfig`,

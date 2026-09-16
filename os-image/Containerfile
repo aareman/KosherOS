@@ -266,6 +266,31 @@ RUN true \
     && mkdir -p /usr/lib/bootc/kargs.d \
     && printf 'kargs = ["quiet", "loglevel=3", "vt.global_cursor_default=0", "rd.udev.log_level=3", "udev.log_priority=3"]\n' \
          > /usr/lib/bootc/kargs.d/10-kosheros.toml \
+    # The three device-security checks an operating system can answer for.
+    # GNOME's Device Security panel reports fwupd's Host Security ID, and
+    # most of that score is the firmware's: Secure Boot, the TPM, VT-d and
+    # the firmware revision are the owner's settings, and BootGuard, SPI
+    # write protection, the ME's manufacturing mode and the CPU's CET and
+    # SMAP are the vendor's. These three are ours.
+    #
+    #   lockdown=integrity  the kernel refuses the paths that would let root
+    #                       rewrite the running kernel. It engages under
+    #                       Secure Boot by itself; saying so explicitly means
+    #                       a machine booted without it still gets the same
+    #                       floor, which is this product's whole posture.
+    #   intel_iommu=on      devices are behind the IOMMU. Modern kernels do
+    #                       this where the firmware exposes VT-d; older
+    #                       Intel parts need asking, and it costs nothing
+    #                       where it is already on.
+    #   mem_sleep_default=s2idle
+    #                       suspend to idle rather than deep S3, which fwupd
+    #                       marks down because S3 leaves the memory image
+    #                       where firmware attacks can reach it.
+    #
+    # Nothing here loads an out-of-tree module (no proprietary drivers ship,
+    # and none can be installed), so lockdown costs the family nothing.
+    && printf 'kargs = ["lockdown=integrity", "intel_iommu=on", "mem_sleep_default=s2idle"]\n' \
+         > /usr/lib/bootc/kargs.d/20-kosheros-security.toml \
     && dconf update
 
 

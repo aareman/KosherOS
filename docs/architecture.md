@@ -35,6 +35,35 @@ services, packages or the image.
 second password (e.g. the other spouse's), stored as a yescrypt hash in
 `/etc/kosher/guardian.shadow`, rate-limited (5 tries → 15 min lockout).
 
+## Device security, and what GNOME's panel can say
+
+Settings → Privacy & Security → **Device Security** reports fwupd's Host
+Security ID. Three of its checks are an operating system's to answer, and
+the image sets all three in `/usr/lib/bootc/kargs.d/20-kosheros-security.toml`:
+
+| kernel argument | what it answers |
+|---|---|
+| `lockdown=integrity` | the kernel refuses the paths that would let root rewrite the running kernel. Secure Boot turns this on by itself; saying it explicitly means a machine booted without Secure Boot still gets the same floor |
+| `intel_iommu=on` | devices sit behind the IOMMU. Modern kernels do this where the firmware exposes VT-d; older Intel parts need asking, and it costs nothing where it is already on |
+| `mem_sleep_default=s2idle` | suspend to idle rather than deep S3, which fwupd marks down because S3 leaves the memory image where firmware attacks can reach it |
+
+Nothing in the image loads an out-of-tree kernel module — no proprietary
+drivers ship, and none can be installed — so lockdown costs the family
+nothing.
+
+**The rest of that panel is not ours.** Secure Boot, the TPM, VT-d and the
+firmware revision are the owner's settings, in the machine's firmware
+setup; Intel BootGuard, SPI flash write protection, the ME's manufacturing
+mode, pre-boot DMA protection and the CPU's CET and SMAP status are the
+vendor's, fixed when the machine was built. On ordinary consumer hardware
+the panel will keep saying "checks failed" however well the OS behaves, and
+one item stays red by design: Fedora swaps to zram, which fwupd counts as
+unencrypted swap.
+
+So the panel is worth reading for the four firmware settings a person can
+actually change, and is not a verdict on the filter. Nothing on that screen
+affects whether KosherOS is filtering.
+
 ## Filtering: the DNS and packet planes
 
 Per-user modes, enforced in two planes:

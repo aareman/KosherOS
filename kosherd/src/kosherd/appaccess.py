@@ -128,14 +128,23 @@ REASONS = {
 }
 
 
+def _get(account, name: str, default=None):
+    """A setting from a UserPolicy or from the dict form of one (what the
+    admin app and the portal hold)."""
+    if isinstance(account, dict):
+        value = account.get(name, default)
+        return default if value is None else value
+    return getattr(account, name, default)
+
+
 def access_of(account) -> str:
     """The account's app access, with the default filled in: the approved
     list for everyone, the whole store for an administrator who has not
     chosen otherwise."""
-    chosen = getattr(account, "app_access", None)
+    chosen = _get(account, "app_access")
     if chosen in APP_ACCESS:
         return chosen
-    return ADMIN_APP_ACCESS if getattr(account, "admin", False) else DEFAULT_APP_ACCESS
+    return ADMIN_APP_ACCESS if _get(account, "admin", False) else DEFAULT_APP_ACCESS
 
 
 def content_reasons(app: dict) -> list[str]:
@@ -173,9 +182,9 @@ def decide(account, app: dict, approved: Iterable[str]) -> str | None:
     the rating ceiling.
     """
     ref = app.get("ref") or ""
-    if ref in set(getattr(account, "blocked_apps", None) or ()):
+    if ref in set(_get(account, "blocked_apps") or ()):
         return "blocked"
-    kinds = set(getattr(account, "blocked_app_kinds", None) or ())
+    kinds = set(_get(account, "blocked_app_kinds") or ())
     if kinds and appkinds.kind_of(app) in kinds:
         return "kind"
     if ref in set(approved):

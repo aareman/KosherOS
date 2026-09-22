@@ -486,7 +486,10 @@ def forget_install(ref: str) -> None:
 
 def installed_details() -> list[dict]:
     """Installed apps with display names and who installed each one."""
+    from . import appkinds
+
     catalog = {a["ref"]: a for a in load_catalog().get("apps", [])}
+    index = cached_index_by_ref() or {}
     ledger = _load_ledger()
     installation = Flatpak.Installation.new_system(None)
     details = []
@@ -495,6 +498,9 @@ def installed_details() -> list[dict]:
             continue
         ref = r.get_name()
         entry = ledger.get(ref, {})
+        # What is known about the app, for the admin app to judge which
+        # accounts may run it: the index first, the approved list after.
+        known = index.get(ref) or catalog.get(ref) or {}
         details.append({
             "ref": ref,
             "name": r.get_appdata_name() or catalog.get(ref, {}).get("name") or ref,
@@ -502,6 +508,9 @@ def installed_details() -> list[dict]:
             "installed_by": entry.get("username", ""),
             "installed_by_uid": entry.get("uid", -1),
             "approved": ref in catalog,
+            "categories": list(known.get("categories") or []),
+            "rating": dict(known.get("rating") or {}),
+            "kind": appkinds.kind_of(known) if known else appkinds.OTHER,
         })
     details.sort(key=lambda a: a["name"].lower())
     return details

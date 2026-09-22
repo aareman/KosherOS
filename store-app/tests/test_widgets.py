@@ -148,13 +148,16 @@ def test_the_grid_has_a_card_per_app(window):
 
 
 def test_every_app_lands_on_exactly_one_shelf():
+    from kosherd import appkinds
     from kosherd.demo import DemoClient as C
 
+    # The shelves ARE kosherd's kinds of app, so what the admin blocks as
+    # "Games" is exactly what this shelf shows.
+    assert store.SHELVES is appkinds.KINDS
     for app in C().catalog:
         key = store.shelf_of(app)
-        claiming = [k for k, _l, claims in store.SHELVES
-                    if set(app.get("categories") or ()) & set(claims)]
-        assert key == (claiming[0] if claiming else "other")
+        assert key in appkinds.KIND_KEYS
+        assert key == appkinds.kind_of(app)
 
 
 def test_an_app_with_no_categories_falls_to_everything_else():
@@ -197,8 +200,8 @@ def test_a_search_can_be_narrowed_to_one_category(window):
 
 def test_an_empty_catalogue_says_who_approves_apps(monkeypatch):
     class Empty(DemoClient):
-        def list_catalog(self):
-            return {"apps": []}
+        def list_store_apps(self, uid=None):
+            return {"apps": [], "access": "approved", "ready": True}
 
     monkeypatch.setattr(store, "DaemonClient", Empty)
     win = store.Window()
@@ -208,6 +211,69 @@ def test_an_empty_catalogue_says_who_approves_apps(monkeypatch):
     assert win.results.get_visible_child_name() == "empty"
     assert "No apps are approved yet" == win.empty.get_title()
     assert "KosherOS Admin" in win.home_subtitle.get_label()
+    assert win.heading.get_label() == "Approved apps"
+
+
+def test_an_older_daemon_with_only_the_approved_list_still_works(monkeypatch):
+    class Older(DemoClient):
+        def list_store_apps(self, uid=None):
+            raise RuntimeError("GDBus.Error:org.freedesktop.DBus.Error.UnknownMethod")
+
+    monkeypatch.setattr(store, "DaemonClient", Older)
+    win = store.Window()
+    drain()
+    assert win.access == "approved"
+    assert [a["ref"] for a in win.catalog] == [a["ref"] for a in win.client.catalog]
+
+
+def test_a_store_account_is_told_the_list_is_the_store(window):
+    # The demo's developer uid is an administrator, so it sees the store.
+    assert window.access == "store"
+    assert window.heading.get_label() == "Apps"
+    assert "from the store" in window.home_subtitle.get_label()
+    shown = {a["ref"] for a in window.catalog}
+    assert "org.gnucash.GnuCash" in shown, "an unapproved store app is offered"
+    assert "com.example.GoreArena" not in shown, "but not one above the ceiling"
+    assert "org.torproject.torbrowser-launcher" not in shown
+
+
+def test_a_store_still_downloading_says_so(monkeypatch):
+    class NotYet(DemoClient):
+        def list_store_apps(self, uid=None):
+            return {"apps": list(self.catalog), "access": "store", "ready": False}
+
+    monkeypatch.setattr(store, "DaemonClient", NotYet)
+    win = store.Window()
+    drain()
+    assert "still being downloaded" in win.home_subtitle.get_label()
+
+
+def test_a_long_shelf_is_drawn_a_page_at_a_time(monkeypatch):
+    class Thousands(DemoClient):
+        def list_store_apps(self, uid=None):
+            apps = [{"ref": f"org.example.App{i:04d}", "name": f"App {i:04d}",
+                     "summary": "One of many", "categories": ["Utility"], "kind": "utilities"}
+                    for i in range(store.PAGE_SIZE * 2 + 5)]
+            return {"apps": apps, "access": "store", "ready": True}
+
+    monkeypatch.setattr(store, "DaemonClient", Thousands)
+    win = store.Window()
+    drain()
+    win.show_shelf("all")
+    drain()
+    assert len(_children(win.grid)) == store.PAGE_SIZE
+    assert win.more.get_visible()
+    assert f"of {store.PAGE_SIZE * 2 + 5}" in win.more.get_label()
+    win.more.emit("clicked")
+    drain()
+    assert len(_children(win.grid)) == store.PAGE_SIZE * 2
+    win.more.emit("clicked")
+    drain()
+    assert len(_children(win.grid)) == store.PAGE_SIZE * 2 + 5
+    assert not win.more.get_visible()
+    # A search starts a fresh page.
+    type_search(win, "App 000")
+    assert len(_children(win.grid)) == 10 and not win.more.get_visible()
 
 
 def test_every_card_gets_an_icon_even_with_nothing_cached(window):

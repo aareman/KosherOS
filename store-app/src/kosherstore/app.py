@@ -1,15 +1,20 @@
-"""KosherOS Store — browse and install approved applications.
+"""KosherOS Store — browse and install applications.
 
-Open to every user: the catalog is the allowlist, so anything listed here
-is already approved by the admin. Installs are performed by kosherd (this
+Open to every user. What it shows is decided by kosherd for the account
+at the keyboard (kosherd.appaccess): the apps an administrator has
+approved, or — for an account opened to the whole store — everything on
+Flathub minus the kinds and apps blocked for it and minus anything rated
+above the computer's content ceiling. So anything listed here is already
+something this account may have. Installs are performed by kosherd (this
 app has no privileges of its own) and progress arrives over D-Bus.
 
 It looks like a store — it opens on the categories, a search box is always
 in the header, and choosing a category (or searching) moves the categories
-into a sidebar with the apps beside them — and it opens instantly, because everything it draws is local: the
-approved list is one small file kosherd writes, and each icon is a file
-flatpak already downloaded beside the remote's catalogue. Nothing here
-parses the 40 MB app index or touches the network.
+into a sidebar with the apps beside them — and it opens quickly, because
+everything it draws is local: the list is one D-Bus reply from an index
+kosherd already holds, and each icon is a file flatpak already downloaded
+beside the remote's catalogue. Nothing here parses the 40 MB app index or
+touches the network, and a shelf of thousands is drawn a page at a time.
 """
 
 from __future__ import annotations
@@ -23,32 +28,14 @@ gi.require_version("Adw", "1")
 gi.require_version("Pango", "1.0")
 from gi.repository import Adw, Gdk, Gio, GLib, Gtk, Pango  # noqa: E402
 
+from kosherd import appkinds  # noqa: E402
 from kosherd.client import DaemonClient  # noqa: E402
 
 APP_ID = "org.kosherlinux.Store"
 
-# The shelves, in the order a person browses them, and the freedesktop
-# categories each gathers. An app lands on the first shelf that claims one
-# of its categories, so nothing appears twice; anything unclaimed falls
-# under Everything else.
-SHELVES = (
-    ("internet", "Internet", ("Network", "WebBrowser", "Email", "Chat", "News")),
-    ("work", "Work", ("Office", "Finance", "Spreadsheet", "WordProcessor",
-                      "Presentation", "Calendar", "ProjectManagement")),
-    ("learning", "Learning", ("Education", "Science", "Languages", "Math",
-                              "Astronomy", "Geography")),
-    ("pictures", "Pictures & video", ("Graphics", "Photography", "AudioVideo",
-                                      "Video", "2DGraphics", "3DGraphics",
-                                      "RasterGraphics", "VectorGraphics", "Viewer")),
-    ("music", "Music", ("Audio", "Music", "Player", "Recorder")),
-    ("games", "Games", ("Game", "ArcadeGame", "BoardGame", "LogicGame",
-                        "KidsGame", "Puzzle", "Simulation", "Sports")),
-    ("develop", "Developer tools", ("Development", "IDE", "TextEditor",
-                                    "Debugger", "WebDevelopment")),
-    ("utilities", "Utilities", ("Utility", "System", "Settings", "Accessibility",
-                                "Archiving", "FileTools", "TerminalEmulator",
-                                "Security")),
-)
+# The shelves are the kinds of app kosherd blocks by (kosherd.appkinds):
+# one vocabulary, so what the admin app calls Games is exactly this shelf.
+SHELVES = appkinds.KINDS
 ICON_SIZE = 48
 FALLBACK_ICON = "application-x-executable"
 # When an app has no icon on this machine at all — a fresh install whose
@@ -56,22 +43,13 @@ FALLBACK_ICON = "application-x-executable"
 # shipped none — draw a lettered tile in its category's colour rather than
 # the same grey box forty times. It is distinct per app, instant, and looks
 # deliberate instead of broken.
-SHELF_TINTS = {
-    "internet": "#3584e4", "work": "#9141ac", "learning": "#1c71d8",
-    "pictures": "#c64600", "music": "#e5a50a", "games": "#2ec27e",
-    "develop": "#613583", "utilities": "#5e5c64", "other": "#5e5c64",
-}
-SHELF_ICONS = {
-    "internet": ("web-browser", "applications-internet"),
-    "work": ("x-office-document", "applications-office"),
-    "learning": ("applications-science", "accessories-dictionary"),
-    "pictures": ("applications-graphics", "image-x-generic"),
-    "music": ("multimedia-player", "audio-x-generic"),
-    "games": ("applications-games", "input-gaming"),
-    "develop": ("applications-engineering", "text-x-script"),
-    "utilities": ("applications-utilities", "applications-system"),
-    "other": (FALLBACK_ICON,),
-}
+SHELF_TINTS = appkinds.KIND_TINTS
+SHELF_ICONS = appkinds.KIND_ICONS
+# How many cards a shelf draws before offering the rest. The whole store
+# is thousands of apps; a grid of thousands of widgets takes seconds on
+# the hardware this runs on, and nobody reads past the first screens
+# without searching anyway.
+PAGE_SIZE = 80
 
 def _tint_css() -> bytes:
     rules = [".app-letter { border-radius: 12px; font-weight: 800; color: #ffffff; }"]
@@ -111,11 +89,7 @@ def _run_async(work, on_done, on_error) -> None:
 
 def shelf_of(app: dict) -> str:
     """Which shelf an app belongs on, from the categories its publisher set."""
-    categories = set(app.get("categories") or ())
-    for key, _label, claims in SHELVES:
-        if categories & set(claims):
-            return key
-    return "other"
+    return appkinds.kind_of(app)
 
 
 def icon_candidates(app: dict) -> list[str]:
@@ -315,7 +289,13 @@ class Window(Adw.ApplicationWindow):
         self.can_install = True
         self.is_admin = False
         self.catalog: list[dict] = []
+        # What kind of list this is ("approved" or "store") and whether
+        # the daemon has the store's index yet; both change the words.
+        self.access = "approved"
+        self.ready = True
         self.shelf = "all"
+        # How many cards the current shelf is showing (see PAGE_SIZE).
+        self.page = PAGE_SIZE
         self._load_css()
 
         self.toasts = Adw.ToastOverlay()
@@ -357,9 +337,9 @@ class Window(Adw.ApplicationWindow):
         self.tiles.connect("child-activated", self._on_tile)
         home_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12,
                            margin_start=18, margin_end=18, margin_top=18)
-        heading = Gtk.Label(label="Approved apps", xalign=0)
-        heading.add_css_class("title-2")
-        home_box.append(heading)
+        self.heading = Gtk.Label(label="Approved apps", xalign=0)
+        self.heading.add_css_class("title-2")
+        home_box.append(self.heading)
         self.home_subtitle = Gtk.Label(xalign=0, wrap=True)
         self.home_subtitle.add_css_class("dim-label")
         home_box.append(self.home_subtitle)
@@ -391,9 +371,17 @@ class Window(Adw.ApplicationWindow):
                                 min_children_per_line=2, max_children_per_line=2,
                                 margin_start=14, margin_end=14, margin_top=12,
                                 margin_bottom=18, valign=Gtk.Align.START)
+        # The rest of a long shelf, a page at a time, under the grid.
+        self.more = Gtk.Button(halign=Gtk.Align.CENTER, margin_bottom=18, visible=False)
+        self.more.add_css_class("pill")
+        self.more.set_cursor_from_name("pointer")
+        self.more.connect("clicked", lambda _b: self._show_more())
+        grid_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        grid_box.append(self.grid)
+        grid_box.append(self.more)
         grid_scroller = Gtk.ScrolledWindow(vexpand=True, hexpand=True,
                                            hscrollbar_policy=Gtk.PolicyType.NEVER)
-        grid_scroller.set_child(self.grid)
+        grid_scroller.set_child(grid_box)
         self.empty = Adw.StatusPage(icon_name="system-search-symbolic", vexpand=True)
         self.results = Gtk.Stack()
         self.results.add_named(grid_scroller, "grid")
@@ -440,7 +428,14 @@ class Window(Adw.ApplicationWindow):
         import os
 
         def load():
-            catalog = self.client.list_catalog().get("apps", [])
+            access, ready = "approved", True
+            try:
+                store = self.client.list_store_apps()
+                catalog = store.get("apps", [])
+                access = store.get("access", "approved")
+                ready = bool(store.get("ready", True))
+            except Exception:  # noqa: BLE001 - an older daemon has only the approved list
+                catalog = self.client.list_catalog().get("apps", [])
             installed = set(self.client.list_installed())
             details = []
             try:
@@ -457,10 +452,11 @@ class Window(Adw.ApplicationWindow):
                 updates = {u["ref"]: u for u in self.client.list_app_updates()}
             except Exception:  # noqa: BLE001 - a store with no update news still opens
                 pass
-            return catalog, installed, details, policy, updates
+            return catalog, installed, details, policy, updates, access, ready
 
         def on_done(result):
-            self.catalog, self.installed, self.installed_apps, policy, self.updates = result
+            (self.catalog, self.installed, self.installed_apps, policy, self.updates,
+             self.access, self.ready) = result
             if policy:
                 me = next((u for u in policy["users"] if u["uid"] == os.getuid()), None)
                 if me is not None:
@@ -589,12 +585,8 @@ class Window(Adw.ApplicationWindow):
         while (child := self.tiles.get_first_child()) is not None:
             self.tiles.remove(child)
         counts = self.shelf_counts()
-        self.home_subtitle.set_label(
-            f"{counts['all']} apps an administrator has approved for this computer. "
-            "Pick a category, or search."
-            if counts["all"] else
-            "An administrator chooses which apps this computer may install, "
-            "in KosherOS Admin.")
+        self.heading.set_label("Apps" if self.access == "store" else "Approved apps")
+        self.home_subtitle.set_label(self.home_words(counts["all"]))
         tiles = []
         if counts["installing"]:
             tiles.append(("installing", "Installing", "folder-download-symbolic"))
@@ -614,6 +606,23 @@ class Window(Adw.ApplicationWindow):
             child.key = key
             child.set_cursor_from_name("pointer")
             self.tiles.append(child)
+
+    def home_words(self, total: int) -> str:
+        """What the home page says under its heading: how many apps, and
+        where they come from — an administrator's list, or the store."""
+        if self.access == "store":
+            words = (f"{total} apps from the store, minus what is not for this "
+                     "account. Pick a category, or search."
+                     if total else "The store is on its way.")
+            if not self.ready:
+                words += (" The rest of the store is still being downloaded; "
+                          "the approved apps are here already.")
+            return words
+        if total:
+            return (f"{total} apps an administrator has approved for this computer. "
+                    "Pick a category, or search.")
+        return ("An administrator chooses which apps this computer may install, "
+                "in KosherOS Admin.")
 
     def _on_tile(self, _box, child) -> None:
         self.show_shelf(getattr(child, "key", "all"))
@@ -663,12 +672,14 @@ class Window(Adw.ApplicationWindow):
         key = getattr(row, "key", "all")
         if key != self.shelf:
             self.shelf = key
+            self.page = PAGE_SIZE
             self._render()
 
     # -- searching and browsing ------------------------------------------------------
 
     def show_shelf(self, key: str) -> None:
         self.shelf = key
+        self.page = PAGE_SIZE
         self.stack.set_visible_child_name("browse")
         self.back.set_visible(True)
         self._select_sidebar(key)
@@ -676,6 +687,7 @@ class Window(Adw.ApplicationWindow):
 
     def _on_search(self) -> None:
         text = self.search.get_text().strip()
+        self.page = PAGE_SIZE
         if text and self.stack.get_visible_child_name() != "browse":
             # Searching takes you into the shelves, across everything.
             self.shelf = "all"
@@ -718,7 +730,13 @@ class Window(Adw.ApplicationWindow):
         self.check_button.set_visible(self.shelf == "updates" and browsing)
         if not shown:
             self.results.set_visible_child_name("empty")
-            if not self.catalog:
+            self.more.set_visible(False)
+            if not self.catalog and self.access == "store":
+                self.empty.set_title("The store is on its way")
+                self.empty.set_description(
+                    "This computer is still downloading the list of apps. "
+                    "Try again in a few minutes.")
+            elif not self.catalog:
                 self.empty.set_title("No apps are approved yet")
                 self.empty.set_description(
                     "An administrator chooses which apps this computer may install, "
@@ -743,12 +761,20 @@ class Window(Adw.ApplicationWindow):
                 self.empty.set_description("Try another category.")
             return
         self.results.set_visible_child_name("grid")
-        for app in shown:
+        for app in shown[:self.page]:
             card = AppCard(app, self)
             self.cards[card.ref] = card
             child = Gtk.FlowBoxChild()
             child.set_child(card)
             self.grid.append(child)
+        left = len(shown) - self.page
+        self.more.set_visible(left > 0)
+        if left > 0:
+            self.more.set_label(f"Show {min(left, PAGE_SIZE)} more of {len(shown)}")
+
+    def _show_more(self) -> None:
+        self.page += PAGE_SIZE
+        self._render()
 
     def _check_updates(self) -> None:
         """Ask the daemon to fetch the remote's news and say what is new."""

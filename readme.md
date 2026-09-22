@@ -92,11 +92,11 @@ system decides for them.
 
 | Group | Web | Pictures | Language | YouTube | Apps |
 |---|---|---|---|---|---|
-| **Default** (no group) | filtered: adult, gambling, dating, social, video and more blocked | immodest hidden | replaced | strict; entertainment, gaming, music and Shorts blocked | chosen by the parent |
-| **Little ones** | only an approved list of sites | none from the web | replaced | none | chosen by the parent |
-| **Kids** | filtered: adult, gambling, dating, social, video and more blocked | immodest hidden | replaced | strict; entertainment, gaming, music and Shorts blocked | chosen by the parent |
-| **Teens** | filtered: adult and gambling blocked, news and approved video allowed | immodest hidden | replaced | moderate | can install approved apps |
-| **Grown-ups** | filtered: adult content and filter bypasses blocked | immodest hidden | left alone | moderate | can install approved apps |
+| **Default** (no group) | filtered: adult, gambling, dating, social, video and more blocked | immodest hidden | replaced | strict; entertainment, gaming, music and Shorts blocked | approved apps only |
+| **Little ones** | only an approved list of sites | none from the web | replaced | none | approved apps only |
+| **Kids** | filtered: adult, gambling, dating, social, video and more blocked | immodest hidden | replaced | strict; entertainment, gaming, music and Shorts blocked | approved apps only |
+| **Teens** | filtered: adult and gambling blocked, news and approved video allowed | immodest hidden | replaced | moderate | the whole store, games blocked |
+| **Grown-ups** | filtered: adult content and filter bypasses blocked | immodest hidden | left alone | moderate | the whole store |
 
 **Filtering that reads the page, not just the address.** In the filtered modes the machine
 inspects the connection locally, so it can block a *page* rather than a whole site, clean up
@@ -112,9 +112,13 @@ with the same policy as the traffic, so a filtered user never clicks into a bloc
 whitelist user can finally *see* what the whitelist contains. Searches inside large sites, and their
 suggestions, are filtered too. See [docs/search.md](docs/search.md).
 
-**Apps from an allowlist.** The KosherOS Store installs from upstream Flathub, limited to the
-apps a parent has approved. A guest account can be switched on, given its own kind of internet,
-and is wiped at sign-out.
+**Apps, as much of the store as each account should have.** The KosherOS Store installs from
+upstream Flathub. An account starts with only the apps a parent has approved; a parent can open
+an account, or a whole group, to the whole store and block kinds of app (games, internet, music)
+or single apps, and the blocks apply to running as well as installing. An account opened to the
+store never sees an app rated for nudity, sexual themes, bad language, gambling, drugs or graphic
+violence unless a parent approves it by name. A guest account can be switched on, given its own
+kind of internet, and is wiped at sign-out.
 
 **A window for the person being filtered.** *My Filter* is a read-only app on every account that
 says, in plain language, what applies to you. A child who can see the rules is likelier to accept
@@ -199,7 +203,7 @@ the guardian password. Full detail in [docs/architecture.md](docs/architecture.m
 | Pages | mitmproxy with a locally generated CA, one listener per filtered account | page rules, category lists, page-content scoring, shop department rules, language clean-up, YouTube limits |
 | Pictures and video | an on-device detector with region covering, sampled keyframes for video | what is hidden, what is covered, and how |
 | Search | SearXNG on loopback behind a KosherOS front end | which results a person sees, and which searches will not run |
-| Apps | malcontent plus a kosherd allowlist over Flathub | which apps each account may run and install |
+| Apps | malcontent plus kosherd deciding per account over Flathub, with Flathub's content ratings | which apps each account may run and install: the approved list or the whole store, minus blocked kinds and apps |
 
 Every list ships complete, and the machine says so when a list failed to load or picture checking
 has backed off: a filter that has quietly stopped is worse than one that never started.
@@ -346,6 +350,7 @@ as "built and tested", not "proven in a home".
 - [x] **Filter core**: kosherd, per-account nftables enforcement, dnsmasq whitelist sets, `kosherctl`
 - [x] **Immutable OS image** on Fedora bootc: builds, lint-clean, boots to GNOME
 - [x] **Admin app and Store**: an approved-app allowlist over upstream Flathub, installs performed by kosherd with live progress
+- [x] **The whole store, per account**: an account or group can be opened to all of Flathub, with kinds of app and single apps blocked, under a fixed content-rating ceiling
 - [x] **Branding**: identity, boot splash, login screen, wallpaper ([docs/branding.md](docs/branding.md)); real logo artwork still to come
 - [x] **Desktop layouts** per account: classic, tiling (PaperWM) and advanced (niri with Noctalia) ([docs/desktop.md](docs/desktop.md))
 - [x] **Installable ISO** and a first-boot wizard: admin account, guardian, boot password, firmware checklist

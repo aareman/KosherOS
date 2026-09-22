@@ -52,6 +52,17 @@ def _page(settings):
     return window._build(settings)
 
 
+def test_which_apps_is_said_in_words():
+    assert app.apps_words({"app_access": "approved"}) == \
+        "Only the apps an administrator has approved"
+    assert app.apps_words({"app_access": "store",
+                           "blocked_app_kinds": [{"key": "games", "label": "Games"}]}) == \
+        "Anything in the store that is not blocked for you · blocked: Games"
+    page = _page({**_settings(), "app_access": "approved", "blocked_app_kinds": []})
+    row = next(r for r in _rows(page) if r.get_title() == "Which apps")
+    assert row.get_subtitle() == "Only the apps an administrator has approved"
+
+
 def test_a_limited_account_sees_its_limit_what_is_left_and_todays_hours():
     page = _page(_settings())
     rows = {r.get_title(): r for r in _rows(page)}

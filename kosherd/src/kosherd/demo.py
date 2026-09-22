@@ -14,7 +14,7 @@ import json
 import time
 from pathlib import Path
 
-from . import profiles, timelimits
+from . import appaccess, profiles, timelimits
 
 now = int(time.time())
 
@@ -493,18 +493,10 @@ class DemoClient:
         first administrator's view unless told otherwise."""
         import os
 
-        from kosherd import appaccess, appkinds
-        from kosherd.policy import UserPolicy
-
         uid = os.getuid() if uid is None else uid
-        doc = next((u for u in self.policy["users"] if u["uid"] == uid), None)
-        if doc is None:
-            doc = next(u for u in self.policy["users"] if u.get("admin"))
-        account = UserPolicy(uid=doc["uid"], username=doc["username"], mode=doc["mode"],
-                             admin=doc.get("admin", False),
-                             app_access=doc.get("app_access"),
-                             blocked_app_kinds=list(doc.get("blocked_app_kinds") or []),
-                             blocked_apps=list(doc.get("blocked_apps") or []))
+        account = next((u for u in self.policy["users"] if u["uid"] == uid), None)
+        if account is None:
+            account = next(u for u in self.policy["users"] if u.get("admin"))
         index = [*self.catalog, *DEMO_STORE_APPS]
         return {"access": appaccess.access_of(account), "ready": True,
                 "apps": appaccess.visible(account, index, self.catalog)}

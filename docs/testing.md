@@ -47,8 +47,11 @@ What each file guards:
 - `test_apply.py` — the order in which enforcement is applied, and what
   happens when a piece of it fails.
 - `test_apps_catalog.py`, `test_appstream.py`, `test_app_queue.py`,
-  `test_mct.py` — the app allowlist, Flathub metadata parsing, the install
-  queue, and per-user app permissions.
+  `test_mct.py`, `test_appaccess.py`, `test_appkinds.py` — the approved
+  list, Flathub metadata parsing (categories and OARS content ratings), the
+  install queue, and which apps each account may install and run: the
+  approved list or the whole store, blocked kinds and apps, the content
+  ceiling.
 - `test_guardian.py`, `test_session.py` — the second password and the
   authenticate-once session.
 - `test_mitmca.py`, `test_mitm_addon.py` — the inspection CA and the
@@ -71,7 +74,7 @@ just test-vm kosher-fedora 50   # just the inspect-mode suite
 |---|---|
 | `10-core` | services running, firewall ordered before the network, the D-Bus API, DNS redirection and family filtering, DoT/DoH rejection |
 | `20-enforcement` | the per-user matrix (none/whitelist/dnsfilter), fail-closed for unmanaged accounts, user-namespace containment, captive-portal windows |
-| `30-apps` | the allowlist refusing unapproved apps, direct installs blocked for users, per-user app permissions |
+| `30-apps` | an approved-only account refused an unapproved app, a store account refused one above the content ceiling, direct installs blocked for users, per-user app permissions |
 | `40-guest` | enable, enforce, wipe-on-sign-out, disable |
 | `50-inspect` | TLS interception: the proxy, the CA, rules reaching it, a blocked URL, an allowed URL, and that uninspected users are untouched |
 | `60-persistence` | revisions advance, the policy stays root-only, a restarted daemon rebuilds enforcement, sessions do not survive a restart |

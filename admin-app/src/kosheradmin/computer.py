@@ -242,8 +242,10 @@ class AppsPage(_Page):
             self.prefs.remove(self.group)
         group = Adw.PreferencesGroup(
             title=f"Approved apps ({len(self.approved)})",
-            description="Anyone using this computer may install these from the "
-                        "KosherOS Store. Nothing else can be installed.")
+            description="What an account on \"Approved apps only\" may install from the "
+                        "KosherOS Store, which is every account unless its Apps tab says "
+                        "otherwise. An approval also lets an account opened to the whole "
+                        "store have an app rated above the computer's content ceiling.")
         if not self.approved:
             row = Adw.ActionRow(title="No apps approved yet",
                                 subtitle="Search below to approve apps")
@@ -273,8 +275,9 @@ class AppsPage(_Page):
     def _build_search(self) -> None:
         group = Adw.PreferencesGroup(
             title="Add apps",
-            description="Search everything available, then approve what you "
-                        "want people on this computer to be able to install.")
+            description="Search everything on Flathub, then approve what every "
+                        "account on this computer may install. To open one account "
+                        "to the whole store instead, use its Apps tab.")
         entry = Adw.EntryRow(title="Search all apps")
         entry.set_show_apply_button(True)
         self.search_entry = entry

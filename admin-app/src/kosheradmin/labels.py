@@ -11,6 +11,8 @@ from __future__ import annotations
 
 import time
 
+from kosherd import appaccess
+from kosherd.appkinds import KIND_LABELS
 from kosherd.categories import CATEGORY_LABELS
 from kosherd.policy import YOUTUBE_CATEGORIES
 
@@ -93,6 +95,37 @@ LANGUAGE_SHORT = {
     "block": "Pages with bad language blocked",
 }
 LANGUAGE_ORDER = ("off", "substitute", "block")
+
+# What the Store offers an account, as one short line.
+APP_ACCESS_SHORT = {
+    "approved": "Approved apps only",
+    "store": "The whole store",
+}
+
+
+def app_name(ref: str) -> str:
+    """'org.gnome.Chess' -> 'Chess': what to call an app when only its id
+    is known, rather than showing a person a ref."""
+    return (ref.rsplit(".", 1)[-1] or ref).strip() or ref
+
+
+def apps_line(user: dict) -> tuple[str, bool]:
+    """The apps chip: what this account may have, and whether that is a
+    restriction (drawn blue) or the open store (drawn amber)."""
+    access = appaccess.access_of(user)
+    kinds = len(user.get("blocked_app_kinds") or [])
+    singles = len(user.get("blocked_apps") or [])
+    allowed = user.get("apps") or []   # the older allow-list, until converted
+    if allowed:
+        return plural(len(allowed), "app allowed"), True
+    words = APP_ACCESS_SHORT[access]
+    if kinds:
+        words += f", {plural(kinds, 'kind')} blocked"
+    elif singles:
+        words += f", {plural(singles, 'app')} blocked"
+    if user.get("can_install_apps", True):
+        words += ", can install"
+    return words, access == "approved" or bool(kinds or singles)
 
 YOUTUBE_RESTRICT_LABELS = {
     "none": "Off",
@@ -410,7 +443,15 @@ def change_sentence(event: dict, users_by_uid: dict | None = None) -> tuple[str,
     elif method == "SetUserApps":
         what = f"{who}: which apps are allowed changed"
     elif method == "SetUserCanInstall":
-        what = f"{who} {'may' if arg(1) else 'may not'} install approved apps"
+        what = f"{who} {'may' if arg(1) else 'may not'} install apps"
+    elif method == "SetUserAppAccess":
+        what = f"{who}: {APP_ACCESS_SHORT.get(arg(1), str(arg(1)))}"
+    elif method == "SetUserBlockedAppKinds":
+        kinds = arg(1) or []
+        what = f"{who}: {plural(len(kinds), 'kind')} of app blocked"
+    elif method == "SetUserBlockedApps":
+        refs = arg(1) or []
+        what = f"{who}: {plural(len(refs), 'app')} blocked by name"
     elif method == "RemoveApp":
         what = f"App uninstalled for everyone ({arg(0)})"
     elif method == "ApproveApp":
@@ -476,6 +517,19 @@ def drift_sentences(changes: list[dict]) -> list[str]:
             out.append(LANGUAGE_SHORT.get(change.get("to"), str(change.get("to"))))
         elif field == "can_install_apps":
             out.append("Can install apps" if change.get("to") else "Cannot install apps")
+        elif field == "app_access":
+            out.append(APP_ACCESS_SHORT.get(change.get("to"), str(change.get("to"))))
+        elif field == "blocked_app_kinds":
+            for name in change.get("added", []):
+                out.append(f"{KIND_LABELS.get(name, name)} apps also blocked")
+            for name in change.get("removed", []):
+                out.append(f"{KIND_LABELS.get(name, name)} apps not blocked")
+        elif field == "blocked_apps":
+            added, removed = change.get("added", []), change.get("removed", [])
+            if added:
+                out.append(f"{plural(len(added), 'more app')} blocked")
+            if removed:
+                out.append(f"{plural(len(removed), 'app')} unblocked")
         elif field == "youtube":
             out.extend(_youtube_drift(change.get("from") or {}, change.get("to") or {}))
     return out
@@ -578,12 +632,7 @@ def protection_lines(user: dict) -> list[tuple[str, str, bool]]:
         blocked = len(youtube.get("blocked_categories") or [])
         video = f"YouTube {restrict.lower()}" + (f", {plural(blocked, 'kind')} blocked" if blocked else "")
 
-    allowed = user.get("apps") or []
-    can_install = user.get("can_install_apps", True)
-    if allowed:
-        apps = plural(len(allowed), "app allowed")
-    else:
-        apps = "All apps" + (", can install" if can_install else "")
+    apps, apps_protect = apps_line(user)
 
     mode_protects = MODE_PROTECTS.get(mode, True)
     return [
@@ -594,7 +643,7 @@ def protection_lines(user: dict) -> list[tuple[str, str, bool]]:
          mode in ("none", "whitelist") or (mode == "filtered" and (
              bool(youtube.get("allowed_channels")) or bool(youtube.get("blocked_categories"))
              or youtube.get("restrict", "moderate") != "none"))),
-        ("view-grid-symbolic", apps, bool(allowed) or not can_install),
+        ("view-grid-symbolic", apps, apps_protect),
     ]
 
 

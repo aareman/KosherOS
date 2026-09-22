@@ -103,6 +103,18 @@ TIME = {
 }
 
 
+def apps_words(s: dict) -> str:
+    """What the Store offers you, in one line: the approved list or the
+    whole store, and which kinds of app are blocked."""
+    words = ("Anything in the store that is not blocked for you"
+             if s.get("app_access") == "store" else
+             "Only the apps an administrator has approved")
+    kinds = [k.get("label") for k in s.get("blocked_app_kinds") or [] if k.get("label")]
+    if kinds:
+        words += " · blocked: " + ", ".join(kinds)
+    return words
+
+
 def _error_text(e: Exception) -> str:
     import re
 
@@ -242,6 +254,8 @@ class Window(Adw.ApplicationWindow):
             subtitle=("You can install apps from KosherOS Store"
                       if s.get("can_install_apps") else
                       "Only an administrator can install apps")))
+        if "app_access" in s:
+            group.add(Adw.ActionRow(title="Which apps", subtitle=apps_words(s)))
         return group
 
     def _time(self, t: dict) -> Adw.PreferencesGroup:

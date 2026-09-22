@@ -190,11 +190,6 @@ def _access_of(user) -> str:
     """An account's app access with its default filled in (appaccess.py)."""
     from .appaccess import access_of
 
-    if isinstance(user, dict):
-        chosen = user.get("app_access")
-        if chosen in ("approved", "store"):
-            return chosen
-        return "store" if user.get("admin") else "approved"
     return access_of(user)
 
 

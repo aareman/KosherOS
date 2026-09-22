@@ -810,7 +810,7 @@ def test_every_setting_made_the_move():
     titles = {r.get_title() for r in _rows(page)}
     for title in ("Group", "Filter mode", "Approved sites", "Page rules",
                   "Pictures and video", "Bad language", "Restricted Mode",
-                  "Can install approved apps", "Allow Wi-Fi sign-in",
+                  "Can install apps", "Which apps", "Allow Wi-Fi sign-in",
                   "Administrator", "Layout", "Remove This Account…"):
         assert title in titles, f"{title} was lost in the move"
 
@@ -890,8 +890,161 @@ def test_the_protection_strip_has_the_four_lines():
     texts = _texts(page)
     for expected in ("Filtered internet · 10 kinds of site blocked",
                      "Immodest pictures hidden", "YouTube strict, 4 kinds blocked",
-                     "All apps"):
+                     "Approved apps only"):
         assert expected in texts, expected
+
+
+# -- the apps tab ------------------------------------------------------------------
+
+def _apps_tab(**kw):
+    page, win, user = _detail(**kw)
+    page.stack.set_visible_child_name("apps")
+    drain()
+    return page, win, user
+
+
+def test_the_apps_tab_offers_the_approved_list_or_the_whole_store():
+    page, _w, _u = _apps_tab()
+    combo = _row_named(page, "Which apps")
+    model = combo.get_model()
+    assert [model.get_string(i) for i in range(model.get_n_items())] == [
+        "Approved apps only", "The whole store, minus what is blocked"]
+    assert combo.get_selected() == 0, "an account starts on the approved list"
+    assert any("strict choice" in t for t in _texts(page))
+
+
+def test_opening_the_store_goes_through_the_guardian_and_says_what_it_means():
+    class Recording(FakeClient):
+        def set_user_app_access(self, uid, access, pw=""):
+            self.calls.append(("set_user_app_access", uid, access))
+
+    win = FakeWindow(Recording())
+    user = a_user()
+    win.policy = {"revision": 1, "users": [user], "custom_profiles": [],
+                  "guardian": {"enabled": False}, "guest": {"enabled": False}}
+
+
+    page = detail.UserDetailPage(win, user)
+    page.stack.set_visible_child_name("apps")
+    drain()
+    combo = _row_named(page, "Which apps")
+    combo.set_selected(1)
+    drain()
+    assert ("set_user_app_access", 1001, "store") in win.client.calls
+    assert any("nudity" in t and "approves them by name" in t for t in _texts(page))
+
+
+def test_every_kind_of_app_has_a_switch_and_blocking_one_is_saved():
+    from kosherd import appkinds
+
+    class Recording(FakeClient):
+        def set_user_blocked_app_kinds(self, uid, kinds, pw=""):
+            self.calls.append(("set_user_blocked_app_kinds", uid, list(kinds)))
+
+    win = FakeWindow(Recording())
+    user = a_user(blocked_app_kinds=["games"])
+    win.policy = {"revision": 1, "users": [user], "custom_profiles": [],
+                  "guardian": {"enabled": False}, "guest": {"enabled": False}}
+
+
+    page = detail.UserDetailPage(win, user)
+    page.stack.set_visible_child_name("apps")
+    drain()
+    titles = {r.get_title() for r in _rows(page)}
+    for key in appkinds.KIND_KEYS:
+        assert appkinds.label(key) in titles
+    assert page.kind_rows["games"].get_active()
+    assert not page.kind_rows["internet"].get_active()
+    page.kind_rows["internet"].set_active(True)
+    drain()
+    assert ("set_user_blocked_app_kinds", 1001, ["games", "internet"]) in win.client.calls
+
+
+def test_a_single_app_can_be_blocked_by_searching_and_unblocked_again():
+    class Recording(FakeClient):
+        def search_apps(self, query):
+            return [{"ref": "org.example.Racer", "name": "Racer", "summary": "Fast cars"},
+                    {"ref": "org.example.Other", "name": "Other", "summary": "Else"}]
+
+        def set_user_blocked_apps(self, uid, refs, pw=""):
+            self.calls.append(("set_user_blocked_apps", uid, list(refs)))
+
+    win = FakeWindow(Recording())
+    user = a_user(blocked_apps=["org.example.Old"])
+    win.policy = {"revision": 1, "users": [user], "custom_profiles": [],
+                  "guardian": {"enabled": False}, "guest": {"enabled": False}}
+
+
+    page = detail.UserDetailPage(win, user)
+    page.stack.set_visible_child_name("apps")
+    drain()
+    assert "Old" in {r.get_title() for r in _rows(page.blocked_list)}
+    page.block_entry.set_text("racer")
+    page.block_entry.emit("apply")
+    drain()
+    block = next(b for b in _buttons(page.block_results) if b.get_label() == "Block")
+    block.emit("clicked")
+    drain()
+    assert ("set_user_blocked_apps", 1001, ["org.example.Old", "org.example.Racer"]) \
+        in win.client.calls
+    assert "Racer" in {r.get_title() for r in _rows(page.blocked_list)}
+    unblock = next(b for b in _buttons(page.blocked_list) if b.get_label() == "Unblock")
+    unblock.emit("clicked")
+    drain()
+    assert win.client.calls[-1][0] == "set_user_blocked_apps"
+    assert "org.example.Old" not in win.client.calls[-1][2]
+
+
+def test_an_installed_app_says_why_this_account_cannot_run_it():
+    installed = [
+        {"ref": "org.gnome.Chess", "name": "Chess", "approved": True,
+         "categories": ["Game"], "kind": "games", "rating": {}},
+        {"ref": "org.example.Unapproved", "name": "Unapproved", "approved": False,
+         "categories": ["Utility"], "kind": "utilities", "rating": {}},
+        {"ref": "org.mozilla.firefox", "name": "Firefox", "approved": True,
+         "categories": ["Network"], "kind": "internet", "rating": {}},
+    ]
+    page, _w, _u = _apps_tab(installed=installed, blocked_app_kinds=["games"],
+                             blocked_apps=["org.mozilla.firefox"])
+    texts = _texts(page.apps_list)
+    assert "Games blocked" in texts
+    assert "not approved" in texts
+    switches = {r.get_title(): [c for c in _suffixes(r) if isinstance(c, Gtk.Switch)][0]
+                for r in _rows(page.apps_list)}
+    assert not switches["Firefox"].get_active() and switches["Firefox"].get_sensitive()
+    assert not switches["Chess"].get_active() and not switches["Chess"].get_sensitive()
+
+
+def _suffixes(row, found=None):
+    found = [] if found is None else found
+    child = row.get_first_child()
+    while child is not None:
+        found.append(child)
+        _suffixes(child, found)
+        child = child.get_next_sibling()
+    return found
+
+
+def test_the_apps_chip_names_the_list_and_the_blocks():
+    assert labels.apps_line(a_user()) == ("Approved apps only", True)
+    assert labels.apps_line(a_user(can_install_apps=True)) == (
+        "Approved apps only, can install", True)
+    assert labels.apps_line(a_user(app_access="store", can_install_apps=True)) == (
+        "The whole store, can install", False)
+    assert labels.apps_line(a_user(app_access="store", blocked_app_kinds=["games", "internet"],
+                                   can_install_apps=True)) == (
+        "The whole store, 2 kinds blocked, can install", True)
+    assert labels.apps_line({"uid": 1, "admin": True}) == ("The whole store, can install", False)
+
+
+def test_drift_names_app_changes_in_words():
+    lines = labels.drift_sentences([
+        {"field": "app_access", "from": "approved", "to": "store"},
+        {"field": "blocked_app_kinds", "added": ["games"], "removed": ["music"]},
+        {"field": "blocked_apps", "added": ["a", "b"], "removed": []},
+    ])
+    assert lines == ["The whole store", "Games apps also blocked", "Music apps not blocked",
+                     "2 more apps blocked"]
 
 
 def test_the_overview_shows_what_was_blocked_today_with_allow():

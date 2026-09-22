@@ -18,6 +18,7 @@ gi.require_version("Adw", "1")
 from gi.repository import Adw, GLib, Gtk  # noqa: E402
 
 from kosherd import activity as activity_mod  # noqa: E402
+from kosherd import appaccess, appkinds  # noqa: E402
 from kosherd import profiles as profiles_mod  # noqa: E402
 from kosherd import timelimits  # noqa: E402
 from kosherd.policy import MEDIA_LEVELS, MODES, YOUTUBE_CATEGORIES  # noqa: E402
@@ -1001,16 +1002,32 @@ class UserDetailPage(Adw.NavigationPage):
 
     # -- apps ----------------------------------------------------------------------
 
+    # What each choice of app access means, under the row (see hint_under).
+    ACCESS_HINTS = {
+        "approved": "Only the apps on the approved list, which is kept under Apps in "
+                    "the sidebar. The strict choice, and what every account starts with.",
+        "store": "Everything on Flathub that is not blocked below. Apps rated for "
+                 "nudity, sexual themes, bad language, gambling, drugs or graphic "
+                 "violence are left out unless an administrator approves them by name.",
+    }
+
     def _apps_tab(self, user: dict) -> list[Adw.PreferencesGroup]:
         """Apps on this computer, from one user's point of view.
 
-        Apps install system-wide, so 'uninstall' removes an app for
-        everyone — that is spelled out. To restrict a single user, turn
-        the app off for them instead (enforced by malcontent).
+        Three things decide what this account may have: which list the
+        Store shows it (the approved list, or the whole store), which
+        kinds of app are blocked, and which single apps are blocked. The
+        blocks apply whichever list is chosen, and to running as well as
+        installing. Apps install system-wide, so 'uninstall' removes an
+        app for everyone — that is spelled out.
         """
-        installs_group = Adw.PreferencesGroup()
-        installs = Adw.SwitchRow(title="Can install approved apps",
-                                 subtitle="Only apps on the approved list, from the KosherOS Store",
+        self.blocked_kinds: set[str] = set(user.get("blocked_app_kinds") or [])
+        self.blocked_apps: list[str] = sorted(user.get("blocked_apps") or [])
+        self._kinds_saved = sorted(self.blocked_kinds)
+
+        installs_group = Adw.PreferencesGroup(title="What this account may install")
+        installs = Adw.SwitchRow(title="Can install apps",
+                                 subtitle="From the KosherOS Store, within the limits below",
                                  active=user.get("can_install_apps", True))
         installs.connect("notify::active", lambda s, _p: (
             s.get_active() != user.get("can_install_apps", True) and self.win.call(
@@ -1018,18 +1035,145 @@ class UserDetailPage(Adw.NavigationPage):
                 done_msg=f"App installs {'enabled' if s.get_active() else 'disabled'} for {user['username']}")))
         installs_group.add(installs)
 
+        access_row = Adw.ComboRow(title="Which apps")
+        access_row.set_model(Gtk.StringList.new(
+            [appaccess.APP_ACCESS_LABELS[key] for key in appaccess.APP_ACCESS]))
+        current = appaccess.access_of(user)
+        access_row.set_selected(appaccess.APP_ACCESS.index(current))
+        installs_group.add(access_row)
+        hint = hint_under(installs_group, self.ACCESS_HINTS[current])
+
+        def on_access(combo, _p):
+            key = appaccess.APP_ACCESS[combo.get_selected()]
+            hint.set_label(self.ACCESS_HINTS[key])
+            if key == appaccess.access_of(user):
+                return
+            user["app_access"] = key
+            self._gated(lambda pw: self.win.client.set_user_app_access(user["uid"], key, pw),
+                        f"{user['username']}: {appaccess.APP_ACCESS_LABELS[key].lower()}")
+
+        access_row.connect("notify::selected", on_access)
+
+        kinds_group = Adw.PreferencesGroup(
+            title="Blocked kinds of apps",
+            description="Blocked whichever list is chosen above: not offered in the "
+                        "Store, and hidden from this account if already installed.")
+        self.kind_rows: dict[str, Adw.SwitchRow] = {}
+        for key in appkinds.KIND_KEYS:
+            row = Adw.SwitchRow(title=appkinds.label(key), active=key in self.blocked_kinds,
+                                use_markup=False)
+            row.connect("notify::active", self._on_kind, key)
+            self.kind_rows[key] = row
+            kinds_group.add(row)
+
+        self.blocked_apps_group = Adw.PreferencesGroup(
+            title="Blocked apps",
+            description="Single apps this account may not have, whatever else says. "
+                        "Search to block an app that is not installed yet.")
+        self.blocked_list = Gtk.ListBox(selection_mode=Gtk.SelectionMode.NONE)
+        self.blocked_list.add_css_class("boxed-list")
+        self.blocked_apps_group.add(self.blocked_list)
+        self.block_entry = Adw.EntryRow(title="Block an app", margin_top=6)
+        self.block_entry.set_show_apply_button(True)
+        self.block_entry.connect("apply", lambda _e: self._search_to_block(user))
+        self.block_entry.connect("entry-activated", lambda _e: self._search_to_block(user))
+        self.blocked_apps_group.add(self.block_entry)
+        self.block_results = Gtk.ListBox(selection_mode=Gtk.SelectionMode.NONE, margin_top=6,
+                                         visible=False)
+        self.block_results.add_css_class("boxed-list")
+        self.blocked_apps_group.add(self.block_results)
+        self._render_blocked(user)
+
         self.apps_group = Adw.PreferencesGroup(
             title="Installed apps",
-            description="Turning an app off hides it from this user only. "
+            description="Turning an app off blocks it for this account only. "
                         "Uninstalling removes it from the whole computer.")
         self.apps_list = Gtk.ListBox(selection_mode=Gtk.SelectionMode.NONE)
         self.apps_list.add_css_class("boxed-list")
         self.apps_list.append(Adw.ActionRow(title="Loading…"))
         self.apps_group.add(self.apps_list)
-        # An empty allow-list means "every installed app".
-        self.allowed: set[str] | None = set(user.get("apps") or []) or None
         self._load_apps(user)
-        return [installs_group, self.apps_group]
+        return [installs_group, kinds_group, self.blocked_apps_group, self.apps_group]
+
+    # -- kinds --
+
+    def _on_kind(self, row: Adw.SwitchRow, _param, key: str) -> None:
+        if row.get_active():
+            self.blocked_kinds.add(key)
+        else:
+            self.blocked_kinds.discard(key)
+        kinds = sorted(self.blocked_kinds)
+        if kinds == self._kinds_saved:
+            return
+        self._kinds_saved = kinds
+        user = self.user
+        user["blocked_app_kinds"] = kinds
+        self._gated(lambda pw: self.win.client.set_user_blocked_app_kinds(user["uid"], kinds, pw),
+                    f"{labels.plural(len(kinds), 'kind')} of app blocked for {user['username']}")
+
+    # -- single apps --
+
+    def _render_blocked(self, user: dict) -> None:
+        clear(self.blocked_list)
+        if not self.blocked_apps:
+            row = Adw.ActionRow(title="No single apps blocked")
+            row.set_sensitive(False)
+            self.blocked_list.append(row)
+        for ref in self.blocked_apps:
+            row = Adw.ActionRow(title=labels.app_name(ref), subtitle=ref, use_markup=False)
+            unblock = small_button("Unblock", "flat")
+            unblock.set_valign(Gtk.Align.CENTER)
+            unblock.connect("clicked", lambda _b, r=ref: self._set_blocked(user, r, False))
+            row.add_suffix(unblock)
+            self.blocked_list.append(row)
+        pointer_cursors(self.blocked_list)
+
+    def _set_blocked(self, user: dict, ref: str, blocked: bool) -> None:
+        refs = set(self.blocked_apps)
+        (refs.add if blocked else refs.discard)(ref)
+        self.blocked_apps = sorted(refs)
+        user["blocked_apps"] = list(self.blocked_apps)
+        self._render_blocked(user)
+        self._gated(lambda pw: self.win.client.set_user_blocked_apps(
+            user["uid"], list(self.blocked_apps), pw),
+            f"{labels.app_name(ref)} {'blocked' if blocked else 'unblocked'} for {user['username']}")
+        if self.apps_list is not None:
+            self._load_apps(user)
+
+    def _search_to_block(self, user: dict) -> None:
+        query = self.block_entry.get_text().strip()
+        if not query:
+            return
+        results = self.block_results
+        results.set_visible(True)
+        clear(results)
+        results.append(Adw.ActionRow(title="Searching…", sensitive=False))
+
+        def on_done(found):
+            if results is not self.block_results:
+                return
+            clear(results)
+            shown = [a for a in found if a["ref"] not in self.blocked_apps][:20]
+            if not shown:
+                results.append(Adw.ActionRow(title="No matches", sensitive=False))
+                return
+            for app in shown:
+                row = Adw.ActionRow(title=app["name"], subtitle=app.get("summary") or app["ref"],
+                                    use_markup=False)
+                btn = small_button("Block", "destructive-action")
+                btn.set_valign(Gtk.Align.CENTER)
+                btn.connect("clicked", lambda _b, a=app: (
+                    self._set_blocked(user, a["ref"], True),
+                    results.set_visible(False), self.block_entry.set_text("")))
+                row.add_suffix(btn)
+                results.append(row)
+            pointer_cursors(results)
+
+        run_async(lambda: self.win.client.search_apps(query), on_done,
+                  lambda e: (clear(results),
+                             results.append(Adw.ActionRow(title=error_text(e), sensitive=False))))
+
+    # -- installed apps --
 
     def _load_apps(self, user: dict) -> None:
         apps_list = self.apps_list
@@ -1044,24 +1188,33 @@ class UserDetailPage(Adw.NavigationPage):
                 apps_list.append(row)
                 return
             for app in details:
-                apps_list.append(self._app_row(user, app, details))
+                apps_list.append(self._app_row(user, app))
             pointer_cursors(apps_list)
 
         run_async(self.win.client.list_installed_details, on_done,
                   lambda e: self.win.toast(error_text(e)))
 
-    def _app_row(self, user: dict, app: dict, all_apps: list[dict]) -> Adw.ActionRow:
+    def _app_row(self, user: dict, app: dict) -> Adw.ActionRow:
         subtitle = app["ref"]
         if app.get("installed_by"):
             subtitle += f" · installed by {app['installed_by']}"
-        if not app.get("approved", True):
-            subtitle += " · no longer approved"
         row = Adw.ActionRow(title=app["name"], subtitle=subtitle, use_markup=False)
-        allowed = self.allowed is None or app["ref"] in self.allowed
-        switch = Gtk.Switch(active=allowed, valign=Gtk.Align.CENTER,
-                            tooltip_text="Allow this user to run the app")
-        switch.connect("state-set", lambda _s, state, r=app["ref"], every=all_apps:
-                       self._set_allowed(user, r, state, every))
+        # Why this account cannot run the app, if it cannot: the switch
+        # answers for a single block; anything else is named so the parent
+        # knows which setting to change.
+        approved = {app["ref"]} if app.get("approved", True) else set()
+        reason = appaccess.decide(user, app, approved)
+        if reason and reason != "blocked":
+            row.add_suffix(tag({"kind": f"{appkinds.label(app.get('kind', 'other'))} blocked",
+                                "not-approved": "not approved",
+                                "content": "above the content ceiling",
+                                "circumvention": "gets around the filter",
+                                "unknown": "not in the app list"}.get(reason, reason)))
+        switch = Gtk.Switch(active=reason is None, valign=Gtk.Align.CENTER,
+                            sensitive=reason in (None, "blocked"),
+                            tooltip_text="Allow this account to run the app")
+        switch.connect("state-set", lambda _s, state, r=app["ref"]:
+                       (self._set_blocked(user, r, not state), False)[1])
         row.add_suffix(switch)
         remove = Gtk.Button(icon_name="user-trash-symbolic", valign=Gtk.Align.CENTER,
                             tooltip_text="Uninstall for everyone")
@@ -1076,20 +1229,6 @@ class UserDetailPage(Adw.NavigationPage):
                      GLib.timeout_add_seconds(3, lambda: (self._load_apps(user), False)[1]))))
         row.add_suffix(remove)
         return row
-
-    def _set_allowed(self, user: dict, ref: str, allowed: bool, all_apps: list[dict]) -> bool:
-        if self.allowed is None:
-            # Was "everything"; materialise the list so one app can be dropped.
-            self.allowed = {a["ref"] for a in all_apps}
-        if allowed:
-            self.allowed.add(ref)
-        else:
-            self.allowed.discard(ref)
-        refs = [] if self.allowed == {a["ref"] for a in all_apps} else sorted(self.allowed)
-        self.win.call(lambda: self.win.client.set_user_apps(user["uid"], refs),
-                      refresh=False,
-                      done_msg=f"{'Allowed' if allowed else 'Blocked'} for {user['username']}")
-        return False
 
     # -- account -------------------------------------------------------------------
 

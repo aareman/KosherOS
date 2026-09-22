@@ -130,29 +130,58 @@ Manage rules with `kosherctl rules <uid> list|allow|block|remove|clear`, or
 the Page rules editor in each profile. `scripts/inspect-verify.sh` drives
 the whole path in a VM (11 checks).
 
-## Apps: an allowlist over upstream Flathub
+## Apps: the whole store, decided per account
 
 KosherOS does not host a package repository. Upstream **Flathub is the
-source**; the **catalog** (`/etc/kosher/catalog.json`, later portal-managed)
-is the allowlist, and **only kosherd installs**:
+source**, and **only kosherd installs**:
 
 - polkit denies the Flatpak system-helper actions to every non-root subject
   (a user running `flatpak install` gets "system operation Deploy not
   allowed"), and malcontent blocks user-scope installs;
 - the **KosherOS Store** (`store-app/`) is open to every user, including
-  supervised ones — safety comes from the allowlist, not from hiding the
-  store. It asks kosherd to install and shows live progress streamed back
-  over D-Bus (`AppProgress`/`AppFinished` signals);
-- kosherd rejects any ref not in the catalog, resolves the real remote ref
-  (branches aren't always `stable`), and runs a libflatpak transaction on a
-  worker thread. `kosherctl check-catalog` verifies every approved app
-  actually exists on the remote;
-- per user, `can_install_apps` can turn installing off (admin app toggle),
-  and `apps` restricts which installed apps a user may run (malcontent).
+  supervised ones — safety comes from kosherd's decision, not from hiding
+  the store. It asks kosherd what this account may have (`ListStoreApps`,
+  judged for the uid on the connection), asks it to install, and shows live
+  progress streamed back over D-Bus (`AppProgress`/`AppFinished` signals);
+- kosherd resolves the real remote ref (branches aren't always `stable`)
+  and runs a libflatpak transaction on a worker thread.
 
-A flatpak remote *filter* rendered from the catalog also keeps unapproved
-apps out of enumeration. It is not a boundary against root — but nobody can
-become root here.
+What an account may have is one rule, `appaccess.decide`, asked by the
+Store, by the installer and by malcontent (so what cannot be installed
+cannot be run either):
+
+1. **Blocks first.** `blocked_apps` (single Flatpak ids) and
+   `blocked_app_kinds` (the Store's shelves — Internet, Work, Learning,
+   Games, Music, Pictures & video, Developer tools, Utilities, Everything
+   else — one vocabulary in `kosherd.appkinds`, folded from Flathub's
+   freedesktop categories) apply whatever else says.
+2. **An approval settles it.** The **approved list**
+   (`/etc/kosher/catalog.json`, later portal-managed) is what an
+   administrator has said yes to by name.
+3. **`app_access`.** `approved` — the default for every account, and
+   today's allowlist — refuses anything else. `store` — what a new
+   administrator gets, and what a parent can give an account or a group —
+   goes on to judge the app.
+4. **The content ceiling.** Flathub rates every app with OARS; kosherd
+   parses `<content_rating>` from appstream and refuses anything above a
+   fixed ceiling per attribute (`appaccess.CEILING`: nudity, sexual
+   themes, profanity, gambling, narcotics and graphic violence at none;
+   cartoon and fantasy violence up to moderate; alcohol, tobacco and
+   realistic violence up to mild). A short list of filter-circumvention
+   tools (Tor launchers, VPN clients) is refused the same way. An app the
+   index does not know is refused too — offline fails closed.
+
+The app index (name, summary, categories, icon file, rating for every app
+on the remote) is parsed once per appstream download on a worker thread
+at daemon start and cached in memory and at `/var/lib/kosher/appindex.json`,
+so neither the Store nor a policy apply ever waits on a forty-megabyte
+parse; malcontent is re-applied once the index is warm.
+
+The flatpak remote *filter* is deny-only: it keeps the circumvention tools
+out of enumeration unless one is approved. It is not a boundary against
+root — but nobody can become root here. `kosherctl apps` shows and sets an
+account's access and blocks; `kosherctl check-catalog` verifies every
+approved app exists on the remote.
 
 ## Policy
 

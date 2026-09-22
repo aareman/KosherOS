@@ -425,10 +425,15 @@ class UpdatesPage(_Page):
             row = Adw.ActionRow(title=entry.get("title") or name,
                                 subtitle=entry.get("description") or "",
                                 subtitle_lines=4)
-            if name and name == effective:
-                icon = Gtk.Image(icon_name="emblem-ok-symbolic")
-                icon.add_css_class("success")
-                row.add_prefix(icon)
+            on_it = bool(name) and name == effective
+            # Every row carries the tick, invisible on the ones that are
+            # not in use, so the two titles line up under each other
+            # instead of one sitting an icon's width to the right.
+            icon = Gtk.Image(icon_name="emblem-ok-symbolic",
+                             opacity=1.0 if on_it else 0.0)
+            icon.add_css_class("success")
+            row.add_prefix(icon)
+            if on_it:
                 mark = Gtk.Label(label="At the next restart"
                                  if self.channels.get("pending") else "In use",
                                  valign=Gtk.Align.CENTER)

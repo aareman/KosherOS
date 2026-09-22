@@ -177,3 +177,94 @@ def test_the_activity_command_refuses_an_unknown_account(monkeypatch, capsys):
     args = type("A", (), {"user": "nobody", "days": 1})()
     assert cli.cmd_activity(args) == 1
     assert "nobody" in capsys.readouterr().err
+
+
+# -- moving between update channels -------------------------------------------
+
+class _ChannelClient:
+    """A daemon that knows about channels, for `kosherctl system channel`."""
+
+    def __init__(self, image="ghcr.io/x/kosher-linux:stable", staged=None):
+        from kosherd import updates
+
+        self.image = image
+        self.staged = staged
+        self.switched: list = []
+        self._describe = updates.describe_channels
+
+    def list_channels(self):
+        return self._describe(self.image, self.staged)
+
+    def set_channel(self, channel, guardian_password=""):
+        self.switched.append((channel, guardian_password))
+
+    def guardian_enabled(self):
+        return False
+
+
+def _system(action, value=""):
+    return type("A", (), {"action": action, "value": value,
+                          "guardian_password": ""})()
+
+
+def test_listing_channels_marks_the_one_this_computer_follows(monkeypatch, capsys):
+    from kosherd import cli
+
+    monkeypatch.setattr(cli, "_client", lambda: _ChannelClient())
+    assert cli.cmd_system(_system("channel")) == 0
+    out = capsys.readouterr().out
+    assert "follows: stable" in out
+    assert "* stable" in out and "  edge" in out
+
+
+def test_a_computer_on_no_channel_is_told_it_will_not_update(monkeypatch, capsys):
+    from kosherd import cli
+
+    monkeypatch.setattr(cli, "_client",
+                        lambda: _ChannelClient("localhost/kosher-linux:dev"))
+    assert cli.cmd_system(_system("channel")) == 0
+    out = capsys.readouterr().out
+    assert "no channel" in out and "not on a channel" in out
+
+
+def test_a_switch_waiting_for_the_next_restart_is_listed(monkeypatch, capsys):
+    from kosherd import cli
+
+    monkeypatch.setattr(cli, "_client", lambda: _ChannelClient(
+        staged="ghcr.io/x/kosher-linux:edge"))
+    assert cli.cmd_system(_system("channel")) == 0
+    out = capsys.readouterr().out
+    assert "follows: stable" in out
+    assert "moving to edge at the next restart" in out
+
+
+def test_naming_a_channel_switches_to_it(monkeypatch, capsys):
+    from kosherd import cli
+
+    client = _ChannelClient()
+    monkeypatch.setattr(cli, "_client", lambda: client)
+    assert cli.cmd_system(_system("channel", "EDGE")) == 0
+    assert client.switched == [("edge", "")]
+    assert "next restart" in capsys.readouterr().out
+
+
+def test_an_unknown_channel_is_refused_before_the_daemon_is_asked(monkeypatch,
+                                                                 capsys):
+    from kosherd import cli
+
+    client = _ChannelClient()
+    monkeypatch.setattr(cli, "_client", lambda: client)
+    assert cli.cmd_system(_system("channel", "nightly")) == 1
+    assert client.switched == []
+    assert "unknown channel" in capsys.readouterr().err
+
+
+def test_the_command_line_accepts_system_channel_with_a_name(monkeypatch):
+    # Through main(), so the parser itself is exercised: `system` took no
+    # value argument before channels existed.
+    from kosherd import cli
+
+    client = _ChannelClient()
+    monkeypatch.setattr(cli, "_client", lambda: client)
+    assert cli.main(["system", "channel", "edge"]) == 0
+    assert client.switched == [("edge", "")]

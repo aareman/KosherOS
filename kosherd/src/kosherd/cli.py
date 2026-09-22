@@ -560,6 +560,10 @@ def cmd_system(args) -> int:
         if not args.value:
             print(f"this computer follows: {info.get('current') or 'no channel'}"
                   f" ({info.get('image') or 'unknown image'})")
+            if info.get("pending"):
+                # bootc leaves the running deployment alone, so without this
+                # the listing would say a switch already made had not been.
+                print(f"  moving to {info['pending']} at the next restart")
             print("channels:")
             for entry in info.get("channels", []):
                 mark = "*" if entry.get("current") else " "

@@ -116,6 +116,17 @@ marks the GitHub release as the stable one. So what families run is a
 build somebody chose. The immutable per-version tags are what a rollback
 names.
 
+**Versions are sequential.** Every merge to master takes the next number,
+and every number gets a tag and a release. The number is committed before
+the image is built, so a release step that fails would leave a hole (it
+did once: 0.3.0's image was built and signed, the releases API refused the
+release with a 403, and the next merge became 0.4.0). The release step
+(`scripts/publish-releases.py`) retries, and it releases every version on
+master that has no tag yet, not only the newest, so a number one run drops
+is picked up by the next. A release made after the fact does not take the
+Latest badge from the newest version; it says whether an image exists for
+it by asking the registry.
+
 **A machine can move between them.** ✅ `ListChannels` says which
 channels exist, which one this computer follows and what each one would
 switch it to; `SetChannel` runs `bootc switch` onto the other tag of the

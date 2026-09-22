@@ -49,6 +49,18 @@ wait_for_dns() {
     return 1
 }
 
+# First IPv4 address of a name, for probes that need a bare address. dig
+# where it exists (the dev VM), getent where it does not (the image ships
+# no bind-utils) — the suites run on both.
+resolve4() {
+    local ip=""
+    if command -v dig >/dev/null 2>&1; then
+        ip=$(dig +short +time=3 "$1" A 2>/dev/null | grep -E '^[0-9.]+$' | head -1)
+    fi
+    [ -n "$ip" ] || ip=$(getent ahostsv4 "$1" 2>/dev/null | awk '{print $1; exit}')
+    printf '%s' "$ip"
+}
+
 # assert_that <description> <command...> — passes when the command succeeds.
 assert_that() {
     local desc="$1"

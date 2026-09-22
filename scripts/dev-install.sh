@@ -75,7 +75,11 @@ install -m 0644 "$repo/os-image/files/etc/resolv.conf" /etc/resolv.conf
 
 echo "== enabling services"
 systemctl daemon-reload
-systemctl enable --now kosher-firewall.service kosher-dns.service kosherd.service
+# enable, then restart — `enable --now` leaves an already-running unit as it
+# is, so a second dev-install left the OLD kosherd in memory rendering rules
+# for a proxy port the new code no longer used. Nothing browsed.
+systemctl enable kosher-firewall.service kosher-dns.service kosherd.service
+systemctl restart kosher-firewall.service kosher-dns.service kosherd.service
 systemctl restart NetworkManager
 
 echo

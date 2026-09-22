@@ -151,6 +151,11 @@ ACTIONS = {
     "FilterLog": ACTION_READ_CONFIG,
     "ApplyUpdate": ACTION_APPLY_UPDATES,
     "DeploymentStatus": ACTION_READ_CONFIG,
+    "ListChannels": ACTION_READ_CONFIG,
+    # Which stream of builds this computer follows. Guardian-gated: moving
+    # the family computer onto edge puts it on builds nobody has tried
+    # yet, and that is a decision for whoever holds the second password.
+    "SetChannel": ACTION_APPLY_UPDATES,
     # Going back to the previously booted image. Not guardian-gated: the
     # image is one this machine already ran, and greenboot must be able to
     # do the same thing with no password when a new image fails to bring
@@ -173,7 +178,7 @@ GUARDIAN_GATED = frozenset({
     "SetMediaLevel",
     "SetLanguageFilter", "SetYouTube",
     "SetGuestConfig", "DisableGuardian", "Enrol", "Unenrol",
-    "SetAdBlock", "SetTimeLimits",
+    "SetAdBlock", "SetTimeLimits", "SetChannel",
 })
 
 # First-boot only; closed forever once setup is stamped complete.
@@ -207,6 +212,9 @@ CHANGES = frozenset({
     # filter. Neither takes arguments, so only the actor and the time are
     # recorded.
     "ApplyUpdate", "Rollback",
+    # And which stream of builds it follows from now on, which is the
+    # longest-lived of the three.
+    "SetChannel",
 })
 # Changes whose first argument is the account they are about.
 PER_USER = frozenset({

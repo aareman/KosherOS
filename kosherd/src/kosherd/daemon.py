@@ -277,6 +277,13 @@ INTROSPECTION_XML = """
       <arg direction="out" type="s" name="text"/>
     </method>
     <method name="ApplyUpdate"/>
+    <method name="ListChannels">
+      <arg direction="out" type="s" name="channels_json"/>
+    </method>
+    <method name="SetChannel">
+      <arg direction="in" type="s" name="channel"/>
+      <arg direction="in" type="s" name="guardian_password"/>
+    </method>
     <method name="DeploymentStatus">
       <arg direction="out" type="s" name="status_json"/>
     </method>
@@ -1884,6 +1891,50 @@ class Daemon:
                                                   self._on_update_finished)
         return None
 
+    def impl_ListChannels(self):
+        """Which update channels exist, which one this machine follows, and
+        what each one would switch it to (see updates.describe_channels)."""
+        from . import updates
+
+        deployment = self._deployment()
+        booted = deployment.get("booted") or {}
+        staged = deployment.get("staged") or {}
+        return GLib.Variant("(s)", (json.dumps(updates.describe_channels(
+            booted.get("image"), staged.get("image"))),))
+
+    def impl_SetChannel(self, channel: str, _guardian_pw: str = ""):
+        """Follow a different channel from now on.
+
+        `bootc switch` onto the other tag of the same repository: the same
+        pull as an update, staged for the next restart, with the files and
+        settings on the machine untouched. It reports on the same
+        UpdateProgress/UpdateFinished signals, because to the person
+        watching it is the same wait.
+
+        Guardian-gated, unlike an update. Moving a family computer onto
+        edge puts it on builds nobody has tried yet, which is the kind of
+        decision the second password exists to need agreement for — and
+        the machine's own repository is kept, so this can never point it
+        somewhere else.
+        """
+        from . import updates
+
+        channel = str(channel or "").strip().lower()
+        thread = getattr(self, "_update_thread", None)
+        if thread is not None and thread.is_alive():
+            raise PolicyError("an update is already running")
+        booted = (self._deployment().get("booted") or {})
+        if booted.get("channel") == channel:
+            raise PolicyError(f"this computer already follows the {channel} channel")
+        try:
+            target = updates.switch_target(booted.get("image") or "", channel)
+        except ValueError as e:
+            raise PolicyError(str(e)) from e
+        log.info("switching to the %s channel: %s", channel, target)
+        self._update_thread = updates.run_switch(
+            target, self._on_update_progress, self._on_update_finished)
+        return None
+
     def _emit_system_signal(self, name: str, signature: str, args: tuple) -> None:
         def emit():
             if self.connection:
@@ -1917,7 +1968,12 @@ class Daemon:
         return None
 
     def impl_DeploymentStatus(self):
-        """Which image is booted, and which one "go back" would return to.
+        """Which image is booted, and which one "go back" would return to."""
+        return GLib.Variant("(s)", (json.dumps(self._deployment()),))
+
+    def _deployment(self) -> dict:
+        """`bootc status` as the plain dict both DeploymentStatus and the
+        channel calls want.
 
         Read defensively: bootc's JSON has moved between releases and this
         must degrade to "unknown" rather than raise, because the one moment
@@ -1929,7 +1985,7 @@ class Daemon:
                         "rollback_queued": False, "staged": None}
         if res.returncode != 0:
             status["error"] = (res.stderr or res.stdout).strip()
-            return GLib.Variant("(s)", (json.dumps(status),))
+            return status
 
         def describe(entry) -> dict | None:
             if not isinstance(entry, dict):
@@ -1953,13 +2009,13 @@ class Daemon:
             doc = json.loads(res.stdout)["status"]
         except (ValueError, KeyError, TypeError) as e:
             status["error"] = f"could not read bootc status: {e}"
-            return GLib.Variant("(s)", (json.dumps(status),))
+            return status
 
         status["booted"] = describe(doc.get("booted"))
         status["rollback"] = describe(doc.get("rollback"))
         status["staged"] = describe(doc.get("staged"))
         status["rollback_queued"] = bool(doc.get("rollbackQueued", False))
-        return GLib.Variant("(s)", (json.dumps(status),))
+        return status
 
     def impl_Rollback(self):
         """Go back to the deployment this machine booted before.

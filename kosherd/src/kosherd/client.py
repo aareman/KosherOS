@@ -316,6 +316,16 @@ class DaemonClient:
         the signals connect_update_signals subscribes to."""
         self._call("System", "ApplyUpdate")
 
+    def list_channels(self) -> dict:
+        """The update channels, which one this machine follows, and what
+        each would switch it to: `current`, `default`, `image`, `channels`."""
+        return json.loads(self._call("System", "ListChannels")[0])
+
+    def set_channel(self, channel: str, guardian_password: str = "") -> None:
+        """Follow another channel from now on. Like apply_update it returns
+        at once and reports on the update signals."""
+        self._call("System", "SetChannel", "(ss)", channel, guardian_password)
+
     def disconnect_signals(self, subscription: int) -> None:
         """Drop a subscription from connect_app_signals or
         connect_update_signals, for a page that is going away."""

@@ -561,11 +561,26 @@ class DemoClient:
         if subscription == 2:
             self._on_update_progress = self._on_update_finished = None
 
+    def list_channels(self):
+        from kosherd import updates
+
+        return updates.describe_channels(
+            self.deployment_status()["booted"]["image"])
+
+    def set_channel(self, channel, pw=""):
+        """Pretend to switch: the same pull, then the same staged update."""
+        self._demo_channel = channel
+        self._change(None, "SetChannel", [channel])
+        self._pretend_pull()
+
     def apply_update(self):
         """Pretend to update: a pull that takes a few seconds, then staged."""
+        self._change(None, "ApplyUpdate", [])
+        self._pretend_pull()
+
+    def _pretend_pull(self):
         from gi.repository import GLib
 
-        self._change(None, "ApplyUpdate", [])
         steps = [(0, "Pulling image (1 of 4)"), (18, "Pulling image (1 of 4)"),
                  (41, "Pulling image (2 of 4)"), (67, "Pulling image (3 of 4)"),
                  (88, "Pulling image (4 of 4)"), (96, "Deploying"), (100, "Update ready")]
@@ -603,9 +618,11 @@ class DemoClient:
         self._change(None, "Reboot", [])
 
     def deployment_status(self):
-        return {"booted": {"image": "ghcr.io/aareman/kosher-linux:edge", "version": "0.1.0-pre.11",
-                           "timestamp": now - 3600},
-                "rollback": {"image": "ghcr.io/aareman/kosher-linux:edge",
+        channel = getattr(self, "_demo_channel", "edge")
+        image = f"ghcr.io/aareman/kosher-linux:{channel}"
+        return {"booted": {"image": image, "version": "0.1.0-pre.11",
+                           "channel": channel, "timestamp": now - 3600},
+                "rollback": {"image": image, "channel": channel,
                              "version": "0.1.0-pre.9", "timestamp": now - 90000},
                 "staged": None, "rollback_queued": False}
 

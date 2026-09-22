@@ -369,6 +369,20 @@ class UpdatesPage(_Page):
         self.connect("shown", lambda _p: self._listen())
         self.connect("hidden", lambda _p: self._stop_listening())
 
+        # Which stream of builds this computer follows. Two rows rather
+        # than a drop-down: each one can then carry the sentence that says
+        # what it means, and the choice is made by pressing the thing you
+        # want instead of by picking a word out of a list.
+        self.channel_group = Adw.PreferencesGroup(
+            title="Which updates this computer gets",
+            description=CHANNEL_INTRO)
+        self.channel_box = Gtk.ListBox(selection_mode=Gtk.SelectionMode.NONE)
+        self.channel_box.add_css_class("boxed-list")
+        self.channel_group.add(self.channel_box)
+        self.prefs.add(self.channel_group)
+        self.channels: dict = {}
+        self._load_channels()
+
         # Going back. Shown with the version it would return to, never as
         # a bare button: a "Roll back" with no target is the control that
         # gets clicked by accident.
@@ -389,6 +403,72 @@ class UpdatesPage(_Page):
         self.prefs.add(back)
         self.rollback_target: dict | None = None
         self._load_deployment()
+
+    def _load_channels(self) -> None:
+        run_async(self.win.client.list_channels, self.show_channels,
+                  lambda e: self.channel_group.set_description(
+                      f"Could not read the update channels: {error_text(e)}"))
+
+    def show_channels(self, info: dict) -> None:
+        """Fill the channel rows from a ListChannels answer.
+
+        Every field can be missing — an older daemon has no channels at
+        all — so a shape this does not recognise leaves the group empty
+        with its explanation, rather than half a list.
+        """
+        self.channels = info or {}
+        clear(self.channel_box)
+        entries = self.channels.get("channels") or []
+        effective = self.channels.get("pending") or self.channels.get("current")
+        for entry in entries:
+            name = entry.get("name") or ""
+            row = Adw.ActionRow(title=entry.get("title") or name,
+                                subtitle=entry.get("description") or "",
+                                subtitle_lines=4)
+            if name and name == effective:
+                icon = Gtk.Image(icon_name="emblem-ok-symbolic")
+                icon.add_css_class("success")
+                row.add_prefix(icon)
+                mark = Gtk.Label(label="At the next restart"
+                                 if self.channels.get("pending") else "In use",
+                                 valign=Gtk.Align.CENTER)
+                mark.add_css_class("dim-label")
+                row.add_suffix(mark)
+            else:
+                button = Gtk.Button(label="Use this", valign=Gtk.Align.CENTER)
+                button.connect("clicked", lambda _b, e=entry: self._ask_switch(e))
+                row.add_suffix(button)
+            self.channel_box.append(row)
+        self.channel_group.set_description(CHANNEL_INTRO + channel_note(self.channels))
+
+    def _ask_switch(self, entry: dict) -> None:
+        title = entry.get("title") or entry.get("name") or "this channel"
+        confirm(self.win, f"Get updates from {title}?",
+                (entry.get("description") or "") + "\n\nKosherOS downloads "
+                "that version now; it starts being used at the next restart. "
+                "Accounts, settings and files stay exactly as they are.",
+                "Switch", lambda: self.win.with_guardian(
+                    lambda pw: self._switch(entry.get("name") or "", title, pw)),
+                destructive=False)
+
+    def _switch(self, name: str, title: str, guardian_password: str) -> None:
+        """Start the switch. It is the same pull as an update and reports on
+        the same signals, so the same progress bar shows it."""
+        self._listen()
+        self.apply_button.set_sensitive(False)
+        self.status_row.set_subtitle(f"Downloading the {title} version…")
+        self.progress.set_fraction(0)
+        self.progress.set_text("Starting…")
+        self.progress.set_visible(True)
+
+        def on_error(e):
+            self.apply_button.set_sensitive(True)
+            self.progress.set_visible(False)
+            self.status_row.set_subtitle(error_text(e))
+            self.win.toast(error_text(e))
+
+        run_async(lambda: self.win.client.set_channel(name, guardian_password),
+                  lambda _r: None, on_error)
 
     def _load_deployment(self) -> None:
         def on_done(status):
@@ -519,9 +599,31 @@ class UpdatesPage(_Page):
             self.apply_button.set_visible(False)
             self.win.toast("Update ready — restart to apply")
             self._load_deployment()
+            self._load_channels()
         else:
             self.status_row.set_subtitle(error or "The update did not finish.")
             self.win.toast(error or "The update did not finish")
+
+
+CHANNEL_INTRO = ("Every update comes from one of two streams. Almost every "
+                 "family wants Stable.")
+
+
+def channel_note(info: dict) -> str:
+    """The sentence added to the group's explanation when the plain two-row
+    list would not tell the whole truth: a switch already waiting for the
+    next restart, or a computer that is on no channel at all."""
+    pending = (info or {}).get("pending")
+    if pending:
+        titles = {c.get("name"): c.get("title") or c.get("name")
+                  for c in (info.get("channels") or [])}
+        return (f" This computer is moving to {titles.get(pending, pending)} "
+                "at its next restart.")
+    if info and not info.get("current"):
+        return (" This computer is not on either stream — it is running a "
+                "fixed version and will not update on its own. Choosing one "
+                "puts it back on updates.")
+    return ""
 
 
 def check_words(info: dict, running: str | None) -> tuple[str, str]:

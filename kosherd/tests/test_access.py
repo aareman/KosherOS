@@ -133,7 +133,10 @@ def test_the_guardian_gate_covers_every_filter_weakening_method():
                 "SetMediaLevel",
                 "SetLanguageFilter", "SetYouTube", "SetGuestConfig",
                 "DisableGuardian",
-                "Enrol", "Unenrol", "SetAdBlock", "SetTimeLimits"}
+                "Enrol", "Unenrol", "SetAdBlock", "SetTimeLimits",
+                # Not a filter setting, but the same kind of decision: it
+                # puts the family computer on builds nobody has tried.
+                "SetChannel"}
     assert GUARDIAN_GATED == expected
     filter_actions = {m for m, a in ACTIONS.items()
                       if a == access.ACTION_MANAGE_FILTER}

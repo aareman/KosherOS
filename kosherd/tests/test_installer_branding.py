@@ -61,7 +61,7 @@ def test_the_buildstamp_names_the_product(img, tmp_path):
     stamp = configparser.ConfigParser()
     stamp.read(tmp_path / ".buildstamp")
     assert stamp["Main"]["Product"] == "KosherOS"
-    assert stamp["Main"]["Version"] == (ROOT / "VERSION").read_text().strip()
+    assert stamp["Main"]["Version"] == brand.VERSION
     assert stamp["Main"]["IsFinal"] == "false"
     assert stamp["Main"]["BugURL"].startswith("https://github.com/aareman/KosherOS")
 
@@ -179,12 +179,15 @@ def test_renaming_leaves_install_iso_pointing_at_the_release(tmp_path):
 
 
 def test_one_version_number_for_the_whole_product():
-    # The VERSION file is the only place the number lives; the Containerfile
-    # copies it into os-release and the ISO name and .buildstamp read it.
-    version = (ROOT / "VERSION").read_text().strip()
-    assert version and version == brand.VERSION
+    # The tags are the only place the number lives (scripts/version.py); the
+    # build passes it in, the Containerfile writes it into the image and
+    # os-release, and the ISO name and .buildstamp read the same value.
+    shown = subprocess.run([sys.executable, str(ROOT / "scripts/version.py"), "show"],
+                           check=True, capture_output=True, text=True).stdout.strip()
+    assert shown and shown == brand.VERSION
     containerfile = (ROOT / "os-image/Containerfile").read_text()
-    assert "COPY VERSION /usr/share/kosher/VERSION" in containerfile
+    assert '"$KOSHER_VERSION" > /usr/share/kosher/VERSION' in containerfile
+    assert "COPY VERSION" not in containerfile, "there is no VERSION file to copy"
     assert "KosherOS 0.1" not in containerfile, "the version must not be hard-coded"
 
 

@@ -196,10 +196,15 @@ RUN true && \
 # --- Lockdown ----------------------------------------------------------------
 # Identity: KosherOS, powered by Fedora (Fedora Remix terms). ID stays
 # "fedora" — tooling keys off it; only the human-facing names change.
-# One version number for the whole product: the repo's VERSION file names
-# the release in os-release, in the installer's welcome screen, and in the
-# ISO's file name (scripts/brand-iso.py reads the same file).
-COPY VERSION /usr/share/kosher/VERSION
+# One version number for the whole product, passed in by the build
+# (KOSHER_VERSION, from scripts/version.py: the tag is the version). It names
+# the release in os-release, in the installer's welcome screen, in the ISO's
+# file name and in the image label at the end of this file; the daemon reads
+# it from /usr/share/kosher/VERSION. An empty one is a broken build, not a
+# build called "".
+ARG KOSHER_VERSION
+RUN test -n "$KOSHER_VERSION" \
+    && printf '%s\n' "$KOSHER_VERSION" > /usr/share/kosher/VERSION
 RUN . /usr/lib/os-release \
     && kosher_version="$(tr -d '[:space:]' < /usr/share/kosher/VERSION)" \
     && sed -i \

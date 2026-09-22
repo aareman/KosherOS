@@ -95,6 +95,6 @@ def test_the_build_registers_the_efi_component_and_checks_it():
 
 
 def test_the_version_in_the_efi_path_is_the_products(tmp_path):
-    version = (ROOT / "VERSION").read_text().strip()
+    version = "0.6.0"  # any number: the path is what is under test
     rasters.build(BRANDING, tmp_path, version=version)
     assert (tmp_path / f"usr/lib/efi/kosheros-grub-theme/{version}/EFI/fedora/kosheros/theme.txt").is_file()

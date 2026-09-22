@@ -39,9 +39,13 @@ ROOT = Path(__file__).resolve().parents[1]
 BRANDING = ROOT / "branding"
 
 PRODUCT = "KosherOS"
-# One version for the whole product, from the VERSION file at the repo root;
-# the Containerfile puts the same number in os-release.
-VERSION = (ROOT / "VERSION").read_text().strip()
+# One version for the whole product, read from the tags by scripts/version.py
+# (the Containerfile puts the same number in os-release). `just release-iso`
+# passes the version found inside the image instead.
+_spec = importlib.util.spec_from_file_location("kosher_version", ROOT / "scripts/version.py")
+_version_tool = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(_version_tool)
+VERSION = _version_tool.dev_version()
 BUG_URL = "https://github.com/aareman/KosherOS/issues"
 # The deep navy of the boot splash (plymouth kosheros.script), so the
 # installer, the splash and the login screen read as one product.

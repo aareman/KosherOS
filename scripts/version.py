@@ -1,37 +1,37 @@
 #!/usr/bin/env python3
-"""The product version, and the semver step taken on every merge.
+"""The product version, read from the tags.
 
-`VERSION` at the repo root is the one place the number lives: the
-Containerfile copies it into os-release, the ISO is named after it, the
-installer's welcome screen reads it from `.buildstamp`, the admin app's
-Updates page shows it. It reads `MAJOR.MINOR.PATCH` — plain semver, with no
-pre-release suffix. (It used to read `0.1.0-pre.N`, a release that never
-arrived and a counter that reached seventy-one; every build was flagged as a
-GitHub pre-release, so the releases page had no releases on it.)
+A commit's version is not written anywhere; it is worked out from the
+history, the same way by everyone who asks:
 
-`bump` is run by CI once for every push to master — every merge — and writes
-the new number, commits VERSION to master and builds that commit, so every
-image, ISO and release carries a different version and a bug report can say
-which build it came from.
+    the last `v*` tag reachable from the commit      is where the count starts
+    what landed since it, by conventional subject    says how far to step:
+        a `feat` anywhere                            the minor moves, the patch resets
+        anything else                                the patch moves
+        a breaking change                            the minor moves, which is what 0.x means
 
-How far the number moves is taken from what landed, through the
-conventional-commit subjects this repository already writes:
+A commit that IS tagged is that version. A commit that is not is the version
+it would be released as — `0.7.0` on master, where the release step tags it
+with exactly that number once the build has passed — or, for a build made
+anywhere else, the same number marked as not a release: `0.7.0-dev.3+g2049571`
+(three commits past the last tag, at that commit).
 
-    a `feat` anywhere in the merge   the minor moves, the patch resets to 0
-    anything else                    the patch moves
-    a breaking change                the minor moves, which is what 0.x means
+The number used to live in a `VERSION` file that CI committed to master
+before building. That spent the number before anything downstream had run,
+and a release step that failed left a hole (0.3.0 was one, and then 0.4.2,
+0.5.0 and 0.6.0 behind it). Now the tag is the version, nothing is committed,
+and the number is spent only when the tag lands — last, after the image is
+built and pushed. The build passes the number to the Containerfile
+(`--build-arg KOSHER_VERSION=$(scripts/version.py show)`), which writes it
+into the image for os-release, the installer and the daemon to read.
 
 **The major never moves on its own.** 1.0.0 is a decision about the product,
 not the result of arithmetic, and the user asked for it to stay out of the
-machine's hands: a major version is a person editing VERSION.
-
-Local builds between merges share the last merged version; the image's sha
-tag tells them apart.
+machine's hands: a major version is a person pushing the tag `v1.0.0`.
 """
 
 from __future__ import annotations
 
-import os
 import re
 import subprocess
 import sys
@@ -39,16 +39,19 @@ from collections.abc import Iterable
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-VERSION_FILE = ROOT / "VERSION"
+
+# Version tags only. A moving `stable` or `edge` tag would otherwise be the
+# nearest tag and break the count.
+TAG_GLOB = "v[0-9]*"
 
 RELEASE = re.compile(r"^(\d+)\.(\d+)(?:\.(\d+))?$")
-# The old series, still readable so the first bump after the change can step
-# off it cleanly. Nothing writes this form any more.
+# The old series, still readable because those tags are in the history.
+# Nothing writes this form any more.
 LEGACY_PRE = re.compile(r"^(\d+)\.(\d+)\.(\d+)-pre\.(\d+)$")
 
 PATCH, MINOR, MAJOR = "patch", "minor", "major"
 
-# What a merge has to say about itself. The subject's type decides; a "!"
+# What a change has to say about itself. The subject's type decides; a "!"
 # after the type, or BREAKING CHANGE in the body, is a break.
 FEATURE = re.compile(r"^feat(\([^)]*\))?!?:", re.I)
 BREAKING_TYPE = re.compile(r"^\w+(\([^)]*\))?!:")
@@ -64,7 +67,7 @@ def parse(text: str) -> tuple[int, int, int, int | None]:
     if m := RELEASE.fullmatch(text):
         major, minor, patch = m.group(1), m.group(2), m.group(3) or "0"
         return int(major), int(minor), int(patch), None
-    raise ValueError(f"VERSION {text!r} is not MAJOR.MINOR.PATCH")
+    raise ValueError(f"version {text!r} is not MAJOR.MINOR.PATCH")
 
 
 def fmt(major: int, minor: int, patch: int) -> str:
@@ -89,7 +92,7 @@ def kind_of(messages: Iterable[str]) -> str:
 
 
 def next_version(text: str, kind: str = PATCH) -> str:
-    """The version a merge of this kind carries."""
+    """The version that follows `text` for a change of this kind."""
     major, minor, patch, pre = parse(text)
     if pre is not None:
         # Stepping off the old 0.1.0-pre.N series: dropping the suffix is
@@ -97,7 +100,7 @@ def next_version(text: str, kind: str = PATCH) -> str:
         return fmt(major, minor, patch)
     if kind == MAJOR:
         raise ValueError(
-            "a major version is a decision, not an increment — edit VERSION "
+            "a major version is a decision, not an increment — push the tag "
             "by hand when the product is ready for it")
     if kind == MINOR:
         return fmt(major, minor + 1, 0)
@@ -106,34 +109,41 @@ def next_version(text: str, kind: str = PATCH) -> str:
     return fmt(major, minor, patch + 1)
 
 
-def _git(*args: str, cwd: Path) -> str:
+def _git(*args: str, cwd: Path = ROOT) -> str:
     return subprocess.run(["git", *args], check=True, cwd=cwd,
                           capture_output=True, text=True).stdout.strip()
 
 
-def last_version_tag(cwd: Path) -> str | None:
-    """The last version tag on this history, which is where the last number
-    was cut.
+def exact_tag(commit: str = "HEAD", cwd: Path = ROOT) -> str | None:
+    """The version tag ON this commit, if it has one."""
+    try:
+        return _git("describe", "--tags", "--exact-match", "--match", TAG_GLOB,
+                    commit, cwd=cwd) or None
+    except (subprocess.CalledProcessError, OSError):
+        return None
+
+
+def last_tag(commit: str = "HEAD", cwd: Path = ROOT) -> str | None:
+    """The nearest version tag reachable from this commit, itself included.
 
     By the history rather than by date: two tags made in the same second
     sort arbitrarily, and the answer decides whether a feature already
     numbered gets counted a second time.
     """
     try:
-        return _git("describe", "--tags", "--abbrev=0", "--match", "v*", cwd=cwd) or None
+        return _git("describe", "--tags", "--abbrev=0", "--match", TAG_GLOB,
+                    commit, cwd=cwd) or None
     except (subprocess.CalledProcessError, OSError):
         return None
 
 
-def merge_messages(cwd: Path) -> list[str]:
-    """The commit messages this merge brings, newest first.
+def messages_since(tag: str | None, commit: str = "HEAD", cwd: Path = ROOT) -> list[str]:
+    """The commit messages between the tag and the commit, newest first.
 
-    Since the last version tag, because that is where the last number was
-    cut. With no tag to go by — a fresh clone with no tags fetched — only
-    the commit in hand is read, which is the conservative answer.
+    With no tag to go by, only the commit in hand is read, which is the
+    conservative answer.
     """
-    tag = last_version_tag(cwd)
-    span = f"{tag}..HEAD" if tag else "HEAD~1..HEAD"
+    span = f"{tag}..{commit}" if tag else f"{commit}~1..{commit}"
     try:
         log = _git("log", "--format=%B%x1f", span, cwd=cwd)
     except (subprocess.CalledProcessError, OSError):
@@ -141,54 +151,76 @@ def merge_messages(cwd: Path) -> list[str]:
     return [part for part in log.split("\x1f") if part.strip()]
 
 
-def merge_kind(cwd: Path) -> str:
-    return kind_of(merge_messages(cwd))
+def kind_since(tag: str | None, commit: str = "HEAD", cwd: Path = ROOT) -> str:
+    return kind_of(messages_since(tag, commit, cwd))
 
 
-def bump(path: Path = VERSION_FILE, *, stage: bool = True,
-         kind: str | None = None) -> str | None:
-    """Write the next version and stage VERSION. Returns the new version, or
-    None when this is a commit that must not be numbered."""
-    git_dir = _git_dir(path.parent)
-    if git_dir is not None and (git_dir / "MERGE_HEAD").exists():
-        return None  # a merge carries no change of its own
-    if os.environ.get("KOSHER_NO_BUMP"):
-        return None
-    if kind is None:
-        kind = merge_kind(path.parent)
-    new = next_version(path.read_text(), kind)
-    path.write_text(new + "\n")
-    if stage:
-        subprocess.run(["git", "add", "--", str(path)], check=True, cwd=path.parent)
-    return new
+def release_version(commit: str = "HEAD", cwd: Path = ROOT) -> str:
+    """The version this commit is, or would be released as.
+
+    Raises when no version tag is reachable at all: the answer would be a
+    guess, and a shallow clone (`fetch-depth: 1`) is the usual reason.
+    """
+    if tag := exact_tag(commit, cwd):
+        return tag[1:]
+    tag = last_tag(commit, cwd)
+    if tag is None:
+        raise ValueError(f"no version tag is reachable from {commit}; "
+                         "fetch the tags (git fetch --tags) and try again")
+    return next_version(tag[1:], kind_since(tag, commit, cwd))
 
 
-def _git_dir(cwd: Path) -> Path | None:
+def dev_version(commit: str = "HEAD", cwd: Path = ROOT) -> str:
+    """What a build made anywhere but the release step calls itself.
+
+    The number it would be released as, marked as not a release, with the
+    distance from the last tag and the commit — so two local builds are
+    told apart and neither is mistaken for a release. Without a tag or a
+    repository to read (a shallow clone, an unpacked tarball) it is
+    `0.0.0-dev...`, which is at least honest.
+    """
+    if tag := exact_tag(commit, cwd):
+        return tag[1:]
     try:
-        out = subprocess.run(["git", "rev-parse", "--git-dir"], check=True, cwd=cwd,
-                             capture_output=True, text=True).stdout.strip()
+        sha = _git("rev-parse", "--short=7", commit, cwd=cwd)
     except (subprocess.CalledProcessError, OSError):
-        return None
-    return (cwd / out).resolve()
+        return "0.0.0-dev.0"
+    tag = last_tag(commit, cwd)
+    if tag is None:
+        count = _git("rev-list", "--count", commit, cwd=cwd)
+        return f"0.0.0-dev.{count}+g{sha}"
+    count = _git("rev-list", "--count", f"{tag}..{commit}", cwd=cwd)
+    return f"{release_version(commit, cwd)}-dev.{count}+g{sha}"
+
+
+USAGE = """usage: version.py [show|release|kind|tag]
+
+  show     the version of this checkout: the tag on it, or the number it
+           would be released as marked -dev (default)
+  release  the version this commit is or would be released as; fails when
+           no version tag can be reached
+  kind     the step the changes since the last tag ask for: minor or patch
+  tag      the release version as its tag, v0.7.0"""
 
 
 def main(argv=None) -> int:
     args = list(sys.argv[1:] if argv is None else argv)
     command = args[0] if args else "show"
-    if command == "show":
-        print(VERSION_FILE.read_text().strip())
-    elif command == "next":
-        print(next_version(VERSION_FILE.read_text(), merge_kind(VERSION_FILE.parent)))
-    elif command == "kind":
-        print(merge_kind(VERSION_FILE.parent))
-    elif command == "bump":
-        new = bump()
-        if new is not None:
-            print(f"version: {new}")
-    else:
-        print(__doc__.strip().splitlines()[0], file=sys.stderr)
-        print("usage: version.py [show|next|kind|bump]", file=sys.stderr)
-        return 2
+    try:
+        if command == "show":
+            print(dev_version(cwd=ROOT))
+        elif command == "release":
+            print(release_version(cwd=ROOT))
+        elif command == "kind":
+            print(kind_since(last_tag(cwd=ROOT), cwd=ROOT))
+        elif command == "tag":
+            print("v" + release_version(cwd=ROOT))
+        else:
+            print(USAGE, file=sys.stderr)
+            return 2
+    except ValueError as error:
+        print(f"version.py: {error}", file=sys.stderr)
+        return 1
     return 0
 
 

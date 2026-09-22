@@ -18,6 +18,7 @@ edits take effect without a restart.
 from __future__ import annotations
 
 import base64
+import ipaddress
 import json
 import logging
 import re
@@ -130,6 +131,25 @@ ASKED_PAGE = """<!doctype html>
 # account, or a source-port lookup that lost a race). Serving that as the
 # open web is the failure the first family test hit: an account shows as
 # filtered and filters nothing. We fail CLOSED to a safe floor instead.
+def is_bare_address(host: str | None) -> bool:
+    """True when the request names an address rather than a site — or
+    nothing at all, which transparent mode reports as the destination
+    address when a connection carries no SNI and no Host.
+
+    Every list the filter judges by is a list of NAMES. An address has no
+    category, so a request made by address used to be judged by nothing
+    and let through; that was finding F3 of the security review (#33).
+    """
+    host = (host or "").strip().strip("[]")
+    if not host:
+        return True
+    try:
+        ipaddress.ip_address(host)
+    except ValueError:
+        return False
+    return True
+
+
 def _fail_closed_entry() -> dict:
     try:
         blocked = list(categories_mod.DEFAULT_BLOCKED)
@@ -853,6 +873,14 @@ class KosherFilter:
         # An explicit allow rule beats the category lists, so an admin can
         # permit one site from a category they otherwise block.
         if pattern is None:
+            # No name, no category, no judgement: an address is blocked
+            # unless an allow rule names it (the escape hatch for a printer
+            # or a NAS the family reaches by address).
+            if is_bare_address(flow.request.pretty_host):
+                log.info("blocked uid=%s %s (an address, not a site)", uid, url)
+                self._block(flow, url, " because it names an address rather "
+                            "than a site", why="address")
+                return
             blocked = self.policy.blocked_categories_for(uid)
             hit = self.categories.blocked_categories_of(
                 flow.request.pretty_host or "", blocked)

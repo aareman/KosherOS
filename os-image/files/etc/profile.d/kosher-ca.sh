@@ -1,3 +1,5 @@
+# shellcheck shell=sh
+# (sourced by every login shell, so it has no shebang of its own.)
 # KosherOS: developer tools trust the filter's certificate.
 #
 # In "Filtered internet" mode this computer reads the account's HTTPS with

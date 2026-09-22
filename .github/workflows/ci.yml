@@ -114,12 +114,14 @@ jobs:
       - name: shellcheck
         run: |
           sudo apt-get install -y shellcheck
+          # Every tracked shell script except the retired legacy/ prototype
+          # — the same set, and the same exclusion, as the pre-commit hook
+          # in devenv.nix, so a commit that passes locally passes here.
           # SC1091: lib.sh is sourced at runtime inside the VM.
           # The greenboot health check decides whether a booted image is
           # kept or rolled back, so it is exactly the script that must not
           # have a shell bug in it.
-          shellcheck -e SC1091 scripts/*.sh scripts/vm-tests/*.sh \
-            os-image/files/etc/greenboot/check/required.d/*.sh
+          git ls-files '*.sh' | grep -v '^legacy/' | xargs shellcheck -e SC1091
 
   changes:
     name: What changed

@@ -59,6 +59,29 @@ fetch-models:
     @echo "person model ready at build/models/yolox_nano.onnx (KOSHER_PERSON_MODEL points here in the dev shell)"
     @echo "the runtime is opt-in: enter the shell with KOSHER_DEV_MODELS=1 devenv shell (compiles onnxruntime once)"
 
+# Install (or repair) this repository's shared pre-commit hook.
+#
+# The dev shell does this on entry; this is for a checkout whose shell has
+# not been entered, and for putting things right after another tool has
+# overwritten the hook. Git keeps ONE hooks directory for a repository and
+# all of its worktrees, so the hook must never name a checkout — see
+# scripts/git-hook-dispatch.sh.
+hooks:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    hooks="$(git rev-parse --path-format=absolute --git-common-dir)/hooks"
+    mkdir -p "$hooks"
+    install -m 755 scripts/git-hook-dispatch.sh "$hooks/pre-commit"
+    echo "pre-commit hook installed into $hooks"
+    if [ ! -f .pre-commit-config.yaml ]; then
+        echo "note: this checkout has no .pre-commit-config.yaml yet, so the"
+        echo "      hook will do nothing. Enter the dev shell to generate it."
+    fi
+
+# Run the commit checks over every file, not only what is staged.
+check:
+    prek run --all-files
+
 # Run the unit test suites (pure logic — no root, no D-Bus, no VM needed).
 test *ARGS:
     # A missing pyyaml silently skips the workflow tests, which is how three

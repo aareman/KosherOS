@@ -31,10 +31,12 @@ blocked_as() {
 # reached the far end unread. Exit codes cannot tell that apart from "refused
 # by the proxy" (ssh exits 255 either way), hence the text.
 reaches_ssh_as() {
-    local u="$1" host="$2"
-    runuser -u "$u" -- timeout 15 ssh -o BatchMode=yes -o StrictHostKeyChecking=no \
-        -o UserKnownHostsFile=/dev/null -o ConnectTimeout=8 "git@$host" 2>&1 \
-        | grep -q "Permission denied"
+    local u="$1" host="$2" out
+    # Captured rather than piped: with pipefail on, a grep -q that closes
+    # the pipe early turns a match into a failing pipeline. It did.
+    out=$(runuser -u "$u" -- timeout 15 ssh -o BatchMode=yes -o StrictHostKeyChecking=no \
+        -o UserKnownHostsFile=/dev/null -o ConnectTimeout=8 "git@$host" 2>&1)
+    printf '%s' "$out" | grep -q "Permission denied"
 }
 
 # A server the same account starts on loopback must stay reachable: sending
@@ -86,6 +88,26 @@ sys.exit(0 if doh.get("Enabled") is False and doh.get("Locked") is True else 1)
 PY
 }
 
+# The stage-1 dev VM is Fedora Cloud with the stack installed on top; only
+# the bootc image carries the boot, console, browser-policy and image-trust
+# configuration. Those checks are skipped there rather than failing for a
+# reason that has nothing to do with the finding.
+. /etc/os-release
+on_image() { [ "${VARIANT_ID:-}" = "kosheros" ]; }
+image_only() {
+    on_image && return 0
+    skip "$1 (needs the KosherOS image VM — just vm — not the stage-1 dev VM)"
+    return 1
+}
+
+# A real GRUB password, not the word "superusers": Fedora's stock grub.cfg
+# carries that word inside the conditional that reads user.cfg, whether or
+# not a password was ever set.
+grub_password_set() {
+    grep -qs 'GRUB2_PASSWORD=' /boot/grub2/user.cfg /boot/efi/EFI/fedora/user.cfg \
+        || grep -rqs 'password_pbkdf2' /boot/grub2/grub.cfg /boot/efi/EFI/fedora/grub.cfg
+}
+
 # -- preconditions ------------------------------------------------------------
 # A failure here is about the run, not the machine: nothing below means
 # anything unless the stack is up and the filtered account can browse.
@@ -111,6 +133,11 @@ sleep 2       # ...and the proxy needs a moment to bind
 check "the proxy is running for the filtered account" 0 systemctl is-active --quiet kosher-mitm
 check "the filtered account reaches an ordinary site" 0 fetch_as wlkid https://example.com
 check "the dns-filtered account reaches an ordinary site" 0 fetch_as dnskid https://example.com
+# The bare-address target comes from a live lookup: a fixed one goes stale
+# (example.com left 93.184.216.34 in 2025, and a probe against it "passed"
+# because nothing answered).
+addr=$(dig +short +time=3 example.com A | grep -E '^[0-9.]+$' | head -1)
+check "a bare-address probe target answers (root, http://$addr/)" 0 fetch "http://$addr/"
 
 # -- F1: every port goes through the proxy ---------------------------------------
 
@@ -135,9 +162,9 @@ check_contains "[F1] UDP below 1024 is rejected for filtered accounts (config)" 
 
 section "[F2] [F3] Browsing by address instead of name"
 check "[F2] dns-filtered account cannot browse by address" 1 \
-    fetch_as dnskid http://93.184.216.34/
+    fetch_as dnskid "http://$addr/"
 assert_that "[F3] filtered account is blocked on a bare address" \
-    blocked_as wlkid "http://93.184.216.34/"
+    blocked_as wlkid "http://$addr/"
 
 # -- F4: encrypted DNS ---------------------------------------------------------------
 
@@ -146,9 +173,11 @@ section "[F4] Encrypted DNS"
 # proxy recognises a DoH request by its shape.
 assert_that "[F4] DoH to a resolver not on the address list is blocked by shape" \
     blocked_as wlkid "https://dns.nextdns.io/dns-query?dns=AAABAAABAAAAAAAAA2ZvbwA"
-assert_that "[F4] Firefox is told never to use DoH (config)" firefox_doh_off
-check "[F4] Chromium is told never to use DoH (config)" 0 bash -c \
-    'grep -rqs "DnsOverHttpsMode.*off" /etc/chromium/policies/managed /etc/opt/chrome/policies/managed'
+image_only "[F4] Firefox is told never to use DoH (config)" \
+    && assert_that "[F4] Firefox is told never to use DoH (config)" firefox_doh_off
+image_only "[F4] Chromium is told never to use DoH (config)" \
+    && check "[F4] Chromium is told never to use DoH (config)" 0 bash -c \
+        'grep -rqs "DnsOverHttpsMode.*off" /etc/chromium/policies/managed /etc/opt/chrome/policies/managed'
 
 # -- F5 -------------------------------------------------------------------------------
 
@@ -166,16 +195,18 @@ check_contains "[F6] dns-filtered mode limits the LAN to local services (config)
 # -- F7: the boot path ----------------------------------------------------------------
 
 section "[F7] The boot path"
-assert_that "[F7] the boot menu is password-protected" \
-    grep -rqs superusers /boot/grub2 /boot/efi/EFI
-assert_that "[F7] the disk is encrypted" \
-    bash -c 'lsblk -rno TYPE | grep -q crypt'
-check_contains "[F7] no dracut shell on a failed boot" "rd.shell=0" cat /proc/cmdline
+image_only "[F7] the boot menu is password-protected" \
+    && assert_that "[F7] the boot menu is password-protected" grub_password_set
+image_only "[F7] the disk is encrypted" \
+    && assert_that "[F7] the disk is encrypted" bash -c 'lsblk -rno TYPE | grep -q crypt'
+image_only "[F7] no dracut shell on a failed boot" \
+    && check_contains "[F7] no dracut shell on a failed boot" "rd.shell=0" cat /proc/cmdline
 
 # -- F8: text consoles ----------------------------------------------------------------
 
 section "[F8] Text consoles"
-assert_that "[F8] text consoles are not offered to accounts" consoles_closed
+image_only "[F8] text consoles are not offered to accounts" \
+    && assert_that "[F8] text consoles are not offered to accounts" consoles_closed
 
 # -- F9 -------------------------------------------------------------------------------
 
@@ -185,10 +216,12 @@ skip "[F9] UI wording; not machine-checkable"
 # -- F10: image trust ------------------------------------------------------------------
 
 section "[F10] Pulled images are verified"
-check "[F10] the image policy accepts nothing unsigned" 1 \
-    grep -q insecureAcceptAnything /etc/containers/policy.json
-check_contains "[F10] the image policy requires a sigstore signature" "sigstoreSigned" \
-    cat /etc/containers/policy.json
+image_only "[F10] the image policy accepts nothing unsigned" \
+    && check "[F10] the image policy accepts nothing unsigned" 1 \
+        grep -q insecureAcceptAnything /etc/containers/policy.json
+image_only "[F10] the image policy requires a sigstore signature" \
+    && check_contains "[F10] the image policy requires a sigstore signature" "sigstoreSigned" \
+        cat /etc/containers/policy.json
 
 # -- F11: rollback ---------------------------------------------------------------------
 

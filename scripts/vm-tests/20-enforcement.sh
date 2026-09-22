@@ -17,7 +17,12 @@ check "no-internet user is blocked"             1 fetch_as nokid https://example
 check "dns-filtered user browses"               0 fetch_as dnskid https://example.com
 check "whitelisted site loads"                  0 fetch_as wlkid https://example.com
 check "non-whitelisted site is blocked"         1 fetch_as wlkid https://www.wikipedia.org
-check "direct-IP browsing is blocked"           1 fetch_as wlkid https://93.184.216.34
+# A live address of a site that is NOT on the whitelist, over plain HTTP:
+# the old fixed 93.184.216.34 stopped answering, and https to a bare
+# address fails on the certificate anyway, so this passed for two wrong
+# reasons at once.
+other=$(dig +short +time=3 wikipedia.org A | grep -E '^[0-9.]+$' | head -1)
+check "direct-IP browsing is blocked (http://$other/)" 1 fetch_as wlkid "http://$other/"
 check_contains "whitelist set is populated"     "elements" nft list set inet kosher wl4
 
 section "Fail closed"

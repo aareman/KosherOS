@@ -19,54 +19,23 @@ concurrency:
   group: pages-${{ github.ref }}
   cancel-in-progress: false
 
-jobs:
-  version:
-    name: Version this merge
-    # One version per push to master — per merge — rather than one per
-    # commit. How far it steps (minor for a feat, patch otherwise, never
-    # major) is scripts/version.py's business, from the commit subjects. The dev shell used to tick VERSION in a pre-commit
-    # hook, which numbered every commit on every branch; a five-commit
-    # branch spent five versions to land one change, and that was judged
-    # excessive. Now CI ticks it once, here, commits the tick to master and
-    # builds THAT commit. The push is made with the workflow's own token,
-    # which does not start another run, and the message says [skip ci]
-    # besides, so a token that would cannot loop either. Serialised, so two
-    # merges in quick succession take two numbers rather than fighting over
-    # one.
-    #
-    # Mind the skip marker: GitHub honours it ANYWHERE in a pushed commit's
-    # message, body included. The commit that introduced this job quoted
-    # it in its own message, and that push got no run at all.
-    if: github.event_name == 'push'
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    concurrency:
-      group: version-bump
-      cancel-in-progress: false
-    outputs:
-      sha: ${{ steps.bump.outputs.sha }}
-      version: ${{ steps.bump.outputs.version }}
-    steps:
-      - uses: actions/checkout@v5
-        with:
-          fetch-depth: 0
-      - id: bump
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          # On top of whatever master is NOW, which includes the tick a run
-          # just before this one may have pushed.
-          git fetch --quiet origin master
-          git reset --hard --quiet origin/master
-          new="$(python3 scripts/version.py bump)"
-          new="${new#version: }"
-          git commit --quiet -m "chore: version $new [skip ci]" -- VERSION
-          git push --quiet origin HEAD:master
-          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
-          echo "version=$new" >> "$GITHUB_OUTPUT"
-          echo "this merge is $new"
+# Versions. There is no version job and no VERSION file in the tree: the
+# tag is the version, and scripts/version.py works out any commit's number
+# from the last tag reachable from it plus what the commits since it say
+# (a feat moves the minor, anything else the patch, never the major). The
+# image job computes the number and builds it in; the release job, last of
+# all, pushes the tag and makes the release. A number is spent only when
+# its tag lands, so a run that fails anywhere before that spends nothing
+# and the next merge takes the same number.
+#
+# It used to be a version job that committed a `chore: version` tick to
+# master first and built that commit. Every failure downstream of it burned
+# a number, and the release step failed for good whenever another commit
+# touching a workflow file landed before it ran (GitHub demands a scope the
+# Actions token cannot have to release an explicit commit in that case).
+# 0.3.0, 0.4.2, 0.5.0 and 0.6.0 were spent that way with no release.
 
+jobs:
   unit:
     name: Unit tests
     runs-on: ubuntu-latest
@@ -127,10 +96,9 @@ jobs:
     name: What changed
     # The image job costs eleven minutes and republishes :edge. A commit
     # that cannot change the image — docs, tests, CI, the Justfile — should
-    # not trigger it. VERSION is deliberately NOT on the list: CI ticks it
-    # for every merge, so it would make the filter always true; the version
-    # inside :edge is the version of the last merge that touched the image,
-    # and a skipped merge's version simply has no build behind it.
+    # not trigger it. The version inside :edge is then the version of the
+    # last merge that touched the image, and a skipped merge's version
+    # simply has no build behind it (its release says so).
     #
     # Pull requests never build. Every PR used to, "to be safe", and with
     # several open at once that was an eleven-minute build per push per
@@ -179,134 +147,110 @@ jobs:
 
   image:
     name: Build OS image
-    needs: [unit, compile, shell, changes, version]
-    # `version` is skipped on a pull request (nothing is numbered there), so
-    # the condition is spelled out rather than relying on the default
-    # all-succeeded, which would skip the build with it.
-    if: |
-      always() && needs.changes.outputs.image == 'true'
-      && needs.unit.result == 'success'
-      && needs.compile.result == 'success'
-      && needs.shell.result == 'success'
-      && needs.version.result != 'failure'
-      && needs.version.result != 'cancelled'
+    needs: [unit, compile, shell, changes]
+    if: needs.changes.outputs.image == 'true'
     runs-on: ubuntu-latest
     permissions:
-      contents: write # the version tag and its GitHub release
+      contents: read
       packages: write
       id-token: write # cosign keyless signing
     env:
       IMAGE: ghcr.io/${{ github.repository_owner }}/kosher-linux
-      # The commit the image is built from: the version tick on a push, the
-      # commit itself on a pull request.
-      SHA: ${{ needs.version.outputs.sha || github.sha }}
+      SHA: ${{ github.sha }}
     steps:
       - uses: actions/checkout@v5
         with:
-          fetch-depth: 0 # the release notes list the commits since the previous version tag
-          ref: ${{ needs.version.outputs.sha || github.sha }}
+          fetch-depth: 0 # the version is counted from the last tag
 
       # Two channels. Every push to master becomes :edge — the maintainer's
       # own daily driver, where every build lands first — plus the
-      # commit's sha tag and its version tag. :stable (and :latest, which
-      # follows it) is never built here: release-stable.yml promotes an
-      # existing signed version by hand, so what families run is a build
-      # somebody chose, not the newest commit.
+      # commit's sha tag. The version tag is added by the release job, once
+      # the version is settled. :stable (and :latest, which follows it) is
+      # never built here: release-stable.yml promotes an existing signed
+      # version by hand, so what families run is a build somebody chose,
+      # not the newest commit.
       - name: Build image
-        # The version goes into the image's label, which is where bootc
-        # reads the "Version:" it shows for the running and the offered build.
+        # The version is the tag on this commit, or the number the release
+        # job will tag it with once this build has passed. The Containerfile
+        # writes it into the image and into the label bootc reads for the
+        # "Version:" it shows for the running and the offered build.
         run: |
-          version="$(tr -d '[:space:]' < VERSION)"
+          version="$(python3 scripts/version.py release)"
+          echo "this build is $version"
           podman build --build-arg "KOSHER_VERSION=$version" \
             -t "$IMAGE:${SHA::12}" -t "$IMAGE:edge" -f os-image/Containerfile .
 
       - name: Push
-        if: github.event_name != 'pull_request'
         run: |
           podman login ghcr.io -u "$GITHUB_ACTOR" -p "${{ secrets.GITHUB_TOKEN }}"
           podman push "$IMAGE:${SHA::12}"
           podman push "$IMAGE:edge"
 
       - name: Sign (cosign keyless)
-        if: github.event_name != 'pull_request'
         uses: sigstore/cosign-installer@v3
-      - if: github.event_name != 'pull_request'
-        run: |
+      - run: |
           # cosign reads Docker's credential store, not podman's auth.json,
           # so it needs its own login to push signatures to ghcr.
           cosign login ghcr.io -u "$GITHUB_ACTOR" -p "${{ secrets.GITHUB_TOKEN }}"
           cosign sign --yes "$IMAGE:${SHA::12}"
           cosign sign --yes "$IMAGE:edge"
 
-      - name: Tag this version's image
-        # The image keeps the version's own tag so a release can point at it
-        # and a machine can be moved to it by name. Making the RELEASE is a
-        # separate job, because a commit that changes nothing in the image
-        # still gets a version and still deserves a release.
-        if: github.event_name != 'pull_request'
-        run: |
-          version="$(tr -d '[:space:]' < VERSION)"
-          podman tag "$IMAGE:${SHA::12}" "$IMAGE:v$version"
-          podman push "$IMAGE:v$version"
-          cosign sign --yes "$IMAGE:v$version"
-
   release:
     name: Release this version
-    # Every merge carries its own version (VERSION, ticked by the version
-    # job above), so every merge that passes the tests gets a release —
-    # even one that changed no image file, which would otherwise leave a
-    # version with nothing to point at and a gap in the history. A merge
-    # whose tests fail gets none, and its changes appear in the next
-    # release's notes, which list everything since the previous tag.
-    needs: [unit, compile, shell, changes, image, version]
+    # Every merge that passes the tests gets a version tag and a release —
+    # even one that changed no image file, whose release says there is no
+    # new image. A merge whose tests fail gets none, spends no number, and
+    # its changes appear in the next release's notes, which list everything
+    # since the previous tag.
+    needs: [unit, compile, shell, changes, image]
     if: |
       always() && github.event_name == 'push'
       && needs.unit.result == 'success'
       && needs.compile.result == 'success'
       && needs.shell.result == 'success'
-      && needs.version.result == 'success'
       && needs.image.result != 'cancelled'
+    # One at a time: two merges close together must count from each
+    # other's tags, not race for one number (the tag push is atomic anyway,
+    # and the script counts again when it loses; this just keeps the log
+    # readable).
+    concurrency:
+      group: release
+      cancel-in-progress: false
     runs-on: ubuntu-latest
     permissions:
-      contents: write
-      packages: read # does the registry hold an image for a version left behind?
+      contents: write # the version tag and its release
+      packages: write # the image's version tag
+      id-token: write # cosign keyless signing of that tag
     env:
       IMAGE: ghcr.io/${{ github.repository_owner }}/kosher-linux
-      SHA: ${{ needs.version.outputs.sha }}
-      # "true" only when an image was actually built and pushed for this
-      # version. `changes.outputs.image` says whether one was MEANT to be,
-      # which is not the same thing when the build fails.
-      BUILT: ${{ needs.image.result == 'success' && needs.changes.outputs.image || 'false' }}
     steps:
       - uses: actions/checkout@v5
         with:
-          fetch-depth: 0 # the notes list the commits since the previous version
-          ref: ${{ needs.version.outputs.sha }}
+          fetch-depth: 0 # the version is counted from the last tag; the notes list the commits since it
 
-      - name: Create the tag and the release
-        # The version was spent the moment the version job committed it, so
-        # a release step that fails leaves a hole: 0.3.0 passed every job,
-        # its image was pushed and signed, and the releases API answered
-        # with a 403 exactly once. The next merge was 0.4.0. Versions are
-        # meant to be sequential, so scripts/publish-releases.py retries,
-        # and releases EVERY version tick on this history that has no tag
-        # yet — a number one run dropped is picked up by the next. One made
-        # after the fact does not take the Latest badge off the newest,
-        # which is what the newest build is meant to hold now that versions
-        # are plain 0.x.x (and what the stable promotion reads). The notes
-        # come from scripts/release-notes.py, grouped into new things, fixes
-        # and the rest; both scripts are read and tested like any other code.
+      - uses: sigstore/cosign-installer@v3
+
+      - name: Tag, then release
+        # scripts/publish-releases.py, in this order: push the version tag
+        # to this commit (atomic — a number can never be spent twice), copy
+        # the sha-tagged image to the version's tag and sign it, create the
+        # release on the tag that now exists. Then finish any version tag
+        # that has no release yet. The tag is pushed with git and the
+        # release names no target commit, because releasing an explicit
+        # commit from Actions is refused whenever a workflow file changed
+        # after it — which is what left four numbers without a release.
+        # The notes come from scripts/release-notes.py; both scripts are
+        # read and tested like any other code.
         env:
           GH_TOKEN: ${{ github.token }}
           GITHUB_TOKEN: ${{ github.token }}
         run: |
-          git fetch --tags --quiet origin
-          built=no
-          [ "$BUILT" = "true" ] && built=yes
+          sudo apt-get update && sudo apt-get install -y skopeo
+          skopeo login ghcr.io -u "$GITHUB_ACTOR" -p "$GITHUB_TOKEN"
+          cosign login ghcr.io -u "$GITHUB_ACTOR" -p "$GITHUB_TOKEN"
           failed=""
           [ "${{ needs.image.result }}" = "failure" ] && failed=--image-failed
-          python3 scripts/publish-releases.py --sha "$SHA" --image "$IMAGE" \
-            --built "$built" $failed
+          python3 scripts/publish-releases.py --sha "$GITHUB_SHA" --image "$IMAGE" $failed
 
   docs:
     name: Docs site

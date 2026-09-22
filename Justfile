@@ -322,7 +322,7 @@ _sudo:
 
 # Build the OS image (layer-cached; kosherd is the last layer).
 build:
-    podman build --build-arg "KOSHER_VERSION=$(tr -d '[:space:]' < VERSION)" -t {{image}} -f os-image/Containerfile .
+    podman build --build-arg "KOSHER_VERSION=$(python3 scripts/version.py show)" -t {{image}} -f os-image/Containerfile .
 
 # Create a bootable qcow2 from the locally built image (bootc-image-builder).
 # Needs sudo (asked for up front): bib must run as root, reading the image

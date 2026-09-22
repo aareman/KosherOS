@@ -116,7 +116,7 @@ def test_rollback_calls_bootc_rollback(monkeypatch):
     seen: list = []
     daemon = _daemon(monkeypatch, record=seen)
     assert daemon.impl_Rollback() is None
-    assert seen == [["bootc", "rollback"]]
+    assert [argv for argv in seen if argv[0] == "bootc"] == [["bootc", "rollback"]]
 
 
 def test_a_failed_rollback_is_reported_not_swallowed(monkeypatch):
@@ -183,3 +183,90 @@ def test_the_version_shown_is_the_deployments_own_not_the_image_label(monkeypatc
     # No tree to read (the booted one here): the label is the fallback.
     assert status["booted"]["version"] == "44.20260910.0"
     assert status["booted"]["channel"] == "stable"
+
+
+# ---- a download in progress must not freeze the daemon ----------------------
+#
+# Every bootc command waits for one lock, and a download holds it for as
+# long as it takes. A `bootc status` run on the main loop meanwhile froze
+# the daemon, progress signals and all: the admin app said "Starting…" and
+# "Checking…" forever on a machine updating from 0.1.0-pre.071.
+
+def test_every_method_that_runs_bootc_is_answered_off_the_main_loop():
+    from kosherd import daemon as daemon_mod
+
+    assert {"CheckUpdate", "DeploymentStatus", "ListChannels", "SetChannel",
+            "Rollback"} <= daemon_mod.IN_BACKGROUND
+
+
+def _fake_run(active="inactive", record=None, hang=False):
+    import subprocess
+
+    def run(argv, **kw):
+        if record is not None:
+            record.append(argv)
+        if argv[0] == "systemctl":
+            return type("R", (), {"stdout": active + "\n", "stderr": "",
+                                  "returncode": 0})()
+        assert kw.get("timeout"), "a bootc call without a timeout can hang forever"
+        if hang:
+            raise subprocess.TimeoutExpired(argv, kw["timeout"])
+        return type("R", (), {"stdout": json.dumps(STATUS), "stderr": "",
+                              "returncode": 0})()
+    return run
+
+
+def test_while_fedoras_own_timer_is_updating_bootc_is_not_asked(monkeypatch):
+    seen: list = []
+    daemon = _daemon(monkeypatch)
+    monkeypatch.setattr("kosherd.daemon.subprocess.run",
+                        _fake_run(active="active", record=seen))
+    status = json.loads(daemon.impl_DeploymentStatus().unpack()[0])
+    assert "already downloading an update" in status["error"]
+    assert not [argv for argv in seen if argv[0] == "bootc"]
+    with pytest.raises(PolicyError, match="already downloading"):
+        daemon.impl_ApplyUpdate()
+    with pytest.raises(PolicyError, match="already downloading"):
+        daemon.impl_CheckUpdate()
+
+
+def test_while_our_own_update_runs_status_answers_at_once(monkeypatch):
+    seen: list = []
+    daemon = _daemon(monkeypatch)
+    monkeypatch.setattr("kosherd.daemon.subprocess.run", _fake_run(record=seen))
+    daemon._update_thread = type("T", (), {"is_alive": lambda self: True})()
+    status = json.loads(daemon.impl_DeploymentStatus().unpack()[0])
+    assert "already downloading" in status["error"]
+    assert not [argv for argv in seen if argv[0] == "bootc"]
+
+
+def test_a_bootc_that_never_answers_is_given_up_on(monkeypatch):
+    daemon = _daemon(monkeypatch)
+    monkeypatch.setattr("kosherd.daemon.subprocess.run", _fake_run(hang=True))
+    status = json.loads(daemon.impl_DeploymentStatus().unpack()[0])
+    assert "did not answer in time" in status["error"]
+    with pytest.raises(PolicyError, match="did not answer in time"):
+        daemon.impl_Rollback()
+
+
+def test_a_background_answer_is_sent_from_the_main_loop(monkeypatch):
+    from kosherd import daemon as daemon_mod
+
+    queued, sent = [], []
+    monkeypatch.setattr(daemon_mod.GLib, "idle_add", queued.append)
+    daemon = _daemon(monkeypatch)
+    monkeypatch.setattr("kosherd.daemon.subprocess.run", _fake_run())
+    invocation = type("I", (), {
+        "return_value": lambda self, v: sent.append(("ok", v)),
+        "return_dbus_error": lambda self, n, m: sent.append(("error", m))})()
+    daemon._answer_in_background("DeploymentStatus", [], 1000, ":1.5", invocation)
+    assert sent == [], "the reply went out from the worker thread"
+    queued[0]()
+    assert sent[0][0] == "ok"
+
+    queued.clear()
+    sent.clear()
+    daemon._update_thread = type("T", (), {"is_alive": lambda self: True})()
+    daemon._answer_in_background("Rollback", [], 1000, ":1.5", invocation)
+    queued[0]()
+    assert sent[0][0] == "error" and "already downloading" in sent[0][1]

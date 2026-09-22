@@ -186,7 +186,7 @@ def test_an_unknown_channel_never_reaches_bootc(monkeypatch):
 def test_switching_while_an_update_is_running_is_refused(monkeypatch):
     daemon = _daemon(monkeypatch, stdout=json.dumps(_status()))
     daemon._update_thread = type("T", (), {"is_alive": lambda self: True})()
-    with pytest.raises(PolicyError, match="already running"):
+    with pytest.raises(PolicyError, match="already downloading an update"):
         daemon.impl_SetChannel("edge", "")
 
 

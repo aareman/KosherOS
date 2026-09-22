@@ -2016,3 +2016,17 @@ def test_an_account_with_no_youtube_limits_keeps_its_previews(addon):
     flow.request.path = "/an_webp/v1/mqdefault_6s.webp"
     assert filt._youtube_preview_refused(flow, 1001) is False
 
+
+
+# -- an address is not a site (issue #33, F3) --------------------------------------
+
+@pytest.mark.parametrize("host", ["93.184.216.34", "10.0.0.1", "2606:4700::1111",
+                                  "[2606:4700::1111]", "", None, "  "])
+def test_an_address_or_nothing_is_a_bare_address(addon, host):
+    assert addon.is_bare_address(host)
+
+
+@pytest.mark.parametrize("host", ["example.com", "www.example.com", "localhost",
+                                  "1.2.3.4.nip.io", "192-168-1-1.example"])
+def test_a_name_is_not(addon, host):
+    assert not addon.is_bare_address(host)

@@ -132,14 +132,24 @@ constructed: a `GLib.Variant` unpacked the wrong way, a polkit action that
 prompted twice. Reading the source cannot see any of those.
 
 `just test` now builds the real dialogs against a stub client on a virtual
-display (`xvfb-run`), which needed GTK4, libadwaita and `GI_TYPELIB_PATH`
-adding to the dev shell — pygobject finds a namespace through that path
-and nothing was setting it, so `import Gtk` failed and the tests would
-have skipped themselves into uselessness.
+display, which needed GTK4, libadwaita and `GI_TYPELIB_PATH` adding to the
+dev shell — pygobject finds a namespace through that path and nothing was
+setting it, so `import Gtk` failed and the tests would have skipped
+themselves into uselessness.
+
+The virtual display is the suite's own. Each GTK app's `tests/conftest.py`
+calls `kosherd.virtualdisplay.ensure()`, which starts an Xvfb server,
+points GTK at it (`DISPLAY` set, `WAYLAND_DISPLAY` unset, `GDK_BACKEND`
+pinned to X11) and stops it when pytest exits. That replaced wrapping the
+suites in `xvfb-run`, which only replaces `DISPLAY`: GTK4 tries Wayland
+first, so on a Wayland desktop every test window still opened on the real
+screen. Because the tests arrange it themselves, running `pytest` directly
+in an app directory is as safe as `just test`.
 
 They skip rather than fail where GTK genuinely is not available; the point
 is to catch the bug on a developer's machine, not to make the suite
-unrunnable elsewhere.
+unrunnable elsewhere. Without Xvfb the widget tests are not collected at
+all, and the run says so, rather than borrowing the desktop.
 
 ## `just check-firewall`
 

@@ -220,6 +220,8 @@ table {TABLE} {{
         # Loopback is nobody's business but the machine's: a dev server or a
         # local service on any port — 443 included — is never redirected.
         oif "lo" return
+        ip daddr 127.0.0.0/8 return
+        ip6 daddr ::1 return
         # Never redirect the resolver's or the proxy's own traffic, or they
         # would loop back into themselves.
         meta skuid {{ 0, {dns_uid}{mitm_exempt}{search_exempt} }} return
@@ -230,6 +232,13 @@ table {TABLE} {{
     chain output {{
         type filter hook output priority filter; policy accept;
 {backend_guard}        oif "lo" accept
+        # A packet the nat rules just redirected (DNS to the resolver, web to
+        # the proxy) already has a loopback DESTINATION here, but this hook
+        # still sees the interface of its original route — so `oif "lo"`
+        # above misses it. Matched by address, or every redirected query and
+        # page would fall through to the per-mode reject below. It did.
+        ip daddr 127.0.0.0/8 accept
+        ip6 daddr ::1 accept
         # Continuation of already-permitted connections (incl. the reply side
         # of inbound ones, e.g. an admin ssh session). A filtered user cannot
         # INITIATE anything with this: their first SYN/datagram is dispatched

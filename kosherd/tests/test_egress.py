@@ -70,6 +70,18 @@ def test_an_accounts_extra_ports_are_excluded_from_the_redirect_and_accepted():
         < _at(output, "meta skuid vmap")
 
 
+def test_redirected_traffic_is_accepted_by_loopback_address_not_only_interface():
+    # Found live: after a nat redirect the destination is 127.0.0.1 but the
+    # filter output hook still sees the original interface, so `oif "lo"`
+    # alone let every redirected DNS query and proxy connection fall through
+    # to the mode chain's reject. Browsing stopped for filtered accounts.
+    output = _chain(_render(_policy()), "output")
+    lo = output.index('oif "lo" accept')
+    assert output[lo + 1] == "ip daddr 127.0.0.0/8 accept"
+    assert output[lo + 2] == "ip6 daddr ::1 accept"
+    assert lo + 2 < _at(output, "meta skuid vmap")
+
+
 # ---- what the mode chains do with what is left ----------------------------------
 
 def test_filtered_mode_is_default_deny():

@@ -132,9 +132,8 @@ kctl rules "$wl" clear >/dev/null
 # deterministic probe for "web on a non-standard port".
 kctl rules "$wl" block "portquiz.net*" >/dev/null
 wait_for_dns  # every policy change restarts the resolver
-sleep 2       # ...and the proxy needs a moment to bind
 check "the proxy is running for the filtered account" 0 systemctl is-active --quiet kosher-mitm
-check "the filtered account reaches an ordinary site" 0 fetch_as wlkid https://example.com
+check "the filtered account reaches an ordinary site" 0 wait_for_proxy_as wlkid
 check "the dns-filtered account reaches an ordinary site" 0 fetch_as dnskid https://example.com
 # The bare-address target comes from a live lookup: a fixed one goes stale
 # (example.com left 93.184.216.34 in 2025, and a probe against it "passed"

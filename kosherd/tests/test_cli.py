@@ -224,7 +224,7 @@ def test_a_computer_on_no_channel_is_told_it_will_not_update(monkeypatch, capsys
                         lambda: _ChannelClient("localhost/kosher-linux:dev"))
     assert cli.cmd_system(_system("channel")) == 0
     out = capsys.readouterr().out
-    assert "no channel" in out and "not on a channel" in out
+    assert "no channel" in out and "will not update on its own" in out
 
 
 def test_a_switch_waiting_for_the_next_restart_is_listed(monkeypatch, capsys):

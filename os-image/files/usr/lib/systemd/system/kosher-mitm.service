@@ -35,6 +35,7 @@ ExecStart=/usr/bin/env mitmdump \
     --set block_global=false \
     --set termlog_verbosity=warn \
     --set flow_detail=0 \
+    --set rawtcp=false \
     --scripts /run/kosher-mitm/kosher_filter.py
 Restart=on-failure
 RestartSec=2

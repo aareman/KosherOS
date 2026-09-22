@@ -426,6 +426,10 @@ def change_sentence(event: dict, users_by_uid: dict | None = None) -> tuple[str,
         what = f"Word list edited ({_list_title(arg(0))})"
     elif method == "SetAdBlock":
         what = "Ads and trackers " + ("blocked for everyone" if arg(0) else "no longer blocked")
+    elif method == "SetNetworkAccess":
+        ports = arg(2) if isinstance(arg(2), list) else []
+        what = f"{who}: video calls {'on' if arg(1) else 'off'}" + \
+            (f", extra ports {', '.join(str(p) for p in ports)}" if ports else ", no extra ports")
     elif method == "SetTimeLimits":
         what = f"{who}: time → {time_summary(arg(1) if isinstance(arg(1), dict) else {})}"
     elif method == "SetGuestConfig":

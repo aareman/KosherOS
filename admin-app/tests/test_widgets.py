@@ -115,6 +115,9 @@ class FakeClient:
     def set_channel(self, channel, guardian_password=""):
         self.calls.append(("set_channel", channel, guardian_password))
 
+    def set_network_access(self, uid, video_calls, extra_ports, guardian_password=""):
+        self.calls.append(("set_network_access", uid, video_calls, list(extra_ports)))
+
     def connect_update_signals(self, on_progress, on_finished):
         self.on_update_progress, self.on_update_finished = on_progress, on_finished
         return 7
@@ -2318,3 +2321,44 @@ def test_a_time_event_reads_in_the_feed_and_on_the_overview():
     what, _d = labels.change_sentence({"method": "SetTimeLimits", "username": "yosef",
                                        "args": [1001, {"daily_minutes": 60}], "t": now})
     assert what == "yosef: time → 1 h a day, any hour"
+
+
+# -- beyond the web: video calls and extra ports (issue #33, F1) -----------------
+
+def _detail_for(user):
+    from kosheradmin.detail import UserDetailPage
+
+    win = FakeWindow(FakeClient())
+    win.policy = {"revision": 1, "users": [user], "guardian": {"enabled": False},
+                  "guest": {"enabled": False}, "custom_profiles": []}
+    page = UserDetailPage(win, user)
+    drain()
+    return win, page
+
+
+def test_a_filtered_account_gets_the_video_calls_switch_and_the_extra_ports_row():
+    win, page = _detail_for(a_user(mode="filtered"))
+    row = _row_named(page, "Video calls")
+    assert row.get_active(), "on by default: school calls must work unconfigured"
+    # The sentence says what "on" costs, in words a parent can read.
+    assert "cannot read" in row.get_subtitle()
+    _row_named(page, "Extra ports (advanced)")
+
+
+def test_video_calls_off_in_the_policy_shows_off():
+    _win, page = _detail_for(a_user(mode="filtered", video_calls=False))
+    assert not _row_named(page, "Video calls").get_active()
+
+
+def test_turning_video_calls_off_calls_the_daemon_with_the_ports_kept():
+    win, page = _detail_for(a_user(mode="filtered", extra_ports=[22]))
+    _row_named(page, "Video calls").set_active(False)
+    drain()
+    assert ("set_network_access", 1001, False, [22]) in win.client.calls
+
+
+def test_a_whitelist_account_is_told_there_is_nothing_to_set():
+    _win, page = _detail_for(a_user(mode="whitelist"))
+    _row_named(page, "Not in this mode")
+    with pytest.raises(AssertionError):
+        _row_named(page, "Video calls")

@@ -338,9 +338,9 @@ class UserDetailPage(Adw.NavigationPage):
         # there — fifteen toggles that change nothing. The approved list
         # takes their place.
         if user["mode"] == "whitelist":
-            return [self._mode_group(user), self._approved_sites_group(user),
+            return [self._mode_group(user), self._network_group(user), self._approved_sites_group(user),
                     self._pages_group(user)]
-        return [self._mode_group(user), self._categories_group(user),
+        return [self._mode_group(user), self._network_group(user), self._categories_group(user),
                 self._pages_group(user)]
 
     def _approved_sites_group(self, user: dict) -> Adw.PreferencesGroup:
@@ -462,6 +462,68 @@ class UserDetailPage(Adw.NavigationPage):
         group.add(mode_row)
         hint_under(group, profile_hint)
         hint_under(group, "Filter mode: " + labels.MODE_HINTS.get(user["mode"], ""))
+        return group
+
+    def _network_group(self, user: dict) -> Adw.PreferencesGroup:
+        """What the account may reach that is not the web.
+
+        Two settings, both plain about what they mean. Video calls are UDP
+        the filter cannot read; the switch is on by default so school calls
+        work without a visit here, and the sentence says what "on" costs.
+        Extra ports are the advanced escape hatch for one program that is
+        neither web nor mail; everything not listed is refused.
+        """
+        group = Adw.PreferencesGroup(
+            title="Beyond the web",
+            description="Web pages go through the filter whatever port they use. "
+                        "These two are the exceptions.")
+        if user["mode"] not in ("filtered", "dnsfilter"):
+            group.add(Adw.ActionRow(
+                title="Not in this mode",
+                subtitle="Whitelist only and No internet allow nothing beyond the "
+                         "approved sites, so there is nothing to set here.",
+                subtitle_lines=2))
+            return group
+
+        video = Adw.SwitchRow(
+            title="Video calls",
+            subtitle="Zoom, Meet and the like send picture and sound over a channel "
+                     "the filter cannot read. Leave this on for an account that has "
+                     "calls to make; turn it off for one that does not.",
+            subtitle_lines=4,
+            active=user.get("video_calls", True))
+
+        def on_video(row, _param):
+            wanted = row.get_active()
+            if wanted == user.get("video_calls", True):
+                return
+            self._gated(lambda pw: self.win.client.set_network_access(
+                user["uid"], wanted, list(user.get("extra_ports", [])), pw),
+                f"{user['username']}: video calls {'on' if wanted else 'off'}")
+
+        video.connect("notify::active", on_video)
+        group.add(video)
+
+        ports_row = Adw.EntryRow(title="Extra ports (advanced)", show_apply_button=True,
+                                 text=", ".join(str(p) for p in user.get("extra_ports", [])))
+
+        def on_apply(row):
+            text = row.get_text().strip()
+            try:
+                ports = sorted({int(p) for p in text.replace(" ", "").split(",") if p})
+            except ValueError:
+                self.win.toast("Ports are numbers separated by commas, like 22, 2222")
+                return
+            self._gated(lambda pw: self.win.client.set_network_access(
+                user["uid"], user.get("video_calls", True), ports, pw),
+                f"{user['username']}: extra ports "
+                + (", ".join(map(str, ports)) if ports else "cleared"))
+
+        ports_row.connect("apply", on_apply)
+        group.add(ports_row)
+        hint_under(group, "Ports a program on this account needs that are not web or "
+                          "mail — 22 for ssh, say. Everything not listed is refused. "
+                          "Leave this empty unless something specific stopped working.")
         return group
 
     def _categories_group(self, user: dict) -> Adw.PreferencesGroup:

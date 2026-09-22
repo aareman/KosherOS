@@ -13,6 +13,14 @@ Design (see docs/architecture.md):
   browsing is therefore blocked for free.
 - evasion_block kills DoT (853), QUIC/HTTP3 (udp 443 — also DoH3/ECH), and a
   curated list of DoH-on-tcp-443 provider IPs.
+- The supervised modes are DEFAULT-DENY (issue #33, F1). A filtered account's
+  every TCP port is redirected into its own proxy listener — web on 8080 is
+  still web — except the resolver's 53, the named non-web protocols
+  (DIRECT_TCP_PORTS: mail) and the account's own extra_ports; what still
+  reaches the mode chain is refused. dnsfilter, which has no proxy, allows
+  80/443 and the same named protocols and refuses other TCP. Loopback is
+  never redirected. UDP cannot be inspected, so it is a decision: NTP, and
+  high ports for video calls (UserPolicy.video_calls, on by default).
 """
 
 from __future__ import annotations
@@ -89,6 +97,18 @@ DEFAULT_DOH_BLOCK4 = (
 
 LAN4 = ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "169.254.0.0/16")
 
+# What a supervised account may reach that is not the web and so cannot go
+# through the proxy: mail. IMAPS, SMTPS and submission — named protocols
+# with a reason, not "ports the web might use". Everything else that is
+# TCP goes to the proxy (filtered) or is refused (dnsfilter); an account
+# that genuinely needs more gets it in `extra_ports`, an advanced setting.
+DIRECT_TCP_PORTS = (465, 587, 993)
+# UDP cannot be inspected at all. Below this a port is a named service and
+# the account gets only NTP; above it is where video calls live, and that
+# is a per-account switch (UserPolicy.video_calls), on by default.
+UDP_HIGH = 1024
+UDP_LOW_ALLOWED = (123,)
+
 
 def _set_block(name: str, addr_type: str, elements: tuple[str, ...] = (), *, interval: bool = False, timeout: bool = False) -> str:
     flags = []
@@ -104,6 +124,14 @@ def _set_block(name: str, addr_type: str, elements: tuple[str, ...] = (), *, int
         lines.append(f"        elements = {{ {', '.join(elements)} }};")
     lines.append("    }")
     return "\n".join(lines)
+
+
+def _ports(*ports: int) -> str:
+    return ", ".join(str(p) for p in sorted(set(int(p) for p in ports)))
+
+
+def _extras(user) -> tuple[int, ...]:
+    return tuple(getattr(user, "extra_ports", ()) or ())
 
 
 def render(policy: Policy, *, dns_uid: int, mitm_uid: int | None = None,
@@ -123,14 +151,31 @@ def render(policy: Policy, *, dns_uid: int, mitm_uid: int | None = None,
     # Filtered mode: send this user's web traffic into the local mitmproxy,
     # which decrypts it so URL rules can be applied.
     ports = mitm_ports(policy)
+    by_uid = {u.uid: u for u in policy.effective_users()}
     if ports and mitm_uid is not None:
         # One rule per user: the destination port IS the user's identity to
-        # the proxy (see mitm_ports).
+        # the proxy (see mitm_ports). EVERY TCP port is redirected, not
+        # only 80 and 443: web on 8080 or 8443 is still web, and a port
+        # that is not redirected is a port that is not read. The
+        # exceptions are 53 (the resolver's, redirected above), the named
+        # non-web protocols, and the account's own extra ports.
         web_redirect = "".join(
-            f"        meta skuid {uid} tcp dport {{ 80, 443 }} redirect to :{port}\n"
+            f"        meta skuid {uid} tcp dport != {{ {_ports(53, *DIRECT_TCP_PORTS, *_extras(by_uid.get(uid)))} }} "
+            f"redirect to :{port}\n"
             for uid, port in ports.items())
     else:
         web_redirect = ""
+
+    # Per-account exceptions, before the mode dispatch: the extra ports an
+    # administrator granted, and the accounts whose video calls are off.
+    supervised = [u for u in policy.effective_users() if u.mode in ("filtered", "dnsfilter")]
+    per_user = "".join(
+        f"        meta skuid {u.uid} tcp dport {{ {_ports(*u.extra_ports)} }} accept\n"
+        for u in supervised if u.extra_ports)
+    no_video = sorted(u.uid for u in supervised if not u.video_calls)
+    if no_video:
+        per_user += (f"        meta skuid {{ {', '.join(map(str, no_video))} }} "
+                     f"udp dport >= {UDP_HIGH} reject\n")
 
     # Unfiltered users are sent to the plain resolver, so the safe-search
     # answers the filtered resolver hands out do not reach them.
@@ -172,6 +217,9 @@ table {TABLE} {{
 
     chain dns_redirect {{
         type nat hook output priority dstnat; policy accept;
+        # Loopback is nobody's business but the machine's: a dev server or a
+        # local service on any port — 443 included — is never redirected.
+        oif "lo" return
         # Never redirect the resolver's or the proxy's own traffic, or they
         # would loop back into themselves.
         meta skuid {{ 0, {dns_uid}{mitm_exempt}{search_exempt} }} return
@@ -189,7 +237,9 @@ table {TABLE} {{
         ct state established,related accept
         meta skuid < {UID_MIN} accept
         meta skuid @captive accept
-{vmap_rule}        # Unknown human users: fail closed.
+        # LAN basics every mode keeps: DHCP, mDNS, printing.
+        jump local_services
+{per_user}{vmap_rule}        # Unknown human users: fail closed.
         jump mode_none
     }}
 
@@ -218,13 +268,11 @@ table {TABLE} {{
     }}
 
     chain mode_none {{
-        jump local_services
         reject
     }}
 
     chain mode_whitelist {{
         jump evasion_block
-        jump local_services
         ip daddr @wl4 tcp dport {{ 80, 443 }} accept
         ip6 daddr @wl6 tcp dport {{ 80, 443 }} accept
         ip daddr @sys4 tcp dport {{ 80, 443 }} accept
@@ -233,13 +281,27 @@ table {TABLE} {{
     }}
 
     chain mode_dnsfilter {{
+        # No proxy here, so the web is 80 and 443 to anywhere, plus the
+        # named non-web protocols; other TCP is refused, not left unread.
         jump evasion_block
-        accept
+        meta l4proto {{ icmp, ipv6-icmp }} accept
+        tcp dport {{ 80, 443, {_ports(*DIRECT_TCP_PORTS)} }} accept
+        udp dport {{ {_ports(*UDP_LOW_ALLOWED)} }} accept
+        udp dport >= {UDP_HIGH} accept
+        reject
     }}
 
     chain mode_filtered {{
+        # Every TCP port this account opens was redirected into its proxy
+        # listener (dns_redirect) and accepted on loopback above, except the
+        # named non-web protocols, which pass here directly. Anything else
+        # reaching this chain is refused: default-deny, by construction.
         jump evasion_block
-        accept
+        meta l4proto {{ icmp, ipv6-icmp }} accept
+        tcp dport {{ {_ports(*DIRECT_TCP_PORTS)} }} accept
+        udp dport {{ {_ports(*UDP_LOW_ALLOWED)} }} accept
+        udp dport >= {UDP_HIGH} accept
+        reject
     }}
 
     # No filtering at all: an adult's own machine. Evasion blocking would be

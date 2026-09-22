@@ -106,7 +106,7 @@ def test_inspect_mode_redirects_web_to_mitmproxy():
     # who is connecting.
     ports = nft.mitm_ports(pol)
     for uid in inspected:
-        assert f"meta skuid {uid} tcp dport {{ 80, 443 }} redirect to :{ports[uid]}" in out
+        assert f"meta skuid {uid} tcp dport != {{ 53, 465, 587, 993 }} redirect to :{ports[uid]}" in out
     assert len(set(ports.values())) == len(inspected), "ports must be distinct"
     # inspected users still get the filtered egress policy and evasion block
     for uid in inspected:
@@ -147,7 +147,7 @@ def test_only_filtered_traffic_is_decrypted():
     out = nft.render(policy_of("dnsfilter", "filtered", "unfiltered"),
                      dns_uid=989, mitm_uid=988)
     # uid 1001 is the filtered one; nobody else is redirected to the proxy.
-    assert "meta skuid 1001 tcp dport { 80, 443 } redirect to :30000" in out
+    assert "meta skuid 1001 tcp dport != { 53, 465, 587, 993 } redirect to :30000" in out
 
 
 def test_unfiltered_users_get_the_plain_resolver():
@@ -196,4 +196,4 @@ def test_user_ports_are_deterministic_and_shared_by_every_renderer():
     assert nft.mitm_ports(pol) == ports
     out = nft.render(pol, dns_uid=989, mitm_uid=988)
     for uid, port in ports.items():
-        assert f"meta skuid {uid} tcp dport {{ 80, 443 }} redirect to :{port}" in out
+        assert f"meta skuid {uid} tcp dport != {{ 53, 465, 587, 993 }} redirect to :{port}" in out

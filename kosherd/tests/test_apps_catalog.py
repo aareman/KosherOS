@@ -84,24 +84,27 @@ def test_catalog_writes_are_atomic(catalog, tmp_path):
 
 # -- remote filter -----------------------------------------------------------
 
-def test_filter_denies_by_default_and_allows_runtimes():
-    rendered = apps.render_filter({"org.mozilla.firefox"})
-    # A filter with any allow line makes deny the default; runtimes must be
-    # allowed or approved apps cannot pull their dependencies.
-    assert "allow runtime/*" in rendered
-    assert "allow app/org.mozilla.firefox/*/*" in rendered
-
-
-def test_filter_lists_only_approved_apps():
+def test_filter_allows_by_default_and_denies_only_the_named_apps():
     rendered = apps.render_filter({"org.a.A", "org.b.B"})
-    app_lines = [ln for ln in rendered.splitlines() if ln.startswith("allow app/")]
-    assert app_lines == ["allow app/org.a.A/*/*", "allow app/org.b.B/*/*"]
+    # A filter with any allow line makes deny the default, which would shut
+    # the whole store; who may install what is kosherd's decision per
+    # account, so the filter must carry no allow line at all.
+    assert not any(ln.startswith("allow") for ln in rendered.splitlines())
+    deny_lines = [ln for ln in rendered.splitlines() if ln.startswith("deny ")]
+    assert deny_lines == ["deny app/org.a.A/*/*", "deny app/org.b.B/*/*"]
 
 
-def test_empty_catalog_still_allows_runtimes_only():
-    app_lines = [ln for ln in apps.render_filter(set()).splitlines()
-                 if ln.startswith("allow app/")]
-    assert app_lines == []
+def test_filter_denies_the_circumvention_tools_unless_approved(catalog):
+    from kosherd import appaccess
+
+    assert apps.denied_refs(set()) == set(appaccess.CIRCUMVENTION)
+    one = sorted(appaccess.CIRCUMVENTION)[0]
+    assert one not in apps.denied_refs({one})
+
+
+def test_an_empty_deny_list_is_a_filter_with_only_comments():
+    lines = [ln for ln in apps.render_filter(set()).splitlines() if ln.strip()]
+    assert lines and all(ln.startswith("#") for ln in lines)
 
 
 # -- install ledger ----------------------------------------------------------

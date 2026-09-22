@@ -210,8 +210,21 @@ class UserPolicy:
     # account, merged with `whitelist` when the filter is rendered. A
     # parent picks "Torah study" instead of typing thirty hosts.
     whitelist_bundles: list[str] = field(default_factory=list)
+    # Which installed apps this account may run, as an allow-list. The
+    # older shape of app control; kosherd turns it into `blocked_apps` on
+    # start-up once it can see what is installed, and malcontent honours
+    # it until then. New policies leave it empty.
     apps: list[str] = field(default_factory=list)
     can_install_apps: bool = True
+    # What the Store offers this account (appaccess.py): "approved" for the
+    # approved list only, "store" for the whole store minus what is
+    # blocked. None means the default for the kind of account — the
+    # approved list, or the whole store for an administrator.
+    app_access: str | None = None
+    # Kinds of app (appkinds.KIND_KEYS) and single apps this account may
+    # neither install nor run, in either access mode.
+    blocked_app_kinds: list[str] = field(default_factory=list)
+    blocked_apps: list[str] = field(default_factory=list)
     rules: list[dict] = field(default_factory=list)
     blocked_categories: list[str] = field(default_factory=list)
     media_level: str = DEFAULT_MEDIA_LEVEL
@@ -253,6 +266,12 @@ class UserPolicy:
             d["apps"] = self.apps
         if not self.can_install_apps:
             d["can_install_apps"] = False
+        if self.app_access:
+            d["app_access"] = self.app_access
+        if self.blocked_app_kinds:
+            d["blocked_app_kinds"] = self.blocked_app_kinds
+        if self.blocked_apps:
+            d["blocked_apps"] = self.blocked_apps
         if self.layout != DEFAULT_LAYOUT:
             d["layout"] = self.layout
         if self.cover_style != DEFAULT_COVER_STYLE:
@@ -361,6 +380,10 @@ class Policy:
                 uid=self.guest.uid, username=GUEST_USERNAME,
                 mode=self.guest.mode, whitelist=list(self.guest.whitelist),
                 whitelist_bundles=list(self.guest.whitelist_bundles),
+                # The guest installs nothing and is wiped at sign-out;
+                # what it may run is the approved list, like any account
+                # in no group.
+                can_install_apps=False,
                 rules=list(self.guest.rules),
                 blocked_categories=list(self.guest.blocked_categories),
                 media_level=self.guest.media_level,
@@ -407,6 +430,9 @@ class Policy:
                     whitelist_bundles=list(u.get("whitelist_bundles", [])),
                     apps=list(u.get("apps", [])),
                     can_install_apps=u.get("can_install_apps", True),
+                    app_access=u.get("app_access") or None,
+                    blocked_app_kinds=list(u.get("blocked_app_kinds", [])),
+                    blocked_apps=list(u.get("blocked_apps", [])),
                     rules=list(u.get("rules", [])),
                     blocked_categories=list(u.get("blocked_categories", [])),
                     media_level=u.get("media_level", DEFAULT_MEDIA_LEVEL),

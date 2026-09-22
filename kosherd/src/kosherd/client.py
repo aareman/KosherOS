@@ -236,6 +236,26 @@ class DaemonClient:
     def list_catalog(self) -> dict:
         return json.loads(self._call("Apps", "ListCatalog")[0])
 
+    def list_store_apps(self) -> dict:
+        """What the Store shows the calling account: {apps, access, ready}.
+        `apps` carry ref, name, summary, categories, icon, kind, approved."""
+        return json.loads(self._call("Apps", "ListStoreApps")[0])
+
+    def set_user_app_access(self, uid: int, access: str,
+                            guardian_password: str = "") -> None:
+        """'approved' for the approved list only, 'store' for the whole
+        store minus what is blocked."""
+        self._call("Apps", "SetUserAppAccess", "(iss)", uid, access, guardian_password)
+
+    def set_user_blocked_app_kinds(self, uid: int, kinds: list[str],
+                                   guardian_password: str = "") -> None:
+        self._call("Apps", "SetUserBlockedAppKinds", "(iass)", uid, kinds,
+                   guardian_password)
+
+    def set_user_blocked_apps(self, uid: int, refs: list[str],
+                              guardian_password: str = "") -> None:
+        self._call("Apps", "SetUserBlockedApps", "(iass)", uid, refs, guardian_password)
+
     def list_installed(self) -> list[str]:
         return self._call("Apps", "ListInstalled")[0]
 

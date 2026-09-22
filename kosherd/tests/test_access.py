@@ -43,7 +43,8 @@ READS = ["GetPolicy", "Status", "IsEnabled", "ListCatalog", "ListInstalled",
          "VerifyGuardian", "PortalStatus", "SyncNow", "GetMyLayout", "GetTimeUsage"]
 CHANGES = ["SetFilterMode", "SetWhitelist", "SetUrlRules", "CreateUser",
            "AdoptUser", "RemoveUser", "RemoveApp", "ApproveApp",
-           "UnapproveApp", "SetUserApps", "SetUserCanInstall", "ApplyUpdate",
+           "UnapproveApp", "SetUserApps", "SetUserCanInstall", "SetUserAppAccess",
+           "SetUserBlockedAppKinds", "SetUserBlockedApps", "ApplyUpdate",
            "SetCaptiveMode", "SetGuardianPassword", "DisableGuardian",
            "SetGuestConfig", "Enrol", "Unenrol", "SetLayout", "SetCoverStyle", "SetAdBlock",
            "SetTimeLimits"]
@@ -71,8 +72,11 @@ def test_unlock_always_prompts_even_when_unlocked():
 def test_store_actions_are_open_to_ordinary_users():
     # The catalog is the allowlist, so using the store needs no admin rights;
     # the action itself is granted to any active local user by polkit.
-    for method in ("ListCatalog", "ListInstalled", "InstallApp"):
+    for method in ("ListCatalog", "ListStoreApps", "ListInstalled", "InstallApp"):
         assert ACTIONS[method] == access.ACTION_USE_STORE
+    # What the store shows depends on who is asking, so the daemon must be
+    # told the caller's uid.
+    assert "ListStoreApps" in access.UID_AWARE
 
 
 def test_reading_your_own_layout_is_open_to_ordinary_users():
@@ -136,7 +140,10 @@ def test_the_guardian_gate_covers_every_filter_weakening_method():
                 "Enrol", "Unenrol", "SetAdBlock", "SetTimeLimits",
                 # Not a filter setting, but the same kind of decision: it
                 # puts the family computer on builds nobody has tried.
-                "SetChannel"}
+                "SetChannel",
+                # Opening an account to the whole store, or lifting an app
+                # block, widens what it can reach.
+                "SetUserAppAccess", "SetUserBlockedAppKinds", "SetUserBlockedApps"}
     assert GUARDIAN_GATED == expected
     filter_actions = {m for m, a in ACTIONS.items()
                       if a == access.ACTION_MANAGE_FILTER}

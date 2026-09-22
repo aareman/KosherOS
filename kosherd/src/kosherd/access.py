@@ -132,6 +132,9 @@ ACTIONS = {
     # per-user can_install_apps flag). Removing affects every user, so it
     # stays an admin action.
     "ListCatalog": ACTION_USE_STORE,
+    # What the Store shows the CALLER: the approved list, or the whole
+    # store minus what is blocked for them (appaccess.py).
+    "ListStoreApps": ACTION_USE_STORE,
     "ListInstalled": ACTION_USE_STORE,
     "InstallApp": ACTION_USE_STORE,
     "ListInstalledDetails": ACTION_READ_CONFIG,
@@ -144,6 +147,11 @@ ACTIONS = {
     "RemoveApp": ACTION_INSTALL_APPS,
     "SetUserApps": ACTION_INSTALL_APPS,
     "SetUserCanInstall": ACTION_INSTALL_APPS,
+    # Opening an account to the whole store, or lifting a block, widens
+    # what it can reach, so these are guardian-gated like the web filter.
+    "SetUserAppAccess": ACTION_INSTALL_APPS,
+    "SetUserBlockedAppKinds": ACTION_INSTALL_APPS,
+    "SetUserBlockedApps": ACTION_INSTALL_APPS,
     "SearchApps": ACTION_READ_CONFIG,
     "ApproveApp": ACTION_INSTALL_APPS,
     "UnapproveApp": ACTION_INSTALL_APPS,
@@ -179,6 +187,7 @@ GUARDIAN_GATED = frozenset({
     "SetLanguageFilter", "SetYouTube",
     "SetGuestConfig", "DisableGuardian", "Enrol", "Unenrol",
     "SetAdBlock", "SetTimeLimits", "SetChannel",
+    "SetUserAppAccess", "SetUserBlockedAppKinds", "SetUserBlockedApps",
 })
 
 # First-boot only; closed forever once setup is stamped complete.
@@ -190,7 +199,7 @@ SETUP_READS = frozenset({"IsComplete", "AdminExists"})
 
 # Methods that need to know which uid called them (session management).
 UID_AWARE = frozenset({"Unlock", "Lock", "Status", "VerifyGuardian", "InstallApp",
-                       "GetMyLayout", "GetMySettings"})
+                       "ListStoreApps", "GetMyLayout", "GetMySettings"})
 
 # Calls that change how the machine is set up, written to the activity log
 # with the admin who made them so "who changed this?" has an answer. Reads,
@@ -204,7 +213,8 @@ CHANGES = frozenset({
     "SetLanguageFilter", "SetYouTube", "SetUserAdmin", "SetLayout",
     "SetCoverStyle", "SetAdBlock", "SetTimeLimits", "SetGuestConfig", "CreateUser",
     "AdoptUser", "RemoveUser", "ResetPassword", "SetUserApps", "RemoveApp", "ApproveApp",
-    "UnapproveApp", "SetUserCanInstall", "SetCaptiveMode",
+    "UnapproveApp", "SetUserCanInstall", "SetUserAppAccess",
+    "SetUserBlockedAppKinds", "SetUserBlockedApps", "SetCaptiveMode",
     "SetGuardianPassword", "DisableGuardian", "Enrol", "Unenrol",
     # Moving the system in either direction. The log answers "who changed
     # this machine, and when", and changing which OS image it runs is
@@ -223,7 +233,8 @@ PER_USER = frozenset({
     "ApplyProfile", "SaveProfile", "AllowUrl", "SetMediaLevel",
     "SetLanguageFilter", "SetYouTube", "SetUserAdmin", "SetLayout",
     "SetCoverStyle", "SetTimeLimits", "RemoveUser", "ResetPassword", "SetUserApps",
-    "SetUserCanInstall", "SetCaptiveMode",
+    "SetUserCanInstall", "SetUserAppAccess", "SetUserBlockedAppKinds",
+    "SetUserBlockedApps", "SetCaptiveMode",
 })
 # Changes whose arguments are secrets or too big to be worth keeping.
 NO_ARGS_LOGGED = frozenset({"SetGuardianPassword", "DisableGuardian",

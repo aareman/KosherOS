@@ -16,6 +16,7 @@ import logging
 import re
 import subprocess
 import sys
+import threading
 from pathlib import Path
 
 import gi
@@ -23,7 +24,8 @@ import gi
 gi.require_version("Gio", "2.0")
 from gi.repository import Gio, GLib
 
-from . import BUS_NAME, OBJECT_PATH, access, apps, auth, policy as policy_mod
+from . import (BUS_NAME, OBJECT_PATH, access, appaccess, appkinds, apps, auth,
+               policy as policy_mod)
 from .apply import apply_policy
 from .apps import AppError
 from .guardian import Guardian, GuardianError
@@ -34,8 +36,8 @@ from .timekeeper import TICK_SECONDS, Session, Timekeeper
 
 log = logging.getLogger("kosherd")
 
-CATALOG_PATH = Path("/etc/kosher/catalog.json")
-FLATPAK_REMOTE = "kosher"
+# How often the daemon refreshes its copy of the store's app list.
+APP_INDEX_REFRESH_SECONDS = 6 * 3600
 
 INTROSPECTION_XML = """
 <node>
@@ -212,6 +214,24 @@ INTROSPECTION_XML = """
   <interface name="org.kosherlinux.Daemon1.Apps">
     <method name="ListCatalog">
       <arg direction="out" type="s" name="catalog_json"/>
+    </method>
+    <method name="ListStoreApps">
+      <arg direction="out" type="s" name="store_json"/>
+    </method>
+    <method name="SetUserAppAccess">
+      <arg direction="in" type="i" name="uid"/>
+      <arg direction="in" type="s" name="access"/>
+      <arg direction="in" type="s" name="guardian_password"/>
+    </method>
+    <method name="SetUserBlockedAppKinds">
+      <arg direction="in" type="i" name="uid"/>
+      <arg direction="in" type="as" name="kinds"/>
+      <arg direction="in" type="s" name="guardian_password"/>
+    </method>
+    <method name="SetUserBlockedApps">
+      <arg direction="in" type="i" name="uid"/>
+      <arg direction="in" type="as" name="refs"/>
+      <arg direction="in" type="s" name="guardian_password"/>
     </method>
     <method name="ListInstalled">
       <arg direction="out" type="as" name="refs"/>
@@ -592,11 +612,15 @@ class Daemon:
         except Exception:
             log.exception("failed to apply policy at startup; baseline rules remain")
         self._quiet_boot_menu()
+        self._convert_app_allowlists()
         self._apply_mct()
         try:
             apps.write_remote_filter()
         except Exception:
             log.exception("could not apply the flatpak remote filter")
+        self._warm_app_index()
+        GLib.timeout_add_seconds(APP_INDEX_REFRESH_SECONDS,
+                                 lambda: (self._warm_app_index(), True)[1])
         GLib.timeout_add_seconds(TICK_SECONDS, self._time_tick)
         try:
             loop.run()
@@ -799,6 +823,61 @@ class Daemon:
             apply_malcontent(self.policy)
         except Exception:  # noqa: BLE001 - app filters must not block the firewall path
             log.exception("malcontent application failed; network policy is still applied")
+
+    def _warm_app_index(self) -> None:
+        """Load the store's app list on a worker thread, then re-judge
+        which installed apps each account may run — malcontent applied
+        before the index was in memory could only go by the approved list."""
+        def work():
+            known = apps.warm_index()
+            if known:
+                log.info("app index ready: %d apps", known)
+                GLib.idle_add(lambda: (self._apply_mct(), False)[1])
+
+        threading.Thread(target=work, daemon=True, name="app-index").start()
+
+    def _convert_app_allowlists(self) -> None:
+        """Turn the older per-account allow-list of runnable apps into the
+        blocked-apps list it means today: every installed app that was
+        not on it. Once, at start-up, when what is installed can be seen;
+        an account whose list cannot be converted yet keeps it, and
+        malcontent still honours it."""
+        users = [u for u in self.policy.users if u.apps]
+        if not users:
+            return
+        try:
+            installed = apps.installed_refs()
+        except Exception as e:  # noqa: BLE001 - convert when flatpak can be asked
+            log.warning("app allow-lists not converted yet: %s", e)
+            return
+        for user in users:
+            user.blocked_apps = sorted(set(user.blocked_apps)
+                                       | (installed - set(user.apps)))
+            user.apps = []
+            log.info("uid %d: app allow-list converted to %d blocked apps",
+                     user.uid, len(user.blocked_apps))
+        try:
+            policy_mod.save(self.policy)
+        except Exception:  # noqa: BLE001
+            log.exception("could not save the converted app lists")
+
+    def _account_for(self, uid: int) -> UserPolicy:
+        """Whose app rules apply to a caller: the managed account or the
+        guest by uid; an administrator's view for root; and for an
+        account kosherd does not manage, the strict default."""
+        found = next((u for u in self.policy.effective_users() if u.uid == uid), None)
+        if found is not None:
+            return found
+        return UserPolicy(uid=uid, username=str(uid), mode="filtered", admin=(uid == 0))
+
+    @staticmethod
+    def _app_entry(ref: str, approved: list[dict]) -> dict:
+        """What is known about an app: its index entry, else its approved
+        entry, else a bare ref (which appaccess fails closed on)."""
+        index = apps.cached_index_by_ref() or {}
+        if ref in index:
+            return index[ref]
+        return next((a for a in approved if a.get("ref") == ref), {"ref": ref})
 
     # ---- Profiles --------------------------------------------------------
 
@@ -1266,6 +1345,12 @@ class Daemon:
             "mode": user.mode,
             "admin": user.admin,
             "can_install_apps": user.can_install_apps,
+            "app_access": appaccess.access_of(user),
+            "blocked_app_kinds": [
+                {"key": key, "label": appkinds.label(key)}
+                for key in user.blocked_app_kinds if appkinds.is_kind(key)
+            ],
+            "blocked_apps": len(user.blocked_apps),
             "language_filter": user.language_filter,
             "adblock": self.policy.adblock,
             "blocked_categories": [
@@ -1739,13 +1824,55 @@ class Daemon:
         self._save_and_apply()  # re-applies malcontent filters
         return None
 
+    def impl_ListStoreApps(self, *, _uid: int):
+        """What the Store shows the caller — decided here, for the uid on
+        the connection, so an account sees exactly what kosherd would
+        install for it and nothing it would refuse."""
+        return GLib.Variant("(s)", (json.dumps(apps.store_apps(self._account_for(_uid))),))
+
+    def impl_SetUserAppAccess(self, uid: int, access_key: str, _guardian_pw: str):
+        if access_key not in appaccess.APP_ACCESS:
+            raise PolicyError(f"unknown app access {access_key!r}")
+        user = self.policy.user(uid)
+        if user is None:
+            raise PolicyError(f"uid {uid} is not managed")
+        user.app_access = access_key
+        self._save_and_apply()  # re-judges which installed apps they may run
+        return None
+
+    def impl_SetUserBlockedAppKinds(self, uid: int, kinds: list[str], _guardian_pw: str):
+        unknown = [k for k in kinds if not appkinds.is_kind(k)]
+        if unknown:
+            raise PolicyError(f"unknown kind of app: {', '.join(unknown)}")
+        user = self.policy.user(uid)
+        if user is None:
+            raise PolicyError(f"uid {uid} is not managed")
+        user.blocked_app_kinds = sorted(set(kinds))
+        self._save_and_apply()
+        return None
+
+    def impl_SetUserBlockedApps(self, uid: int, refs: list[str], _guardian_pw: str):
+        user = self.policy.user(uid)
+        if user is None:
+            raise PolicyError(f"uid {uid} is not managed")
+        user.blocked_apps = sorted({r.strip() for r in refs if r.strip()})
+        self._save_and_apply()
+        return None
+
     def impl_InstallApp(self, ref: str, *, _uid: int):
         import pwd
 
-        user = self.policy.user(_uid)
-        if _uid != 0 and user is not None and not user.can_install_apps:
+        account = self._account_for(_uid)
+        if _uid != 0 and not account.can_install_apps:
             raise PolicyError("app installation is turned off for this user")
-        self.app_manager.install(ref)  # validates against the allowlist
+        approved = apps.load_catalog().get("apps", [])
+        approved_refs = {a["ref"] for a in approved}
+
+        def permit(r: str) -> str | None:
+            reason = appaccess.decide(account, self._app_entry(r, approved), approved_refs)
+            return None if reason is None else appaccess.REASONS[reason]
+
+        self.app_manager.install(ref, permit=permit)
         try:
             username = pwd.getpwuid(_uid).pw_name
         except KeyError:

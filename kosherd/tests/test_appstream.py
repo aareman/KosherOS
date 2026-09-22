@@ -47,9 +47,25 @@ CATALOGUE = """<?xml version="1.0" encoding="UTF-8"?>
     <id>org.chess.Chess</id>
     <name>Chess</name>
     <summary>Play chess</summary>
+    <categories><category>Game</category><category>BoardGame</category></categories>
+    <content_rating type="oars-1.1">
+      <content_attribute id="violence-cartoon">none</content_attribute>
+      <content_attribute id="violence-fantasy">mild</content_attribute>
+      <content_attribute id="language-profanity">moderate</content_attribute>
+    </content_rating>
   </component>
 </components>
 """
+
+
+def test_content_rating_is_kept_without_the_nones(catalogue):
+    by_ref = {a["ref"]: a for a in apps.parse_appstream(catalogue)}
+    assert by_ref["org.chess.Chess"]["rating"] == {
+        "violence-fantasy": "mild", "language-profanity": "moderate"}
+    assert by_ref["org.chess.Chess"]["categories"] == ["Game", "BoardGame"]
+    # An app with no <content_rating> is unrated: an empty dict, never a
+    # missing key, so the ceiling can be asked about every entry.
+    assert by_ref["org.mozilla.firefox"]["rating"] == {}
 
 
 @pytest.fixture

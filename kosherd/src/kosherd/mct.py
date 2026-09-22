@@ -3,20 +3,25 @@
 flatpak and gnome-shell natively honor malcontent app filters stored in
 accountsservice. kosherd writes one per managed user so that:
 - non-admin managed users cannot install flatpaks at all (user OR system) —
-  this is what actually blocks `flatpak install --user` from dodging the
-  curated remote;
+  this is what actually blocks `flatpak install --user` from dodging
+  kosherd;
 - admins keep installation rights (kosherd itself installs system-wide).
 
-Per-app allow-lists (user.apps) are enforced as a malcontent blocklist of
-everything installed that is NOT allowed; refreshed on every policy apply
-and after each install/remove.
+What an account may run is the same rule as what it may install
+(appaccess.decide): the approved list or the whole store, minus blocked
+kinds and blocked apps. It is enforced as a malcontent blocklist of every
+installed app the rule refuses, refreshed on every policy apply and after
+each install/remove. The older per-user allow-list (user.apps) is still
+honoured for a policy that has not been converted yet.
 """
 
 from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
+from typing import Iterable
 
+from . import appaccess
 from .policy import Policy, UserPolicy
 
 log = logging.getLogger(__name__)
@@ -41,19 +46,39 @@ class FilterSpec:
     blocked_paths: list[str] = field(default_factory=list)
 
 
-def filter_spec(user: UserPolicy, installed: list[tuple[str, str]]) -> FilterSpec:
-    """The filter for `user`, given (app id, full ref) pairs of what is installed."""
+def _entry(app_id: str, index: dict[str, dict] | None, approved: dict[str, dict]) -> dict:
+    """What is known about an installed app: its index entry, else its
+    approved-list entry, else a bare ref (which decide() fails closed on)."""
+    if index and app_id in index:
+        return index[app_id]
+    if app_id in approved:
+        return approved[app_id]
+    return {"ref": app_id}
+
+
+def filter_spec(user: UserPolicy, installed: list[tuple[str, str]],
+                index: dict[str, dict] | None = None,
+                approved: Iterable[dict] = ()) -> FilterSpec:
+    """The filter for `user`, given (app id, full ref) pairs of what is
+    installed, the app index by ref (None when the machine has not loaded
+    one yet) and the approved list's entries."""
     if user.admin:
         # Admins install through kosherd; leaving the capability on keeps
-        # the stock tooling coherent for them.
+        # the stock tooling coherent for them, and restricting their own
+        # launcher would only lock them out of fixing it.
         return FilterSpec(user.uid, True, True)
 
+    approved_by_ref = {a["ref"]: a for a in approved if a.get("ref")}
     blocklist = []
-    if user.apps:
-        # An allow-list is expressed to malcontent as "block everything
-        # installed that is not on it", using EXACT refs.
-        blocklist = [full_ref for app_id, full_ref in installed
-                     if app_id not in user.apps]
+    for app_id, full_ref in installed:
+        if user.apps and app_id not in user.apps:
+            # The older allow-list: "block everything installed that is
+            # not on it", using EXACT refs.
+            blocklist.append(full_ref)
+            continue
+        entry = _entry(app_id, index, approved_by_ref)
+        if appaccess.decide(user, entry, approved_by_ref) is not None:
+            blocklist.append(full_ref)
     # Hide the admin app from people who cannot use it: left in the app grid
     # it invites someone to open it and meet a password prompt they can never
     # satisfy, which reads as broken rather than "not for you".
@@ -61,8 +86,12 @@ def filter_spec(user: UserPolicy, installed: list[tuple[str, str]]) -> FilterSpe
                       list(ADMIN_ONLY_PROGRAMS))
 
 
-def specs_for(policy: Policy, installed: list[tuple[str, str]]) -> list[FilterSpec]:
-    return [filter_spec(user, installed) for user in policy.effective_users()]
+def specs_for(policy: Policy, installed: list[tuple[str, str]],
+              index: dict[str, dict] | None = None,
+              approved: Iterable[dict] = ()) -> list[FilterSpec]:
+    approved = list(approved)
+    return [filter_spec(user, installed, index, approved)
+            for user in policy.effective_users()]
 
 
 def _installed_apps() -> list[tuple[str, str]]:
@@ -87,12 +116,19 @@ def apply_malcontent(policy: Policy) -> None:
     gi.require_version("Malcontent", "0")
     from gi.repository import Gio, GLib, Malcontent
 
-    manager = Malcontent.Manager.new(Gio.bus_get_sync(Gio.BusType.SYSTEM, None))
-    # Only look up what is installed if some user actually restricts apps.
-    installed = _installed_apps() if any(
-        u.apps and not u.admin for u in policy.effective_users()) else []
+    from . import apps
 
-    for spec in specs_for(policy, installed):
+    manager = Malcontent.Manager.new(Gio.bus_get_sync(Gio.BusType.SYSTEM, None))
+    # Only look up what is installed if some user is restricted at all.
+    restricted = any(not u.admin for u in policy.effective_users())
+    installed = _installed_apps() if restricted else []
+    # The index already in memory, never a parse here: this runs on the
+    # policy path, and a forty-megabyte parse does not belong on it. The
+    # daemon re-applies once the index is warm.
+    index = apps.cached_index_by_ref() if restricted else None
+    approved = apps.load_catalog().get("apps", []) if restricted else []
+
+    for spec in specs_for(policy, installed, index, approved):
         builder = Malcontent.AppFilterBuilder.new()
         builder.set_allow_user_installation(spec.allow_user_installation)
         builder.set_allow_system_installation(spec.allow_system_installation)

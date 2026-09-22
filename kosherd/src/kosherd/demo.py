@@ -44,6 +44,35 @@ def _shipped_catalog() -> list[dict]:
              "summary": "Browse the web", "categories": ["Network", "WebBrowser"]}]
 
 
+# What the whole store looks like beyond the approved list, for an account
+# opened to it: a few of each kind, one rated above the ceiling (which the
+# Store never shows) and one filter-circumvention tool (likewise).
+DEMO_STORE_APPS = [
+    {"ref": "org.gnome.Fractal", "name": "Fractal", "summary": "Matrix group messaging",
+     "categories": ["Network", "InstantMessaging"], "rating": {"social-chat": "intense"}},
+    {"ref": "org.gnucash.GnuCash", "name": "GnuCash", "summary": "Personal and small-business finances",
+     "categories": ["Office", "Finance"], "rating": {}},
+    {"ref": "org.kde.kstars", "name": "KStars", "summary": "A desktop planetarium",
+     "categories": ["Education", "Science", "Astronomy"], "rating": {}},
+    {"ref": "net.supertuxkart.SuperTuxKart", "name": "SuperTuxKart",
+     "summary": "A 3D kart racing game",
+     "categories": ["Game", "ArcadeGame"], "rating": {"violence-cartoon": "mild"}},
+    {"ref": "io.github.zaps166.QMPlay2", "name": "QMPlay2", "summary": "Video and audio player",
+     "categories": ["AudioVideo", "Player", "Video"], "rating": {}},
+    {"ref": "org.musescore.MuseScore", "name": "MuseScore", "summary": "Create and play sheet music",
+     "categories": ["AudioVideo", "Audio", "Music"], "rating": {}},
+    {"ref": "com.github.marktext.marktext", "name": "MarkText", "summary": "A Markdown editor",
+     "categories": ["Office", "TextEditor"], "rating": {}},
+    {"ref": "org.gnome.Podcasts", "name": "Podcasts", "summary": "Listen to your favourite shows",
+     "categories": ["AudioVideo", "Audio"], "rating": {}},
+    {"ref": "com.example.GoreArena", "name": "Gore Arena", "summary": "A violent shooter",
+     "categories": ["Game", "ShooterGame"],
+     "rating": {"violence-bloodshed": "intense", "language-profanity": "intense"}},
+    {"ref": "org.torproject.torbrowser-launcher", "name": "Tor Browser Launcher",
+     "summary": "Download and run Tor Browser", "categories": ["Network", "WebBrowser"],
+     "rating": {}},
+]
+
 # The sample family's groups: made by the family, as they would be. The
 # grown-ups are in none; they have the filter on for themselves.
 KIDS = profiles.Profile(
@@ -60,7 +89,8 @@ TEENS = profiles.Profile(
     blocked_categories=tuple(sorted({*profiles.for_mode("dnsfilter").blocked_categories,
                                      "immodest", "violence", "drugs"})),
     media_level="immodest", language_filter="substitute",
-    youtube={"restrict": "moderate"}, can_install_apps=True)
+    youtube={"restrict": "moderate"}, can_install_apps=True,
+    app_access="store", blocked_app_kinds=("games",))
 LITTLE_ONES = profiles.Profile(
     key="custom-little-ones", label="Little ones",
     description="Approved sites only, no pictures from the web.",
@@ -72,7 +102,7 @@ GROWN_UP = profiles.Profile(
     blocked_categories=tuple(sorted({*profiles.for_mode("dnsfilter").blocked_categories,
                                      "immodest"})),
     media_level="immodest", language_filter="off",
-    youtube={"restrict": "moderate"}, can_install_apps=True)
+    youtube={"restrict": "moderate"}, can_install_apps=True, app_access="store")
 DEMO_GROUPS = (LITTLE_ONES, KIDS, TEENS)
 
 
@@ -92,6 +122,8 @@ def _user(uid, name, key, admin=False, **kw):
          "rules": [], "apps": [], "blocked_categories": list(p.blocked_categories),
          "media_level": p.media_level, "language_filter": p.language_filter,
          "youtube": dict(p.youtube), "can_install_apps": p.can_install_apps,
+         "app_access": p.app_access, "blocked_app_kinds": list(p.blocked_app_kinds),
+         "blocked_apps": list(p.blocked_apps),
          "layout": "classic", "cover_style": "frost", "time": {},
          "profile": p.key or None}
     u.update(kw)
@@ -452,6 +484,43 @@ class DemoClient:
     # -- apps ----------------------------------------------------------------------
 
     def list_catalog(self): return {"apps": list(self.catalog)}
+
+    def list_store_apps(self, uid=None):
+        """What the Store shows: the approved list for an approved-only
+        account, the approved list plus a shelf of pretend store apps for
+        one opened to the whole store — minus what is blocked for it. The
+        real daemon reads the caller's uid from the bus; the demo takes the
+        first administrator's view unless told otherwise."""
+        import os
+
+        from kosherd import appaccess, appkinds
+        from kosherd.policy import UserPolicy
+
+        uid = os.getuid() if uid is None else uid
+        doc = next((u for u in self.policy["users"] if u["uid"] == uid), None)
+        if doc is None:
+            doc = next(u for u in self.policy["users"] if u.get("admin"))
+        account = UserPolicy(uid=doc["uid"], username=doc["username"], mode=doc["mode"],
+                             admin=doc.get("admin", False),
+                             app_access=doc.get("app_access"),
+                             blocked_app_kinds=list(doc.get("blocked_app_kinds") or []),
+                             blocked_apps=list(doc.get("blocked_apps") or []))
+        index = [*self.catalog, *DEMO_STORE_APPS]
+        return {"access": appaccess.access_of(account), "ready": True,
+                "apps": appaccess.visible(account, index, self.catalog)}
+
+    def set_user_app_access(self, uid, access, guardian_password=""):
+        self._user(uid)["app_access"] = access
+        self._change(uid, "SetUserAppAccess", [uid, access])
+
+    def set_user_blocked_app_kinds(self, uid, kinds, guardian_password=""):
+        self._user(uid)["blocked_app_kinds"] = sorted(kinds)
+        self._change(uid, "SetUserBlockedAppKinds", [uid, sorted(kinds)])
+
+    def set_user_blocked_apps(self, uid, refs, guardian_password=""):
+        self._user(uid)["blocked_apps"] = sorted(refs)
+        self._change(uid, "SetUserBlockedApps", [uid, sorted(refs)])
+
     def list_installed(self): return [a["ref"] for a in self.installed]
     def list_installed_details(self): return list(self.installed)
     def set_user_apps(self, uid, refs): self._user(uid)["apps"] = list(refs)

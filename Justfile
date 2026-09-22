@@ -102,14 +102,13 @@ test *ARGS:
     @python3 -c "import yaml" 2>/dev/null || echo "WARNING: pyyaml missing — the workflow tests will skip. Re-enter 'devenv shell'."
     cd kosherd && python3 -m pytest tests/ -q {{ARGS}}
     PYTHONPATH=kosherd/src:search-app python3 -m pytest search-app/tests -q {{ARGS}}
-    xvfb-run -a env PYTHONPATH=kosherd/src:admin-app/src \
-        python3 -m pytest admin-app/tests -q {{ARGS}}
-    xvfb-run -a env PYTHONPATH=kosherd/src:store-app/src \
-        python3 -m pytest store-app/tests -q {{ARGS}}
-    xvfb-run -a env PYTHONPATH=kosherd/src:setup-app/src \
-        python3 -m pytest setup-app/tests -q {{ARGS}}
-    xvfb-run -a env PYTHONPATH=kosherd/src:myfilter-app/src \
-        python3 -m pytest myfilter-app/tests -q {{ARGS}}
+    # The widget suites start their own Xvfb (tests/conftest.py) and point
+    # GTK at it, so nothing appears on the desktop. xvfb-run alone did not
+    # manage that: GTK4 picks Wayland first, and xvfb-run only sets DISPLAY.
+    PYTHONPATH=kosherd/src:admin-app/src python3 -m pytest admin-app/tests -q {{ARGS}}
+    PYTHONPATH=kosherd/src:store-app/src python3 -m pytest store-app/tests -q {{ARGS}}
+    PYTHONPATH=kosherd/src:setup-app/src python3 -m pytest setup-app/tests -q {{ARGS}}
+    PYTHONPATH=kosherd/src:myfilter-app/src python3 -m pytest myfilter-app/tests -q {{ARGS}}
     python3 scripts/wizard-check.py
     cd portal && PYTHONPATH=src:../kosherd/src python3 -m pytest tests/ -q {{ARGS}}
 

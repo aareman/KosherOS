@@ -91,7 +91,7 @@ in
     # on construction, which a source-parsing test cannot see.
     pkgs.gtk4
     pkgs.libadwaita
-    pkgs.xvfb-run
+    pkgs.xorg.xvfb # the private display those tests draw on (kosherd/virtualdisplay.py)
     pkgs.nftables # `nft --check` of rendered rulesets
     pkgs.shellcheck # the VM test suites and installer scripts
     # Fedora test VM (plain QEMU + cloud-init; no libvirt needed)

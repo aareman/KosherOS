@@ -16,3 +16,8 @@ kosher-admin = "kosheradmin.app:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/kosheradmin"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# So `pytest` works from this directory as it does from `just test`.
+pythonpath = ["src", "../kosherd/src"]

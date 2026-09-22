@@ -50,6 +50,9 @@ it to make sure no setting is missing its label.
 
 ## Running the tests
 
-    xvfb-run -a env PYTHONPATH=../kosherd/src:src python3 -m pytest tests -q
+    python3 -m pytest -q
 
-They build the real widgets against a stub client on a virtual display.
+They build the real widgets against a stub client on a virtual display of
+their own: `tests/conftest.py` starts an Xvfb server and points GTK at it,
+so no window ever appears on your desktop. Without Xvfb installed (the dev
+shell has it) the widget tests are not collected, and the run says why.

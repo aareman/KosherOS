@@ -23,6 +23,7 @@ from __future__ import annotations
 import json
 import re
 from . import lists
+from . import textfold
 from pathlib import Path
 from urllib.parse import parse_qsl, unquote_plus, urlsplit
 
@@ -72,8 +73,7 @@ class SiteRules:
         # worth reparsing at all. Reparsing a megabyte of HTML costs a
         # fifth of a second on the machine this runs on, and almost no
         # page contains any of these words.
-        self._quick = re.compile("|".join(
-            re.escape(t.lower()) for t in sorted(pooled) if t)) if pooled else None
+        self._quick = _quick_scan(pooled)
 
     def __len__(self) -> int:
         return len(self.sites)
@@ -86,7 +86,7 @@ class SiteRules:
             return None
         # Decoded, because a department reaches the server percent-encoded
         # as often as not.
-        haystack = unquote_plus(f"{parts.path}?{parts.query}").lower()
+        haystack = _prep(unquote_plus(f"{parts.path}?{parts.query}"))
 
         for hosts, pattern, site in self._by_host:
             if not any(_under(host, h) for h in hosts):
@@ -141,11 +141,10 @@ class SiteRules:
         pattern = _compile(terms)
         if pattern is None:
             return None
-        quick = re.compile("|".join(
-            re.escape(t.lower()) for t in sorted(terms) if t))
+        quick = _quick_scan(terms)
 
         def is_blocked(text: str) -> bool:
-            return bool(pattern.search(text.lower()))
+            return bool(pattern.search(_prep(text)))
 
         return tags, is_blocked, quick
 
@@ -175,7 +174,7 @@ class SiteRules:
         """
         if not text or self._search_terms is None:
             return None
-        match = self._search_terms.search(text.lower())
+        match = self._search_terms.search(_prep(text))
         return match.group(0) if match else None
 
     def blocked_search(self, url: str) -> str | None:
@@ -209,16 +208,37 @@ def _under(host: str, domain: str) -> bool:
     return host == domain or host.endswith("." + domain)
 
 
+def _prep(text: str) -> str:
+    """Text as the patterns expect it: folded (see textfold) and lowercase."""
+    return textfold.fold(text).lower()
+
+
+def _quick_scan(terms) -> re.Pattern | None:
+    """A plain substring scan for any term, in either of its spellings.
+
+    Run over the raw text, so a term is listed as written and as folded:
+    "sous-vêtements" must be found whether or not the page kept the accent.
+    """
+    spellings = {s for t in terms if t for s in (t.lower(), _prep(t))}
+    if not spellings:
+        return None
+    return re.compile("|".join(re.escape(s) for s in sorted(spellings)))
+
+
 def _compile(terms: list[str]) -> re.Pattern | None:
     if not terms:
         return None
     # Bounded by non-word characters rather than \b: these appear in URLs
-    # as /womens-lingerie/ and ?dept=lingerie, not as free text.
-    alts = "|".join(re.escape(t.lower()).replace(r"\ ", r"[\s\-_+]") for t in
+    # as /womens-lingerie/ and ?dept=lingerie, not as free text. Any
+    # script's letters count as word characters, so a Hebrew or Russian
+    # department name is a whole word too; an underscore is a boundary
+    # because URLs use it as one.
+    alts = "|".join(re.escape(_prep(t)).replace(r"\ ", r"[\s\-_+]") for t in
                     sorted(terms, key=len, reverse=True))
     # An optional plural: a department is "bras" on one shop and "bra" on
     # the next, and the list should not have to carry both spellings.
-    return re.compile(rf"(?<![a-z0-9])({alts})(?:e?s)?(?![a-z0-9])")
+    return re.compile(
+        rf"{textfold.BOUNDARY_BEFORE}({alts})(?:e?s)?{textfold.BOUNDARY_AFTER}")
 
 
 def load(*paths: Path) -> SiteRules:

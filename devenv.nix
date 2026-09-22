@@ -109,8 +109,61 @@ in
   # it once per merge to master (see .github/workflows/ci.yml, "version").
   # `python3 scripts/version.py bump` is still there for CI and for a
   # person cutting a release by hand.
+  #
+  # What is left is a handful of checks that take milliseconds and catch
+  # things a reviewer should never have to. None of them rewrite a file:
+  # a hook that edits what you are committing, while you are committing
+  # it, is the hook people disable.
+  #
+  # legacy/ is out of all of them. It is the retired Ubuntu prototype, kept
+  # as reference material and not maintained; holding it to today's
+  # standards would mean a wall of findings nobody intends to fix.
+  git-hooks.hooks = {
+    check-merge-conflicts.enable = true;
+    check-added-large-files.enable = true;
+    check-python.enable = true;
+    # Three broken workflow files reached GitHub once (see the `just test`
+    # recipe), so the YAML is parsed before it leaves the machine. mkdocs.yml
+    # is out: it carries a !!python/name: tag for a pymdownx extension,
+    # which a plain safe-load cannot construct and which `just docs` proves
+    # anyway.
+    check-yaml = {
+      enable = true;
+      excludes = [ "^mkdocs\\.yml$" ];
+    };
+    # The VM suites, the installer scripts and the greenboot health check
+    # that decides whether a booted image is kept. Same files and the same
+    # exclusion as the CI job, so the two never disagree about a commit.
+    # SC1091: lib.sh is sourced at run time inside the VM.
+    shellcheck = {
+      enable = true;
+      excludes = [ "^legacy/" ];
+      args = [ "-e" "SC1091" ];
+    };
+  };
 
+  # These hooks reach a worktree through a dispatcher, never directly.
+  #
+  # Git keeps one hooks directory for a repository and all of its
+  # worktrees, and devenv installs a hook naming its own checkout by
+  # absolute path — so with worktrees the last dev shell entered wins, and
+  # deleting that worktree breaks every commit in the repository. Claude
+  # Code sessions make worktrees under .claude/worktrees/ routinely, and
+  # this repository was found broken that way. scripts/git-hook-dispatch.sh
+  # names no checkout: it asks git which tree is being committed to and
+  # runs that tree's own configuration. See `just hooks`.
+  #
+  # It is written after devenv's own installer has run, so it is the hook
+  # that survives, and only when it differs, so entering a second shell in
+  # a second worktree is not a write at all.
   enterShell = ''
+    hooks="$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null || true)/hooks"
+    dispatcher="${config.devenv.root}/scripts/git-hook-dispatch.sh"
+    if [ -d "$hooks" ] && [ -f "$dispatcher" ] \
+        && ! cmp -s "$dispatcher" "$hooks/pre-commit"; then
+      install -m 755 "$dispatcher" "$hooks/pre-commit"
+      echo "installed the shared pre-commit hook into $hooks"
+    fi
     echo "kosher-linux dev shell — try: just test | just render | just fedora-vm"
   '';
 

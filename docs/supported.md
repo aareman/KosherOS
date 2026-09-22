@@ -41,7 +41,7 @@ are reachable from every account, including whitelist‑only ones.
 | Java (Maven, Gradle) | not set automatically | Fedora extracts a Java keystore at `/etc/pki/ca-trust/extracted/java/cacerts`; `JAVA_TOOL_OPTIONS` was left out because it prints a line on every JVM start. |
 
 The environment points at the system bundle
-(`/etc/pki/tls/certs/ca-bundle.crt`), which contains the KosherOS
+(`/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem`), which contains the KosherOS
 authority once inspection is set up and is Fedora's ordinary bundle
 otherwise, so it is harmless on an account that is not inspected.
 

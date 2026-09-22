@@ -427,6 +427,12 @@ def change_sentence(event: dict, users_by_uid: dict | None = None) -> tuple[str,
         what = "Computer enrolled with a portal"
     elif method == "Unenrol":
         what = "Computer unenrolled from the portal"
+    elif method == "SetChannel":
+        what = f"Updates now come from the {arg(0)} stream"
+    elif method == "ApplyUpdate":
+        what = "A system update was downloaded"
+    elif method == "Rollback":
+        what = "The computer was put back to its previous version"
     else:
         what = method or "A setting changed"
     detail = f"{actor}, {when_text(event.get('t', 0))}"

@@ -555,6 +555,31 @@ def cmd_system(args) -> int:
         print(f"going back to {target.get('version') or 'the previous version'}"
               " at the next restart")
         return 0
+    if args.action == "channel":
+        info = c.list_channels()
+        if not args.value:
+            print(f"this computer follows: {info.get('current') or 'no channel'}"
+                  f" ({info.get('image') or 'unknown image'})")
+            print("channels:")
+            for entry in info.get("channels", []):
+                mark = "*" if entry.get("current") else " "
+                print(f"  {mark} {entry['name']:<7} {entry['summary']}")
+            if not info.get("current"):
+                print("\nThis computer is not on a channel — it runs a pinned "
+                      "version or a locally built image. Naming a channel "
+                      "moves it onto one.")
+            return 0
+        wanted = args.value.strip().lower()
+        known = [e["name"] for e in info.get("channels", [])]
+        if wanted not in known:
+            print(f"unknown channel: {args.value} (try {' or '.join(known)})",
+                  file=sys.stderr)
+            return 1
+        c.set_channel(wanted, _guardian_pw(args))
+        print(f"switching to the {wanted} channel; the download runs in the "
+              "background and takes effect at the next restart.\n"
+              "Run 'kosherctl system status' to see it staged.")
+        return 0
     return 1
 
 
@@ -1007,8 +1032,14 @@ def main(argv: list[str] | None = None) -> int:
     s.set_defaults(func=cmd_portal)
 
     s = sub.add_parser("system",
-                       help="which system version is running, and going back")
-    s.add_argument("action", choices=["status", "check", "update", "rollback"])
+                       help="which system version is running, which channel "
+                            "it follows, and going back")
+    s.add_argument("action",
+                   choices=["status", "check", "update", "rollback", "channel"])
+    s.add_argument("value", nargs="?", default="",
+                   help="with 'channel': the channel to switch to "
+                        "(omit to list them)")
+    s.add_argument("--guardian-password")
     s.set_defaults(func=cmd_system)
 
     s = sub.add_parser("sync", help="pull policy from the portal now")

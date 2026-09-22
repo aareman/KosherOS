@@ -104,6 +104,107 @@ def _channel(image: str) -> str | None:
     return tail.split(":", 1)[1] if ":" in tail else None
 
 
+# -- channels ---------------------------------------------------------------
+#
+# Two of them, and they are tags on the same image rather than different
+# images, so moving between them is `bootc switch` onto the other tag and
+# nothing else: no reinstall, no second registry, and the files and
+# settings on the machine are untouched. The wording is aimed at a parent
+# deciding for the family computer, not at somebody who knows what a
+# container tag is.
+
+CHANNELS: tuple[dict, ...] = (
+    {
+        "name": "stable",
+        "title": "Stable",
+        "summary": "Tried first, then released. Right for a family computer.",
+        "description": "Updates arrive after they have run on Edge for a "
+                       "while and somebody has chosen to release them. "
+                       "Fewer updates, and less chance of one of them "
+                       "causing trouble.",
+    },
+    {
+        "name": "edge",
+        "title": "Edge",
+        "summary": "Every new build the day it is made. For testing.",
+        "description": "Every change lands here first, so new things arrive "
+                       "weeks earlier — and so do the rough edges. Choose "
+                       "this only if you are happy to report problems and "
+                       "to go back a version when one turns up.",
+    },
+)
+CHANNEL_NAMES: tuple[str, ...] = tuple(c["name"] for c in CHANNELS)
+DEFAULT_CHANNEL = "stable"
+
+
+def repo_of(image: str) -> str:
+    """An image reference without its tag or digest.
+
+    'ghcr.io/aareman/kosher-linux:edge' -> 'ghcr.io/aareman/kosher-linux'.
+    Only the last path segment is looked at, because the registry part may
+    carry a port ('localhost:5000/x:edge') whose colon is not a tag.
+    """
+    ref = (image or "").split("@", 1)[0].strip()
+    head, sep, tail = ref.rpartition("/")
+    name = tail.split(":", 1)[0]
+    return f"{head}{sep}{name}" if sep else name
+
+
+def switch_target(image: str, channel: str) -> str:
+    """The image reference for `channel`, keeping the repository `image`
+    came from.
+
+    A machine's own image is the starting point rather than a constant, so
+    a build from somewhere else (a fork, a local registry, a test
+    machine) switches within its own repository instead of being quietly
+    moved onto ghcr.io. Switching also works from a pinned version tag,
+    which is how a machine parked on one release rejoins a channel.
+    """
+    if channel not in CHANNEL_NAMES:
+        raise ValueError(f"unknown channel: {channel}")
+    repo = repo_of(image)
+    if not repo:
+        raise ValueError("this machine does not say which image it runs, "
+                         "so there is nothing to switch from")
+    return f"{repo}:{channel}"
+
+
+def describe_channels(image: str | None, staged: str | None = None) -> dict:
+    """What the admin app and kosherctl show: the channels, which one this
+    machine is on, and what it would switch to.
+
+    `current` is None when the machine runs something that is not a
+    channel at all — a pinned version, a digest, or a locally built image
+    — which is a real state (it is what every machine installed before
+    channels existed is in) and reads as "not on a channel" rather than as
+    an error.
+
+    `pending` is the point of `staged`. A switch does not change the
+    running deployment, only the one queued for the next restart, so right
+    after switching the booted image still names the old channel. Without
+    this the screen would say the switch had not happened.
+    """
+    image = image or ""
+    current = _channel(image)
+    if current not in CHANNEL_NAMES:
+        current = None
+    queued = _channel(staged or "")
+    if queued not in CHANNEL_NAMES or queued == current:
+        queued = None
+    out = []
+    for entry in CHANNELS:
+        row = dict(entry)
+        row["current"] = entry["name"] == current
+        row["pending"] = entry["name"] == queued
+        try:
+            row["image"] = switch_target(image, entry["name"])
+        except ValueError:
+            row["image"] = None
+        out.append(row)
+    return {"current": current, "pending": queued, "image": image or None,
+            "default": DEFAULT_CHANNEL, "channels": out}
+
+
 def run_upgrade(on_progress: Progress, on_finished: Finished,
                 argv: tuple[str, ...] = ("bootc", "upgrade")) -> threading.Thread:
     """Start the upgrade in a thread and return it.
@@ -121,9 +222,17 @@ def run_upgrade(on_progress: Progress, on_finished: Finished,
             ok, error = _run(list(argv), on_progress, with_progress=False)
         on_finished(ok, error)
 
-    thread = threading.Thread(target=worker, name="bootc-upgrade", daemon=True)
+    thread = threading.Thread(target=worker, name="-".join(argv[:2]), daemon=True)
     thread.start()
     return thread
+
+
+def run_switch(image: str, on_progress: Progress,
+               on_finished: Finished) -> threading.Thread:
+    """Move this machine onto another image reference — the same pull, the
+    same progress and the same "takes effect at the next restart" as an
+    update, because that is exactly what it is."""
+    return run_upgrade(on_progress, on_finished, argv=("bootc", "switch", image))
 
 
 def _run(argv: list[str], on_progress: Progress, with_progress: bool) -> tuple[bool, str]:
@@ -149,6 +258,7 @@ def _run(argv: list[str], on_progress: Progress, with_progress: bool) -> tuple[b
     output = proc.communicate()[0] or ""
     if proc.returncode != 0:
         tail = "\n".join(output.strip().splitlines()[-3:])
-        return False, f"bootc upgrade failed: {tail}".strip()
+        what = " ".join(a for a in argv[:2] if not a.startswith("-"))
+        return False, f"{what or 'bootc'} failed: {tail}".strip()
     on_progress(100, "Update ready")
     return True, ""

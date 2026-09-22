@@ -96,11 +96,24 @@ class FakeClient:
         return self._overrides.get("check", {"ok": True, "available": False, "version": None,
                                              "channel": "edge", "raw": "No changes in: x:edge"})
 
+    def list_channels(self):
+        from kosherd import updates
+
+        if "channels" in self._overrides:
+            return self._overrides["channels"]
+        deployment = self.deployment_status()
+        return updates.describe_channels(
+            (deployment.get("booted") or {}).get("image"),
+            (deployment.get("staged") or {}).get("image"))
+
     # The update runs on in the daemon; the page hears about it by signal.
     update_calls = 0
 
     def apply_update(self):
         self.update_calls += 1
+
+    def set_channel(self, channel, guardian_password=""):
+        self.calls.append(("set_channel", channel, guardian_password))
 
     def connect_update_signals(self, on_progress, on_finished):
         self.on_update_progress, self.on_update_finished = on_progress, on_finished
@@ -1321,6 +1334,92 @@ def test_an_update_the_timer_already_staged_offers_restart_on_arrival():
     drain()
     assert page.restart_button.get_visible()
     assert "version 2" in page.status_row.get_subtitle()
+
+
+# -- choosing which updates this computer gets ---------------------------------
+
+def _plain_window(client=None):
+    win = FakeWindow(client or FakeClient())
+    win.policy = {"revision": 1, "users": [], "guardian": {"enabled": False},
+                  "guest": {"enabled": False}}
+    return win
+
+
+def _channel_rows(page):
+    return {row.get_title(): row for row in _rows(page.channel_box)}
+
+
+def test_both_channels_are_offered_with_the_one_in_use_marked():
+    page = computer.UpdatesPage(_plain_window())
+    drain()
+    rows = _channel_rows(page)
+    assert set(rows) == {"Stable", "Edge"}
+    # Each one says what it means; a parent chooses between sentences, not
+    # between the words "stable" and "edge".
+    assert all(row.get_subtitle() for row in rows.values())
+    assert "In use" in _texts(rows["Stable"])
+    assert "Use this" in _texts(rows["Edge"])
+    assert "Use this" not in _texts(rows["Stable"])
+
+
+def test_choosing_the_other_channel_asks_before_it_pulls_anything():
+    win = _plain_window()
+    page = computer.UpdatesPage(win)
+    drain()
+    page._ask_switch({"name": "edge", "title": "Edge", "description": "…"})
+    drain()
+    # Presenting the question must not switch anything on its own.
+    assert [c for c in win.client.calls if c[0] == "set_channel"] == []
+
+
+def test_switching_calls_the_daemon_and_shows_the_same_progress_bar():
+    win = _plain_window()
+    page = computer.UpdatesPage(win)
+    drain()
+    page._switch("edge", "Edge", "")
+    drain()
+    assert ("set_channel", "edge", "") in win.client.calls
+    assert page.progress.get_visible()
+    assert "Edge" in page.status_row.get_subtitle()
+
+
+def test_a_switch_waiting_for_the_next_restart_says_so_instead_of_offering_it_again():
+    # bootc leaves the running deployment alone, so without this the page
+    # would still show the old channel as the one in use.
+    win = _plain_window(FakeClient(deployment={
+        "booted": {"image": "ghcr.io/x/kosher-linux:stable", "version": "1"},
+        "rollback": None, "rollback_queued": False,
+        "staged": {"image": "ghcr.io/x/kosher-linux:edge", "version": "2"}}))
+    page = computer.UpdatesPage(win)
+    drain()
+    rows = _channel_rows(page)
+    assert "At the next restart" in _texts(rows["Edge"])
+    assert "Use this" in _texts(rows["Stable"])
+    assert "next restart" in page.channel_group.get_description()
+
+
+def test_a_computer_on_no_channel_is_told_it_will_not_update_itself():
+    # Every machine installed before channels existed is in this state.
+    win = _plain_window(FakeClient(deployment={
+        "booted": {"image": "localhost/kosher-linux:dev", "version": "1"},
+        "rollback": None, "rollback_queued": False, "staged": None}))
+    page = computer.UpdatesPage(win)
+    drain()
+    assert "will not update on its own" in page.channel_group.get_description()
+    assert all("Use this" in _texts(row)
+               for row in _channel_rows(page).values())
+
+
+def test_a_daemon_too_old_to_know_about_channels_does_not_break_the_page():
+    class Old(FakeClient):
+        def list_channels(self):
+            raise RuntimeError("unknown method")
+
+    page = computer.UpdatesPage(_plain_window(Old()))
+    drain()
+    assert "Could not read the update channels" in \
+        page.channel_group.get_description()
+    assert page.apply_button.get_sensitive()
 
 
 def test_a_failed_update_says_why_and_gives_the_button_back():

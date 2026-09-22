@@ -75,6 +75,7 @@ just test-vm kosher-fedora 50   # just the inspect-mode suite
 | `40-guest` | enable, enforce, wipe-on-sign-out, disable |
 | `50-inspect` | TLS interception: the proxy, the CA, rules reaching it, a blocked URL, an allowed URL, and that uninspected users are untouched |
 | `60-persistence` | revisions advance, the policy stays root-only, a restarted daemon rebuilds enforcement, sessions do not survive a restart |
+| `80-hardening` | the protections the red-team review (issue #33) asked for, asserted from a supervised account: every port through the proxy, no browsing by bare address, DoH blocked by shape, LAN limited, boot menu and disk protected, consoles closed, images verified. **Expected to fail until those fixes land** — a red line here is information, not breakage; each carries its finding number |
 
 ## Writing a new test
 

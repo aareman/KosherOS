@@ -172,10 +172,18 @@ assert_that "[F3] filtered account is blocked on a bare address" \
 # -- F4: encrypted DNS ---------------------------------------------------------------
 
 section "[F4] Encrypted DNS"
-# NextDNS is not in the shipped address list, so this passes only when the
-# proxy recognises a DoH request by its shape.
-assert_that "[F4] DoH to a resolver not on the address list is blocked by shape" \
-    blocked_as wlkid "https://dns.nextdns.io/dns-query?dns=AAABAAABAAAAAAAAA2ZvbwA"
+# "By shape" means the proxy recognises a DoH request whatever the address,
+# so the probe must reach the proxy: a resolver the shipped NAME lists
+# already block (dns.nextdns.io answers 0.0.0.0 here) never gets there and
+# would pass for the wrong reason. Precondition: the host resolves.
+doh_host=cloudflare-dns.com
+doh_ip=$(resolve4 "$doh_host")
+if [ -z "$doh_ip" ] || [ "$doh_ip" = "0.0.0.0" ]; then
+    skip "[F4] DoH blocked by shape: $doh_host is already blocked by name here, so shape cannot be told apart"
+else
+    assert_that "[F4] DoH to a resolver the lists do not name ($doh_host) is blocked by shape" \
+        blocked_as wlkid "https://$doh_host/dns-query?dns=AAABAAABAAAAAAAAA2ZvbwA"
+fi
 image_only "[F4] Firefox is told never to use DoH (config)" \
     && assert_that "[F4] Firefox is told never to use DoH (config)" firefox_doh_off
 image_only "[F4] Chromium is told never to use DoH (config)" \

@@ -100,12 +100,15 @@ image_only() {
     return 1
 }
 
-# A real GRUB password, not the word "superusers": Fedora's stock grub.cfg
-# carries that word inside the conditional that reads user.cfg, whether or
-# not a password was ever set.
+# A real GRUB password. Fedora's stock grub.cfg contains both the word
+# "superusers" and a `password_pbkdf2 root ${GRUB2_PASSWORD}` line inside
+# the conditional that reads user.cfg — present whether or not a password
+# was ever set, so neither word is evidence. A set password is a hash:
+# GRUB2_PASSWORD=grub.pbkdf2.sha512... in user.cfg, or that literal hash
+# in the config itself.
 grub_password_set() {
-    grep -qs 'GRUB2_PASSWORD=' /boot/grub2/user.cfg /boot/efi/EFI/fedora/user.cfg \
-        || grep -rqs 'password_pbkdf2' /boot/grub2/grub.cfg /boot/efi/EFI/fedora/grub.cfg
+    grep -qsE '^GRUB2_PASSWORD=grub\.pbkdf2\.' /boot/grub2/user.cfg /boot/efi/EFI/fedora/user.cfg \
+        || grep -rqs 'grub\.pbkdf2\.sha512\.' /boot/grub2/grub.cfg /boot/efi/EFI/fedora/grub.cfg
 }
 
 # -- preconditions ------------------------------------------------------------

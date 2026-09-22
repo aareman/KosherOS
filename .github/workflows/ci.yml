@@ -128,9 +128,14 @@ jobs:
     # not trigger it. VERSION is deliberately NOT on the list: CI ticks it
     # for every merge, so it would make the filter always true; the version
     # inside :edge is the version of the last merge that touched the image,
-    # and a skipped merge's version simply has no build behind it. Anything
-    # but an ordinary push (a pull request, a first push, a rewritten
-    # history) builds, to be safe.
+    # and a skipped merge's version simply has no build behind it.
+    #
+    # Pull requests never build. Every PR used to, "to be safe", and with
+    # several open at once that was an eleven-minute build per push per
+    # branch for an image nobody would run — the load was judged crazy.
+    # The tests, the compile check and shellcheck still run on every PR;
+    # the image is built once, from the merge. A first push or a rewritten
+    # history still builds, because the diff cannot be trusted there.
     runs-on: ubuntu-latest
     outputs:
       image: ${{ steps.filter.outputs.image }}
@@ -145,6 +150,11 @@ jobs:
           if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then
             echo "image=true" >> "$GITHUB_OUTPUT"
             echo "asked for by hand: building"
+            exit 0
+          fi
+          if [ "$GITHUB_EVENT_NAME" = "pull_request" ]; then
+            echo "image=false" >> "$GITHUB_OUTPUT"
+            echo "a pull request: the image is built from the merge, not here"
             exit 0
           fi
           if [ "$GITHUB_EVENT_NAME" != "push" ] || [ -z "$BASE" ] \

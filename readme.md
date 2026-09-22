@@ -251,18 +251,20 @@ devenv shell      # or let direnv do it on cd
 just test         # the unit suites: about fifteen seconds, no root, no VM
 ```
 
-Entering the shell also installs a pre-commit hook: merge-conflict markers,
+Entering the shell also installs git hooks (on commit, and on push for the
+large-file check): merge-conflict markers,
 stray large files, Python syntax, YAML and shellcheck, all of which rewrite
 nothing and take milliseconds. `just check` runs them over every file rather
 than the staged ones, and `just hooks` installs the hook into a checkout
 whose shell has not been entered.
 
 If you work in `git worktree`s, note that git keeps **one** hooks directory
-for a repository and all of its worktrees. The installed hook is therefore a
-dispatcher that names no checkout: it asks git which tree is being committed
-to and runs that tree's own configuration (`scripts/git-hook-dispatch.sh`).
-Do not replace it with one that hard-codes a path — a hook naming a worktree
-breaks every commit in the repository the moment that worktree is deleted.
+for a repository and all of its worktrees. The installed hooks are therefore
+one dispatcher that names no checkout: it asks git which tree is being
+committed to or pushed from and runs that tree's own configuration
+(`scripts/git-hook-dispatch.sh`). Do not replace it with one that hard-codes
+a path — a hook naming a worktree breaks every commit and push in the
+repository the moment that worktree is deleted.
 
 Every merge carries its own version, plain `0.x.x` semver. CI writes the
 next number once for every push to master — committing it to master and

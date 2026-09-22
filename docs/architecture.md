@@ -175,7 +175,16 @@ The app index (name, summary, categories, icon file, rating for every app
 on the remote) is parsed once per appstream download on a worker thread
 at daemon start and cached in memory and at `/var/lib/kosher/appindex.json`,
 so neither the Store nor a policy apply ever waits on a forty-megabyte
-parse; malcontent is re-applied once the index is warm.
+parse; malcontent is re-applied once the index is warm. Two things about
+the download matter. flatpak cuts the apps a remote filter denies out of
+the appstream it deploys, and names the deployed directory
+`<commit>-<sha256 of the filter>`, so kosherd fetches again whenever the
+deployed copy was built under a different filter than the one in force
+(the upgrade from the allow-list filter otherwise left a fifty-app index
+for a day), as well as when it is a day old. And the first fetch at boot
+usually runs before the network is up, so a failed refresh is tried again
+in two minutes rather than at the six-hour tick, and opening the Store
+with no index asks at once.
 
 The flatpak remote *filter* is deny-only: it keeps the circumvention tools
 out of enumeration unless one is approved. It is not a boundary against

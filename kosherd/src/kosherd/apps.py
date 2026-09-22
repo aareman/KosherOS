@@ -177,19 +177,64 @@ def _arch() -> str:
     return Flatpak.get_default_arch() if Flatpak is not None else "x86_64"
 
 
+def _appstream_dir() -> Path:
+    return Path(f"/var/lib/flatpak/appstream/{REMOTE}/{_arch()}")
+
+
 def _appstream_path() -> Path:
-    return Path(
-        f"/var/lib/flatpak/appstream/{REMOTE}/{_arch()}/active/appstream.xml.gz"
-    )
+    return _appstream_dir() / "active" / "appstream.xml.gz"
 
 
-def ensure_appstream() -> None:
-    """Fetch/refresh the remote's app metadata if it is missing or stale."""
+def filter_checksum(filter_path: Path | None = None) -> str | None:
+    """The SHA-256 flatpak computes for the remote filter's contents, or
+    None when there is no filter."""
+    import hashlib
+
+    try:
+        return hashlib.sha256((filter_path or FILTER_PATH).read_bytes()).hexdigest()
+    except OSError:
+        return None
+
+
+def appstream_is_stale(active_target: str | None, current_filter: str | None,
+                       age: float | None, max_age: float = _APPSTREAM_MAX_AGE) -> bool:
+    """Whether the deployed appstream needs fetching again.
+
+    flatpak filters the appstream it deploys by the remote's filter — an
+    app the filter denies is cut out of the XML — and names the deployed
+    directory `<commit>-<sha256 of the filter>`. So a copy deployed under
+    a different filter than the one in force now describes a different
+    store: the machine that upgraded from the allow-list filter to the
+    deny-only one had an index of fifty approved apps and nothing else,
+    and it stayed that way for a day. The directory's name says which
+    filter it was built under, and flatpak re-deploys when that name
+    changes even if the remote's commit has not.
+
+    `active_target` is what the `active` symlink points at (None when
+    nothing is deployed), `current_filter` the checksum of the filter in
+    force (None for no filter), `age` the deployed copy's age in seconds.
+    """
+    if active_target is None or age is None:
+        return True
+    deployed_filter = active_target.rsplit("-", 1)[1] if "-" in active_target else None
+    if deployed_filter != current_filter:
+        return True
+    return age >= max_age
+
+
+def ensure_appstream(force: bool = False) -> None:
+    """Fetch/refresh the remote's app metadata if it is missing, stale, or
+    was deployed under a different remote filter than the one in force."""
+    import os
     import time
 
     path = _appstream_path()
-    fresh = path.exists() and (time.time() - path.stat().st_mtime) < _APPSTREAM_MAX_AGE
-    if fresh:
+    try:
+        target = os.readlink(_appstream_dir() / "active")
+        age = time.time() - path.stat().st_mtime
+    except OSError:
+        target, age = None, None
+    if not force and not appstream_is_stale(target, filter_checksum(), age):
         return
     installation = Flatpak.Installation.new_system(None)
     installation.update_appstream_sync(REMOTE, Flatpak.get_default_arch(), None)
@@ -404,19 +449,23 @@ def cached_index_by_ref() -> dict[str, dict] | None:
     return {a["ref"]: a for a in index} if index is not None else None
 
 
-def warm_index() -> int:
+def warm_index() -> tuple[int, bool]:
     """Fetch the remote's appstream if stale and load the index. For a
-    worker thread at daemon start; returns how many apps it knows. Never
-    raises: a machine that is offline simply has no index yet."""
+    worker thread at daemon start; returns (how many apps it knows,
+    whether the copy it read is current). Never raises: a machine that is
+    offline simply has no index yet, or a stale one — which the caller
+    should try to refresh again soon."""
+    fresh = True
     try:
         ensure_appstream()
     except Exception as e:  # noqa: BLE001 - offline is not an error here
         log.warning("could not refresh the %s app list: %s", REMOTE, e)
+        fresh = False
     try:
-        return len(_load_index())
+        return len(_load_index()), fresh
     except Exception:  # noqa: BLE001
         log.exception("could not load the app index")
-        return 0
+        return 0, False
 
 
 def store_apps(account, approved: list[dict] | None = None) -> dict:

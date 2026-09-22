@@ -36,8 +36,12 @@ from .timekeeper import TICK_SECONDS, Session, Timekeeper
 
 log = logging.getLogger("kosherd")
 
-# How often the daemon refreshes its copy of the store's app list.
+# How often the daemon refreshes its copy of the store's app list, and how
+# soon it tries again while it has none: the first fetch at boot usually
+# runs before the network is up, and a store that stays empty for six
+# hours because of that is a store that looks broken.
 APP_INDEX_REFRESH_SECONDS = 6 * 3600
+APP_INDEX_RETRY_SECONDS = 120
 
 INTROSPECTION_XML = """
 <node>
@@ -888,17 +892,43 @@ class Daemon:
         except Exception:  # noqa: BLE001 - app filters must not block the firewall path
             log.exception("malcontent application failed; network policy is still applied")
 
-    def _warm_app_index(self) -> None:
+    _index_thread: threading.Thread | None = None
+    _index_retry_pending = False
+
+    def _warm_app_index(self) -> bool:
         """Load the store's app list on a worker thread, then re-judge
         which installed apps each account may run — malcontent applied
-        before the index was in memory could only go by the approved list."""
-        def work():
-            known = apps.warm_index()
-            if known:
-                log.info("app index ready: %d apps", known)
-                GLib.idle_add(lambda: (self._apply_mct(), False)[1])
+        before the index was in memory could only go by the approved list.
+        While the list cannot be had (offline, or the network not up yet
+        at boot) it tries again soon. Returns whether a load was started."""
+        if self._index_thread is not None and self._index_thread.is_alive():
+            return False
 
-        threading.Thread(target=work, daemon=True, name="app-index").start()
+        def work():
+            known, fresh = apps.warm_index()
+            if known:
+                log.info("app index ready: %d apps%s", known,
+                         "" if fresh else " (a stale copy; the refresh failed)")
+                GLib.idle_add(lambda: (self._apply_mct(), False)[1])
+            if not fresh:
+                GLib.idle_add(self._retry_app_index_soon)
+
+        self._index_thread = threading.Thread(target=work, daemon=True, name="app-index")
+        self._index_thread.start()
+        return True
+
+    def _retry_app_index_soon(self) -> bool:
+        if not self._index_retry_pending:
+            self._index_retry_pending = True
+            log.info("the app list could not be refreshed; trying again in %d s",
+                     APP_INDEX_RETRY_SECONDS)
+            GLib.timeout_add_seconds(APP_INDEX_RETRY_SECONDS, self._retry_app_index)
+        return False
+
+    def _retry_app_index(self) -> bool:
+        self._index_retry_pending = False
+        self._warm_app_index()
+        return False
 
     def _convert_app_allowlists(self) -> None:
         """Turn the older per-account allow-list of runnable apps into the
@@ -1922,7 +1952,12 @@ class Daemon:
         """What the Store shows the caller — decided here, for the uid on
         the connection, so an account sees exactly what kosherd would
         install for it and nothing it would refuse."""
-        return GLib.Variant("(s)", (json.dumps(apps.store_apps(self._account_for(_uid))),))
+        store = apps.store_apps(self._account_for(_uid))
+        if not store["ready"]:
+            # Somebody has the Store open and there is nothing to show
+            # them yet: go and look now rather than at the next tick.
+            self._warm_app_index()
+        return GLib.Variant("(s)", (json.dumps(store),))
 
     def impl_SetUserAppAccess(self, uid: int, access_key: str, _guardian_pw: str):
         if access_key not in appaccess.APP_ACCESS:

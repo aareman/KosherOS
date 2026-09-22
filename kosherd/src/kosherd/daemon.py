@@ -412,6 +412,29 @@ INTROSPECTION_XML = """
 ACTIONS = access.ACTIONS
 UID_AWARE = access.UID_AWARE
 
+# Methods that run `bootc`, answered from a worker thread instead of the
+# main loop. Every bootc command waits for the one sysroot lock, and an
+# update holds it for as long as the download takes: a `bootc status`
+# asked for meanwhile used to sit on the main loop for all of it, which
+# froze the whole daemon — the update's own progress signals included, so
+# the admin app said "Starting…" and "Checking…" until it was closed.
+# None of these change the policy, which is what makes it safe for them
+# to finish off the main loop.
+IN_BACKGROUND = frozenset({"CheckUpdate", "DeploymentStatus", "ListChannels",
+                           "SetChannel", "Rollback"})
+
+# Seconds to wait on each short bootc command before saying so. A check
+# goes to the registry, so it gets longer than reading local status. A pull
+# is not here: it runs in its own thread and reports progress instead.
+BOOTC_TIMEOUT = {"status": 60, "upgrade": 180, "rollback": 180}
+
+# The image enables Fedora's own update timer as well as kosherd's button.
+# While its service runs it holds bootc's lock, and every bootc command of
+# ours would wait behind it without a word.
+BOOTC_TIMER_SERVICE = "bootc-fetch-apply-updates.service"
+UPDATE_BUSY = ("This computer is already downloading an update. The rest of "
+               "this page will work again when it finishes.")
+
 SETUP_STAMP = Path("/var/lib/kosher/setup-complete")
 GRUB_USER_CFG = Path("/boot/grub2/user.cfg")
 
@@ -749,6 +772,11 @@ class Daemon:
                 if not self.guardian.verify(args[-1]):
                     raise GuardianError("guardian password incorrect")
                 self.sessions.grant_guardian(uid)
+            if method in IN_BACKGROUND:
+                threading.Thread(target=self._answer_in_background, daemon=True,
+                                 name=f"call-{method}",
+                                 args=(method, args, uid, sender, invocation)).start()
+                return
             snapshot = copy.deepcopy(self.policy)
             result = getattr(self, f"impl_{method}")(*args, _uid=uid) \
                 if method in UID_AWARE else getattr(self, f"impl_{method}")(*args)
@@ -770,6 +798,36 @@ class Daemon:
             self._roll_back(snapshot, method)
             log.exception("%s failed", method)
             invocation.return_dbus_error(ERROR_NAME, f"internal error: {e}")
+
+    def _answer_in_background(self, method, args, uid, sender, invocation) -> None:
+        """Run one IN_BACKGROUND method on this thread and hand the answer
+        back to the main loop, where D-Bus replies and the activity log
+        are written. Errors are sorted the way _handle_call sorts them."""
+        result = message = None
+        try:
+            impl = getattr(self, f"impl_{method}")
+            result = impl(*args, _uid=uid) if method in UID_AWARE else impl(*args)
+        except (PolicyError, KeyError, ValueError) as e:
+            log.warning("%s by %s refused: %s", method, sender, e)
+            message = str(e)
+        except GLib.Error as e:
+            log.warning("%s by %s failed downstream: %s", method, sender, e.message)
+            message = e.message
+        except Exception as e:  # noqa: BLE001 - daemon must not crash on a bad call
+            log.exception("%s failed", method)
+            message = f"internal error: {e}"
+
+        def reply():
+            if message is not None:
+                invocation.return_dbus_error(ERROR_NAME, message)
+                return False
+            invocation.return_value(result)
+            log.info("%s by %s (uid %s): ok", method, sender, uid)
+            if method in access.CHANGES:
+                self._note_change(method, args, by=uid)
+            return False
+
+        GLib.idle_add(reply)
 
     def _roll_back(self, snapshot, method: str) -> None:
         """Put the in-memory policy back to what it was before a failed call."""
@@ -2030,7 +2088,7 @@ class Daemon:
         own words in `raw` (see updates.parse_check)."""
         from . import updates
 
-        res = subprocess.run(["bootc", "upgrade", "--check"], capture_output=True, text=True)
+        res = self._bootc("upgrade", "--check")
         info = updates.parse_check(res.stdout or res.stderr)
         info["ok"] = res.returncode == 0
         return GLib.Variant("(s)", (json.dumps(info),))
@@ -2047,9 +2105,7 @@ class Daemon:
         """
         from . import updates
 
-        thread = getattr(self, "_update_thread", None)
-        if thread is not None and thread.is_alive():
-            raise PolicyError("an update is already running")
+        self._refuse_if_updating()
         self._update_thread = updates.run_upgrade(self._on_update_progress,
                                                   self._on_update_finished)
         return None
@@ -2083,9 +2139,7 @@ class Daemon:
         from . import updates
 
         channel = str(channel or "").strip().lower()
-        thread = getattr(self, "_update_thread", None)
-        if thread is not None and thread.is_alive():
-            raise PolicyError("an update is already running")
+        self._refuse_if_updating()
         booted = (self._deployment().get("booted") or {})
         if booted.get("channel") == channel:
             raise PolicyError(f"this computer already follows the {channel} channel")
@@ -2097,6 +2151,37 @@ class Daemon:
         self._update_thread = updates.run_switch(
             target, self._on_update_progress, self._on_update_finished)
         return None
+
+    def _updating(self) -> bool:
+        """Is a download holding bootc's lock: an update or channel switch
+        this daemon started, or Fedora's timer doing its own?"""
+        thread = getattr(self, "_update_thread", None)
+        if thread is not None and thread.is_alive():
+            return True
+        try:
+            res = subprocess.run(["systemctl", "is-active", BOOTC_TIMER_SERVICE],
+                                 capture_output=True, text=True, timeout=10)
+        except (OSError, subprocess.SubprocessError):
+            return False
+        return (res.stdout or "").strip() in ("active", "activating", "reloading")
+
+    def _refuse_if_updating(self) -> None:
+        if self._updating():
+            raise PolicyError(UPDATE_BUSY)
+
+    def _bootc(self, *args: str):
+        """Run one short bootc command. Refuses rather than waiting while a
+        download holds the lock, and gives up after BOOTC_TIMEOUT."""
+        self._refuse_if_updating()
+        argv = ["bootc", *args]
+        try:
+            return subprocess.run(argv, capture_output=True, text=True,
+                                  timeout=BOOTC_TIMEOUT.get(args[0], 120))
+        except subprocess.TimeoutExpired as e:
+            log.warning("%s did not answer in %ss", " ".join(argv), e.timeout)
+            raise PolicyError("The update system did not answer in time. Try "
+                              "again in a few minutes, or restart the computer "
+                              "if it keeps happening.") from e
 
     def _emit_system_signal(self, name: str, signature: str, args: tuple) -> None:
         def emit():
@@ -2142,10 +2227,13 @@ class Daemon:
         must degrade to "unknown" rather than raise, because the one moment
         somebody needs this screen is when the machine is already unwell.
         """
-        res = subprocess.run(["bootc", "status", "--json"],
-                             capture_output=True, text=True)
         status: dict = {"booted": None, "rollback": None,
                         "rollback_queued": False, "staged": None}
+        try:
+            res = self._bootc("status", "--json")
+        except PolicyError as e:
+            status["error"] = str(e)
+            return status
         if res.returncode != 0:
             status["error"] = (res.stderr or res.stdout).strip()
             return status
@@ -2192,8 +2280,7 @@ class Daemon:
         thing this exists to prevent: a family with a broken computer and
         nobody home who can fix it.
         """
-        res = subprocess.run(["bootc", "rollback"], capture_output=True,
-                             text=True)
+        res = self._bootc("rollback")
         if res.returncode != 0:
             raise PolicyError(f"bootc rollback failed: {res.stderr.strip()}")
         # The dispatcher writes the activity entry, because Rollback is in

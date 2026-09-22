@@ -270,18 +270,22 @@ committed to or pushed from and runs that tree's own configuration
 a path — a hook naming a worktree breaks every commit and push in the
 repository the moment that worktree is deleted.
 
-Every merge carries its own version, plain `0.x.x` semver. CI writes the
-next number once for every push to master — committing it to master and
-building that commit — so each released image and ISO can be told apart and
-a bug report can say which build it came from. The number reaches
-os-release, the installer's welcome screen, the ISO's file name and the
-admin app's Updates page.
+Every merge carries its own version, plain `0.x.x` semver, and the git tag
+is the version: nothing in the tree records it. `scripts/version.py` counts
+any commit's number from the last tag reachable from it, and CI's release
+job pushes that tag once the build has passed, last of all, so a run that
+fails spends no number. Each released image and ISO can be told apart and a
+bug report can say which build it came from. The number reaches os-release,
+the installer's welcome screen, the ISO's file name and the admin app's
+Updates page; a build made anywhere but CI calls itself
+`0.7.0-dev.3+g2049571`, so it is never mistaken for a release.
 
-How far it steps comes from the merge's own commit subjects: a `feat` moves
-the minor, anything else moves the patch, and a breaking change moves the
-minor too, which is what a zero major version is for. The major never moves
-on its own — 1.0.0 is a decision, made by editing `VERSION`. After a merge,
-`git pull` before your next push: master has CI's version commit on it.
+How far it steps comes from the commit subjects since the last tag: a
+`feat` moves the minor, anything else moves the patch, and a breaking change
+moves the minor too, which is what a zero major version is for. The major
+never moves on its own — 1.0.0 is a decision, made by pushing the tag
+`v1.0.0` by hand. `python3 scripts/version.py show` says what your checkout
+would be called.
 
 The daemons are ordinary Python projects. Most work needs no image at all:
 

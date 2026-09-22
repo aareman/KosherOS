@@ -104,11 +104,11 @@ in
     pkgs.xorriso
   ];
 
-  # There is no version-bump hook any more. VERSION used to be ticked on
-  # every commit, which numbered every commit on every branch; CI now ticks
-  # it once per merge to master (see .github/workflows/ci.yml, "version").
-  # `python3 scripts/version.py bump` is still there for CI and for a
-  # person cutting a release by hand.
+  # There is no version-bump hook, and no VERSION file in the tree: the tag
+  # is the version. scripts/version.py counts any commit's number from the
+  # last tag, `just build` writes it into the build context, and CI's
+  # release job pushes the tag once the build has passed (see
+  # .github/workflows/ci.yml, "release").
   #
   # What is left is a handful of checks that take milliseconds and catch
   # things a reviewer should never have to. None of them rewrite a file:

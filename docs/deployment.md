@@ -114,14 +114,31 @@ copies the exact signed image for that version to `:stable` and `:latest`,
 after verifying its cosign signature came from this repository's CI, and
 marks the GitHub release as the stable one. So what families run is a
 build somebody chose. The immutable per-version tags are what a rollback
-names. Still open: `kosherctl channel` (admin + guardian gated) wrapping
-`bootc switch`, so a machine can be moved between channels without a root
-shell.
+names.
+
+**A machine can move between them.** ✅ `ListChannels` says which
+channels exist, which one this computer follows and what each one would
+switch it to; `SetChannel` runs `bootc switch` onto the other tag of the
+**same repository**, so a fork or a locally built image switches within
+itself and this can never point a computer somewhere else. It is the same
+pull as an update, on the same progress signals, staged for the next
+restart, with accounts, settings and files untouched — and it is the way
+a machine pinned to one version rejoins a channel. Guardian-gated and
+written to the activity log, because putting the family computer on edge
+means builds nobody has tried yet. The admin app's Updates page offers
+the two channels as rows that say what each one means, with a check on
+the one in use; `kosherctl system channel` lists them and `kosherctl
+system channel edge` switches. A `bootc switch` does not move the running
+deployment, only the one queued for the next restart, so both surfaces
+read the *staged* image as well and say "at the next restart" rather than
+claiming nothing happened. A machine on no channel at all — a pinned
+version, a digest, or anything installed before channels existed — is
+shown as exactly that, with the note that it will not update on its own.
 
 **4. Rollback — built.** ✅ The daemon exposes `DeploymentStatus` (which
 image is booted, and what "go back" would return to) and `Rollback`, with
-`kosherctl system status|check|update|rollback` over them and a **"Go back
-to the previous version"** control on the admin app's Updates page, which
+`kosherctl system status|check|update|rollback|channel` over them and a
+**"Go back to the previous version"** control on the admin app's Updates page, which
 names the version it would return to and is disabled with a reason when
 there is nothing to go back to. `Rollback` needs the update right but
 **not** the guardian password: the image is one this machine already ran,

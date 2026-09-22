@@ -113,7 +113,11 @@ somebody is waiting on an answer, and below them
 *Administration*: the activity feed and what is not about one person, in three pages —
 Protection, Apps and Updates. Protection opens on whether the filter is
 actually working, and then on the things one machine can only answer once — ad and tracker
-blocking, the word lists, the guardian password.
+blocking, the word lists, the guardian password. Updates shows the version the computer is
+running, what an update would bring, the way back if one went wrong, and which of the two
+streams of updates it follows: Stable, which almost every family wants, or Edge, which gets
+every new build the day it is made. Moving between them downloads the other version now and
+starts using it at the next restart; nothing on the computer is lost.
 
 Requests come first: when somebody asks for a blocked page from the block page, a blue
 banner under the page's header says so and one click answers it. Filter health is honest:

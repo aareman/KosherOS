@@ -103,4 +103,8 @@ Both settings are off until a parent sets them. See
 
 A machine installed from a release ISO follows its channel automatically;
 if an update boots without the filter enforcing, it goes back to the
-previous version on its own. See [deployment](deployment.md).
+previous version on its own. **Admin → Updates** shows both channels and
+moves the computer between them — the download happens straight away and
+the new version is used from the next restart, with accounts, settings
+and files untouched. Changing it asks for the guardian password when one
+is set. See [deployment](deployment.md).

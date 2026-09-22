@@ -12,7 +12,12 @@
 # account that is not inspected). Kept in step with
 # /etc/environment.d/50-kosher-ca.conf, which covers apps started from the
 # desktop rather than a shell.
-KOSHER_CA_BUNDLE=/etc/pki/tls/certs/ca-bundle.crt
+# The extracted bundle, not /etc/pki/tls/certs/ca-bundle.crt: Fedora 44's
+# ca-certificates dropped that path, and with these variables naming a
+# file that did not exist, curl, git, pip, node and cargo failed every
+# HTTPS connection on the whole machine. The extracted bundle exists on
+# every release and already carries what update-ca-trust adds.
+KOSHER_CA_BUNDLE=/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem
 export SSL_CERT_FILE="$KOSHER_CA_BUNDLE"          # Python (ssl), Ruby/gem, uv, httpx, many others
 export REQUESTS_CA_BUNDLE="$KOSHER_CA_BUNDLE"     # Python requests
 export PIP_CERT="$KOSHER_CA_BUNDLE"               # pip

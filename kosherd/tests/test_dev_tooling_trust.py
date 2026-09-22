@@ -21,7 +21,9 @@ from kosherd.policy import DEVELOPER_REGISTRIES, Policy, UserPolicy
 ROOT = Path(__file__).parents[2]
 PROFILE = ROOT / "os-image/files/etc/profile.d/kosher-ca.sh"
 ENVD = ROOT / "os-image/files/etc/environment.d/50-kosher-ca.conf"
-BUNDLE = "/etc/pki/tls/certs/ca-bundle.crt"
+# The extracted bundle: Fedora 44 dropped /etc/pki/tls/certs/ca-bundle.crt,
+# and with the environment naming a missing file every HTTPS tool failed.
+BUNDLE = "/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem"
 
 # variable -> the tool it exists for
 EXPECTED = {

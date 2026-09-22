@@ -602,7 +602,7 @@ which to a student looks like "the internet is broken".
 So the image sets, for every account, the environment each tool honours:
 `SSL_CERT_FILE`, `REQUESTS_CA_BUNDLE`, `PIP_CERT`, `NODE_EXTRA_CA_CERTS`,
 `CARGO_HTTP_CAINFO` and `GIT_SSL_CAINFO` at the system bundle
-(`/etc/pki/tls/certs/ca-bundle.crt`, which contains the KosherOS authority
+(`/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem`, which contains the KosherOS authority
 once inspection is set up and is Fedora's ordinary bundle otherwise), and
 `DENO_TLS_CA_STORE=system`, `UV_NATIVE_TLS=1`. Twice: `/etc/profile.d/kosher-ca.sh`
 for login shells and `/etc/environment.d/50-kosher-ca.conf` for programs

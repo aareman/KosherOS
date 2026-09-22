@@ -26,6 +26,11 @@
 set -eu
 
 stage=$(basename "$0")
+# prek keeps a hook it replaces as NAME.legacy and runs it after its own
+# shim. When that happens to this file, the shim has already run this
+# stage's checks; running them again would be the same work twice, and
+# "pre-commit.legacy" is not a stage prek accepts. Say nothing and pass.
+case "$stage" in *.legacy) exit 0 ;; esac
 here=$(cd "$(dirname "$0")" && pwd)
 root=$(git rev-parse --show-toplevel 2>/dev/null) || exit 0
 config="$root/.pre-commit-config.yaml"

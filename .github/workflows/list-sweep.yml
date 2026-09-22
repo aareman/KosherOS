@@ -1,0 +1,63 @@
+name: List sweep
+
+# The word lists against real pages: a few hundred ordinary sites in every
+# language the lists cover, the top of the web, and a sample of the adult
+# category, judged exactly as the filtering proxy would judge them
+# (scripts/list-sweep.py). This is what finds an entry that is an
+# ordinary word in a neighbouring language, or a matcher bug that only a
+# real page's markup provokes — the unit tests cannot.
+#
+# Weekly, because the web moves and so does the adult sample; on demand,
+# with the sizes adjustable; and on a pull request that touches the lists
+# or the matchers. Not on every push: it depends on a few hundred third
+# parties answering, and a flaky red on an unrelated change teaches
+# people to ignore red.
+
+on:
+  schedule:
+    - cron: "17 4 * * 0"
+  workflow_dispatch:
+    inputs:
+      popular:
+        description: how many of the most visited domains to fetch
+        default: "800"
+      adult:
+        description: how many adult-category domains to sample
+        default: "400"
+  pull_request:
+    paths:
+      - os-image/lists/**
+      - kosherd/src/kosherd/language.py
+      - kosherd/src/kosherd/content.py
+      - kosherd/src/kosherd/textfold.py
+      - kosherd/src/kosherd/siterules.py
+      - scripts/list-sweep.py
+      - .github/workflows/list-sweep.yml
+
+permissions:
+  contents: read
+
+jobs:
+  sweep:
+    name: Judge real pages with the shipped lists
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v5
+      - name: Sweep
+        # The script needs nothing beyond the standard library and
+        # kosherd's list modules. The report lands on the run's summary
+        # page; the per-page detail — including which adult sample pages
+        # were missed, which the summary never names — is the artifact.
+        run: |
+          python3 scripts/list-sweep.py \
+            --popular "${{ github.event.inputs.popular || '800' }}" \
+            --adult "${{ github.event.inputs.adult || '400' }}" \
+            --summary "$GITHUB_STEP_SUMMARY" \
+            --out sweep
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: list-sweep
+          path: sweep/
+          retention-days: 30

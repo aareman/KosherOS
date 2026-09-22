@@ -81,6 +81,32 @@ content list it earns points on every page. So before adding a word ask:
 Each file's `comment` records the words that were considered and left
 out, so nobody has to rediscover why.
 
+## Testing against real pages
+
+The unit tests check sentences. What they cannot know is that *af* is
+Dutch, or that a Hungarian news portal quotes language in its headlines.
+Real pages know, so there is a sweep over them:
+
+    just sweep --curated-only      # the hand-listed sites, a minute
+    just sweep                     # plus the top of the web and an adult sample
+
+`sweep/sites.json` here lists a dozen ordinary sites per language (news,
+shopping, government, cooking, Torah). Nothing on it should be blocked for
+its words or rewritten; the report names every page the lists reacted
+to, with the terms and words that did it, so a maintainer can tell a
+news story about pornography from an entry that is an ordinary word.
+The full run adds the most visited domains on the web (Tranco) minus the
+adult category, for breadth, and a sample of the UT1 adult category for
+recall — fetched at run time, never written down here, and never named
+in the report. `scripts/list-sweep.py` has the thresholds and the
+reasoning behind each.
+
+CI runs it weekly and on any pull request that touches this directory
+or the matchers (`.github/workflows/list-sweep.yml`); the report is the
+run's summary page and the per-page detail is its artifact. Add a site
+here when a language is thin, or when a family reports a page the lists
+got wrong — a site that has failed once is worth keeping.
+
 ## Shared words
 
 English is merged first, then the other languages by code. A word two

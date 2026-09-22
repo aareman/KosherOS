@@ -21,7 +21,7 @@ check "non-whitelisted site is blocked"         1 fetch_as wlkid https://www.wik
 # the old fixed 93.184.216.34 stopped answering, and https to a bare
 # address fails on the certificate anyway, so this passed for two wrong
 # reasons at once.
-other=$(dig +short +time=3 wikipedia.org A | grep -E '^[0-9.]+$' | head -1)
+other=$(resolve4 wikipedia.org)
 check "direct-IP browsing is blocked (http://$other/)" 1 fetch_as wlkid "http://$other/"
 check_contains "whitelist set is populated"     "elements" nft list set inet kosher wl4
 

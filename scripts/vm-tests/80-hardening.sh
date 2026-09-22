@@ -136,7 +136,7 @@ check "the dns-filtered account reaches an ordinary site" 0 fetch_as dnskid http
 # The bare-address target comes from a live lookup: a fixed one goes stale
 # (example.com left 93.184.216.34 in 2025, and a probe against it "passed"
 # because nothing answered).
-addr=$(dig +short +time=3 example.com A | grep -E '^[0-9.]+$' | head -1)
+addr=$(resolve4 example.com)
 check "a bare-address probe target answers (root, http://$addr/)" 0 fetch "http://$addr/"
 
 # -- F1: every port goes through the proxy ---------------------------------------

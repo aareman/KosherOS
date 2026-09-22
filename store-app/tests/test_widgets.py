@@ -211,13 +211,20 @@ def test_an_empty_catalogue_says_who_approves_apps(monkeypatch):
 
 
 def test_every_card_gets_an_icon_even_with_nothing_cached(window):
+    # A cached file or a themed icon where the machine has one; otherwise
+    # the app's initial on a tile (letter_tile). On a bare virtual display
+    # with no icon theme to speak of, most cards take the tile — which is
+    # the case this test is about: never an empty space.
     window.show_shelf("all")
     drain()
     for child in _children(window.grid):
         card = child.get_child()
         image = card.get_first_child().get_first_child()
-        assert isinstance(image, Gtk.Image)
-        assert image.get_icon_name() or image.get_paintable() or image.get_storage_type()
+        if isinstance(image, Gtk.Label):
+            assert image.get_label().strip() and image.has_css_class("app-letter")
+        else:
+            assert isinstance(image, Gtk.Image)
+            assert image.get_icon_name() or image.get_paintable() or image.get_storage_type()
 
 
 def test_installing_shows_progress_then_the_app_is_installed(window):

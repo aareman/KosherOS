@@ -1,0 +1,14 @@
+{
+  "wordlist.json": {
+    "version": "1",
+    "comment": "The default word list, meant to be complete enough that a family never has to build one. Replacements are mild on purpose: the goal is a page that reads normally minus the language, because a page full of [removed] is one people stop using. Slurs are removed outright since no mild reading of them exists. Admins may add or remove entries, and the portal can replace this file wholesale."
+  },
+  "content-terms.json": {
+    "version": 1,
+    "comment": "Terms for judging a page by its words, used where the domain lists have nothing to say — a new site, a blog post, a marketplace listing, an unclassified search result. Each term sits at the strongest verdict it can support (nsfw / suggestive / immodest) and carries a weight in points; 25 points convicts at that level, and points also count toward every milder level. So one 25-point explicit term is enough on its own, two 12-point terms together are enough, and no amount of swimwear vocabulary can ever add up to 'explicit'. Terms match as whole words only and stop earning points after a few repeats, so a word in a navigation menu cannot convict a page. This is meant to be complete out of the box: an administrator may add or remove a handful, but nobody should have to build it."
+  },
+  "search-blocklist.json": {
+    "version": 1,
+    "comment": "Search terms blocked outright in every filtered mode. Unlike the profanity list, which substitutes a milder word inside a page, these stop the search from running: an explicit query shows explicit text in the result snippets even when every link is dropped. Terms are matched as whole words, tolerant of the usual disguises (p0rn, p-o-r-n). Kept to terms that have no innocent use, so an ordinary search is never refused. An administrator may add or remove a handful; nobody should have to build this list. A query that is plainly asking for help with the problem (addiction, recovery, filtering, a helpline) is let through: the results are filtered by category either way, so nothing is exposed, and somebody looking for a way out must not be met by a block page."
+  }
+}

@@ -38,6 +38,13 @@ admin-demo:
 store-demo:
     env PYTHONPATH=kosherd/src:store-app/src python3 -m kosherstore.demo
 
+# Rebuild the three shipped word lists (bad language, page terms, blocked
+# searches) from the one-file-per-language sources in os-image/lists/.
+# A test fails when the shipped files are stale; --verbose lists the
+# words two languages share. See os-image/lists/README.md.
+lists *ARGS:
+    python3 scripts/build-lists.py {{ARGS}}
+
 # The docs site as GitHub Pages publishes it (https://aareman.github.io/KosherOS/):
 # the readme as the front page, docs/*.md, and a Releases page from GitHub.
 docs:

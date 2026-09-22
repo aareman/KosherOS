@@ -116,16 +116,23 @@ marks the GitHub release as the stable one. So what families run is a
 build somebody chose. The immutable per-version tags are what a rollback
 names.
 
-**Versions are sequential.** Every merge to master takes the next number,
-and every number gets a tag and a release. The number is committed before
-the image is built, so a release step that fails would leave a hole (it
-did once: 0.3.0's image was built and signed, the releases API refused the
-release with a 403, and the next merge became 0.4.0). The release step
-(`scripts/publish-releases.py`) retries, and it releases every version on
-master that has no tag yet, not only the newest, so a number one run drops
-is picked up by the next. A release made after the fact does not take the
-Latest badge from the newest version; it says whether an image exists for
-it by asking the registry.
+**Versions are sequential, and the tag is the version.** Nothing in the
+tree records the number: `scripts/version.py` counts it from the last tag
+reachable from a commit plus what the commits since it say (a `feat` moves
+the minor, anything else the patch). The image job builds the pushed commit
+with that number in it, and the release job, after the tests and the build
+have passed, pushes the tag, copies the image to the version's tag and
+signs it, then creates the release on the tag (`scripts/publish-releases.py`).
+The number is spent only when the tag lands, so a run that fails before
+that spends nothing and the next merge takes the same number. A run that
+dies after it leaves a tag with no release, and the next run finishes it.
+
+It used to be a `VERSION` file that CI committed to master before building.
+Every failure downstream burned a number, and the release step failed for
+good whenever a commit touching a workflow file landed before it ran:
+GitHub demands a scope the Actions token cannot hold to release an explicit
+commit in that case. 0.3.0, 0.4.2, 0.5.0 and 0.6.0 were spent that way and
+tagged by hand afterwards.
 
 **A machine can move between them.** ✅ `ListChannels` says which
 channels exist, which one this computer follows and what each one would

@@ -568,10 +568,13 @@ def cmd_system(args) -> int:
             for entry in info.get("channels", []):
                 mark = "*" if entry.get("current") else " "
                 print(f"  {mark} {entry['name']:<7} {entry['summary']}")
-            if not info.get("current"):
-                print("\nThis computer is not on a channel — it runs a pinned "
-                      "version or a locally built image. Naming a channel "
-                      "moves it onto one.")
+            if not (info.get("current") or info.get("pending")):
+                print("\nthis computer is fixed at one version and will not "
+                      "update on its own; name a channel to start getting "
+                      "updates again")
+            if (info.get("pending") or info.get("current")) != "stable":
+                print("\nstable is the one to be on unless you are helping "
+                      "test KosherOS")
             return 0
         wanted = args.value.strip().lower()
         known = [e["name"] for e in info.get("channels", [])]
@@ -580,9 +583,9 @@ def cmd_system(args) -> int:
                   file=sys.stderr)
             return 1
         c.set_channel(wanted, _guardian_pw(args))
-        print(f"switching to the {wanted} channel; the download runs in the "
-              "background and takes effect at the next restart.\n"
-              "Run 'kosherctl system status' to see it staged.")
+        print(f"switching to {wanted}; the download runs in the background "
+              "and the new version is used from the next restart\n"
+              "run 'kosherctl system status' to see it staged")
         return 0
     return 1
 

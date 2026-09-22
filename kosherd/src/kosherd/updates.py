@@ -117,20 +117,24 @@ CHANNELS: tuple[dict, ...] = (
     {
         "name": "stable",
         "title": "Stable",
-        "summary": "Tried first, then released. Right for a family computer.",
-        "description": "Updates arrive after they have run on Edge for a "
-                       "while and somebody has chosen to release them. "
-                       "Fewer updates, and less chance of one of them "
-                       "causing trouble.",
+        "summary": "updates that have been tested first",
+        "description": "Updates arrive here after they have been tested, so "
+                       "they come less often and are less likely to break "
+                       "something. Stay on this one unless you are helping "
+                       "test KosherOS.",
     },
     {
         "name": "edge",
         "title": "Edge",
-        "summary": "Every new build the day it is made. For testing.",
-        "description": "Every change lands here first, so new things arrive "
-                       "weeks earlier — and so do the rough edges. Choose "
-                       "this only if you are happy to report problems and "
-                       "to go back a version when one turns up.",
+        "summary": "every new version as soon as it is built",
+        "description": "Every new version arrives here as soon as it is "
+                       "built, often several in a week. Things break here "
+                       "sometimes; that is what it is for.",
+        # Shown when confirming the switch. Only the direction that costs
+        # something has one: a warning on every choice is a warning
+        # nobody reads.
+        "caution": "Edge versions have not been tested, and things break "
+                   "there sometimes.",
     },
 )
 CHANNEL_NAMES: tuple[str, ...] = tuple(c["name"] for c in CHANNELS)

@@ -448,10 +448,14 @@ class UpdatesPage(_Page):
 
     def _ask_switch(self, entry: dict) -> None:
         title = entry.get("title") or entry.get("name") or "this channel"
-        confirm(self.win, f"Get updates from {title}?",
-                (entry.get("description") or "") + "\n\nKosherOS downloads "
-                "that version now; it starts being used at the next restart. "
-                "Accounts, settings and files stay exactly as they are.",
+        # Not the row's own description again — you have just read it. What
+        # this adds is what pressing Switch does, and the warning on the
+        # one direction that carries a cost.
+        caution = entry.get("caution")
+        confirm(self.win, f"Switch this computer to {title}?",
+                (f"{caution}\n\n" if caution else "")
+                + "The download starts now and the new version is used from "
+                "the next restart. Settings and files are kept.",
                 "Switch", lambda: self.win.with_guardian(
                     lambda pw: self._switch(entry.get("name") or "", title, pw)),
                 destructive=False)
@@ -610,8 +614,7 @@ class UpdatesPage(_Page):
             self.win.toast(error or "The update did not finish")
 
 
-CHANNEL_INTRO = ("Every update comes from one of two streams. Almost every "
-                 "family wants Stable.")
+CHANNEL_INTRO = "Almost everyone should be on Stable."
 
 
 def channel_note(info: dict) -> str:
@@ -622,12 +625,12 @@ def channel_note(info: dict) -> str:
     if pending:
         titles = {c.get("name"): c.get("title") or c.get("name")
                   for c in (info.get("channels") or [])}
-        return (f" This computer is moving to {titles.get(pending, pending)} "
-                "at its next restart.")
+        return (f" This computer switches to {titles.get(pending, pending)} "
+                "at the next restart.")
     if info and not info.get("current"):
-        return (" This computer is not on either stream — it is running a "
-                "fixed version and will not update on its own. Choosing one "
-                "puts it back on updates.")
+        return (" This computer is on neither one. It is fixed at one version "
+                "and will not update on its own; pick one to start getting "
+                "updates again.")
     return ""
 
 

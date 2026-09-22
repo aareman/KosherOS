@@ -342,6 +342,12 @@ class DemoClient:
     def _time_state(self, u):
         return timelimits.status(u.get("time"), self.used_today.get(u["uid"], 0))
 
+    def set_network_access(self, uid, video_calls, extra_ports, pw=""):
+        u = self._user(uid)
+        u["video_calls"] = bool(video_calls)
+        u["extra_ports"] = sorted(set(int(p) for p in extra_ports))
+        self._change(uid, "SetNetworkAccess", [uid, bool(video_calls), u["extra_ports"]])
+
     def set_time_limits(self, uid, settings, pw=""):
         self._user(uid)["time"] = timelimits.parse(settings)
         self._change(uid, "SetTimeLimits", [uid, timelimits.parse(settings)])

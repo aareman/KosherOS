@@ -152,6 +152,12 @@ INTROSPECTION_XML = """
     <method name="GetTimeUsage">
       <arg direction="out" type="s" name="usage_json"/>
     </method>
+    <method name="SetNetworkAccess">
+      <arg direction="in" type="i" name="uid"/>
+      <arg direction="in" type="b" name="video_calls"/>
+      <arg direction="in" type="s" name="extra_ports_json"/>
+      <arg direction="in" type="s" name="guardian_password"/>
+    </method>
     <method name="ApplyProfile">
       <arg direction="in" type="i" name="uid"/>
       <arg direction="in" type="s" name="profile"/>
@@ -1274,6 +1280,36 @@ class Daemon:
             raise PolicyError("administrators are never limited; make this "
                               "account a user account first")
         user.time = settings
+        self._save_and_apply()
+        return None
+
+    def impl_SetNetworkAccess(self, uid: int, video_calls: bool, extra_ports_json: str,
+                              _guardian_pw: str):
+        """What this account may reach beyond the web (see nft.py).
+
+        Guardian-gated in both directions like every filter setting: turning
+        video calls on opens the one channel the filter cannot read, and an
+        extra port is a door the proxy never sees behind. The special ports
+        are refused by name — 53 belongs to the resolver, 80 and 443 to the
+        proxy — because granting them would silently undo the filter.
+        """
+        try:
+            ports = json.loads(extra_ports_json or "[]")
+        except ValueError:
+            raise PolicyError("extra ports must be a JSON list of numbers") from None
+        if not isinstance(ports, list) or not all(isinstance(p, int) and not isinstance(p, bool)
+                                                 for p in ports):
+            raise PolicyError("extra ports must be a JSON list of numbers")
+        if len(ports) > 20:
+            raise PolicyError("at most 20 extra ports")
+        for port in ports:
+            if not 1 <= port <= 65535:
+                raise PolicyError(f"{port} is not a port")
+            if port in (53, 80, 443):
+                raise PolicyError(f"port {port} is the filter's own and cannot be opened directly")
+        user = self._managed(uid)
+        user.video_calls = bool(video_calls)
+        user.extra_ports = sorted(set(ports))
         self._save_and_apply()
         return None
 

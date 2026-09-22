@@ -102,6 +102,9 @@ ACTIONS = {
     # the same road: a filter action, guardian-gated.
     "SetTimeLimits": ACTION_MANAGE_FILTER,
     "GetTimeUsage": ACTION_READ_CONFIG,
+    # Beyond the web: video calls (UDP the filter cannot read) and extra
+    # ports. Opening either widens what the account reaches.
+    "SetNetworkAccess": ACTION_MANAGE_FILTER,
     "ApproveRequest": ACTION_MANAGE_FILTER,
     "DismissRequest": ACTION_MANAGE_USERS,
     "ListRequests": ACTION_READ_CONFIG,
@@ -186,7 +189,7 @@ GUARDIAN_GATED = frozenset({
     "SetMediaLevel",
     "SetLanguageFilter", "SetYouTube",
     "SetGuestConfig", "DisableGuardian", "Enrol", "Unenrol",
-    "SetAdBlock", "SetTimeLimits", "SetChannel",
+    "SetAdBlock", "SetTimeLimits", "SetChannel", "SetNetworkAccess",
     "SetUserAppAccess", "SetUserBlockedAppKinds", "SetUserBlockedApps",
 })
 
@@ -211,7 +214,7 @@ CHANGES = frozenset({
     "ApplyProfile", "SaveProfile", "DeleteProfile", "ApproveRequest",
     "DismissRequest", "AllowUrl", "EditList", "SetMediaLevel",
     "SetLanguageFilter", "SetYouTube", "SetUserAdmin", "SetLayout",
-    "SetCoverStyle", "SetAdBlock", "SetTimeLimits", "SetGuestConfig", "CreateUser",
+    "SetCoverStyle", "SetAdBlock", "SetTimeLimits", "SetNetworkAccess", "SetGuestConfig", "CreateUser",
     "AdoptUser", "RemoveUser", "ResetPassword", "SetUserApps", "RemoveApp", "ApproveApp",
     "UnapproveApp", "SetUserCanInstall", "SetUserAppAccess",
     "SetUserBlockedAppKinds", "SetUserBlockedApps", "SetCaptiveMode",
@@ -232,7 +235,7 @@ PER_USER = frozenset({
     "SetBlockedCategories",
     "ApplyProfile", "SaveProfile", "AllowUrl", "SetMediaLevel",
     "SetLanguageFilter", "SetYouTube", "SetUserAdmin", "SetLayout",
-    "SetCoverStyle", "SetTimeLimits", "RemoveUser", "ResetPassword", "SetUserApps",
+    "SetCoverStyle", "SetTimeLimits", "SetNetworkAccess", "RemoveUser", "ResetPassword", "SetUserApps",
     "SetUserCanInstall", "SetUserAppAccess", "SetUserBlockedAppKinds",
     "SetUserBlockedApps", "SetCaptiveMode",
 })

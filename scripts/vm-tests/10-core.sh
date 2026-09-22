@@ -19,10 +19,15 @@ section "Certificates"
 # node trust the inspect CA. Fedora 44 moved the bundle, and for one build
 # every one of those tools failed every HTTPS connection. Existence is the
 # whole check; the path is read from the file, not repeated here.
-ca_bundle=$(. /etc/profile.d/kosher-ca.sh 2>/dev/null; printf '%s' "${SSL_CERT_FILE:-}")
-check "the CA bundle the environment names exists ($ca_bundle)" 0 test -s "$ca_bundle"
-check "the environment.d copy names the same bundle" 0 \
-    grep -q "SSL_CERT_FILE=$ca_bundle" /etc/environment.d/50-kosher-ca.conf
+if [ -f /etc/profile.d/kosher-ca.sh ]; then
+    ca_bundle=$(. /etc/profile.d/kosher-ca.sh 2>/dev/null; printf '%s' "${SSL_CERT_FILE:-}")
+    check "the CA bundle the environment names exists ($ca_bundle)" 0 test -s "$ca_bundle"
+    check "the environment.d copy names the same bundle" 0 \
+        grep -q "SSL_CERT_FILE=$ca_bundle" /etc/environment.d/50-kosher-ca.conf
+else
+    # The stage-1 dev VM installs the stack, not the image's shell environment.
+    skip "CA bundle environment (only the image ships /etc/profile.d/kosher-ca.sh)"
+fi
 
 section "Daemon API"
 check "kosherctl reaches the daemon" 0 kosherctl status

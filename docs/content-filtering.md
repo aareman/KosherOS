@@ -20,6 +20,39 @@ the web.
 The gap between "blocks porn domains" and "a frum family trusts this
 machine" is the whole product.
 
+## Which ports an account may use
+
+A supervised account's network is **default-deny**, not "everything except
+what is blocked". For an account in *Filtered internet* every TCP connection
+it opens — on any port — is redirected into that account's own proxy
+listener, so a web page served on 8080 or 8443 meets the same URL rules,
+category lists and picture filter as one on 443. Loopback is never
+redirected: a program on the computer talking to itself is nobody's business.
+Anything that reaches the proxy and is not HTTP, or TLS carrying HTTP, is
+refused rather than passed through (`rawtcp=false`).
+
+Three things do not go through the proxy, because they are not web and the
+proxy could not read them:
+
+- **Mail.** IMAPS (993), SMTPS (465) and submission (587) are allowed
+  directly. They are named protocols with a reason, not "ports the web might
+  use".
+- **Extra ports** an administrator grants one account, under *Beyond the
+  web* on the account's page (or `kosherctl network UID --extra-ports 22`).
+  This is the advanced escape hatch for a program that is neither web nor
+  mail — ssh, say. The filter's own ports (53, 80, 443) can never be granted
+  this way. Empty by default.
+- **Video calls.** UDP cannot be inspected at all, and Zoom, Meet and school
+  calls send picture and sound over UDP to high ports. That is allowed by
+  default, so calls work without a visit to the admin app, and the switch on
+  the account's page says plainly that this is the one channel the filter
+  cannot read; turn it off for an account that has no calls to make. Below
+  port 1024 an account gets only NTP; QUIC (UDP 443) stays refused.
+
+*DNS-filtered* accounts have no proxy, so for them the web is 80 and 443 to
+anywhere plus the same named protocols; other TCP is refused. *Whitelist
+only* and *No internet* allow nothing beyond the approved sites, as before.
+
 ## What the incumbents actually do
 
 Worth being clear-eyed, because it sets the bar and the cost:

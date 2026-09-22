@@ -7,7 +7,8 @@ ensure_test_users
 uid=$(id -u wlkid)
 
 section "Turning it on"
-check "mode can be set to inspect" 0 kosherctl set-mode "$uid" inspect --guardian-password ""
+# "inspect" was the mode's first name; the CLI takes the current one.
+check "mode can be set to filtered" 0 kosherctl set-mode "$uid" filtered --guardian-password ""
 kctl rules "$uid" clear >/dev/null
 check "a block rule can be added" 0 \
     kosherctl rules "$uid" block "example.com/blocked*" --guardian-password ""
@@ -56,6 +57,12 @@ section "Turning it off"
 kctl rules "$uid" clear >/dev/null
 check "mode can be set back" 0 kosherctl set-mode "$uid" whitelist --guardian-password ""
 sleep 2
-check "the proxy stops when nobody is inspected" 1 systemctl is-active --quiet kosher-mitm
+# Only true when this was the last filtered account: a test VM that has
+# accumulated others keeps the proxy up for them, which is correct.
+if kosherctl status 2>/dev/null | grep -v "^  wlkid " | grep -qE "\): filtered"; then
+    skip "the proxy stops when nobody is inspected (another account on this VM is filtered)"
+else
+    check "the proxy stops when nobody is inspected" 1 systemctl is-active --quiet kosher-mitm
+fi
 
 report

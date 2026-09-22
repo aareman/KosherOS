@@ -61,6 +61,21 @@ resolve4() {
     printf '%s' "$ip"
 }
 
+# The proxy takes a few seconds to bind after a mode change, and the first
+# request into a listener that is not there yet fails for a reason that has
+# nothing to do with the rule under test. Wait until a fetch as the user
+# actually succeeds (or give up after ~30s and let the check say so).
+wait_for_proxy_as() {
+    local u="$1" i
+    for i in $(seq 1 30); do
+        if runuser -u "$u" -- curl -sS --max-time 5 -o /dev/null https://example.com 2>/dev/null; then
+            return 0
+        fi
+        sleep 1
+    done
+    return 1
+}
+
 # assert_that <description> <command...> — passes when the command succeeds.
 assert_that() {
     local desc="$1"

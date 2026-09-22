@@ -170,6 +170,30 @@ def cmd_set_mode(args) -> int:
     return 0
 
 
+def cmd_network(args) -> int:
+    """kosherctl network UID [--video-calls on|off] [--extra-ports 22,2222|none]"""
+    c = _client()
+    user = next((u for u in c.get_policy().get("users", []) if u.get("uid") == args.uid), None)
+    if user is None:
+        print(f"uid {args.uid} is not managed", file=sys.stderr)
+        return 1
+    video = user.get("video_calls", True)
+    ports = list(user.get("extra_ports", []))
+    if args.video_calls:
+        video = args.video_calls == "on"
+    if args.extra_ports is not None:
+        ports = [] if args.extra_ports.strip().lower() in ("", "none") else \
+            [int(p) for p in args.extra_ports.split(",") if p.strip()]
+    if not args.video_calls and args.extra_ports is None:
+        print(f"uid {args.uid}: video calls {'on' if video else 'off'}; extra ports: "
+              + (", ".join(map(str, ports)) or "none"))
+        return 0
+    c.set_network_access(args.uid, video, ports, _guardian_pw(args))
+    print(f"uid {args.uid}: video calls {'on' if video else 'off'}; extra ports: "
+          + (", ".join(map(str, ports)) or "none"))
+    return 0
+
+
 def cmd_set_whitelist(args) -> int:
     _client().set_whitelist(args.uid, args.domains, _guardian_pw(args))
     print(f"uid {args.uid}: {len(args.domains)} domains")
@@ -947,6 +971,14 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("-g", "--grep", default="", help="show only lines matching this pattern")
     s.set_defaults(func=cmd_log)
     sub.add_parser("get-policy", help="dump the full policy JSON").set_defaults(func=cmd_get_policy)
+
+    s = sub.add_parser("network",
+                       help="what an account may reach beyond the web: video calls, extra ports")
+    s.add_argument("uid", type=int)
+    s.add_argument("--video-calls", choices=["on", "off"])
+    s.add_argument("--extra-ports", help="comma-separated TCP ports, or 'none'")
+    s.add_argument("--guardian-password")
+    s.set_defaults(func=cmd_network)
 
     s = sub.add_parser("set-mode", help="change a user's filter mode")
     s.add_argument("uid", type=int)

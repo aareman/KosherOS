@@ -236,6 +236,13 @@ class UserPolicy:
     # Empty means no daily limit and always allowed — the default, so a
     # family that never opens the Time tab is not surprised by a sign-out.
     time: dict = field(default_factory=dict)
+    # Beyond the web (see nft.py). UDP cannot be inspected, so whether this
+    # account may send it to high ports — what a video call needs — is a
+    # decision, on by default so school calls work unconfigured. Extra TCP
+    # ports are the advanced escape hatch for a program that is neither
+    # web nor mail; everything not named is refused.
+    video_calls: bool = True
+    extra_ports: list[int] = field(default_factory=list)
     # The group this account is in (a key in Policy.custom_profiles), or
     # None. Explicit, never inferred from matching settings: an account may
     # differ from its group and still belong to it, and a change to the
@@ -278,6 +285,10 @@ class UserPolicy:
             d["cover_style"] = self.cover_style
         if self.time:
             d["time"] = self.time
+        if not self.video_calls:
+            d["video_calls"] = False
+        if self.extra_ports:
+            d["extra_ports"] = sorted(set(int(p) for p in self.extra_ports))
         return d
 
 
@@ -441,6 +452,8 @@ class Policy:
                     layout=u.get("layout", DEFAULT_LAYOUT),
                     cover_style=u.get("cover_style", DEFAULT_COVER_STYLE),
                     time=dict(u.get("time", {})),
+                    video_calls=bool(u.get("video_calls", True)),
+                    extra_ports=[int(p) for p in u.get("extra_ports", [])],
                     profile=u.get("profile") or None,
                 )
                 for u in doc["users"]

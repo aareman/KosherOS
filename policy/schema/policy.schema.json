@@ -176,6 +176,21 @@
         },
         "time": {
           "$ref": "#/$defs/time"
+        },
+        "video_calls": {
+          "type": "boolean",
+          "description": "UDP above 1024 to the internet, which video calls need and the filter cannot read. Default true; a per-account switch."
+        },
+        "extra_ports": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 65535
+          },
+          "maxItems": 20,
+          "uniqueItems": true,
+          "description": "TCP ports this account may open directly, beyond the web and mail: an advanced setting, empty by default."
         }
       }
     },
@@ -466,6 +481,21 @@
         },
         "time": {
           "$ref": "#/$defs/time"
+        },
+        "video_calls": {
+          "type": "boolean",
+          "description": "UDP above 1024 to the internet, which video calls need and the filter cannot read. Default true; a per-account switch."
+        },
+        "extra_ports": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 65535
+          },
+          "maxItems": 20,
+          "uniqueItems": true,
+          "description": "TCP ports this account may open directly, beyond the web and mail: an advanced setting, empty by default."
         }
       }
     },

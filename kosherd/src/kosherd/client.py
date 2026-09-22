@@ -166,6 +166,13 @@ class DaemonClient:
         """Ads and trackers blocked at the resolvers, for every account."""
         self._call("Profiles", "SetAdBlock", "(bs)", enabled, guardian_password)
 
+    def set_network_access(self, uid: int, video_calls: bool, extra_ports: list[int],
+                           guardian_password: str = "") -> None:
+        """Beyond the web: whether UDP to high ports (video calls) is allowed,
+        and which extra TCP ports the account may open directly."""
+        self._call("Profiles", "SetNetworkAccess", "(ibss)", uid, bool(video_calls),
+                   json.dumps([int(p) for p in extra_ports]), guardian_password)
+
     def set_time_limits(self, uid: int, settings: dict,
                         guardian_password: str = "") -> None:
         """{"daily_minutes": n, "allowed": [7 day strings]} — see timelimits.py."""

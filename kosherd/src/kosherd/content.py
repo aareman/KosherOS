@@ -135,7 +135,7 @@ class Scorer:
             return None
         # Longest first so "sex video" scores as the phrase, not as "sex".
         ordered = sorted(self.terms, key=len, reverse=True)
-        alts = "|".join(re.escape(t).replace(r"\ ", r"\s+") for t in ordered)
+        alts = "|".join(_term_regex(t) for t in ordered)
         # An optional plural on the end: a list written in the singular
         # otherwise misses "crop tops" and "mini skirts", which is how a
         # page of them scored twenty points and passed. The plural is
@@ -145,6 +145,18 @@ class Scorer:
         return re.compile(
             rf"(?<![\w-]){textfold.PREFIX_GROUP}({alts})(?:e?s)?(?![\w-])",
             re.IGNORECASE)
+
+    def _term_of(self, found: str) -> str | None:
+        """The listed term a match was, with the whitespace and any article
+        that _term_regex let in between its words taken back out."""
+        term = re.sub(r"\s+", " ", found.lower())
+        if term in self.terms:
+            return term
+        for article in (" ה", f" {textfold.ARABIC_ARTICLE}"):
+            stripped = term.replace(article, " ")
+            if stripped in self.terms:
+                return stripped
+        return None
 
     def score(self, text: str, *, allow_help_context: bool = True) -> Verdict:
         if not self._regex or not text:
@@ -157,8 +169,9 @@ class Scorer:
             threshold *= HELP_CONTEXT_MULTIPLIER
         counts: dict[str, int] = {}
         for match in self._regex.finditer(text):
-            term = re.sub(r"\s+", " ", match.group(1).lower())
-            counts[term] = counts.get(term, 0) + 1
+            term = self._term_of(match.group(1))
+            if term is not None:
+                counts[term] = counts.get(term, 0) + 1
 
         earned = {NSFW: 0, SUGGESTIVE: 0, IMMODEST: 0}
         for term, count in counts.items():
@@ -193,6 +206,24 @@ class Scorer:
 def _canonical(term: str) -> str:
     """The one spelling a term is stored and matched under."""
     return re.sub(r"\s+", " ", textfold.fold(term).lower()).strip()
+
+
+def _term_regex(term: str) -> str:
+    """A term as a pattern: its words with any whitespace between them.
+
+    Hebrew puts the article on the second word of a phrase (נערות
+    הליווי, בגדי הים) and Arabic on both, so between the words of a
+    phrase in those scripts the article may appear.
+    """
+    words = [re.escape(w) for w in term.split()]
+    script = textfold.script_of(term)
+    if script == textfold.HEBREW:
+        joiner = r"\s+ה?"
+    elif script == textfold.ARABIC:
+        joiner = rf"\s+(?:{textfold.ARABIC_ARTICLE})?"
+    else:
+        joiner = r"\s+"
+    return joiner.join(words)
 
 
 def is_help_context(text: str) -> bool:
@@ -271,6 +302,34 @@ _META = re.compile(
 _TITLE = re.compile(r"<title[^>]*>(.*?)</title", re.IGNORECASE | re.DOTALL)
 
 
+def _drop_open_tail(document: str) -> str:
+    """Cut off a script, style, comment or tag that opens and never
+    closes before the end — what a cut at the scan limit leaves behind.
+
+    The FIRST unclosed opener is where the cut goes, not the last: a
+    minified script can contain the text "<script" in a string, and
+    cutting there would keep the kilobytes of source before it.
+    """
+    lowered = document.lower()
+    cut = len(document)
+    for opener, closer in (("<script", "</script"), ("<style", "</style"),
+                           ("<!--", "-->")):
+        pos = 0
+        while True:
+            start = lowered.find(opener, pos, cut)
+            if start == -1:
+                break
+            end = lowered.find(closer, start + len(opener), cut)
+            if end == -1:
+                cut = start
+                break
+            pos = end + len(closer)
+    start = lowered.rfind("<", 0, cut)
+    if start != -1 and lowered.find(">", start, cut) == -1:
+        cut = start
+    return document[:cut]
+
+
 def visible_text(html: str, limit: int = 200_000) -> str:
     """The words a reader would see, plus the title and description.
 
@@ -278,7 +337,12 @@ def visible_text(html: str, limit: int = 200_000) -> str:
     most honest summary of what a page is, and they are what a search
     engine shows as the snippet.
     """
-    document = html[:limit]
+    # The cut at the limit lands wherever it lands — and callers often
+    # slice before calling, so it may already have landed. If that is
+    # inside a script, a stylesheet, a comment or a tag, everything after
+    # its opening is source that never reached a reader, and left in
+    # place it is scored as words ("xxx-large", "1 ul", SVG path data).
+    document = _drop_open_tail(html[:limit])
     parts = [m.group(1) for m in _TITLE.finditer(document)]
     parts += [m.group(1) for m in _META.finditer(document)]
     parts.append(_MARKUP.sub(" ", document))

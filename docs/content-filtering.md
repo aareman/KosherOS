@@ -332,6 +332,69 @@ From the command line: `kosherctl words show words`,
 `kosherctl words add words blast --replacement bother`,
 `kosherctl words remove searches "bikini atoll"`.
 
+## Other languages
+
+A family that reads Hebrew, Russian or French at home was, until the
+lists learned those languages, protected only by the domain lists. Every
+word list was English, and the matchers assumed it: a word boundary was
+"not [A-Za-z0-9]", a disguised letter was a Latin letter, and a page in
+another script was, as far as the matcher was concerned, one long word.
+
+The lists now ship in sixteen languages — English, Hebrew, Yiddish,
+Russian, Ukrainian, French, Spanish, Portuguese, German, Italian, Dutch,
+Hungarian, Polish, Arabic, Persian and Turkish — chosen for where Jewish
+families live. Each is one file under `os-image/lists/`, and the three
+shipped files are built from them (`just lists`); a test fails when they
+drift. The README there says how to add a word or a language and, more
+importantly, what to leave out.
+
+The matchers learned what the lists needed (`kosherd/textfold.py`):
+
+* A **word is a whole word in any script**, and in Hebrew and Arabic also
+  behind the prefixes those languages glue on — והביקיני counts as
+  ביקיני, البورن as بورن — while מזונות is left alone. This cuts both
+  ways, which is why זונות is not on the list: with a prefix allowed,
+  the bracha is מ plus the plural of a curse.
+* **Vowel points and accents between letters are ignored**, and a mark
+  before a letter is the middle of a word, not a boundary.
+* **An accented letter matches its plain spelling** — cabrón and cabron,
+  kurwa mać and kurwa mac — for the accents that mark stress, and only
+  those: ñ is not n (coño, cono), ö is not o (göt, got). ß is ss, ё is е,
+  the alef variants are one letter, and the Persian kaf is the Arabic
+  one, so one list serves both.
+* The bad-language list compiles **one pattern per script** and only runs
+  the ones a page contains; the alternation is factored by first letter,
+  so fifteen hundred words scan a page in about the time a hundred and
+  fifty did.
+* A page is scored in its **folded** spelling, so a term is listed once.
+  A Hebrew phrase may take the article on its second word (נערות
+  הליווי), an Arabic one on both.
+* The "writing about the problem" register that halves a page's evidence
+  speaks the same languages.
+
+Testing the lists on real front pages in every language found the
+problems a word list has and a unit test does not. Three were in the
+matcher and applied to English too: a digit standing in for a letter let
+numbers match short words (8.5 read as *bs*, 455 as *ass*), so a word
+under four letters is now matched as written and a disguise must keep
+half its letters; a page cut at the scan limit inside a script or an
+SVG path leaked its source into the "visible" text, so the unterminated
+tail is dropped first; and a vowel mark counted as a word boundary. The
+rest were **entries that are ordinary words in a neighbouring
+language**, because every Latin-script list shares one matcher: *af* and
+*hoe* are Dutch, *hell* is German, *git* is Turkish and a program,
+*pédé* folds to the Portuguese *pede*, *fica* is Portuguese, *huren* is
+Dutch for renting, *mayo* is mayonnaise, *string* and *body* are code.
+They were removed, and the sweep that caught them is now a test.
+
+Two limits remain, and both are recorded rather than hidden. A word two
+Latin-script languages spell alike gets one replacement — *puta* reads
+as Spanish on a Portuguese page — because nothing tells the proxy what
+language a page is in; reading `<html lang>` would fix that and is the
+natural next step. And the scorer's plural rule is English (*bra*
+matches *bras*, which is French for arms, worth four points), so the
+other lists carry their own forms.
+
 ## YouTube
 
 Restricted Mode is one switch for the whole site, which is useless for a

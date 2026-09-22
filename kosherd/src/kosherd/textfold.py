@@ -97,6 +97,20 @@ MARKS = "\u0300-\u036f\u0591-\u05bd\u05bf\u05c1\u05c2\u05c4\u05c5\u05c7" \
 MARKS_CLASS = f"[{MARKS}]"
 _MARKS_RE = re.compile(MARKS_CLASS)
 
+# The marks a word of one script can carry, for a pattern that only has
+# to allow for those: a Latin word never has a Hebrew point in it, and
+# the class is repeated between every two letters of every listed word.
+_MARKS_BY_SCRIPT = {
+    LATIN: "̀-ͯ",
+    CYRILLIC: "̀-ͯ",
+    HEBREW: "֑-ׇֽֿׁׂׅׄ",
+    ARABIC: "ً-ٰٟۖ-ۜ۟-۪ۤۧۨ-ۭ",
+}
+
+
+def marks_class(script: str) -> str:
+    return f"[{_MARKS_BY_SCRIPT.get(script, MARKS)}]"
+
 
 # -- accented letters that spell a plain one ---------------------------------
 
@@ -147,9 +161,16 @@ def _build_fold_table() -> dict[str, str]:
 
 FOLD_TABLE = _build_fold_table()
 
+# For the character classes in a pattern: the spellings from Latin-1 and
+# Latin Extended-A (the European languages) plus the non-Latin entries.
+# The rest of the fold table — Vietnamese tone letters and the like — is
+# folded when text is scored, but would triple the size of every class in
+# a pattern that is repeated for every letter of every listed word.
 _VARIANTS: dict[str, str] = {}
 for _ch, _base in FOLD_TABLE.items():
-    if len(_base) == 1 and _base.isascii() and _ch.lower() not in _VARIANTS.get(_base.lower(), ""):
+    if len(_base) == 1 \
+            and not (0x180 <= ord(_ch) <= 0x24F or 0x1E00 <= ord(_ch) <= 0x1EFF) \
+            and _ch.lower() not in _VARIANTS.get(_base.lower(), ""):
         _VARIANTS[_base.lower()] = _VARIANTS.get(_base.lower(), "") + _ch.lower()
 
 
@@ -158,8 +179,9 @@ def base_letter(ch: str) -> str:
     return FOLD_TABLE.get(ch, ch)
 
 
-def latin_variants(base: str) -> str:
-    """Every accented lowercase spelling of a plain Latin letter."""
+def variants(base: str) -> str:
+    """Every other lowercase spelling of a plain letter: à á â for a, ё for
+    е, the alef variants for ا, the Persian kaf for ك."""
     return _VARIANTS.get(base.lower(), "")
 
 
@@ -198,12 +220,15 @@ HEBREW_PREFIXES = "הובלמשכ"
 ARABIC_PREFIXES = "وفبلك"
 ARABIC_ARTICLE = "ال"
 
-# A word may begin here: not after a letter or a digit. Not \b, because a
-# disguised spelling ends in punctuation, which would put a boundary in
-# the wrong place; and not [A-Za-z0-9], which is what made every Hebrew
-# letter look like a boundary. An underscore is allowed either side
-# because the disguised spellings use it as padding.
-BOUNDARY_BEFORE = r"(?<![^\W_])"
+# A word may begin here: not after a letter or a digit, and not after a
+# vowel point or accent either, since a mark belongs to the letter before
+# it and so is the middle of a word (the damma in أُخرى made خرى look
+# like a word of its own). Not \b, because a disguised spelling ends in
+# punctuation, which would put a boundary in the wrong place; and not
+# [A-Za-z0-9], which is what made every Hebrew letter look like a
+# boundary. An underscore is allowed either side because the disguised
+# spellings use it as padding.
+BOUNDARY_BEFORE = rf"(?<![^\W_])(?<![{MARKS}])"
 BOUNDARY_AFTER = r"(?![^\W_])"
 
 
@@ -215,17 +240,26 @@ def word_start(script: str) -> str:
     list entry זונה is found inside והזונה and بورن inside والبورن.
     Every alternative is fixed-width, which is what a lookbehind needs.
     """
+    # A pointed text puts a vowel on the prefix letter itself (וְזונה), so
+    # each prefix may carry one mark.
+    m = f"[{MARKS}]"
     if script == HEBREW:
         p = f"[{HEBREW_PREFIXES}]"
         return (f"(?:{BOUNDARY_BEFORE}"
                 f"|(?<={BOUNDARY_BEFORE}{p})"
-                f"|(?<={BOUNDARY_BEFORE}{p}{{2}}))")
+                f"|(?<={BOUNDARY_BEFORE}{p}{m})"
+                f"|(?<={BOUNDARY_BEFORE}{p}{{2}})"
+                f"|(?<={BOUNDARY_BEFORE}{p}{m}{p})"
+                f"|(?<={BOUNDARY_BEFORE}{p}{p}{m})"
+                f"|(?<={BOUNDARY_BEFORE}{p}{m}{p}{m}))")
     if script == ARABIC:
         p = f"[{ARABIC_PREFIXES}]"
         return (f"(?:{BOUNDARY_BEFORE}"
                 f"|(?<={BOUNDARY_BEFORE}{p})"
+                f"|(?<={BOUNDARY_BEFORE}{p}{m})"
                 f"|(?<={BOUNDARY_BEFORE}{ARABIC_ARTICLE})"
-                f"|(?<={BOUNDARY_BEFORE}{p}{ARABIC_ARTICLE}))")
+                f"|(?<={BOUNDARY_BEFORE}{p}{ARABIC_ARTICLE})"
+                f"|(?<={BOUNDARY_BEFORE}{p}{m}{ARABIC_ARTICLE}))")
     return BOUNDARY_BEFORE
 
 

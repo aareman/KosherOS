@@ -50,11 +50,11 @@ decides for them.
 
 | Group | Web | Pictures | Language | YouTube | Apps |
 |---|---|---|---|---|---|
-| **Default** (no group) | filtered: adult, gambling, dating, social, video and more blocked | immodest hidden | replaced | strict; entertainment, gaming, music and Shorts blocked | chosen by the parent |
-| **Little ones** | only an approved list of sites | none from the web | replaced | none | chosen by the parent |
-| **Kids** | filtered: adult, gambling, dating, social, video and more blocked | immodest hidden | replaced | strict; entertainment, gaming, music and Shorts blocked | chosen by the parent |
-| **Teens** | filtered: adult and gambling blocked, news and approved video allowed | immodest hidden | replaced | moderate | can install approved apps |
-| **Grown-ups** | filtered: adult content and filter bypasses blocked | immodest hidden | left alone | moderate | can install approved apps |
+| **Default** (no group) | filtered: adult, gambling, dating, social, video and more blocked | immodest hidden | replaced | strict; entertainment, gaming, music and Shorts blocked | approved apps only |
+| **Little ones** | only an approved list of sites | none from the web | replaced | none | approved apps only |
+| **Kids** | filtered: adult, gambling, dating, social, video and more blocked | immodest hidden | replaced | strict; entertainment, gaming, music and Shorts blocked | approved apps only |
+| **Teens** | filtered: adult and gambling blocked, news and approved video allowed | immodest hidden | replaced | moderate | the whole store, games blocked |
+| **Grown-ups** | filtered: adult content and filter bypasses blocked | immodest hidden | left alone | moderate | the whole store |
 
 **Filtering that reads the page, not just the address.** In the filtered modes the machine
 inspects the connection locally, so it can block a *page* rather than a whole site, clean
@@ -69,8 +69,13 @@ results with the same policy as the traffic, so a filtered user never clicks int
 page and a whitelist user can finally *see* what the whitelist contains. See
 [search](search.md).
 
-**Apps from an allowlist.** The KosherOS Store installs from upstream Flathub, limited to
-the apps a parent has approved, and keeps them current: an Updates shelf is always there,
+**Apps, as much of the store as each account should have.** The KosherOS Store installs
+from upstream Flathub. An account starts with only the apps a parent has approved. A parent
+can open an account, or a whole group, to the whole store and block kinds of app (games,
+internet, music and so on) or single apps; the blocks apply to running as well as installing.
+An account opened to the store never sees an app rated for nudity, sexual themes, bad
+language, gambling, drugs or graphic violence, or a tool for getting around the filter, unless
+a parent approves it by name. The Store keeps apps current: an Updates shelf is always there,
 with a Check for updates button that asks Flathub, one button per app and one for all of
 them. Installed lists everything on the machine and Installing shows what is in hand. A guest
 account can be switched on, given its own kind of internet, and is wiped at sign-out.
@@ -143,7 +148,7 @@ flowchart LR
         DNS[dnsmasq: family DNS, ad blocking]
         Proxy[mitmproxy: pages, pictures, video]
         Search[SearXNG + KosherOS front end]
-        MCT[malcontent: app allowlist]
+        MCT[malcontent: which apps each account may run]
     end
     Admin -->|Unlock once| DBus
     Store --> DBus

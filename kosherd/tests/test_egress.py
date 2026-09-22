@@ -141,6 +141,10 @@ def test_the_ruleset_still_loads(tmp_path):
     path = tmp_path / "k.nft"; path.write_text(ruleset)
     res = subprocess.run(["unshare", "-rn", "nft", "--check", "-f", str(path)],
                          capture_output=True, text=True)
+    # GitHub's runners refuse a user namespace; the other nft check skips
+    # there the same way, and `just render` covers it in the dev shell.
+    if "unshare" in res.stderr and res.returncode != 0:
+        pytest.skip(f"cannot create user/net namespace here: {res.stderr.strip()}")
     assert res.returncode == 0, res.stderr
 
 

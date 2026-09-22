@@ -87,6 +87,10 @@ def _letter_class(letter: str, sep: str, disguised: bool) -> str:
     return "[" + re.escape(chars + (WILDCARDS if disguised else "")) + "]"
 
 
+def _letters_in(word: str) -> int:
+    return sum(ch.isalpha() for ch in word)
+
+
 def _parts(word: str) -> tuple[str, str]:
     """A word's pattern in two pieces: its first letter, and the rest.
 
@@ -95,7 +99,7 @@ def _parts(word: str) -> tuple[str, str]:
     """
     marks = textfold.marks_class(textfold.script_of(word))
     letters = [ch for ch in word.lower() if not textfold._MARKS_RE.match(ch)]
-    disguised = sum(ch.isalpha() for ch in letters) >= MIN_DISGUISED
+    disguised = _letters_in(word) >= MIN_DISGUISED
     # Marks between the letters are always let through, since a pointed
     # word is the same word; padding only where a disguise is allowed.
     sep = rf"{marks}*{PADDING}" if disguised else f"{marks}*"
@@ -148,35 +152,47 @@ class Wordlist:
             by_script.setdefault(textfold.script_of(word), []).append(word)
         patterns = []
         for script, listed in by_script.items():
-            # Factored by first letter: a thousand alternatives tried at
-            # every position of every page is what made a page cost 60 ms;
-            # one character class per first letter, and the thirty or so
-            # words behind it only when it matches, brings that back to a
-            # few. The order within a group stays longest first.
-            groups: dict[str, tuple[list[str], list[str]]] = {}
-            for word in listed:
-                head, tail = _parts(word)
-                if head:
-                    tails, members = groups.setdefault(head, ([], []))
-                    tails.append(tail)
-                    members.append(word)
-            alternation = "|".join(f"{head}(?:{'|'.join(tails)})"
-                                   for head, (tails, _members) in groups.items())
-            # Not \b: the disguised forms end in punctuation, which would
-            # put a boundary in the wrong place. Require a non-letter
-            # either side — in any script, not only [A-Za-z0-9] — and for
-            # Hebrew and Arabic allow the prefixes those languages glue
-            # onto a word, so זונה is found inside והזונה. A mark left
-            # hanging after the last letter goes with the word.
-            pattern = re.compile(
-                rf"{textfold.word_start(script)}({alternation})"
-                rf"{textfold.marks_class(script)}*{textfold.BOUNDARY_AFTER}",
-                re.IGNORECASE)
-            patterns.append((textfold.presence(script), pattern))
-            # For naming the word that hit: the same groups, so only the
-            # words that share the hit's first letter are ever tried.
-            for head, (_tails, members) in groups.items():
-                self._heads.append((re.compile(head, re.IGNORECASE), members))
+            # Hebrew and Arabic words are found behind the prefixes those
+            # languages glue on, so זונה is found inside והזונה — but only
+            # words long enough to be unmistakable. A three-letter word
+            # behind a one-letter prefix is some other word too often:
+            # فخري is a given name, not ف plus خري. Short words get the
+            # plain boundary, in their own pattern.
+            long_words = [w for w in listed if _letters_in(w) >= MIN_DISGUISED]
+            short_words = [w for w in listed if _letters_in(w) < MIN_DISGUISED]
+            for words_here, start in ((long_words, textfold.word_start(script)),
+                                      (short_words, textfold.BOUNDARY_BEFORE)):
+                if not words_here:
+                    continue
+                # Factored by first letter: a thousand alternatives tried
+                # at every position of every page is what made a page
+                # cost 60 ms; one character class per first letter, and
+                # the thirty or so words behind it only when it matches,
+                # brings that back to a few. The order within a group
+                # stays longest first.
+                groups: dict[str, tuple[list[str], list[str]]] = {}
+                for word in words_here:
+                    head, tail = _parts(word)
+                    if head:
+                        tails, members = groups.setdefault(head, ([], []))
+                        tails.append(tail)
+                        members.append(word)
+                alternation = "|".join(f"{head}(?:{'|'.join(tails)})"
+                                       for head, (tails, _members) in groups.items())
+                # Not \b: the disguised forms end in punctuation, which
+                # would put a boundary in the wrong place. Require a
+                # non-letter either side — in any script, not only
+                # [A-Za-z0-9]. A mark left hanging after the last letter
+                # goes with the word.
+                pattern = re.compile(
+                    rf"{start}({alternation})"
+                    rf"{textfold.marks_class(script)}*{textfold.BOUNDARY_AFTER}",
+                    re.IGNORECASE)
+                patterns.append((textfold.presence(script), pattern))
+                # For naming the word that hit: the same groups, so only
+                # the words that share the hit's first letter are tried.
+                for head, (_tails, members) in groups.items():
+                    self._heads.append((re.compile(head, re.IGNORECASE), members))
         return patterns
 
     def _applicable(self, text: str):
@@ -241,14 +257,24 @@ class Wordlist:
 
     def contains_any(self, text: str) -> bool:
         """Whether the text holds a listed word (for block mode)."""
+        return next(self._hits(text), None) is not None
+
+    def words_in(self, text: str) -> list[str]:
+        """The listed words this text holds, each once, in order of first
+        appearance. What the admin app and the list sweep show a person."""
+        found: dict[str, None] = {}
+        for word in self._hits(text):
+            found.setdefault(word)
+        return list(found)
+
+    def _hits(self, text: str):
         if not self._patterns or not text:
-            return False
+            return
         for pattern in self._applicable(text):
             for match in pattern.finditer(text):
                 word = self._matched_word(match)
                 if word is not None and plausible(word, match.group(0)):
-                    return True
-        return False
+                    yield word
 
 
 def plausible(word: str, found: str) -> bool:

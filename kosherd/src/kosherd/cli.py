@@ -370,6 +370,57 @@ def cmd_media(args) -> int:
     return 0
 
 
+def cmd_apps(args) -> int:
+    """What the Store offers an account, and what is blocked from it."""
+    from kosherd import appaccess, appkinds
+
+    c = _client()
+    if args.action == "kinds":
+        for key in appkinds.KIND_KEYS:
+            print(f"  {key:<10} {appkinds.label(key)}")
+        return 0
+
+    user = next((u for u in c.get_policy()["users"] if u["uid"] == args.uid), None)
+    if user is None:
+        print(f"uid {args.uid} is not managed", file=sys.stderr)
+        return 1
+    access_key = user.get("app_access") or ("store" if user.get("admin") else "approved")
+    kinds = list(user.get("blocked_app_kinds", []))
+    blocked = list(user.get("blocked_apps", []))
+
+    if args.action == "show":
+        print(f"{user['username']}: {appaccess.APP_ACCESS_LABELS[access_key]}")
+        print("  blocked kinds: " + (", ".join(kinds) if kinds else "none"))
+        print("  blocked apps:  " + (", ".join(blocked) if blocked else "none"))
+        print("  can install:   " + ("yes" if user.get("can_install_apps", True) else "no"))
+        return 0
+    if args.action == "access":
+        if args.values[:1] not in (["approved"], ["store"]):
+            print("usage: kosherctl apps access <uid> approved|store", file=sys.stderr)
+            return 2
+        c.set_user_app_access(args.uid, args.values[0], _guardian_pw(args))
+        print(f"{user['username']}: {appaccess.APP_ACCESS_LABELS[args.values[0]]}")
+        return 0
+    if args.action in ("block-kind", "unblock-kind"):
+        bad = [k for k in args.values if not appkinds.is_kind(k)]
+        if bad:
+            print(f"unknown kind: {', '.join(bad)} (see 'kosherctl apps kinds')",
+                  file=sys.stderr)
+            return 2
+        kinds = (sorted(set(kinds) | set(args.values)) if args.action == "block-kind"
+                 else [k for k in kinds if k not in args.values])
+        c.set_user_blocked_app_kinds(args.uid, kinds, _guardian_pw(args))
+        print(f"{user['username']} blocks kinds: " + (", ".join(kinds) if kinds else "none"))
+        return 0
+    if args.action in ("block", "unblock"):
+        blocked = (sorted(set(blocked) | set(args.values)) if args.action == "block"
+                   else [r for r in blocked if r not in args.values])
+        c.set_user_blocked_apps(args.uid, blocked, _guardian_pw(args))
+        print(f"{user['username']} blocks apps: " + (", ".join(blocked) if blocked else "none"))
+        return 0
+    return 2
+
+
 def cmd_layout(args) -> int:
     from .policy import LAYOUT_LABELS
 
@@ -1023,6 +1074,15 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("value", nargs="?", default="")
     s.add_argument("--guardian-password")
     s.set_defaults(func=cmd_youtube)
+
+    s = sub.add_parser("apps", help="what the Store offers a user, and what is blocked")
+    s.add_argument("action", choices=["show", "access", "block-kind", "unblock-kind",
+                                      "block", "unblock", "kinds"])
+    s.add_argument("uid", type=int, nargs="?", default=0)
+    s.add_argument("values", nargs="*", default=[],
+                   help="approved|store, kinds (see 'kinds'), or app ids")
+    s.add_argument("--guardian-password")
+    s.set_defaults(func=cmd_apps)
 
     s = sub.add_parser("categories", help="content categories to block for a user")
     s.add_argument("uid", type=int, nargs="?", default=0)

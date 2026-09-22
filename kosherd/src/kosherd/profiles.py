@@ -41,6 +41,10 @@ class Profile:
     language_filter: str = "off"
     youtube: dict = field(default_factory=dict)
     can_install_apps: bool = True
+    # What the Store offers (appaccess.py) and what is blocked from it.
+    app_access: str = "approved"
+    blocked_app_kinds: tuple[str, ...] = ()
+    blocked_apps: tuple[str, ...] = ()
 
 
 # What an account gets when it is in no group: the open web with content
@@ -66,7 +70,8 @@ DEFAULTS = Profile(
 ADMIN_DEFAULTS = Profile(
     key="", label="", description="Filtering for an adult: the floor, and the rest open.",
     mode="filtered", blocked_categories=tuple(sorted(DEFAULT_BLOCKED)),
-    media_level="none", language_filter="off", youtube={}, can_install_apps=True)
+    media_level="none", language_filter="off", youtube={}, can_install_apps=True,
+    app_access="store")
 
 # The content settings that go with each kind of internet, for an account
 # or the guest set up by the kind alone. Not groups, and not named: an
@@ -117,7 +122,8 @@ CUSTOM_PREFIX = "custom-"
 
 # The settings a group fixes, in the order a parent reads them.
 DIFF_FIELDS = ("blocked_categories", "media_level", "language_filter",
-               "youtube", "can_install_apps")
+               "youtube", "can_install_apps", "app_access", "blocked_app_kinds",
+               "blocked_apps")
 
 
 def slug(label: str) -> str:
@@ -133,7 +139,10 @@ def to_dict(profile: Profile) -> dict:
             "media_level": profile.media_level,
             "language_filter": profile.language_filter,
             "youtube": dict(profile.youtube),
-            "can_install_apps": profile.can_install_apps}
+            "can_install_apps": profile.can_install_apps,
+            "app_access": profile.app_access,
+            "blocked_app_kinds": list(profile.blocked_app_kinds),
+            "blocked_apps": list(profile.blocked_apps)}
 
 
 def from_dict(doc: dict) -> Profile:
@@ -145,7 +154,10 @@ def from_dict(doc: dict) -> Profile:
         media_level=str(doc.get("media_level") or "none"),
         language_filter=str(doc.get("language_filter") or "off"),
         youtube=dict(doc.get("youtube") or {}),
-        can_install_apps=bool(doc.get("can_install_apps", True)))
+        can_install_apps=bool(doc.get("can_install_apps", True)),
+        app_access=str(doc.get("app_access") or "approved"),
+        blocked_app_kinds=tuple(sorted(doc.get("blocked_app_kinds") or [])),
+        blocked_apps=tuple(sorted(doc.get("blocked_apps") or [])))
 
 
 def _field(user, name, default=None):
@@ -168,7 +180,27 @@ def from_user(user, label: str, description: str = "") -> Profile:
         media_level=str(_field(user, "media_level", "none") or "none"),
         language_filter=str(_field(user, "language_filter", "off") or "off"),
         youtube=dict(_field(user, "youtube", {}) or {}),
-        can_install_apps=bool(_field(user, "can_install_apps", True)))
+        can_install_apps=bool(_field(user, "can_install_apps", True)),
+        app_access=_access_of(user),
+        blocked_app_kinds=tuple(sorted(_field(user, "blocked_app_kinds", []) or [])),
+        blocked_apps=tuple(sorted(_field(user, "blocked_apps", []) or [])))
+
+
+def _access_of(user) -> str:
+    """An account's app access with its default filled in (appaccess.py)."""
+    from .appaccess import access_of
+
+    if isinstance(user, dict):
+        chosen = user.get("app_access")
+        if chosen in ("approved", "store"):
+            return chosen
+        return "store" if user.get("admin") else "approved"
+    return access_of(user)
+
+
+# The app settings a group carries. The guest has none of these fields:
+# it installs nothing and runs the approved list, which needs no setting.
+_APP_FIELDS = ("can_install_apps", "app_access", "blocked_app_kinds", "blocked_apps")
 
 
 def apply(user, profile: Profile) -> None:
@@ -180,15 +212,20 @@ def apply(user, profile: Profile) -> None:
               "media_level": profile.media_level,
               "language_filter": profile.language_filter,
               "youtube": dict(profile.youtube)}
+    app_values = {"can_install_apps": profile.can_install_apps,
+                  "app_access": profile.app_access,
+                  "blocked_app_kinds": list(profile.blocked_app_kinds),
+                  "blocked_apps": list(profile.blocked_apps)}
     if isinstance(user, dict):
         user.update(values)
         if "can_install_apps" in user:  # the guest installs nothing
-            user["can_install_apps"] = profile.can_install_apps
+            user.update(app_values)
         return
     for name, value in values.items():
         setattr(user, name, value)
     if hasattr(user, "can_install_apps"):
-        user.can_install_apps = profile.can_install_apps
+        for name, value in app_values.items():
+            setattr(user, name, value)
 
 
 def all_profiles(custom=()) -> tuple[Profile, ...]:
@@ -260,4 +297,14 @@ def _changes(user, profile: Profile) -> list[dict]:
     if theirs != dict(profile.youtube):
         changes.append({"field": "youtube", "from": dict(profile.youtube),
                         "to": theirs})
+    if _access_of(user) != profile.app_access:
+        changes.append({"field": "app_access", "from": profile.app_access,
+                        "to": _access_of(user)})
+    for field_name in ("blocked_app_kinds", "blocked_apps"):
+        have = set(_field(user, field_name, []) or [])
+        want = set(getattr(profile, field_name))
+        if have != want:
+            changes.append({"field": field_name,
+                            "added": sorted(have - want),
+                            "removed": sorted(want - have)})
     return changes

@@ -223,6 +223,25 @@
           },
           "can_install_apps": {
             "type": "boolean"
+          },
+          "app_access": {
+            "type": "string",
+            "enum": [
+              "approved",
+              "store"
+            ]
+          },
+          "blocked_app_kinds": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "blocked_apps": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
           }
         },
         "additionalProperties": false
@@ -329,7 +348,31 @@
         "can_install_apps": {
           "type": "boolean",
           "default": true,
-          "description": "May this user install apps from the approved catalog through the KosherOS app store? Everything installable is pre-approved by the admin, so this is on by default, including for supervised users."
+          "description": "May this user install apps through the KosherOS Store? What the Store offers is decided by app_access and the blocks below, so this is on by default, including for supervised users."
+        },
+        "app_access": {
+          "type": "string",
+          "enum": [
+            "approved",
+            "store"
+          ],
+          "description": "What the Store offers this account: 'approved' for the approved list only (the default for an account; the strict, complete choice), 'store' for the whole Flathub store minus what is blocked and minus apps rated above the computer's content ceiling. Absent means the default for the kind of account: 'approved', or 'store' for an administrator."
+        },
+        "blocked_app_kinds": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "description": "Kinds of app (the Store's shelves: internet, work, learning, games, music, pictures, develop, utilities, other) this account may neither install nor run, whatever its app_access."
+        },
+        "blocked_apps": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "description": "Single apps (Flatpak app ids) this account may neither install nor run, whatever its app_access."
         },
         "profile": {
           "type": "string",

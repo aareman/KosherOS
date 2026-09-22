@@ -1,5 +1,5 @@
 {
-  "comment": "The approved app allowlist. kosherd installs ONLY these refs, from upstream Flathub, and renders this list into a flatpak remote filter. An admin adds to or removes from it in KosherOS Admin; this is the starting shelf, chosen so an ordinary family, a student and a developer all find what they need on day one without anybody curating a list. Each entry carries the freedesktop categories the Store shelves it by. Later portal-managed.",
+  "comment": "The approved app list. An account on 'Approved apps only' (the default) may install and run these and nothing else; an account opened to the whole store may have anything on Flathub that is not blocked for it, and an approval also overrides the computer's content ceiling for that one app. kosherd installs, from upstream Flathub. An admin adds to or removes from this list in KosherOS Admin; this is the starting shelf, chosen so an ordinary family, a student and a developer all find what they need on day one without anybody curating a list. Each entry carries the freedesktop categories the Store shelves it by. Later portal-managed.",
   "apps": [
     { "ref": "org.mozilla.firefox", "name": "Firefox", "summary": "Browse the web", "categories": ["Network", "WebBrowser"] },
     { "ref": "org.chromium.Chromium", "name": "Chromium", "summary": "Browse the web", "categories": ["Network", "WebBrowser"] },

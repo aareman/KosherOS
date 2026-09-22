@@ -269,6 +269,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      packages: read # does the registry hold an image for a version left behind?
     env:
       IMAGE: ghcr.io/${{ github.repository_owner }}/kosher-linux
       SHA: ${{ needs.version.outputs.sha }}
@@ -283,33 +284,29 @@ jobs:
           ref: ${{ needs.version.outputs.sha }}
 
       - name: Create the tag and the release
+        # The version was spent the moment the version job committed it, so
+        # a release step that fails leaves a hole: 0.3.0 passed every job,
+        # its image was pushed and signed, and the releases API answered
+        # with a 403 exactly once. The next merge was 0.4.0. Versions are
+        # meant to be sequential, so scripts/publish-releases.py retries,
+        # and releases EVERY version tick on this history that has no tag
+        # yet — a number one run dropped is picked up by the next. One made
+        # after the fact does not take the Latest badge off the newest,
+        # which is what the newest build is meant to hold now that versions
+        # are plain 0.x.x (and what the stable promotion reads). The notes
+        # come from scripts/release-notes.py, grouped into new things, fixes
+        # and the rest; both scripts are read and tested like any other code.
         env:
           GH_TOKEN: ${{ github.token }}
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
-          version="$(tr -d '[:space:]' < VERSION)"
-          tag="v$version"
-          if gh release view "$tag" >/dev/null 2>&1; then
-            echo "release $tag already exists; leaving it"
-            exit 0
-          fi
           git fetch --tags --quiet origin
-          previous="$(git tag --list 'v*' --sort=-creatordate | grep -v "^$tag\$" | head -1 || true)"
-          # The notes are written by scripts/release-notes.py: grouped into
-          # new things, fixes and the rest, each labelled with the part of
-          # the product it touched. Keeping them out of this file means they
-          # can be read and tested like any other code.
           built=no
           [ "$BUILT" = "true" ] && built=yes
           failed=""
           [ "${{ needs.image.result }}" = "failure" ] && failed=--image-failed
-          python3 scripts/release-notes.py --version "$version" --previous "$previous" \
-            --sha "$SHA" --image "$IMAGE" --built "$built" $failed \
-            --out release-notes.md
-          cat release-notes.md
-          # Plain 0.x.x now, so the newest build is the latest release
-          # rather than something GitHub hides behind a badge.
-          gh release create "$tag" --target "$SHA" \
-            --title "KosherOS $version" --notes-file release-notes.md
+          python3 scripts/publish-releases.py --sha "$SHA" --image "$IMAGE" \
+            --built "$built" $failed
 
   docs:
     name: Docs site

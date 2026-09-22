@@ -183,7 +183,11 @@ def test_counts_are_words_a_person_says():
 
 
 def test_the_workflow_uses_the_script():
+    # Through scripts/publish-releases.py, which makes the release for
+    # every version still waiting for one and asks this script for each
+    # one's wording (see test_publish_releases.py).
     ci = (ROOT / ".github/workflows/ci.yml").read_text()
-    assert "scripts/release-notes.py" in ci
-    assert "--out release-notes.md" in ci
-    assert "--notes-file release-notes.md" in ci
+    assert "scripts/publish-releases.py" in ci
+    publish = (ROOT / "scripts/publish-releases.py").read_text()
+    assert 'NOTES = ROOT / "scripts/release-notes.py"' in publish
+    assert '"--notes-file", str(notes)' in publish

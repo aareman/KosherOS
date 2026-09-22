@@ -69,8 +69,10 @@ def test_the_release_says_when_there_is_no_new_image():
     # The wording lives in scripts/release-notes.py now; the workflow only
     # tells it which case this is (see test_release_notes.py).
     ci = (ROOT / ".github/workflows/ci.yml").read_text()
-    assert "scripts/release-notes.py" in ci
+    assert "scripts/publish-releases.py" in ci
     assert "--built" in ci and "--image-failed" in ci
+    publish = (ROOT / "scripts/publish-releases.py").read_text()
+    assert "scripts/release-notes.py" in publish, "which hands the wording to release-notes.py"
 
 
 def test_the_image_job_still_tags_and_signs_the_version():
@@ -174,7 +176,12 @@ def test_the_version_is_ticked_once_per_merge_by_ci_not_per_commit():
         assert "version" in jobs[name]["needs"], name
     ci = (ROOT / ".github/workflows/ci.yml").read_text()
     assert "GITHUB_SHA::12" not in ci, "images are tagged with the ticked commit"
-    assert '--target "$SHA"' in ci
+    # The release is made from the ticked commit too: the workflow hands it
+    # to publish-releases.py, which targets the release at it (and at every
+    # earlier tick still waiting for one — see test_publish_releases.py).
+    assert '--sha "$SHA"' in ci
+    publish = (ROOT / "scripts/publish-releases.py").read_text()
+    assert '"--target", commit' in publish
     # And the dev shell no longer installs the hook.
     nix = (ROOT / "devenv.nix").read_text()
     assert "git-hooks.hooks.version-bump" not in nix

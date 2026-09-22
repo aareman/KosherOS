@@ -102,11 +102,11 @@ POPULAR_MAX_NSFW = 0.03
 # Adult pages the scorer reads as explicit. A word scorer cannot read a
 # page that is a script and no text, or a parked domain, and a fair share
 # of the adult category is one or the other — the domain lists are what
-# catch those. In a first small sample, six of thirteen fetched pages read
-# as explicit; five of the rest had no listed word on them at all. Set
-# low for the first weekly runs, to be raised to sit a little under what
-# they measure.
-ADULT_MIN_RECALL = 0.40
+# catch those. The first CI run fetched 227 of 400 sampled domains and
+# read 63% of them as explicit; most of the rest had no listed word on
+# them at all. Set to sit a little under that, and to be raised as the
+# lists improve.
+ADULT_MIN_RECALL = 0.50
 
 ACCEPT_LANGUAGE = {
     "en": "en-US,en;q=0.9", "he": "he-IL,he;q=0.9,en;q=0.5", "yi": "yi,he;q=0.8",

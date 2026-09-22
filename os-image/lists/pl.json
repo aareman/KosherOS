@@ -1,7 +1,7 @@
 {
   "language": "pl",
   "name": "Polish",
-  "comment": "Polish as written on the web. ć ń ó ś ź also match their plain spelling (kurwa mać catches kurwa mac); ą ę ł ż do not, so both spellings are listed where people drop them. Words with an innocent everyday meaning are left out: pedał is a pedal, ciota an aunt, szmata a rag, cipa is kept but cipka is common enough as a pet word to leave. Slurs are removed outright.",
+  "comment": "Polish as written on the web. ć ń ó ś ź also match their plain spelling (kurwa mać catches kurwa mac); ą ę ł ż do not, so both spellings are listed where people drop them. Words with an innocent everyday meaning are left out: pedał is a pedal, ciota an aunt, szmata a rag, cholera on its own is the disease on every health page (cholerny and cholera jasna stay), cipa is kept but cipka is common enough as a pet word to leave. Slurs are removed outright.",
   "replacements": {
     "kurwa": "kurczę",
     "kurwy": "osoby",
@@ -70,7 +70,6 @@
     "dziwki": "osoby",
     "kutas": "drań",
     "kutasy": "dranie",
-    "cholera": "kurczę",
     "cholerny": "okropny",
     "cholerna": "okropna",
     "cholernie": "okropnie",

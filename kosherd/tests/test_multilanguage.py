@@ -125,6 +125,15 @@ def test_a_pointed_prefix_is_still_a_prefix(sample):
     assert sample.clean("וְזונה")[0] == "וְיצאנית"
 
 
+def test_a_short_word_gets_no_prefix():
+    # فخري is a given name, not the prefix ف on a three-letter word; and
+    # a four-letter word is still found behind its article.
+    words = Wordlist({"خرى": "X", "شرموطة": "Y"})
+    assert words.clean("المحامي فخري")[0] == "المحامي فخري"
+    assert words.clean("يا خرى")[0] == "يا X"
+    assert words.clean("والشرموطة")[0] == "والY"
+
+
 # -- the page scorer -----------------------------------------------------------
 
 @pytest.fixture(scope="module")

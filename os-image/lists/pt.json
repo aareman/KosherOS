@@ -1,7 +1,7 @@
 {
   "language": "pt",
   "name": "Portuguese",
-  "comment": "Brazilian and European Portuguese. What Portuguese spells the same as Spanish (puta, idiota, tanga, orgasmo) is already on the Spanish list and is not repeated. Words with an innocent everyday meaning are left out: pau is wood, rola a bird, veado a deer, pelada a football game, gostosa is tasty, corno a horn, bicha a queue in Portugal, crioulo a language. Slurs are removed outright.",
+  "comment": "Brazilian and European Portuguese. What Portuguese spells the same as Spanish (puta, idiota, tanga, orgasmo) is already on the Spanish list and is not repeated. Words with an innocent everyday meaning are left out: pau is wood, rola a bird, veado a deer, pelada a football game, gostosa is tasty, maiô folds to maio (May), corno a horn, bicha a queue in Portugal, crioulo a language. Slurs are removed outright.",
   "replacements": {
     "merda": "porcaria",
     "merdas": "porcarias",
@@ -241,8 +241,6 @@
         "biquíni",
         "biquini",
         "biquínis",
-        "maiô",
-        "maio de banho",
         "fato de banho",
         "roupa de banho",
         "minissaia",

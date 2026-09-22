@@ -385,7 +385,16 @@ language**, because every Latin-script list shares one matcher: *af* and
 *hoe* are Dutch, *hell* is German, *git* is Turkish and a program,
 *pédé* folds to the Portuguese *pede*, *fica* is Portuguese, *huren* is
 Dutch for renting, *mayo* is mayonnaise, *string* and *body* are code.
-They were removed, and the sweep that caught them is now a test.
+They were removed, and the sweep that caught them is now a test — two
+tests, in fact. The sentences it produced are in the unit suite, and the
+sweep itself is `scripts/list-sweep.py` (`just sweep`), which CI runs
+weekly and on every change to the lists or the matchers. It fetches the
+curated ordinary sites in every language, the top of the web minus the
+adult category for breadth, and a fresh sample of the adult category for
+recall, judges each as the proxy would, and fails the run when ordinary
+pages read as explicit too often, a language's pages are rewritten
+wholesale, or the adult sample slips past the scorer. The report names
+the ordinary pages the lists reacted to and never an adult one.
 
 Two limits remain, and both are recorded rather than hidden. A word two
 Latin-script languages spell alike gets one replacement — *puta* reads

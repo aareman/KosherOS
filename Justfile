@@ -45,6 +45,13 @@ store-demo:
 lists *ARGS:
     python3 scripts/build-lists.py {{ARGS}}
 
+# Run the shipped lists over real pages, as the proxy would: the curated
+# ordinary sites in every language, the top of the web, and a sample of
+# the adult category. The same thing CI does weekly (list-sweep.yml).
+# `just sweep --curated-only` downloads nothing and takes a minute.
+sweep *ARGS:
+    python3 scripts/list-sweep.py {{ARGS}}
+
 # The docs site as GitHub Pages publishes it (https://aareman.github.io/KosherOS/):
 # the readme as the front page, docs/*.md, and a Releases page from GitHub.
 docs:

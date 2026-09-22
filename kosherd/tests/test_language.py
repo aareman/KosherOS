@@ -160,9 +160,10 @@ def test_matching_a_page_does_not_cost_more_than_it_has_to():
     """
     wordlist = load(WORDLIST)
     assert len(wordlist) > 100, "needs the real list to be meaningful"
-    assert wordlist._pattern.groups == 1, (
-        f"{wordlist._pattern.groups} capture groups in the page-scanning "
-        "pattern; it must stay at one")
+    for _presence, pattern in wordlist._patterns:
+        assert pattern.groups == 1, (
+            f"{pattern.groups} capture groups in a page-scanning pattern; "
+            "it must stay at one")
 
 
 def test_the_word_that_matched_is_still_identified(tmp_path):

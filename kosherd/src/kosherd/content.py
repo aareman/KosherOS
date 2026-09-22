@@ -27,11 +27,13 @@ real evidence before it trips.
 
 from __future__ import annotations
 
+import html as _html
 import json
 import math
 import re
 from dataclasses import dataclass
 from . import lists
+from . import textfold
 from pathlib import Path
 
 TERMS_PATHS = lists.paths("content-terms.json")
@@ -62,11 +64,35 @@ MAX_REPEATS = 4
 # filter that blocks them is working against the family that installed it.
 # So a page in this register has to clear twice the evidence — which a real
 # explicit site does several times over, since those score in the hundreds.
+#
+# The same register in the other languages the lists cover, matched on the
+# FOLDED text (see textfold.fold), so the stems are written without their
+# accents. A Hebrew stem is found behind the prefixes the language glues
+# on (להתמכרות, בסינון), which is what the optional group in front does.
 HELP_CONTEXT = re.compile(
-    r"\b(addict\w*|recover\w*|rehab\w*|therap\w*|counsel\w*|struggl\w*|"
+    r"(?<![\w-])(?:[" + textfold.HEBREW_PREFIXES + r"]{1,2})?(?:"
+    # English, and transliterated Hebrew
+    r"addict\w*|recover\w*|rehab\w*|therap\w*|counsel\w*|struggl\w*|"
     r"quit\w*|helpline|hotline|support group|accountability|help|"
     r"filter\w*|block\w*|parental control\w*|safeguard\w*|"
-    r"shmiras|shemiras|einayim|teshuv\w*|yetzer)\b",
+    r"shmiras|shemiras|einayim|teshuv\w*|yetzer|"
+    # Hebrew and Yiddish
+    r"התמכרות|מכור\w*|גמילה|טיפול|ייעוץ|סינון|מסנן\w*|חסימ\w*|עזרה|"
+    r"שמירת עיניים|תשובה|יצר הרע|בקרת הורים|הילף|"
+    # Russian and Ukrainian
+    r"зависимост\w*|лечени\w*|терапи\w*|помощ\w*|фильтр\w*|блокир\w*|"
+    r"родительск\w*|залежн\w*|допомог\w*|"
+    # French, Spanish, Portuguese, Italian
+    r"aide|dependance|dependencia|dipendenza|ayuda|ajuda|aiuto|terap\w*|"
+    r"bloqu\w*|blocc\w*|filtr\w*|controle parental|control parental|"
+    r"controllo parentale|adicci\w*|vicio|"
+    # German, Dutch, Hungarian, Polish, Turkish
+    r"abhangig\w*|hilfe|jugendschutz|kindersicherung|sperr\w*|"
+    r"verslaving|hulp|ouderlijk toezicht|fuggoseg|segitseg|szuroprogram|"
+    r"uzaleznien\w*|pomoc|bagimlilik|yardim|ebeveyn|"
+    # Arabic and Persian
+    r"ادمان|علاج|مساعده|حجب|فلتر\w*|رقابه|اعتياد|كمك|درمان"
+    r")(?![^\W_])",
     re.IGNORECASE,
 )
 HELP_CONTEXT_MULTIPLIER = 2
@@ -90,8 +116,18 @@ class Scorer:
     """
 
     def __init__(self, terms: dict[str, tuple[str, int]] | None = None):
-        self.terms = {t: v for t, v in (terms or {}).items()
-                      if v[0] in SEVERITY and v[0] != CLEAN}
+        # Terms are kept in their folded spelling (textfold.fold), which is
+        # the spelling the text is matched in: an entry written "cabrón"
+        # and a page that writes "cabron" have to meet in the middle.
+        self.terms: dict[str, tuple[str, int]] = {}
+        for term, value in (terms or {}).items():
+            if value[0] not in SEVERITY or value[0] == CLEAN:
+                continue
+            folded = _canonical(term)
+            # Two spellings folding together keep the stronger reading.
+            if folded in self.terms and SEVERITY[self.terms[folded][0]] >= SEVERITY[value[0]]:
+                continue
+            self.terms[folded] = value
         self._regex = self._compile()
 
     def _compile(self) -> re.Pattern | None:
@@ -102,13 +138,20 @@ class Scorer:
         alts = "|".join(re.escape(t).replace(r"\ ", r"\s+") for t in ordered)
         # An optional plural on the end: a list written in the singular
         # otherwise misses "crop tops" and "mini skirts", which is how a
-        # page of them scored twenty points and passed.
-        return re.compile(rf"(?<![\w-])({alts})(?:e?s)?(?![\w-])",
-                          re.IGNORECASE)
+        # page of them scored twenty points and passed. The plural is
+        # English; the other lists carry their own forms. In front, the
+        # prefixes Hebrew and Arabic glue onto a word, so הביקיני and
+        # والبورن count as the words they contain.
+        return re.compile(
+            rf"(?<![\w-]){textfold.PREFIX_GROUP}({alts})(?:e?s)?(?![\w-])",
+            re.IGNORECASE)
 
     def score(self, text: str, *, allow_help_context: bool = True) -> Verdict:
         if not self._regex or not text:
             return Verdict(CLEAN, 0, ())
+        # Matched in the folded spelling the terms are kept in: without
+        # points, without the accents people drop, one form per letter.
+        text = textfold.fold(text)
         threshold = THRESHOLD
         if allow_help_context and HELP_CONTEXT.search(text):
             threshold *= HELP_CONTEXT_MULTIPLIER
@@ -147,6 +190,16 @@ class Scorer:
         return Verdict(level, points, hits)
 
 
+def _canonical(term: str) -> str:
+    """The one spelling a term is stored and matched under."""
+    return re.sub(r"\s+", " ", textfold.fold(term).lower()).strip()
+
+
+def is_help_context(text: str) -> bool:
+    """Is this text plainly about the problem rather than the material?"""
+    return bool(text and HELP_CONTEXT.search(textfold.fold(text)))
+
+
 def _apply_delta(shipped: dict, add, remove) -> dict:
     """Merge a family's added terms in, and take their removals out.
 
@@ -161,9 +214,9 @@ def _apply_delta(shipped: dict, add, remove) -> dict:
         for weight, words in by_weight.items():
             target.setdefault(weight, [])
             target[weight] += [w for w in words if w not in target[weight]]
-    dropped = {t.lower() for t in remove}
+    dropped = {_canonical(t) for t in remove}
     if dropped:
-        merged = {level: {weight: [w for w in words if w.lower() not in dropped]
+        merged = {level: {weight: [w for w in words if _canonical(w) not in dropped]
                           for weight, words in by_weight.items()}
                   for level, by_weight in merged.items()}
     return {"terms": merged}
@@ -180,7 +233,7 @@ def _scorer_from(doc: dict) -> Scorer:
             except (TypeError, ValueError):
                 continue
             for word in words:
-                word = word.lower()
+                word = _canonical(word)
                 # A term listed twice keeps its strongest reading.
                 if word in terms and SEVERITY[terms[word][0]] >= SEVERITY[level]:
                     continue
@@ -225,11 +278,13 @@ def visible_text(html: str, limit: int = 200_000) -> str:
     most honest summary of what a page is, and they are what a search
     engine shows as the snippet.
     """
-    html = html[:limit]
-    parts = [m.group(1) for m in _TITLE.finditer(html)]
-    parts += [m.group(1) for m in _META.finditer(html)]
-    parts.append(_MARKUP.sub(" ", html))
-    return " ".join(parts)
+    document = html[:limit]
+    parts = [m.group(1) for m in _TITLE.finditer(document)]
+    parts += [m.group(1) for m in _META.finditer(document)]
+    parts.append(_MARKUP.sub(" ", document))
+    # Entities spell letters too: a page that writes &eacute; or &#1489;
+    # is read as the letters it means, not as the markup it used.
+    return _html.unescape(" ".join(parts))
 
 
 def score_html(html: str, scorer: Scorer) -> Verdict:

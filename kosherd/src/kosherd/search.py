@@ -186,7 +186,7 @@ class ResultFilter:
             return None
         if mode == "none":
             return "this account has no internet access"
-        if self.blocklist.contains_any(query) and not HELP_CONTEXT.search(query):
+        if self.blocklist.contains_any(query) and not content.is_help_context(query):
             return "that search is blocked"
         if user.get("language_filter", "off") != "off" and \
                 self.wordlist.contains_any(query):

@@ -17,6 +17,7 @@ from __future__ import annotations
 import json
 import re
 from . import lists
+from . import textfold
 from pathlib import Path
 
 # Admin- or portal-supplied first, then the shipped default. See lists.py
@@ -34,28 +35,52 @@ LETTER_ALIASES = {
     "a": "a4@", "b": "b8", "c": "c(", "e": "e3", "g": "g6",
     "i": "i1!|", "l": "l1|", "o": "o0", "s": "s5$", "t": "t7+",
 }
+# Hebrew letters that take a different shape at the end of a word. A
+# disguised or misspelt curse may use either, so a class holds both.
+HEBREW_FINALS = {"כ": "כך", "ך": "כך", "מ": "מם", "ם": "מם", "נ": "נן",
+                 "ן": "נן", "פ": "פף", "ף": "פף", "צ": "צץ", "ץ": "צץ"}
 # A censor writes f*ck meaning the letter is there but hidden, so a
 # wildcard has to stand FOR a letter rather than be deleted — an earlier
 # version folded it away and then f*ck no longer matched fuck at all.
 WILDCARDS = "*#"
 # Padding between letters (f.u.c.k, f-u-c-k). Bounded, so a match cannot
-# run across a whole sentence.
-SEPARATOR = r"[\s._\-]{0,2}"
-
-OFF = "off"
-SUBSTITUTE = "substitute"
-BLOCK = "block"
-MODES = (OFF, SUBSTITUTE, BLOCK)
+# run across a whole sentence. A vowel point or an accent between letters
+# is not padding but is not a letter either: a pointed זוֹנָה is the same
+# word as זונה, so the marks are let through wherever padding is.
+SEPARATOR = rf"{textfold.MARKS_CLASS}*[\s._\-]{{0,2}}"
 
 
 def _letter_class(letter: str) -> str:
-    aliases = LETTER_ALIASES.get(letter, letter)
-    return "[" + re.escape(aliases + WILDCARDS) + "]"
+    """Everything one letter of a listed word may look like on a page.
+
+    A plain Latin letter also matches its disguises (4 for a, $ for s)
+    and its accented spellings (à á â for a), so one entry covers
+    "cabrón", "cabron" and "c@bron". A letter with an accent that spells
+    a different letter — ñ, ö, ő — stands only for itself; see textfold
+    for which is which. ß is spelt ss as often as not, so it matches
+    either.
+    """
+    letter = letter.lower()
+    base = textfold.base_letter(letter)
+    if base == "ss":
+        return f"(?:ß|s{SEPARATOR}s)"
+    if len(base) > 1:       # a ligature spelt as two letters
+        return SEPARATOR.join(_letter_class(ch) for ch in base)
+    if "a" <= base <= "z":
+        chars = LETTER_ALIASES.get(base, base) + textfold.latin_variants(base)
+    elif letter in HEBREW_FINALS:
+        chars = HEBREW_FINALS[letter]
+    else:
+        # Cyrillic ё/е, an Arabic alef variant: base is the plain form,
+        # and the class holds the plain form and this spelling of it.
+        chars = "".join(dict.fromkeys(base + letter))
+    return "[" + re.escape(chars + WILDCARDS) + "]"
 
 
 def word_pattern(word: str) -> str:
     """A regex matching a word and its usual disguises."""
-    return SEPARATOR.join(_letter_class(ch) for ch in word.lower())
+    return SEPARATOR.join(_letter_class(ch) for ch in word.lower()
+                          if not textfold._MARKS_RE.match(ch))
 
 
 class Wordlist:
@@ -63,28 +88,56 @@ class Wordlist:
 
     def __init__(self, replacements: dict[str, str] | None = None):
         self.replacements = {k.lower(): v for k, v in (replacements or {}).items()}
-        self._pattern = self._compile()
+        self._patterns = self._compile()
 
-    def _compile(self) -> re.Pattern | None:
+    def _compile(self) -> list[tuple[re.Pattern | None, re.Pattern]]:
+        """One pattern per script the list is written in.
+
+        Matching costs time in proportion to the alternation, so a page is
+        only scanned with the lists whose script it actually contains: the
+        Hebrew words are never run over an English page, and vice versa.
+        The Latin pattern always runs, because nearly every page has some
+        Latin on it (a URL, a brand name) and the test would save nothing.
+
+        Each pattern has ONE group, not one per word. A named group per
+        word made the engine track 145 sets of boundaries through every
+        character of every page, which measured 40 ms on a 28 KB page
+        against 4 ms for the identical pattern without them — a tenfold
+        cost for information that is cheap to recover afterwards (see
+        _matched_word), and it was paid on every page whether or not
+        anything matched.
+        """
         if not self.replacements:
-            return None
+            self._each = []
+            return []
         # Longest first, so "bullshit" wins over "shit".
         words = sorted(self.replacements, key=len, reverse=True)
         self._order = words
-        # ONE group, not one per word. A named group per word made the
-        # engine track 145 sets of boundaries through every character of
-        # every page, which measured 40 ms on a 28 KB page against 4 ms
-        # for the identical pattern without them — a tenfold cost for
-        # information that is cheap to recover afterwards (see
-        # _matched_word), and it was paid on every page whether or not
-        # anything matched.
         self._each = [(w, re.compile(rf"{word_pattern(w)}\Z", re.IGNORECASE))
                       for w in words]
-        alternation = "|".join(word_pattern(w) for w in words)
-        # Not \b: the disguised forms end in punctuation, which would put a
-        # boundary in the wrong place. Require a non-letter either side.
-        return re.compile(rf"(?<![A-Za-z0-9])({alternation})(?![A-Za-z0-9])",
-                          re.IGNORECASE)
+        by_script: dict[str, list[str]] = {}
+        for word in words:
+            by_script.setdefault(textfold.script_of(word), []).append(word)
+        patterns = []
+        for script, listed in by_script.items():
+            alternation = "|".join(word_pattern(w) for w in listed)
+            # Not \b: the disguised forms end in punctuation, which would
+            # put a boundary in the wrong place. Require a non-letter
+            # either side — in any script, not only [A-Za-z0-9] — and for
+            # Hebrew and Arabic allow the prefixes those languages glue
+            # onto a word, so זונה is found inside והזונה. A mark left
+            # hanging after the last letter goes with the word.
+            pattern = re.compile(
+                rf"{textfold.word_start(script)}({alternation})"
+                rf"{textfold.MARKS_CLASS}*{textfold.BOUNDARY_AFTER}",
+                re.IGNORECASE)
+            patterns.append((textfold.presence(script), pattern))
+        return patterns
+
+    def _applicable(self, text: str):
+        for presence, pattern in self._patterns:
+            if presence is None or presence.search(text):
+                yield pattern
 
     def __len__(self) -> int:
         return len(self.replacements)
@@ -114,7 +167,7 @@ class Wordlist:
 
     def clean(self, text: str) -> tuple[str, int]:
         """Return (cleaned text, number of substitutions)."""
-        if not self._pattern or not text:
+        if not self._patterns or not text:
             return text, 0
         count = 0
 
@@ -126,11 +179,15 @@ class Wordlist:
             count += 1
             return self._match_case(match.group(0), self.replacements[word])
 
-        return self._pattern.sub(swap, text), count
+        for pattern in self._applicable(text):
+            text = pattern.sub(swap, text)
+        return text, count
 
     def contains_any(self, text: str) -> bool:
         """Whether the text holds a listed word (for block mode)."""
-        return bool(self._pattern and text and self._pattern.search(text))
+        if not self._patterns or not text:
+            return False
+        return any(pattern.search(text) for pattern in self._applicable(text))
 
 
 def _apply_delta(shipped: dict, add, remove) -> dict:

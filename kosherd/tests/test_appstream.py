@@ -58,6 +58,98 @@ CATALOGUE = """<?xml version="1.0" encoding="UTF-8"?>
 """
 
 
+# -- when to fetch the catalogue again -----------------------------------------
+
+COMMIT = "a" * 64
+OLD_FILTER = "b" * 64
+NEW_FILTER = "c" * 64
+
+
+def test_nothing_deployed_is_stale():
+    assert apps.appstream_is_stale(None, NEW_FILTER, None)
+
+
+def test_a_fresh_copy_under_the_current_filter_is_kept():
+    assert not apps.appstream_is_stale(f"{COMMIT}-{NEW_FILTER}", NEW_FILTER, 3600)
+
+
+def test_a_day_old_copy_is_fetched_again():
+    assert apps.appstream_is_stale(f"{COMMIT}-{NEW_FILTER}", NEW_FILTER, 25 * 3600)
+
+
+def test_a_copy_deployed_under_another_filter_is_stale_however_new():
+    # flatpak cuts the apps a remote filter denies out of the appstream it
+    # deploys, and names the directory <commit>-<filter checksum>. The
+    # machine that upgraded from the allow-list filter had an index of the
+    # fifty approved apps and nothing else, and it was going to keep it
+    # for a day.
+    assert apps.appstream_is_stale(f"{COMMIT}-{OLD_FILTER}", NEW_FILTER, 60)
+
+
+def test_a_copy_deployed_with_no_filter_is_stale_once_there_is_one():
+    assert apps.appstream_is_stale(COMMIT, NEW_FILTER, 60)
+    assert not apps.appstream_is_stale(COMMIT, None, 60)
+
+
+def test_the_filter_checksum_is_what_flatpak_computes(tmp_path):
+    import hashlib
+
+    path = tmp_path / "flathub.filter"
+    path.write_text(apps.render_filter({"org.example.Tor"}))
+    assert apps.filter_checksum(path) == hashlib.sha256(path.read_bytes()).hexdigest()
+    assert apps.filter_checksum(tmp_path / "missing") is None
+
+
+def test_ensure_appstream_reads_the_active_link_and_the_filter(tmp_path, monkeypatch):
+    calls = []
+
+    class FakeInstallation:
+        @staticmethod
+        def new_system(_c):
+            return FakeInstallation()
+
+        def update_appstream_sync(self, remote, arch, _c):
+            calls.append((remote, arch))
+
+    class FakeFlatpak:
+        Installation = FakeInstallation
+
+        @staticmethod
+        def get_default_arch():
+            return "x86_64"
+
+    arch_dir = tmp_path / "flathub" / "x86_64"
+    filter_path = tmp_path / "flathub.filter"
+    filter_path.write_text(apps.render_filter(set()))
+    checksum = apps.filter_checksum(filter_path)
+    deployed = arch_dir / f"{COMMIT}-{checksum}"
+    deployed.mkdir(parents=True)
+    (deployed / "appstream.xml.gz").write_bytes(b"")
+    (arch_dir / "active").symlink_to(deployed.name)
+    monkeypatch.setattr(apps, "Flatpak", FakeFlatpak)
+    monkeypatch.setattr(apps, "_appstream_dir", lambda: arch_dir)
+    monkeypatch.setattr(apps, "FILTER_PATH", filter_path)
+
+    apps.ensure_appstream()
+    assert calls == [], "a fresh copy under the current filter is kept"
+    filter_path.write_text(apps.render_filter({"org.example.Tor"}))
+    apps.ensure_appstream()
+    assert calls == [("flathub", "x86_64")], "a changed filter fetches again at once"
+    apps.ensure_appstream(force=True)
+    assert len(calls) == 2
+
+
+def test_warm_index_says_when_the_copy_it_read_is_stale(monkeypatch):
+    def failing():
+        raise RuntimeError("no network")
+
+    monkeypatch.setattr(apps, "ensure_appstream", failing)
+    monkeypatch.setattr(apps, "_load_index", lambda: [{"ref": "a"}, {"ref": "b"}])
+    assert apps.warm_index() == (2, False)
+    monkeypatch.setattr(apps, "ensure_appstream", lambda: None)
+    assert apps.warm_index() == (2, True)
+
+
 def test_content_rating_is_kept_without_the_nones(catalogue):
     by_ref = {a["ref"]: a for a in apps.parse_appstream(catalogue)}
     assert by_ref["org.chess.Chess"]["rating"] == {

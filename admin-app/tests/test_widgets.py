@@ -1338,6 +1338,73 @@ def test_a_pasted_handle_is_still_added_as_it_is(monkeypatch):
     assert "channel_names" not in client.saved[-1]
 
 
+def _pause_after_typing(dialog, text):
+    """What the entry does SEARCH_DELAY_MS after the last keystroke."""
+    dialog.entry.set_text(text)
+    dialog.entry.emit("search-changed")
+    drain()
+
+
+def _searched(client):
+    return [c[1] for c in client.calls if c[0] == "search_youtube_channels"]
+
+
+def test_the_search_runs_as_you_type_from_the_second_letter(monkeypatch):
+    client = ChannelSearching()
+    page, opened = _youtube_page(monkeypatch, client)
+    page._add_channel()
+    dialog = opened[-1]
+    assert dialog.entry.get_search_delay() == dialogs.SEARCH_DELAY_MS
+    _pause_after_typing(dialog, "t")
+    assert _searched(client) == []
+    assert not dialog.scroller.get_visible()
+    _pause_after_typing(dialog, "to")
+    assert _searched(client) == ["to"]
+    assert "TorahAnytime" in {r.get_title() for r in _rows(dialog.results)}
+    # Back under two letters: the results go away, and nothing is asked.
+    _pause_after_typing(dialog, "t")
+    assert not dialog.scroller.get_visible()
+    assert _searched(client) == ["to"]
+
+
+def test_each_query_is_asked_once_per_dialog(monkeypatch):
+    client = ChannelSearching()
+    page, opened = _youtube_page(monkeypatch, client)
+    page._add_channel()
+    dialog = opened[-1]
+    for text in ("torah", "torah a", "torah"):
+        _pause_after_typing(dialog, text)
+    assert _searched(client) == ["torah", "torah a"]
+    assert "TorahAnytime" in {r.get_title() for r in _rows(dialog.results)}
+
+
+def test_enter_and_the_pause_in_typing_ask_once_between_them(monkeypatch):
+    client = ChannelSearching()
+    page, opened = _youtube_page(monkeypatch, client)
+    page._add_channel()
+    dialog = opened[-1]
+    dialog.entry.set_text("shiur")
+    dialog.entry.emit("activate")
+    dialog.entry.emit("search-changed")
+    drain()
+    assert _searched(client) == ["shiur"]
+
+
+def test_an_address_is_not_searched_but_a_bare_handle_is(monkeypatch):
+    client = ChannelSearching()
+    page, opened = _youtube_page(monkeypatch, client)
+    page._add_channel()
+    dialog = opened[-1]
+    _pause_after_typing(dialog, f"youtube.com/channel/{TORAH}")
+    _pause_after_typing(dialog, TORAH)
+    assert _searched(client) == []
+    assert dialog.get_response_enabled("add")
+    # A handle alone is searched too, to show whose it is; Add still works.
+    _pause_after_typing(dialog, "@torahanytime1")
+    assert _searched(client) == ["@torahanytime1"]
+    assert dialog.get_response_enabled("add")
+
+
 def test_a_failed_search_says_why_in_the_dialog(monkeypatch):
     class Offline(ChannelSearching):
         def search_youtube_channels(self, query):

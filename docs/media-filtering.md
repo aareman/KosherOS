@@ -131,6 +131,59 @@ of twenty-five photographs of men modelling khaki trousers, six are
 hidden at this level. The sections below on a tzniut classifier remain
 the plan for the rest.
 
+### Statues and old paintings
+
+Family testing then reported that "roman statues are missed a bunch as
+well as old paintings of immodest women" — statues of men and women both,
+and the private parts of men in particular. Measured on Wikimedia
+photographs of well-known statues and paintings, at full size and at a
+300 px thumbnail width, three things were going wrong:
+
+- **A male face switched the skin rule off.** The promotion of a clean
+  picture to immodest when the figure below the face is mostly skin only
+  ran below a *female* face. The Discobolus and a crouching Venus whose
+  face the model called male came back clean with over forty percent skin
+  across the figure. The model's sexing of a marble face is a coin toss,
+  and a bare male chest was already immodest by label, so the rule now
+  runs below any face.
+- **The box guessed from a face is upright.** A figure bent, crouching or
+  thrown has its body beside its face, and the estimated box is mostly
+  background. A picture that a face-derived box measured clean is now
+  measured again over the person detector's own, tight box.
+- **Nothing anchored some figures at all.** The person model was trained
+  on photographs of people; on marble it hedges. David in a wide shot of
+  its hall scored 0.44, the Farnese Hercules 0.22, a close crop of a
+  Rubens torso 0.23 — under the 0.5 line, so no skin measurement ran. A
+  guess below the line is now believed when the region it names is bare
+  enough, on a sliding scale (`WEAK_PERSON_CONFIDENCE`, `BARE_SKIN_LIMIT`):
+  a guess of 0.2 needs a region that is 45 percent skin, and the
+  requirement falls to the ordinary found-figure line as the score
+  approaches 0.5. Marble reads as skin under the colour gate, which is
+  what makes this work for statues.
+
+A face is left out of a found figure's measurement. In a head-and-
+shoulders portrait the face is a third of the detector's tight box, which
+on its own passed the found-figure line and would have hidden every
+clothed portrait on a news page.
+
+Measured on 24 statues, 16 nude paintings and 47 controls (animals, food,
+toys, furniture, clothed people, clothed statues and clothed portraits):
+
+| set | full size, before → after | thumbnail, before → after |
+|---|---|---|
+| statues | 19 → 23 of 24 hidden | 19 → 22 of 24 hidden |
+| nude paintings | 15 → 16 of 16 hidden | 14 → 16 of 16 hidden |
+| controls wrongly hidden | 12 → 14 of 47 | 12 → 13 of 47 |
+
+The two controls newly covered are a photograph with a woman in short
+sleeves at its edge (within the standard) and a monochrome portrait
+whose plaited background is the lightness of the sitter's face. Known
+misses, stated rather than hidden: a dark bronze (the Riace warrior) has
+no skin tone to measure and nothing else to go on; and the Farnese
+Hercules at thumbnail width scores 0.14 as a person, below even the weak
+line. Clothed marble statues are often covered too, because marble reads
+as skin; that is a price accepted for the statues the rule was made for.
+
 ## Video
 
 Judged by its source first, then by a few of its frames.

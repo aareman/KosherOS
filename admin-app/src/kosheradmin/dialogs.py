@@ -613,6 +613,129 @@ def request_row(win, request: dict, on_answered=None) -> RequestRow:
     return RequestRow(win, request, on_answered)
 
 
+class ApproveChannelDialog(Adw.AlertDialog):
+    """Approve a YouTube channel by finding it by name.
+
+    A parent knows a channel by its name, not by the ID the filter matches
+    on, so the name is searched for (by kosherd, see kosherd.ytsearch) and
+    each result has its own Approve. A pasted handle, ID or address is
+    still taken as it is — Add lights up for one, and Enter adds it.
+
+    `on_pick(ref, name)` gets what to list — the channel's ID for a search
+    result, since that is the one thing every YouTube page names — and the
+    channel's name to show beside it, or None for something pasted.
+    """
+
+    def __init__(self, win, approved: list[str], on_pick):
+        super().__init__(
+            heading="Approve a channel",
+            body="Search for it by name, or paste its handle (@example), "
+                 "its ID (UC…) or the address of its page.")
+        self.win = win
+        self.approved = set(approved)
+        self.on_pick = on_pick
+        self._asked = 0
+
+        self.entry = Gtk.SearchEntry(placeholder_text="Channel name or @handle",
+                                     hexpand=True)
+        self.entry.connect("activate", lambda _e: self._submit())
+        self.entry.connect("changed", lambda _e: self.set_response_enabled(
+            "add", self._pasted() is not None))
+        search = Gtk.Button(icon_name="system-search-symbolic",
+                            tooltip_text="Search YouTube")
+        search.connect("clicked", lambda _b: self.search())
+        line = Gtk.Box(spacing=6)
+        line.append(self.entry)
+        line.append(search)
+
+        self.results = Gtk.ListBox(selection_mode=Gtk.SelectionMode.NONE)
+        self.results.add_css_class("boxed-list")
+        self.scroller = Gtk.ScrolledWindow(hscrollbar_policy=Gtk.PolicyType.NEVER,
+                                           propagate_natural_height=True,
+                                           max_content_height=360, visible=False)
+        self.scroller.set_child(self.results)
+
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
+        box.append(line)
+        box.append(self.scroller)
+        self.set_extra_child(box)
+        self.add_response("cancel", "Cancel")
+        self.add_response("add", "Add")
+        self.set_response_appearance("add", Adw.ResponseAppearance.SUGGESTED)
+        self.set_response_enabled("add", False)
+        self.set_close_response("cancel")
+        self.connect("response", self._on_response)
+
+    def _pasted(self) -> str | None:
+        return labels.youtube_channel_ref(self.entry.get_text())
+
+    def _submit(self) -> None:
+        # The same by-hand answer as submit_on_enter: this AdwAlertDialog
+        # has no response() method.
+        if self._pasted():
+            self.emit("response", "add")
+            self.close()
+        else:
+            self.search()
+
+    def _on_response(self, _d, response: str) -> None:
+        ref = self._pasted()
+        if response == "add" and ref:
+            self.on_pick(ref, None)
+
+    def search(self) -> None:
+        query = self.entry.get_text().strip()
+        if not query:
+            return
+        # Only the newest search may fill the list: a slow answer to an
+        # earlier one must not replace the results being read.
+        self._asked += 1
+        asked = self._asked
+        self.scroller.set_visible(True)
+        clear(self.results)
+        self.results.append(Adw.ActionRow(title="Searching YouTube…", sensitive=False))
+
+        def on_done(found):
+            if asked == self._asked:
+                self.show_results(found)
+
+        def on_error(e):
+            if asked == self._asked:
+                clear(self.results)
+                self.results.append(Adw.ActionRow(
+                    title="Could not search YouTube", subtitle=error_text(e),
+                    use_markup=False, sensitive=False))
+
+        run_async(lambda: self.win.client.search_youtube_channels(query),
+                  on_done, on_error)
+
+    def show_results(self, found: list[dict]) -> None:
+        clear(self.results)
+        if not found:
+            self.results.append(Adw.ActionRow(
+                title="No channels found",
+                subtitle="Check the spelling, or paste the channel's address instead.",
+                sensitive=False))
+            return
+        for channel in found:
+            row = Adw.ActionRow(title=channel["title"],
+                                subtitle=labels.channel_result_subtitle(channel),
+                                use_markup=False)
+            if {channel["id"], channel.get("handle")} & self.approved:
+                row.add_suffix(tag("Approved"))
+            else:
+                approve = small_button("Approve", "suggested-action")
+                approve.set_valign(Gtk.Align.CENTER)
+                approve.connect("clicked", lambda _b, c=channel: self.pick(c))
+                row.add_suffix(approve)
+            self.results.append(row)
+        pointer_cursors(self.results)
+
+    def pick(self, channel: dict) -> None:
+        self.on_pick(channel["id"], channel["title"])
+        self.close()
+
+
 class HealthDialog(Adw.Dialog):
     """Everything the filter status has to say, in full sentences."""
 

@@ -148,6 +148,14 @@
               "default": [],
               "description": "Channel ids or handles this user may watch. When non-empty, everything else on YouTube is blocked."
             },
+            "channel_names": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              },
+              "default": {},
+              "description": "What to call an approved channel in the admin app, by the id or handle in allowed_channels. Display only; the filter never reads it."
+            },
             "restrict": {
               "enum": [
                 "none",
@@ -434,6 +442,14 @@
               },
               "default": [],
               "description": "Channel ids or handles this user may watch. When non-empty, everything else on YouTube is blocked."
+            },
+            "channel_names": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              },
+              "default": {},
+              "description": "What to call an approved channel in the admin app, by the id or handle in allowed_channels. Display only; the filter never reads it."
             },
             "restrict": {
               "enum": [

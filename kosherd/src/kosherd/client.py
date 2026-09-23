@@ -151,6 +151,11 @@ class DaemonClient:
         self._call("Profiles", "SetYouTube", "(iss)", uid,
                    json.dumps(settings), guardian_password)
 
+    def search_youtube_channels(self, query: str) -> list[dict]:
+        """Channels matching a name, best first: `id`, `title`, and when
+        known `handle` and `subscribers`."""
+        return json.loads(self._call("Profiles", "SearchYouTubeChannels", "(s)", query)[0])
+
     def set_user_admin(self, uid: int, admin: bool,
                        guardian_password: str = "") -> None:
         self._call("Profiles", "SetUserAdmin", "(ibs)", uid, admin,

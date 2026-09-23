@@ -303,6 +303,15 @@ class DemoClient:
         self._user(uid)["youtube"] = dict(settings)
         self._change(uid, "SetYouTube", [uid])
 
+    def search_youtube_channels(self, query):
+        """Made-up channels shaped like the real answer; the demo never
+        goes to YouTube."""
+        slug = "".join(ch for ch in query.lower() if ch.isalnum()) or "channel"
+        return [{"id": f"UCdemo{slug}{i:02d}"[:24].ljust(24, "x"),
+                 "title": f"{query.title()} {i}" if i > 1 else query.title(),
+                 "handle": f"@{slug}{i if i > 1 else ''}",
+                 "subscribers": f"{12 * i}K subscribers"} for i in range(1, 6)]
+
     def set_user_admin(self, uid, admin, pw=""):
         self._user(uid)["admin"] = admin
         self._change(uid, "SetUserAdmin", [uid, admin])

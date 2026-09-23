@@ -479,6 +479,18 @@ def cmd_language(args) -> int:
     return 0
 
 
+def cmd_youtube_search(args) -> int:
+    """Channels matching a name, with the ID to give allow-channel."""
+    found = _client().search_youtube_channels(" ".join(args.query))
+    if not found:
+        print("no channels found", file=sys.stderr)
+        return 1
+    for channel in found:
+        extra = " · ".join(x for x in (channel.get("handle"), channel.get("subscribers")) if x)
+        print(f"  {channel['id']}  {channel['title']}" + (f"  ({extra})" if extra else ""))
+    return 0
+
+
 def cmd_youtube(args) -> int:
     from .policy import YOUTUBE_CATEGORIES
 
@@ -500,8 +512,10 @@ def cmd_youtube(args) -> int:
     if args.action == "show":
         print(f"{user['username']}: Restricted Mode "
               f"{settings.get('restrict', 'moderate')}")
+        names = settings.get("channel_names") or {}
         print("  approved channels: "
-              + (", ".join(channels) if channels else "every channel"))
+              + (", ".join(f"{names[c]} ({c})" if c in names else c for c in channels)
+                 if channels else "every channel"))
         print("  blocked kinds: "
               + (", ".join(f"{c} ({YOUTUBE_CATEGORIES.get(c, '?')})"
                            for c in sorted(blocked)) if blocked else "none"))
@@ -523,6 +537,12 @@ def cmd_youtube(args) -> int:
         settings["allowed_channels"] = channels
     elif args.action == "remove-channel":
         settings["allowed_channels"] = [c for c in channels if c != args.value]
+        names = {c: n for c, n in (settings.get("channel_names") or {}).items()
+                 if c != args.value}
+        if names:
+            settings["channel_names"] = names
+        else:
+            settings.pop("channel_names", None)
     c.set_youtube(args.uid, settings, _guardian_pw(args))
     print(f"YouTube settings saved for {user['username']}")
     return 0
@@ -1106,6 +1126,11 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("value", nargs="?", default="")
     s.add_argument("--guardian-password")
     s.set_defaults(func=cmd_youtube)
+
+    s = sub.add_parser("youtube-search",
+                       help="find a YouTube channel's ID by its name, for allow-channel")
+    s.add_argument("query", nargs="+")
+    s.set_defaults(func=cmd_youtube_search)
 
     s = sub.add_parser("apps", help="what the Store offers a user, and what is blocked")
     s.add_argument("action", choices=["show", "access", "block-kind", "unblock-kind",

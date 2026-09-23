@@ -25,9 +25,9 @@ from kosherd.policy import MEDIA_LEVELS, MODES, YOUTUBE_CATEGORIES  # noqa: E402
 
 from . import labels  # noqa: E402
 from .common import (banner_slot, avatar, chip, clear, confirm, error_text, mode_badge,  # noqa: E402
-                     pointer_cursors, run_async, small_button, submit_on_enter, tag)
-from .dialogs import (RulesDialog, SavePresetDialog, WhitelistDialog, allow_menu,  # noqa: E402
-                      confirm_remove_user, request_row)
+                     pointer_cursors, run_async, small_button, tag)
+from .dialogs import (ApproveChannelDialog, RulesDialog, SavePresetDialog,  # noqa: E402
+                      WhitelistDialog, allow_menu, confirm_remove_user, request_row)
 from .feed import fold  # noqa: E402
 from .schedule import ScheduleGrid, legend  # noqa: E402
 
@@ -786,6 +786,7 @@ class UserDetailPage(Adw.NavigationPage):
         settings = dict(user.get("youtube") or {})
         self.yt_blocked = set(settings.get("blocked_categories", []))
         self.yt_channels = list(settings.get("allowed_channels", []))
+        self.yt_names = dict(settings.get("channel_names", {}))
         self.yt_restrict = settings.get("restrict", "moderate")
         self._yt_saved = self._youtube_settings()
         self._yt_building = True
@@ -866,7 +867,13 @@ class UserDetailPage(Adw.NavigationPage):
         if self.yt_blocked:
             settings["blocked_categories"] = sorted(self.yt_blocked)
         if self.yt_channels:
-            settings["allowed_channels"] = self.yt_channels
+            # A copy: the saved settings are compared with the next ones,
+            # and sharing the list made every approval after the first
+            # look like no change at all, so it was never saved.
+            settings["allowed_channels"] = list(self.yt_channels)
+            names = {c: self.yt_names[c] for c in self.yt_channels if c in self.yt_names}
+            if names:
+                settings["channel_names"] = names
         return settings
 
     def _save_youtube(self) -> None:
@@ -896,28 +903,22 @@ class UserDetailPage(Adw.NavigationPage):
         self._save_youtube()
 
     def _add_channel(self) -> None:
-        dialog = Adw.AlertDialog(
-            heading="Approve a channel",
-            body="Paste the channel handle (@example) or its ID (UC…). It is "
-                 "in the address of any of the channel's videos.")
-        entry = Gtk.Entry(placeholder_text="@example")
-        dialog.set_extra_child(entry)
-        dialog.add_response("cancel", "Cancel")
-        dialog.add_response("add", "Add")
-        dialog.set_response_appearance("add", Adw.ResponseAppearance.SUGGESTED)
-        dialog.set_default_response("add")
-        dialog.set_close_response("cancel")
-        submit_on_enter(dialog, "add", entry)
+        def on_pick(ref: str, name: str | None) -> None:
+            if ref in self.yt_channels:
+                return
+            self.yt_channels.append(ref)
+            if name:
+                self.yt_names[ref] = name
+            self._rebuild_channels()
+            self._save_youtube()
 
-        def on_response(_d, response):
-            value = entry.get_text().strip()
-            if response == "add" and value and value not in self.yt_channels:
-                self.yt_channels.append(value)
-                self._rebuild_channels()
-                self._save_youtube()
+        ApproveChannelDialog(self.win, self.yt_channels, on_pick).present(self.win)
 
-        dialog.connect("response", on_response)
-        dialog.present(self.win)
+    def _remove_channel(self, ref: str) -> None:
+        self.yt_channels.remove(ref)
+        self.yt_names.pop(ref, None)
+        self._rebuild_channels()
+        self._save_youtube()
 
     def _rebuild_channels(self) -> None:
         clear(self.channel_list)
@@ -926,12 +927,15 @@ class UserDetailPage(Adw.NavigationPage):
                 title="Every channel is allowed",
                 subtitle="Only the settings below apply."))
             return
-        for name in self.yt_channels:
-            row = Adw.ActionRow(title=name, use_markup=False)
+        for ref in self.yt_channels:
+            # A channel found by search is listed by its ID, which nobody
+            # can read, so its name leads and the ID is the subtitle.
+            name = self.yt_names.get(ref)
+            row = Adw.ActionRow(title=name or ref, subtitle=ref if name else "",
+                                use_markup=False)
             remove = Gtk.Button(icon_name="user-trash-symbolic", valign=Gtk.Align.CENTER)
             remove.add_css_class("flat")
-            remove.connect("clicked", lambda _b, n=name: (
-                self.yt_channels.remove(n), self._rebuild_channels(), self._save_youtube()))
+            remove.connect("clicked", lambda _b, r=ref: self._remove_channel(r))
             row.add_suffix(remove)
             self.channel_list.append(row)
 

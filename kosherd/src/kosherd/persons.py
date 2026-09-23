@@ -16,9 +16,12 @@ solved problem with a small model. YOLOX-Nano (Megvii, Apache-2.0) is
 the person in ten of those eleven crops, and the "people" it found among
 the furniture were men modelling trousers.
 
-Only the person class is read, only when the nudity model found no face,
-and only when the picture has enough skin-toned area to be worth asking.
-The box it returns is what the skin measurement in vision.py then runs on.
+Only the person class is read, only when the nudity model's labels left
+the picture clean, and only when the picture has enough skin-toned area
+to be worth asking. The box it returns is what the skin measurement in
+vision.py then runs on. vision.py asks down to a lower confidence than
+PERSON_CONFIDENCE and believes a weak guess only over a region that is
+mostly bare: classical statues are people the model hedges on.
 
 Preprocessing and decoding are pure functions on arrays, tested without
 the model; the model itself is loaded lazily and its absence — no file, no

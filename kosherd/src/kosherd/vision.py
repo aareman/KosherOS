@@ -301,18 +301,61 @@ def face_lightness(image_bytes: bytes, face) -> int | None:
         return None
 
 
+# The person detector says "a person" at 0.5. Below that it is guessing —
+# but a guess over a region that is mostly bare is not the same thing as
+# a guess over a sofa. Classical statues are where this bit: the person
+# model was trained on photographs of people, and on marble it hedges.
+# Michelangelo's David in a wide shot of its hall scored 0.44, the Farnese
+# Hercules 0.22, a close crop of a Rubens torso 0.23 — and each of those
+# boxes was between half and nine tenths skin-toned. So a weak guess is
+# believed when its region is bare enough, on a sliding scale: at
+# WEAK_PERSON_CONFIDENCE the region must be BARE_SKIN_LIMIT skin, and the
+# requirement falls to FOUND_SKIN_LIMIT (the ordinary line for a found
+# figure) as the score approaches the detector's own line, so a near-miss
+# at 0.41 with a third of its box skin — Botticelli's Venus at thumbnail
+# size — is believed too. Measured on eighty-odd controls (animals, food,
+# toys, furniture, clothed people, clothed statues), the only one the
+# scale takes is a clothed marble statuette of Athena — marble reads as
+# skin, and that is a price worth paying for the statues it was made for.
+WEAK_PERSON_CONFIDENCE = 0.2
+BARE_SKIN_LIMIT = 0.45
+
+
+def believable(score: float, bare: float | None) -> bool:
+    """Whether a person guess below the detector's line is taken, given
+    how much of its region is skin."""
+    from . import persons as persons_mod
+
+    if score >= persons_mod.PERSON_CONFIDENCE:
+        return True
+    if score < WEAK_PERSON_CONFIDENCE or bare is None:
+        return False
+    span = persons_mod.PERSON_CONFIDENCE - WEAK_PERSON_CONFIDENCE
+    how_sure = (score - WEAK_PERSON_CONFIDENCE) / span
+    needed = BARE_SKIN_LIMIT - how_sure * (BARE_SKIN_LIMIT - FOUND_SKIN_LIMIT)
+    return bare >= needed
+
+
 def _person_in(image_bytes: bytes, size) -> tuple | None:
     """The best person box the person detector finds, or None: no model,
-    nobody, or too little skin-toned area for it to matter either way."""
+    nobody, or too little skin-toned area for it to matter either way.
+
+    A confident detection is taken as it is; a weak one is taken only
+    when the region it names is bare enough (see believable())."""
     from . import persons as persons_mod
 
     whole = skin_fraction(image_bytes, (0, 0, *size))
     if whole is None or whole < persons_mod.WORTH_ASKING:
         return None
-    found = persons_mod.default().detect(image_bytes)
+    found = persons_mod.default().detect(image_bytes, threshold=WEAK_PERSON_CONFIDENCE)
     if not found:
         return None
-    return found[0][1]
+    for score, box in found:  # best first
+        if score >= persons_mod.PERSON_CONFIDENCE:
+            return box
+        if believable(score, skin_fraction(image_bytes, box)):
+            return box
+    return None
 
 
 def core_box(body):
@@ -323,20 +366,26 @@ def core_box(body):
 
 
 def shows_too_much(image_bytes: bytes, body, reference: int | None = None,
-                   found: bool = False) -> bool:
+                   found: bool = False, faces=()) -> bool:
     """The figure, or its legs alone, past the immodest line. `reference`
     is the face's lightness, used when the picture has no colour; `found`
     says the box came from the person detector rather than a face, so it
-    is tight around the figure and its middle is measured as well."""
+    is tight around the figure and its middle is measured as well.
+
+    `faces` are left out of the measurement. A face is not immodest, and
+    in a head-and-shoulders portrait it is a third of the detector's tight
+    box — enough on its own to pass the line for a found figure, which
+    would hide every clothed portrait on a news page. In a box guessed
+    from a face the face is a thirtieth of it and the exclusion is moot."""
     limit = FOUND_SKIN_LIMIT if found else SKIN_LIMIT
-    fraction = skin_fraction(image_bytes, body, reference)
+    fraction = skin_fraction(image_bytes, body, reference, exclude=faces)
     if fraction is not None and fraction >= limit:
         return True
     if found:
-        core = skin_fraction(image_bytes, core_box(body), reference)
+        core = skin_fraction(image_bytes, core_box(body), reference, exclude=faces)
         if core is not None and core >= SKIN_LIMIT:
             return True
-    legs = skin_fraction(image_bytes, legs_box(body), reference)
+    legs = skin_fraction(image_bytes, legs_box(body), reference, exclude=faces)
     return legs is not None and legs >= LEGS_SKIN_LIMIT
 
 # A body-part detection this weak is not a verdict on its own, but it is
@@ -356,10 +405,13 @@ def _union_grown(boxes, width, height, grow: float = 1.0):
     return (left, top, right - left, bottom - top)
 
 
-def skin_fraction(image_bytes: bytes, box, reference: int | None = None) -> float | None:
+def skin_fraction(image_bytes: bytes, box, reference: int | None = None,
+                  exclude=()) -> float | None:
     """How much of `box` is skin-toned: by the classic YCbCr gate in a
     colour picture, by lightness in a monochrome photograph (see MONO_*),
-    and nothing at all in a monochrome drawing — text, a terminal, code."""
+    and nothing at all in a monochrome drawing — text, a terminal, code.
+    Pixels inside any of the `exclude` boxes (faces) are not counted on
+    either side of the fraction; a region that is all excluded is None."""
     try:
         import io
 
@@ -368,16 +420,28 @@ def skin_fraction(image_bytes: bytes, box, reference: int | None = None) -> floa
         with Image.open(io.BytesIO(image_bytes)) as im:
             mono = _is_monochrome(im)
             x, y, w, h = box
-            region = im.convert("RGB").convert("YCbCr").crop(
-                (x, y, min(x + w, im.width), min(y + h, im.height)))
+            right, bottom = min(x + w, im.width), min(y + h, im.height)
+            region = im.convert("RGB").convert("YCbCr").crop((x, y, right, bottom))
             if region.width < 8 or region.height < 8:
                 return None
             # Sample down: precision is not needed to measure a fraction.
             # Nearest, not smoothed: smoothing invents grey levels between
             # a drawing's few, and a terminal would pass for a photograph.
-            region = region.resize((min(96, region.width), min(96, region.height)),
-                                   Image.Resampling.NEAREST)
+            sample_w, sample_h = min(96, region.width), min(96, region.height)
+            region = region.resize((sample_w, sample_h), Image.Resampling.NEAREST)
             data = list(region.getdata())
+            if exclude:
+                # Which samples fall inside an excluded box, in the
+                # sampled region's own coordinates.
+                sx, sy = sample_w / (right - x), sample_h / (bottom - y)
+                holes = [(int((ex - x) * sx), int((ey - y) * sy),
+                          int((ex + ew - x) * sx), int((ey + eh - y) * sy))
+                         for ex, ey, ew, eh in exclude]
+                data = [px for i, px in enumerate(data)
+                        if not any(hx0 <= i % sample_w < hx1 and hy0 <= i // sample_w < hy1
+                                   for hx0, hy0, hx1, hy1 in holes)]
+                if not data:
+                    return None
             if mono:
                 if not looks_photographic(Y for Y, _cb, _cr in data):
                     return 0.0
@@ -454,7 +518,7 @@ def hides(media_level: str, verdict: ImageVerdict) -> bool:
 # logic: a family test found a swimsuit thumbnail still "clean" after the
 # skin rule shipped, because its clean verdict from earlier was still in
 # the cache.
-JUDGEMENT_VERSION = 7  # 7: a found figure's tight box and its middle
+JUDGEMENT_VERSION = 8  # 8: any face anchors the skin rule; weak person guesses over bare regions
 
 
 def digest(data: bytes) -> str:
@@ -992,8 +1056,13 @@ class ImageFilter:
         detectable class at all — bare shoulders, exposed legs — came back
         clean. So: when a picture is being hidden and a face was found, the
         whole estimated figure joins the covered regions; and a clean
-        picture with a female face is promoted to immodest when the figure
-        shows too much skin for the labels to have caught.
+        picture with a face is promoted to immodest when the figure shows
+        too much skin for the labels to have caught. Classical statues and
+        old paintings of nudes are what the later steps are for: the
+        models hedge on marble and on paint, so a face of either sex, the
+        person detector's own box, and even a weak person guess over a
+        mostly bare region each get a turn before a picture is called
+        clean.
         """
         try:
             import io
@@ -1006,19 +1075,27 @@ class ImageFilter:
             return verdict
         faces = [d.box for d in detections
                  if d.label in FACES and d.score >= MIN_CONFIDENCE]
-        female = [d.box for d in detections
-                  if d.label == "FACE_FEMALE" and d.score >= MIN_CONFIDENCE]
         if verdict.level != CLEAN and faces:
             bodies = tuple(body_box(f, *size) for f in faces)
             return ImageVerdict(verdict.level, verdict.regions + bodies,
                                 verdict.has_person)
-        if verdict.level == CLEAN and female:
-            for face in female:
+        # Any face, not only a female one. The rule began as female-only
+        # so that a man in short sleeves would not trip it, but it left
+        # every figure the model called male unmeasured — and the model's
+        # sexing of a face is a coin toss on a statue. A nude male statue
+        # with a face the model called male came back clean with over
+        # forty percent skin across the figure, while the same statue at
+        # thumbnail size, where the model found no face, was caught by the
+        # person-detector path below. A bare male chest is already
+        # immodest by label (MALE_BREAST_EXPOSED); this measures it when
+        # the label does not fire.
+        if verdict.level == CLEAN and faces:
+            for face in faces:
                 reference = face_lightness(image_bytes, face)
                 if shows_too_much(image_bytes, body_box(face, *size), reference):
                     return ImageVerdict(
                         IMMODEST,
-                        tuple(body_box(f, *size) for f in female),
+                        tuple(body_box(f, *size) for f in faces),
                         True)
         # No face in frame — a figure seen from behind, say — but body parts
         # were found. A woman in a sports shirt photographed from the back
@@ -1032,14 +1109,17 @@ class ImageFilter:
             fraction = skin_fraction(image_bytes, figure)
             if fraction is not None and fraction >= SKIN_LIMIT:
                 return ImageVerdict(IMMODEST, (figure,), True)
-        # Nothing to hang a body on — no face, and either no part at all or
-        # nothing that said "too much". A skirt photographed from the hips
-        # down is exactly this: legs are not a class. Ask the person
-        # detector where the figure is, and measure the skin over that.
-        if verdict.level == CLEAN and not faces:
+        # Still clean. Either nothing anchored a body — no face, and no part
+        # that said "too much"; a skirt photographed from the hips down is
+        # exactly this, legs are not a class — or a face did, and the box
+        # guessed from it (upright, face on top) measured clean. That guess
+        # misses a figure bent, crouching or thrown: the Discobolus's body
+        # is beside its face, not under it. Ask the person detector where
+        # the figure actually is, and measure the skin over that.
+        if verdict.level == CLEAN:
             person = _person_in(image_bytes, size)
             if person is not None:
-                if shows_too_much(image_bytes, person, found=True):
+                if shows_too_much(image_bytes, person, found=True, faces=faces):
                     return ImageVerdict(IMMODEST, (person,), True)
                 return ImageVerdict(CLEAN, (), True)
         return verdict

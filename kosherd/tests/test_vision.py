@@ -638,3 +638,112 @@ def test_a_judgement_change_invalidates_cached_verdicts(monkeypatch):
     before = vision.digest(data)
     monkeypatch.setattr(vision, "JUDGEMENT_VERSION", vision.JUDGEMENT_VERSION + 1)
     assert vision.digest(data) != before
+
+
+# -- statues and old paintings: a face of either sex, and a weak guess at a figure -----
+
+def test_a_male_face_over_exposed_skin_is_promoted_too():
+    # A nude male statue with a face the model called male came back clean
+    # with over forty percent skin across the figure, because only a female
+    # face used to anchor the measurement. A bare male chest is immodest by
+    # label already; this measures it when the label does not fire.
+    photo = _skin_photo(skin_box=(60, 60, 240, 400))
+    face = vision.Detection("FACE_MALE", 0.9, (120, 30, 60, 60))
+    verdict = vision.ImageFilter._person_aware(photo, [face], vision.judge([face]))
+    assert verdict.level == vision.IMMODEST
+    assert verdict.regions
+
+
+def test_a_male_face_over_clothing_stays_clean():
+    photo = _skin_photo(skin_box=None)
+    face = vision.Detection("FACE_MALE", 0.9, (120, 30, 60, 60))
+    verdict = vision.ImageFilter._person_aware(photo, [face], vision.judge([face]))
+    assert verdict.level == vision.CLEAN
+
+
+def test_a_figure_beside_its_face_is_measured_over_the_detectors_box(monkeypatch):
+    # The Discobolus: bent double, the body is beside the face, not under
+    # it, so the box guessed from the face (upright) is mostly background
+    # and measures clean. The person detector's own box is what is bare.
+    from kosherd import persons
+
+    photo = _skin_photo(skin_box=(120, 20, 400, 200), size=(400, 300))   # a figure lying across the top
+    face = vision.Detection("FACE_MALE", 0.9, (20, 40, 50, 50))          # face at the far left
+    assert not vision.shows_too_much(photo, vision.body_box(face.box, 400, 300)), \
+        "the upright guess misses it"
+    monkeypatch.setattr(persons, "default", lambda: _Finds((20, 20, 380, 200)))
+    verdict = vision.ImageFilter._person_aware(photo, [face], vision.judge([face]))
+    assert verdict.level == vision.IMMODEST
+    assert verdict.regions == ((20, 20, 380, 200),)
+
+
+class _Guesses(_Finds):
+    """A person detector that is not sure: returns its box at `score`,
+    but only when asked down to that score."""
+
+    def __init__(self, box, score):
+        super().__init__(box)
+        self.score = score
+
+    def detect(self, data, threshold=0.5):
+        return [(self.score, self.box)] if self.box and self.score >= threshold else []
+
+
+def test_a_weak_guess_at_a_person_is_believed_over_a_bare_region(monkeypatch):
+    # Classical statues: the person model hedges on marble (David 0.44,
+    # the Farnese Hercules 0.22), below its own line — but the region it
+    # names is mostly skin, and a sofa's never is.
+    from kosherd import persons
+
+    photo = _skin_photo(skin_box=(80, 40, 220, 380))
+    monkeypatch.setattr(persons, "default", lambda: _Guesses((80, 40, 140, 340), 0.25))
+    verdict = vision.ImageFilter._person_aware(photo, [], vision.judge([]))
+    assert verdict.level == vision.IMMODEST
+    assert verdict.has_person
+
+
+def test_a_weak_guess_over_a_mostly_covered_region_is_not_believed(monkeypatch):
+    # The same weak score over a figure that is only a little skin (an arm
+    # at the edge): not enough to call it a person, so nothing is hidden.
+    from kosherd import persons
+
+    photo = _skin_photo(skin_box=(80, 40, 120, 380))                    # a strip: ~28% of the box
+    monkeypatch.setattr(persons, "default", lambda: _Guesses((80, 40, 140, 340), 0.25))
+    verdict = vision.ImageFilter._person_aware(photo, [], vision.judge([]))
+    assert verdict.level == vision.CLEAN
+    assert not verdict.has_person
+
+
+def test_the_barer_the_region_the_weaker_the_guess_that_is_believed():
+    from kosherd import persons
+
+    assert vision.believable(persons.PERSON_CONFIDENCE, None), "a real detection needs no skin"
+    assert not vision.believable(vision.WEAK_PERSON_CONFIDENCE - 0.01, 0.99), "below the floor, nothing helps"
+    assert vision.believable(vision.WEAK_PERSON_CONFIDENCE, vision.BARE_SKIN_LIMIT)
+    assert not vision.believable(vision.WEAK_PERSON_CONFIDENCE, vision.BARE_SKIN_LIMIT - 0.01)
+    # Botticelli's Venus at thumbnail size: 0.41 with a third of the box skin.
+    assert vision.believable(0.41, 0.35)
+    assert not vision.believable(0.41, 0.20)
+
+
+def test_a_face_is_left_out_of_a_found_figures_measurement(monkeypatch):
+    # A head-and-shoulders portrait: the face is a third of the detector's
+    # tight box, which on its own passes the line for a found figure. That
+    # would hide every clothed portrait on a news page. The face is not
+    # immodest and is not counted.
+    from kosherd import persons
+
+    photo = _skin_photo(skin_box=(100, 20, 200, 120), size=(300, 300))   # the face, and nothing else bare
+    face = vision.Detection("FACE_FEMALE", 0.9, (100, 20, 100, 100))
+    box = (80, 10, 140, 200)                                              # head and shoulders
+    assert vision.skin_fraction(photo, box) > vision.FOUND_SKIN_LIMIT, "counted, the face alone trips it"
+    assert vision.skin_fraction(photo, box, exclude=[face.box]) < 0.05
+    monkeypatch.setattr(persons, "default", lambda: _Finds(box))
+    verdict = vision.ImageFilter._person_aware(photo, [face], vision.judge([face]))
+    assert verdict.level == vision.CLEAN
+    assert verdict.has_person
+
+
+def test_a_region_that_is_all_face_measures_as_nothing():
+    photo = _skin_photo(skin_box=(0, 0, 300, 400))
+    assert vision.skin_fraction(photo, (10, 10, 50, 50), exclude=[(0, 0, 300, 400)]) is None

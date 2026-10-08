@@ -28,7 +28,7 @@ parent in the family's own words: *hide immodest pictures*,
 Three ideas hold it together.
 
 **Complete out of the box.** A parent installs it, puts each person in a group of their own
-naming — or leaves the strict default — and is done. The category lists, word lists and
+naming, or leaves the strict default, and is done. The category lists, word lists and
 picture filter ship whole; adding a site or a word is possible, but never required.
 
 **Local first.** Filtering happens on the device, on modest hardware, with no account and
@@ -115,14 +115,14 @@ it](images/admin-protection.png)
 
 **Everyone is one click away.** The sidebar lists the family by name, with a badge when
 somebody is waiting on an answer, and below them
-*Administration*: the activity feed and what is not about one person, in three pages —
+*Administration*: the activity feed and what is not about one person, in three pages:
 Protection, Apps and Updates. Protection opens on whether the filter is
-actually working, and then on the things one machine can only answer once — ad and tracker
+actually working, and then on the things one machine can only answer once: ad and tracker
 blocking, the word lists, the guardian password. Updates shows the version the computer is
 running, what an update would bring, the way back if one went wrong, and which of the two
-streams of updates it follows: Stable, which almost every family wants, or Edge, which gets
+channels it follows: Stable, which almost every family wants, or Edge, which gets
 every new build the day it is made. Moving between them downloads the other version now and
-starts using it at the next restart; nothing on the computer is lost.
+starts using it at the next restart. Nothing on the computer is lost.
 
 Requests come first: when somebody asks for a blocked page from the block page, a blue
 banner under the page's header says so and one click answers it. Filter health is honest:
@@ -175,13 +175,14 @@ just vm           # make a bootable disk from it (needs sudo)
 just try          # boot a throwaway copy; the first boot runs the setup wizard
 ```
 
-To install on real hardware, `just release-iso` builds an installer ISO from the published
-stable image, so the machine it installs follows the stable channel and updates itself.
+To install on real hardware, `just release-iso` builds an installer ISO from a published
+channel, so the machine it installs follows that channel and updates itself.
 `just usb-image` writes a system you can try from a USB stick without touching the internal
 disk.
 
 To look at the apps without installing anything, `just admin-demo` and `just store-demo`
-open them against a pretend daemon with a sample family.
+open them against a pretend daemon with a sample family. [How to
+contribute](contributing.md) has the rest of the developer setup.
 
 ## Status
 
@@ -193,5 +194,6 @@ Not yet proven: time on a booted machine. Several recent pieces have been seen r
 but not used on a real KosherOS session, and the update-rollback path has never fired for
 real. Treat every claim here as "built and tested", not "proven in a home".
 
-Where the project is going next is on the [deployment](deployment.md) page, and every build
-so far is on the [releases](releases.md) page.
+What has to happen before the first family installs it is on the
+[updates and channels](deployment.md) page, and every build so far is on the
+[releases](releases.md) page.

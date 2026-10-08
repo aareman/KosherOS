@@ -336,7 +336,7 @@ prompt never appears in the middle of a long build. Once a VM is up, a root shel
 | `os-image/` | the distribution itself: the Containerfile and every file the image carries |
 | `branding/` | logo and wallpaper source art, and the script that makes every raster from them |
 | `scripts/` | list fetching, live checks, the stage-1 VM installer |
-| `docs/` | [architecture](docs/architecture.md), [content filtering](docs/content-filtering.md), [media filtering](docs/media-filtering.md), [search](docs/search.md), [desktop](docs/desktop.md), [branding](docs/branding.md), [deployment](docs/deployment.md), [licensing](docs/licensing.md), [testing](docs/testing.md), [standalone](docs/standalone.md) |
+| `docs/` | the site: [architecture](docs/architecture.md), [content filtering](docs/content-filtering.md), [pictures and video](docs/media-filtering.md), [search](docs/search.md), [desktop](docs/desktop.md), [branding](docs/branding.md), [updates and channels](docs/deployment.md), [licensing](docs/licensing.md), [contributing](docs/contributing.md), [testing](docs/testing.md), [standalone](docs/standalone.md) |
 | `legacy/` | the retired e2guardian/Ubuntu prototype, kept for reference |
 
 ## Status
@@ -370,7 +370,7 @@ as "built and tested", not "proven in a home".
 - [x] **Anaconda installer branding**: `just iso` puts a KosherOS `product.img` on the ISO, so the installer says KosherOS and wears the mark; not yet seen on a booted installer
 - [ ] **Deployment**: signature verification on the machine, a release ISO pinned at a public registry, update channels ([docs/deployment.md](docs/deployment.md))
 - [ ] **A long session on a booted machine** with the whole family flow, under GNOME
-- [ ] **Licence and contribution files**: `LICENSE` and `CONTRIBUTING.md` ([docs/licensing.md](docs/licensing.md))
+- [ ] **The licence file**: `LICENSE` ([docs/licensing.md](docs/licensing.md))
 
 Not on the roadmap but assessed: the filter is separable from the OS. See
 [docs/standalone.md](docs/standalone.md) for what a distro-agnostic package would take, and for a
@@ -385,15 +385,16 @@ See the [open issues][issues-url] for the full list of proposed features and kno
 Contributions are welcome, and the bar is the one the product sets for itself: a family should
 never need to understand any of this to be protected by it.
 
-1. Fork the project and create a branch (`git checkout -b feature/short-name`)
-2. Run `just test` before and after; add a test for what you changed. UI work gets a widget test that builds the real screen.
-3. Commit in small, focused steps with a message that says what changed and why
-4. Push the branch and open a pull request
+1. Start from an issue, or open one.
+2. Branch from `master`, run `just test` before and after, and add a test for what you changed.
+3. Commit in small, focused steps, with a subject that says what changed for the person running KosherOS.
+4. Open a pull request that links the issue.
 
 Things that are always welcome without asking first: a site or word the shipped lists miss, a
 sentence in the apps that a parent would not understand, a claim in these docs that a booted
-machine proved wrong. A `CONTRIBUTING.md` with the DCO is on the roadmap; until then, sign your
-commits off (`git commit -s`) to say you have the right to contribute them.
+machine proved wrong. [How to contribute](https://aareman.github.io/KosherOS/contributing/)
+has the setup, the loops, the commit conventions and what CI does;
+[CONTRIBUTING.md](CONTRIBUTING.md) is the short version.
 
 ## Licence
 

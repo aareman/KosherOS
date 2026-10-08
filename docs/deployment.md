@@ -1,248 +1,194 @@
-# Shipping updates to real machines
+# Updates and channels
 
-*Nothing here is hosted yet. This records the decisions that are settled,
-what already exists in the tree, and what has to be true before an image
-goes onto someone's laptop.*
+KosherOS is a container image. A machine updates by pulling the newest
+version of the image it follows and rebooting into it atomically, with the
+previous version kept to go back to. This page describes how a build gets
+from a merge to a family's machine, what a machine does when an update goes
+wrong, and what is still to be done before the first family installs it.
 
-## There is no "ISO server"
+## Three things ship separately
 
-bootc updates come from an **OCI container registry**: the machine polls
-the newest digest of an image ref and stages an atomic reboot into it. The
-ISO is only ever for the *first* install. So there are three independent
-delivery channels, and they have almost nothing in common.
+| What | How it ships | Size |
+|---|---|---|
+| the OS | a container registry; the machine runs `bootc upgrade` on a timer | a few GB on first pull, small differences after |
+| the category database | a signed manifest and a hash-verified download | about 190 MB, pulled on refresh |
+| word lists, site rules, search terms | inside the signed portal bundle | kilobytes |
+| the installer ISO | a file, for the first install only | GBs, pulled once |
 
-| what | how it ships | size / traffic | needs |
-|---|---|---|---|
-| the OS | container registry, `bootc upgrade` | few GB first pull, small deltas after | a real registry (`/v2/` API) — object storage will not do |
-| category database | signed manifest + hash-verified download | ~190 MB, re-pulled on refresh | dumb static hosting; needs no trust of its own |
-| word lists, site rules, search blocklist | inside the signed portal bundle | kilobytes | the portal |
-| installer ISO | static file | GBs, pulled rarely | dumb static hosting |
+Filter lists must never need an OS release. The portal signs a manifest
+with the database's URL, size and SHA-256; the device fetches the file from
+wherever the manifest says and checks it against the hash before it goes
+near the filter. [Content filtering](content-filtering.md#the-lists-shipped-updated-edited)
+describes the list layers.
 
-The list channels matter because **filter lists must never need an OS
-release.** `catalogsync.py` was written for exactly this: the portal signs
-a manifest (URL, size, SHA-256), the device fetches the database from
-anywhere at all and checks it against that hash before it goes near the
-filter. The signature covers the hash, so the download itself can come
-over plain HTTP from a mirror or a CDN and a byte out of place is caught.
+## Versions
+
+Every merge to `master` that passes its tests gets a version, plain
+`0.MINOR.PATCH`, and the git tag is the version. Nothing in the tree
+records it. A `feat` in the commits since the last tag moves the minor
+number; anything else moves the patch; a breaking change moves the minor
+too, which is what a zero major version is for. The major never moves on
+its own. Version 1.0.0 is a decision, made by a person pushing the tag.
+
+CI's image job builds the number into the image, and the release job, last
+of all, pushes the tag, copies the image to the version's tag, signs it and
+creates the GitHub release on it. A number is spent only when its tag
+lands, so a run that fails anywhere before that spends nothing and the
+next merge takes the same number. A merge that changed nothing in the image
+still gets a version and a release, which says so.
+
+The number reaches the OS, the installer's welcome screen, the ISO's file
+name and the admin app's Updates page. A build made anywhere but CI calls
+itself something like `0.7.0-dev.3+g2049571`, so it is never mistaken for a
+release. `python3 scripts/version.py show` says what a checkout would be
+called.
+
+## Two channels
+
+| Channel | Who | How it moves |
+|---|---|---|
+| `edge` | the maintainer's own machine, and testers | every merge to `master` that changes the image |
+| `stable` | everyone else | a person promotes a version that has run well on edge |
+
+`edge` is published by CI: every merge becomes `:edge`, alongside the
+commit's own tag and the version's tag, signed with cosign. `stable` is
+never built by a push. The "Promote to stable" workflow, run by hand with a
+version tag, verifies the signature on that version's image came from this
+repository's CI, copies the same image to `:stable` and `:latest` without
+rebuilding, and marks the release as the stable one. What families run is
+a build somebody chose.
+
+At the time of writing nothing has been promoted yet, so there is no stable
+image; the first promotion makes one.
+
+**A machine can move between channels.** The admin app's Updates page
+shows both channels, says what each one means, and marks the one in use.
+Switching downloads the other channel's current version straight away and
+starts using it at the next restart, with accounts, settings and files
+untouched. It takes the guardian password and is written to the activity
+log, because putting the family computer on edge means builds nobody has
+tried yet. `kosherctl system channel` does the same from the command line.
+A switch stays inside the same image repository, so a fork or a locally
+built image switches within itself and can never be pointed somewhere else.
+A machine on no channel at all, a pinned version or anything installed
+before channels existed, is shown as exactly that, with the note that it
+will not update on its own.
+
+## Installing
+
+`just release-iso` pulls the stable image from the public registry and
+builds an installer ISO from it, so the installed machine follows the
+stable channel and updates itself. `just release-iso edge` does the same
+for edge. The ISO is named after the version inside the image. A disk built
+from a local image records that local name as its origin and never finds an
+update, so an installer for a real machine is always built from the
+registry.
+
+The installer creates no users and asks no passwords; the first boot runs
+the setup wizard instead. If the machine has exactly one internal drive
+that is not the installer stick, the disk question answers itself and the
+install is a single Begin Installation button. With two or more candidate
+disks the installer asks, so a second drive is never wiped unseen.
+
+Downloadable ISOs are not published yet. See [what is still to
+do](#what-is-still-to-do).
+
+## Going back
+
+The daemon knows which image is booted and which one "go back" would return
+to. The admin app's Updates page has a "Go back to the previous version"
+control that names the version it would return to and is disabled with a
+reason when there is nothing to go back to. `kosherctl system rollback`
+does the same. Going back needs the update right but not the guardian
+password, because the image is one this machine already ran and the
+machine has to be able to do the same thing with no password at all. Both
+directions are written to the activity log; a rollback especially, since
+it can restore an older filter.
+
+**The machine puts itself back on its own.** greenboot runs a required
+health check on every boot: the daemon is up, the resolver answers on
+loopback, the firewall table is loaded, and, where somebody is in filtered
+mode, the proxy is running. If a newly staged image fails that, the boot
+counter runs down and the machine returns to the deployment it came from.
+Every assertion in that check is local. It never tests whether the
+internet works, because a family's router being off must not roll the
+operating system back, and there is a test asserting the script reaches no
+network.
+
+This path has been verified against the units and tested as a script, and
+has not yet been watched firing on a deliberately broken image. That needs
+a VM boot.
 
 ## Settled decisions
 
 **Distribution is public and the OS is free.** Anyone may download and
-install KosherOS; there is no per-device authentication on the registry
-and no licence gate on the OS. This is not only a philosophical choice —
-it keeps the free tier of a public registry available, which is the
-single largest hosting subsidy the project gets. Gating distribution
-would mean per-device tokens, a self-hosted registry, and a bandwidth
-bill.
+install KosherOS. There is no per-device authentication on the registry
+and no licence gate on the OS. Besides being the point of the project, it
+keeps the free tier of a public registry available, which is the largest
+hosting subsidy the project gets.
 
-**Zero marginal cost per device is a requirement, not a preference.** The
-whole point of the project is filtered computers for families who should
-not have to pay hundreds of dollars per device per year, which is what
-the existing offerings charge. So any design that puts a per-family cost
-in the update path — metered egress, hosting that scales with installs, a
-subscription choke point — contradicts the reason the thing exists. Every
-choice below is made against that constraint, and it is why the pieces
-that carry real bytes are deliberately placed on free, hash-verified,
-CDN-backed hosting rather than on a VPS whose bill grows with adoption.
+**Zero cost per device is a requirement.** Existing kosher filters charge
+hundreds of dollars per device per year. Any design that puts a per-family
+cost in the update path, metered egress, hosting that scales with
+installs, a subscription in the way of lists, contradicts the reason the
+project exists.
 
-**Hosting is GitHub-first, chosen to keep costs down.** ghcr.io for the
-image, GitHub Releases for the ISO, GitHub Pages for the marketing site,
-GitHub Actions for CI, and one small VPS alongside for the always-on
-portal and update service. Deliberately *not* a hyperscaler: this is an
-egress-dominated product and metered egress is the wrong bill to take
-on. ECR + S3 + CloudFront + Fargate is the same architecture at many
-times the price.
+**Hosting is GitHub-first.** ghcr.io for the image, GitHub Releases for the
+ISO, GitHub Pages for this site, GitHub Actions for CI, and one small VPS
+for the always-on portal. Not a hyperscaler: this
+is an egress-dominated product and metered egress is the wrong bill.
 
-**Bandwidth is dominated by OS image pulls**, so anything that reduces
-layer churn per release is worth real effort. kosherd and the apps are
-already the last layers in the Containerfile for this reason; keep it
-that way.
+**Bandwidth is dominated by image pulls**, so anything that reduces layer
+churn per release is worth effort. The daemon and the apps are the last
+layers in the Containerfile for this reason.
 
 **The signing key does not live at any provider.** An offline copy exists
 before a single machine is fielded. Losing it is the one unrecoverable
-failure in this design: every fielded machine has pinned it, and no
-update can be published without it.
+failure in this design.
 
-## What already works
+## What is still to do
 
-| piece | state |
-|---|---|
-| image build, push, cosign signature | `.github/workflows/ci.yml` — builds on push to master, pushes `:latest` and `:<sha>` to ghcr, signs both keyless |
-| automatic update polling | `bootc-fetch-apply-updates.timer` enabled (`os-image/Containerfile`) |
-| updates and rollback from the daemon | `CheckUpdate`, `ApplyUpdate`, `DeploymentStatus`, `Rollback` in `kosherd/src/kosherd/daemon.py` |
-| self-healing updates | greenboot, with a required check that the filter is enforcing (`os-image/files/etc/greenboot/check/required.d/`) |
-| signed policy sync | `sync.py` + portal `/api/v1/devices/{id}/policy`, Ed25519, replay-proof by revision |
-| signed list bundle | portal `/api/v1/devices/{id}/lists`, installed by `lists.install_portal_lists` |
-| hash-verified category database | `catalogsync.py` — atomic replace, and only after the new database opens and answers a query |
-| dev iteration path | `just vm-upgrade` — a rootless registry on the host, `bootc switch` + `upgrade` in the VM, ~1 min |
+In the order it blocks a family installing KosherOS.
 
-## What blocks a real install
-
-In the order it blocks daily-driving the thing.
-
-**1. Signature verification is a TODO.** `os-image/Containerfile` says so
-in as many words — grep for `TODO(stage 2)` above the kosherd layers. CI
-*signs* images; the fielded machine verifies nothing and will boot
-whatever sits at the ref. This is the tamper-resistance story of the whole
-product and it must land before real hardware exists. Needs
-`/etc/containers/policy.json` plus `registries.d/`.
-
-Sign with **our own cosign keypair**, not keyless. Keyless pins trust to
-a GitHub OIDC identity, so renaming the repo or restructuring the
-workflow silently breaks updates on every fielded machine, and
-containers-policy's keyless identity matching is the fussier path. Keep
-the keyless signature too if it is free; verify against a key we control
-and can rotate deliberately.
-
-**2. An installed machine must point at the public registry — built.** ✅
-A disk built from `localhost/kosher-linux:dev` records that as its bootc
-origin and never finds an update again; every machine installed before
-this existed is in that state and needs a reinstall to get onto the update
-path. `just release-iso [CHANNEL]` pulls `ghcr.io/aareman/kosher-linux:stable`
-(or `:edge`) and builds the ISO from it, so the installed machine's origin
-is the channel and `bootc upgrade` — and the timer that runs it — follow
-it. The ISO is named after the version inside the image. Still to confirm:
-`bootc status` on the actual machine, not in a VM.
-
-**3. Channels — built.** ✅ Two channels, decided by the user: **`:edge`**
-is published by CI on every push to master (with the commit-sha tag and
-the `v<VERSION>` tag, plus a GitHub release), and is the maintainer's own
-daily driver where every build lands first. **`:stable`** is
-never built by a push: the "Promote to stable" workflow
-(`.github/workflows/release-stable.yml`, run by hand with a version tag)
-copies the exact signed image for that version to `:stable` and `:latest`,
-after verifying its cosign signature came from this repository's CI, and
-marks the GitHub release as the stable one. So what families run is a
-build somebody chose. The immutable per-version tags are what a rollback
-names.
-
-**Versions are sequential, and the tag is the version.** Nothing in the
-tree records the number: `scripts/version.py` counts it from the last tag
-reachable from a commit plus what the commits since it say (a `feat` moves
-the minor, anything else the patch). The image job builds the pushed commit
-with that number in it, and the release job, after the tests and the build
-have passed, pushes the tag, copies the image to the version's tag and
-signs it, then creates the release on the tag (`scripts/publish-releases.py`).
-The number is spent only when the tag lands, so a run that fails before
-that spends nothing and the next merge takes the same number. A run that
-dies after it leaves a tag with no release, and the next run finishes it.
-
-It used to be a `VERSION` file that CI committed to master before building.
-Every failure downstream burned a number, and the release step failed for
-good whenever a commit touching a workflow file landed before it ran:
-GitHub demands a scope the Actions token cannot hold to release an explicit
-commit in that case. 0.3.0, 0.4.2, 0.5.0 and 0.6.0 were spent that way and
-tagged by hand afterwards.
-
-**A machine can move between them.** ✅ `ListChannels` says which
-channels exist, which one this computer follows and what each one would
-switch it to; `SetChannel` runs `bootc switch` onto the other tag of the
-**same repository**, so a fork or a locally built image switches within
-itself and this can never point a computer somewhere else. It is the same
-pull as an update, on the same progress signals, staged for the next
-restart, with accounts, settings and files untouched — and it is the way
-a machine pinned to one version rejoins a channel. Guardian-gated and
-written to the activity log, because putting the family computer on edge
-means builds nobody has tried yet. The admin app's Updates page offers
-the two channels as rows that say what each one means, with a check on
-the one in use; `kosherctl system channel` lists them and `kosherctl
-system channel edge` switches. A `bootc switch` does not move the running
-deployment, only the one queued for the next restart, so both surfaces
-read the *staged* image as well and say "at the next restart" rather than
-claiming nothing happened. A machine on no channel at all — a pinned
-version, a digest, or anything installed before channels existed — is
-shown as exactly that, with the note that it will not update on its own.
-
-**4. Rollback — built.** ✅ The daemon exposes `DeploymentStatus` (which
-image is booted, and what "go back" would return to) and `Rollback`, with
-`kosherctl system status|check|update|rollback|channel` over them and a
-**"Go back to the previous version"** control on the admin app's Updates page, which
-names the version it would return to and is disabled with a reason when
-there is nothing to go back to. `Rollback` needs the update right but
-**not** the guardian password: the image is one this machine already ran,
-and greenboot has to be able to do the same thing with no password at all,
-so gating it would mainly risk a machine nobody present can repair.
-Changing which image the machine runs is written to the activity log in
-both directions — a rollback especially, since it can restore an older
-filter.
-
-✅ **And the machine puts itself back.** greenboot is installed and
-`greenboot-healthcheck.service` enabled (its own `[Install]` carries
-`Also=greenboot-set-rollback-trigger.service`, so enabling one arms both —
-verified against the unit in `fedora-bootc:44`, and the build now asserts
-`is-enabled` for both so a rename fails the build rather than shipping a
-machine with no floor). The required check at
-`os-image/files/etc/greenboot/check/required.d/10-kosher-filter.sh` asserts
-kosherd is up, the resolver is up and answering on loopback, the
-`inet kosher` nftables table is loaded, and — only where somebody is
-actually in `filtered` mode — that the proxy is running. If a newly staged
-image fails that, the boot counter runs down and the machine returns to
-the deployment it came from.
-
-Every assertion in that check is deliberately **local**. It must never
-test whether the internet works: a family's router being off would
-otherwise roll the operating system back, which is both useless and
-alarming. There is a test asserting the script reaches no network.
-
-Still open here: a decision on what the auto-update timer does — staging
-silently and taking effect at the next natural reboot is the
-recommendation, rather than nagging a parent. And greenboot has never
-actually fired: the unit name is verified and the check is unit-tested,
-but watching a deliberately broken image roll itself back needs a VM
-boot, which needs sudo and is a person's job.
-
-**5. List updates must not require enrolment.** Today the only path to
-fresh lists is a family enrolling in a portal. For a shipped product the
-category database and word lists have to refresh on every machine out of
-the box — requiring a non-technical parent to enrol somewhere before
-their lists stop going stale is the same failure as requiring them to
-curate the lists themselves. Split the portal's two roles: a **public
-update service** (unauthenticated GET of the signed bundle and manifest,
-public key pinned into the image at build time) and the **per-family
-portal** (enrolment, policy, remote support). Same codebase, two
-deployments.
-
-This is the central promise rather than a convenience. A device that has
-never been enrolled, never registered and never paid for anything still
-gets current filter lists forever. Anything less recreates the
-per-device subscription this project exists to replace.
-
-**6. The list build belongs in CI, not the image build.**
-`os-image/Containerfile:146` runs `fetch-categories.py` with
-`|| echo "WARNING: category import failed"`, so one bad upstream day
-ships an image with the seed list and nobody notices. Move it to a
-nightly job that builds the database, puts it behind a CDN, and publishes
-the signed manifest. The image then carries the last good snapshot and
-machines pull newer on their own.
-
-**7. Marketing site and downloads.** Static site; a download page with
-the ISO, its SHA-256, its signature, and instructions for checking them;
-a page on what is actually filtered; a support page. Lowest risk, and
-genuinely the last thing that has to be right.
+1. **Signature verification on the machine.** CI signs every image; the
+   fielded machine verifies nothing yet and will boot whatever sits at the
+   ref. This is the tamper-resistance story of the whole product. It needs
+   a containers policy and registry configuration in the image, verifying
+   against a key the project controls and can rotate, rather than keyless
+   identity alone, so that renaming the repository cannot silently break
+   updates on every fielded machine.
+2. **List updates without enrolment.** Today the only path to fresh lists
+   is a family enrolling in a portal. A shipped product has to refresh the
+   category database and word lists on every machine out of the box,
+   because requiring a non-technical parent to enrol somewhere before
+   their lists stop going stale is the same failure as requiring them to
+   curate the lists. The plan is to split the portal into a public update
+   service, an unauthenticated download of the signed bundle with the
+   public key pinned into the image, and the per-family portal for
+   enrolment and policy. Same code, two deployments.
+3. **The list build belongs in CI, not the image build.** The image build
+   fetches the category lists and falls back to a seed list with a warning
+   if the fetch fails, so one bad upstream day could ship an image with the
+   seed list. A nightly job should build the database, publish it as a
+   release asset, and publish the signed manifest; the image then carries
+   the last good snapshot and machines pull newer on their own.
+4. **What the update timer does.** The stock bootc timer is enabled, and
+   it restarts the machine into an update once one is downloaded. Whether
+   it should instead stage the update and wait for the next natural
+   restart, rather than interrupting a parent, is not decided.
+5. **Downloads.** A download page with the ISO, its SHA-256, its signature
+   and instructions for checking them.
 
 ## Costs
 
-Near zero, by construction, and it has to stay that way as adoption
-grows.
-
+Near zero by construction, and it has to stay that way as adoption grows.
 ghcr is free for public images with no meaningful egress cap, and bootc
 pulls only changed layers. GitHub Pages and Releases are free.
 
-**The 190 MB category database should be a GitHub Release asset**, not a
-file on the VPS. This falls out of `catalogsync.py`'s design rather than
-being a trick: the portal signs a manifest carrying the URL and the
-SHA-256, and the device verifies the hash before the database goes near
-the filter — so the download itself needs no trust and can come from
-anywhere. GitHub Releases are free, CDN-backed, need no authentication
-for a public repository, and take files far larger than this. The nightly
-job that rebuilds the database publishes it as a release asset and hands
-the portal a manifest pointing at it.
-
-That leaves the VPS serving only the signed manifest and the policy
-endpoints — kilobytes per device per day. The recurring bill is one small
-VPS regardless of whether ten families or ten thousand are running
-KosherOS, which is the property the project needs.
-
-The number worth measuring before committing to anything: the compressed
-size of the image itself. The qcow2 is 4.77 GB, so a few GB compressed is
-the working estimate, and it drives every other figure here.
+The category database should be a GitHub Release asset rather than a file
+on the VPS. The manifest's signature covers the hash, so the download needs
+no trust and can come from anywhere; GitHub Releases are free, CDN-backed
+and need no authentication for a public repository. That leaves the VPS
+serving only the signed manifest and the policy endpoints, kilobytes per
+device per day, so the recurring bill is one small VPS whether ten families
+or ten thousand are running KosherOS.

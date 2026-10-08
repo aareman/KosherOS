@@ -116,6 +116,9 @@ ACTIONS = {
     "SetMediaLevel": ACTION_MANAGE_FILTER,
     "SetLanguageFilter": ACTION_MANAGE_FILTER,
     "SetYouTube": ACTION_MANAGE_FILTER,
+    # Finding a channel to approve reads nothing of the machine's and
+    # changes nothing; approving it is SetYouTube, which is gated.
+    "SearchYouTubeChannels": ACTION_READ_CONFIG,
     "ListProfiles": ACTION_READ_CONFIG,
     "FilterStatus": ACTION_READ_CONFIG,
     "GetListEdits": ACTION_READ_CONFIG,

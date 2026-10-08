@@ -9,6 +9,7 @@ a value is the kind of bug nobody notices until a family hits it.
 
 from __future__ import annotations
 
+import re
 import time
 
 from kosherd import appaccess
@@ -133,6 +134,31 @@ YOUTUBE_RESTRICT_LABELS = {
     "strict": "Strict",
 }
 YOUTUBE_RESTRICT_ORDER = ("none", "moderate", "strict")
+
+# A channel's handle or ID, alone or inside any of its addresses — what the
+# filter matches on. youtube.com/c/… and /user/… names are not here: the
+# filter cannot match them, so they are searched for like any other name.
+_CHANNEL_HANDLE = re.compile(r"(?:^|youtube\.com/)(@[\w.-]+)", re.IGNORECASE)
+_CHANNEL_ID = re.compile(r"(?:^|/channel/)(UC[\w-]{22})(?:$|[/?#])")
+
+
+def youtube_channel_ref(text: str) -> str | None:
+    """'@handle' or 'UC…' from what an admin pasted — the handle or ID
+    itself, or an address of the channel or of its page — or None when it
+    is a name to search for instead."""
+    text = (text or "").strip()
+    for pattern in (_CHANNEL_HANDLE, _CHANNEL_ID):
+        match = pattern.search(text)
+        if match:
+            return match.group(1)
+    return None
+
+
+def channel_result_subtitle(channel: dict) -> str:
+    """'@torahanytime1 · 12.8K subscribers' for a search result, falling
+    back to the ID so two channels with one name can be told apart."""
+    parts = [p for p in (channel.get("handle"), channel.get("subscribers")) if p]
+    return " · ".join(parts) or channel["id"]
 
 # How the desktop looks, in the order a parent would consider them. Not a
 # protection — the filter does not care which shell draws the windows — so

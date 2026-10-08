@@ -117,6 +117,19 @@ def test_youtube_settings_roundtrip():
     assert Policy.from_dict(pol.to_dict()).users[0].youtube == yt
 
 
+def test_an_approved_channel_found_by_search_keeps_its_name():
+    # Listed by ID, which is what every YouTube page names; the name is
+    # only for the admin app to show.
+    yt = {"allowed_channels": ["UC7BFmSXP4mHMNSvWUaqg2uQ"],
+          "channel_names": {"UC7BFmSXP4mHMNSvWUaqg2uQ": "TorahAnytime"}}
+    pol = Policy(users=[UserPolicy(uid=1000, username="x", mode="filtered", youtube=yt)])
+    assert Policy.from_dict(pol.to_dict()).users[0].youtube == yt
+    doc = pol.to_dict()
+    doc["users"][0]["youtube"]["channel_names"] = {"UC7BFmSXP4mHMNSvWUaqg2uQ": 7}
+    with pytest.raises(PolicyError):
+        Policy.from_dict(doc)
+
+
 def test_an_invalid_media_level_is_rejected():
     from kosherd.policy import UserPolicy
 

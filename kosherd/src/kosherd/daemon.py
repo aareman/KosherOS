@@ -25,7 +25,7 @@ gi.require_version("Gio", "2.0")
 from gi.repository import Gio, GLib
 
 from . import (BUS_NAME, OBJECT_PATH, access, appaccess, appkinds, apps, auth,
-               policy as policy_mod)
+               policy as policy_mod, ytsearch)
 from .apply import apply_policy
 from .apps import AppError
 from .guardian import Guardian, GuardianError
@@ -127,6 +127,10 @@ INTROSPECTION_XML = """
       <arg direction="in" type="i" name="uid"/>
       <arg direction="in" type="s" name="settings_json"/>
       <arg direction="in" type="s" name="guardian_password"/>
+    </method>
+    <method name="SearchYouTubeChannels">
+      <arg direction="in" type="s" name="query"/>
+      <arg direction="out" type="s" name="results_json"/>
     </method>
     <method name="SetUserAdmin">
       <arg direction="in" type="i" name="uid"/>
@@ -424,8 +428,10 @@ UID_AWARE = access.UID_AWARE
 # the admin app said "Starting…" and "Checking…" until it was closed.
 # None of these change the policy, which is what makes it safe for them
 # to finish off the main loop.
+# A YouTube channel search waits on YouTube instead, which is as good a
+# reason: the main loop must not stop for the network.
 IN_BACKGROUND = frozenset({"CheckUpdate", "DeploymentStatus", "ListChannels",
-                           "SetChannel", "Rollback"})
+                           "SetChannel", "Rollback", "SearchYouTubeChannels"})
 
 # Seconds to wait on each short bootc command before saying so. A check
 # goes to the registry, so it gets longer than reading local status. A pull
@@ -1298,6 +1304,15 @@ class Daemon:
         self._managed(uid).youtube = settings
         self._save_and_apply()
         return None
+
+    def impl_SearchYouTubeChannels(self, query: str):
+        """Channels matching a name, so an admin approves one by picking it
+        instead of copying its ID out of an address (see ytsearch)."""
+        try:
+            found = ytsearch.search_channels(query)
+        except ytsearch.SearchError as e:
+            raise PolicyError(str(e)) from None
+        return GLib.Variant("(s)", (json.dumps(found),))
 
     def impl_SetLayout(self, uid: int, layout: str):
         """Choose how an account's desktop is laid out.

@@ -45,13 +45,13 @@ class FakeBackend:
         return {"results": self.results}
 
 
-def start(user, results=None, fail=False):
+def start(user, results=None, fail=False, backend=None):
     """Run the real server on an ephemeral port with a stubbed backend."""
     policy = search_mod.SearchPolicy(Path("/nonexistent"))
     policy._users = {UID: user}
     policy._refresh = lambda: None
 
-    server_mod.Handler.backend = FakeBackend(results, fail)
+    server_mod.Handler.backend = backend or FakeBackend(results, fail)
     server_mod.Handler.result_filter = search_mod.ResultFilter(
         policy=policy, bundle=FakeBundle(), scorer=content.load(TERMS),
         blocklist=search_mod.load_blocklist(BLOCKLIST),
@@ -150,10 +150,49 @@ def test_an_unknown_user_is_shown_nothing(get):
 
 
 def test_a_backend_outage_says_so_instead_of_showing_nothing(get):
-    # "No results" would be a lie, and a lie that reads as censorship.
+    # "No results" would be a lie, and a lie that reads as censorship. In
+    # words, because the page's head has gone out before the engine is
+    # asked, so a status code cannot carry the news.
     status, body = get({"mode": "filtered"}, "/search?q=torah", fail=True)
-    assert status == 503
     assert "Search is unavailable" in body
+    assert "No results" not in body
+
+
+def test_the_search_bar_is_drawn_before_the_results_are_ready():
+    # The engine and the filter take a few seconds on a slow connection.
+    # The page must not be a blank tab for that long: the head goes out
+    # at once and the results follow in the same response.
+    import socket
+    gate = threading.Event()
+    results = [{"url": "https://chinuch.org/a", "title": "Lessons",
+                "content": "Torah"}]
+
+    class Slow(FakeBackend):
+        def search(self, query, category, page):
+            gate.wait(5)
+            return {"results": results}
+
+    httpd = start({"mode": "filtered"}, backend=Slow())
+    port = httpd.server_address[1]
+    try:
+        with socket.create_connection(("127.0.0.1", port), timeout=5) as sock:
+            sock.sendall(b"GET /search?q=torah HTTP/1.1\r\n"
+                         b"Host: 127.0.0.1\r\nConnection: close\r\n\r\n")
+            got = b""
+            while b"</header>" not in got:
+                got += sock.recv(65536)
+            # The head is here with the query in the box; the results are
+            # not, because the engine has not answered yet.
+            assert b'value="torah"' in got
+            assert b"chinuch.org" not in got
+            gate.set()
+            while not got.endswith(b"0\r\n\r\n"):
+                got += sock.recv(65536)
+            assert b"chinuch.org/a" in got
+            assert b"</html>" in got
+    finally:
+        httpd.shutdown()
+        httpd.server_close()
 
 
 def test_results_are_never_cached(get):

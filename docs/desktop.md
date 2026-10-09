@@ -77,11 +77,11 @@ and the KosherOS wallpaper.
   session is removed so the login screen offers exactly two sessions.
 - ArcMenu is not packaged by Fedora and needs build tools, so a builder
   stage, pinned to a release, builds it and only the result is copied in.
-  The button says "Apps" with a house icon in the brand blue, because a
-  picture alone did not tell anyone where the apps were, and the KosherOS
-  mark is the admin app's icon and read as "admin" on the taskbar. If a
-  build ships without ArcMenu, Dash to Panel's own apps button with the
-  same house is the fallback.
+  The button says "Apps" beside the front of the Bais Hamikdosh in the
+  brand blue, because a picture alone did not tell anyone where the apps
+  were, and the KosherOS mark is the admin app's icon and read as "admin"
+  on the taskbar. If a build ships without ArcMenu, Dash to Panel's own
+  apps button with the same picture is the fallback.
 - **Hebrew out of the box.** Every account gets English first and Hebrew
   second, the login screen the same, and the advanced session reads the
   system keymap. Super+Space and Alt+Shift both switch, and the indicator

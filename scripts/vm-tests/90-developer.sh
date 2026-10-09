@@ -81,6 +81,30 @@ for _ in $(seq 1 24); do
 done
 check "and can be removed again" 1 as wlkid bash -lc 'command -v gh'
 
+section "Containers are the account's"
+check "docker is podman's shim" 0 test -x /usr/bin/docker
+check_contains "and says so" "podman" docker --version
+check "podman-compose is in the image" 0 test -x /usr/bin/podman-compose
+check_contains "the whitelist account has subordinate ids" "wlkid" cat /etc/subuid
+check_contains "and the firewall maps its block to its chain" "$(awk -F: '/^wlkid:/{print $2"-"($2+$3-1)}' /etc/subuid)" nft list chain inet kosher output
+# A small image with curl: Fedora's own registry is a system domain.
+img=registry.fedoraproject.org/fedora-minimal:44
+if as wlkid timeout 600 podman pull -q "$img" >/dev/null 2>&1; then
+    ok "a whitelist account pulls from a registry"
+    check "a container on a whitelist account reaches a registry" 0 \
+        as wlkid podman run --rm "$img" curl -sS --max-time 20 -o /dev/null https://registry.npmjs.org/
+    check "but not a site off the list" 1 \
+        as wlkid podman run --rm "$img" curl -sS --max-time 20 -o /dev/null https://example.com/
+    check "inside the container the system bundle is in place" 0 \
+        as wlkid podman run --rm "$img" grep -q BEGIN /etc/ssl/certs/ca-certificates.crt
+    check_contains "and the tools inside are pointed at it" "ca-certificates.crt" \
+        as wlkid podman run --rm "$img" printenv SSL_CERT_FILE
+    as wlkid podman rmi -f "$img" >/dev/null 2>&1
+else
+    bad "a whitelist account could not pull $img"
+fi
+check "a no-internet account cannot pull" 1 as nokid timeout 120 podman pull -q "$img"
+
 section "What a build may fetch"
 # A fixed-output build runs as a nixbld user with the network. The wrong
 # hash is deliberate: "hash mismatch" means the fetch SUCCEEDED (the

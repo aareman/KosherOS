@@ -21,11 +21,24 @@ RUN mkdir -p /out && ( git clone --depth 1 --branch "${ARCMENU_REF}" \
 FROM quay.io/fedora/fedora-bootc:44
 
 # --- Packages ---------------------------------------------------------------
-# GNOME desktop + our runtime deps. Remove escape hatches (toolbox/container
-# tooling is attack-surface hygiene; the skuid firewall holds regardless).
+# GNOME desktop + our runtime deps. toolbox is excluded: a mutable Fedora
+# beside the locked-down one is an escape hatch. Containers themselves
+# are not — see podman below.
 # dnf5 can't mix a @group with plain packages in one install, hence two calls.
-RUN dnf -y install --exclude=toolbox --exclude=podman @workstation-product-environment && dnf clean all
+RUN dnf -y install --exclude=toolbox @workstation-product-environment && dnf clean all
 RUN dnf -y install dnsmasq nftables python3-gobject python3-jsonschema python3-pip \
+        # Rootless containers (issue #34): podman, with `docker` as its own
+        # shim (podman-docker) so the tools that look for one — the Dev
+        # Containers extension, scripts — find it, and podman-compose for
+        # compose files. Rootless only: a rootless container's network is a
+        # user-space process owned by the account, so every packet it
+        # sends carries the account's uid and is filtered as the account.
+        # A root daemon's bridge would leave through the kernel's forward
+        # path with no owner to dispatch on, which is why there is no
+        # Docker daemon. /etc/containers/mounts.conf and
+        # containers.conf.d/ put the filter's certificate inside every
+        # container; kosherd gives each account its subordinate ids.
+        podman podman-docker podman-compose passt \
         malcontent malcontent-tools flatpak accountsservice cage \
         ca-certificates \
         # greenboot: if a new image boots without the filter coming up, the
@@ -62,14 +75,13 @@ RUN dnf -y install dnsmasq nftables python3-gobject python3-jsonschema python3-p
     && usermod -aG kosher-spool kosher-mitm \
     && usermod -aG kosher-spool kosher-search
 # sudo is on dnf's protected list; removing it here is the whole point.
-# podman must STAY: bootc (the update mechanism) depends on it in F44+. The
-# skuid firewall contains rootless containers, and SUB_UID_COUNT=0 below
-# denies new users subordinate IDs anyway.
+# (podman stays, and not only for containers: bootc, the update
+# mechanism, depends on it in F44+.)
 RUN for p in sudo toolbox gnome-boxes gnome-software PackageKit \
         PackageKit-command-not-found gnome-initial-setup gnome-classic-session; do \
         rpm -q "$p" >/dev/null 2>&1 && dnf -y --setopt=protected_packages= remove "$p"; \
     done; \
-    ! rpm -q sudo && rpm -q bootc
+    ! rpm -q sudo && rpm -q bootc && test -x /usr/bin/docker && test -x /usr/bin/podman-compose
 
 # Build/branding tooling in one early layer, so the later steps that use it
 # are cheap and local. Layer ORDER in this file is deliberate: the heavy,
@@ -347,7 +359,14 @@ RUN true \
 
 RUN passwd -l root \
     && groupadd -r kosher-admin \
-    && sed -i -e 's/^SUB_UID_COUNT.*/SUB_UID_COUNT 0/' -e 's/^SUB_GID_COUNT.*/SUB_GID_COUNT 0/' /etc/login.defs \
+    # Every new account gets a block of subordinate ids: an image carries
+    # files owned by many uids, and without a block to map them to podman
+    # cannot unpack it. (This used to be 0, as belt to the firewall's
+    # braces; the firewall maps each block to its owner's chain instead —
+    # kosherd/containers.py.) Accounts made before this get theirs from
+    # kosherd.
+    && sed -i -e 's/^SUB_UID_COUNT.*/SUB_UID_COUNT 65536/' -e 's/^SUB_GID_COUNT.*/SUB_GID_COUNT 65536/' /etc/login.defs \
+    && grep -q '^SUB_UID_COUNT 65536' /etc/login.defs \
     && systemctl mask systemd-resolved.service debug-shell.service \
     && systemctl enable sshd.service \
     && systemctl enable kosherd.service kosher-firewall.service kosher-dns.service \

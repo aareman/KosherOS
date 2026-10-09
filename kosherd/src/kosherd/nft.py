@@ -136,6 +136,7 @@ def _extras(user) -> tuple[int, ...]:
 
 def render(policy: Policy, *, dns_uid: int, mitm_uid: int | None = None,
            search_uid: int | None = None, build_gid: int | None = None,
+           subids: dict[int, list[tuple[int, int]]] | None = None,
            doh_block4: tuple[str, ...] = DEFAULT_DOH_BLOCK4) -> str:
     """Return a complete `nft -f`-loadable ruleset for this policy.
 
@@ -145,14 +146,30 @@ def render(policy: Policy, *, dns_uid: int, mitm_uid: int | None = None,
     (fetchurl, fetchFromGitHub) runs as one of them with the network, on
     behalf of whichever account asked and outside that account's filter.
     They get the registries and the system domains, and nothing else.
+    subids: each account's subordinate id blocks ({uid: [(start, end)]},
+    containers.py). A process inside a rootless container that is not
+    root there runs on the host as one of these ids, so every rule that
+    names the account names its blocks too: the container is filtered as
+    its owner.
     """
+    subids = subids or {}
+
+    def owner(uid: int) -> list[str]:
+        """The uid and its blocks, as nft set elements."""
+        return [str(uid)] + [f"{s}-{e}" for s, e in subids.get(uid, [])]
+
+    def owner_match(uid: int) -> str:
+        elems = owner(uid)
+        return elems[0] if len(elems) == 1 else "{ " + ", ".join(elems) + " }"
+
     # Before the system-uid accept: nixbld is below UID_MIN too.
     nix_build = (
         f"        meta skgid {build_gid} jump nix_build\n"
         if build_gid is not None else "")
     vmap_entries = ", ".join(
-        f"{u.uid} : jump {MODE_CHAINS[u.mode]}"
+        f"{elem} : jump {MODE_CHAINS[u.mode]}"
         for u in sorted(policy.effective_users(), key=lambda u: u.uid)
+        for elem in owner(u.uid)
     )
     vmap_rule = f"        meta skuid vmap {{ {vmap_entries} }}\n" if vmap_entries else ""
 
@@ -168,7 +185,7 @@ def render(policy: Policy, *, dns_uid: int, mitm_uid: int | None = None,
         # exceptions are 53 (the resolver's, redirected above), the named
         # non-web protocols, and the account's own extra ports.
         web_redirect = "".join(
-            f"        meta skuid {uid} tcp dport != {{ {_ports(53, *DIRECT_TCP_PORTS, *_extras(by_uid.get(uid)))} }} "
+            f"        meta skuid {owner_match(uid)} tcp dport != {{ {_ports(53, *DIRECT_TCP_PORTS, *_extras(by_uid.get(uid)))} }} "
             f"redirect to :{port}\n"
             for uid, port in ports.items())
     else:
@@ -178,11 +195,12 @@ def render(policy: Policy, *, dns_uid: int, mitm_uid: int | None = None,
     # administrator granted, and the accounts whose video calls are off.
     supervised = [u for u in policy.effective_users() if u.mode in ("filtered", "dnsfilter")]
     per_user = "".join(
-        f"        meta skuid {u.uid} tcp dport {{ {_ports(*u.extra_ports)} }} accept\n"
+        f"        meta skuid {owner_match(u.uid)} tcp dport {{ {_ports(*u.extra_ports)} }} accept\n"
         for u in supervised if u.extra_ports)
     no_video = sorted(u.uid for u in supervised if not u.video_calls)
     if no_video:
-        per_user += (f"        meta skuid {{ {', '.join(map(str, no_video))} }} "
+        elems = [e for uid in no_video for e in owner(uid)]
+        per_user += (f"        meta skuid {{ {', '.join(elems)} }} "
                      f"udp dport >= {UDP_HIGH} reject\n")
 
     # Unfiltered users are sent to the plain resolver, so the safe-search
@@ -190,7 +208,7 @@ def render(policy: Policy, *, dns_uid: int, mitm_uid: int | None = None,
     unfiltered = sorted(u.uid for u in policy.effective_users()
                         if u.mode in UNFILTERED_MODES)
     if unfiltered:
-        uids = ", ".join(str(u) for u in unfiltered)
+        uids = ", ".join(e for uid in unfiltered for e in owner(uid))
         open_dns = (
             f"        meta skuid {{ {uids} }} udp dport 53 redirect to :{OPEN_DNS_PORT}\n"
             f"        meta skuid {{ {uids} }} tcp dport 53 redirect to :{OPEN_DNS_PORT}\n"

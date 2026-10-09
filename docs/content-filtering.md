@@ -650,6 +650,19 @@ are in `DEVELOPER_REGISTRIES` (`policy.py`), reachable from every account
 like the OS's own update and Flathub hosts. They hold code, not pages, and
 a school or work project on this computer needs them on day one.
 
+Containers fetch as the account, with one wrinkle. A rootless container's
+network is pasta, a process owned by the account, so the firewall sees
+the account's uid on everything the container sends and dispatches it
+as usual. But a process inside the container that is not root there runs
+on the host as one of the account's *subordinate* ids, and with
+`--network=host` its sockets carry that id. So every rule that names an
+account's uid names its subordinate block too (`nft.py`, from
+`/etc/subuid` through `containers.py`): the vmap, the proxy redirect,
+the extra ports, the video-call switch, the plain resolver. A block is
+filtered as its owner, whichever id inside it is talking. kosherd gives
+each managed account a block of 65536 when it has none, which is what
+lets images with files of many owners unpack at all.
+
 Nix is the one tool that does not fetch as the account. Its daemon runs
 as root, and a build that fetches its source (`fetchurl`,
 `fetchFromGitHub`) runs as one of the `nixbld` users — below the first

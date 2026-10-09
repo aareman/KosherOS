@@ -28,6 +28,9 @@ kosher-time-notify = "kosherd.timenotify:main"
 # Run by pam_exec after pam_time refuses a sign-in, so the refusal shows in
 # the activity log.
 kosher-time-refused = "kosherd.timelimits:refused_login_main"
+# Run as the account after a nixpkgs app is installed or removed: links
+# the profile's desktop files and icons into ~/.local/share.
+kosher-nix-desktop = "kosherd.nixdesktop:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/kosherd"]

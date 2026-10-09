@@ -73,6 +73,22 @@ def test_the_first_boot_copies_the_skeleton_without_clobbering():
     # keeps every boot after the first from touching a store in use.
     assert starts[1].startswith("/usr/bin/cp -a --no-clobber")
     assert starts[1].endswith("/nix/. /var/lib/nix/")
+    # ...and the copy is relabelled: cp kept the skeleton's default_t on
+    # the booted image, and the daemon's socket could not be created.
+    assert starts[2] == "/usr/sbin/restorecon -R /var/lib/nix"
+
+
+def test_the_store_and_the_daemons_socket_carry_labels_init_may_use():
+    # Seen on a booted image: nothing names /nix in Fedora's policy, so
+    # the socket's label came out default_t and systemd was refused.
+    rules = re.findall(r"semanage fcontext -a -t (\w+) '([^']+)'", CONTAINERFILE)
+    assert rules == [
+        ("var_lib_t", "/nix(/.*)?"),
+        ("var_run_t", "/nix/var/nix/daemon-socket(/.*)?"),
+        ("var_run_t", "/var/lib/nix/var/nix/daemon-socket(/.*)?"),
+    ], "the socket rules must come after the general one: the last match wins"
+    assert "restorecon -R /nix" in CONTAINERFILE
+    assert "matchpathcon -n /nix/var/nix/daemon-socket/socket" in CONTAINERFILE
 
 
 def test_devbox_is_pinned_by_hash_and_checked():

@@ -189,7 +189,10 @@ def test_only_hosts_no_list_knows_about_are_worth_reading():
     assert f.unknown_host("https://brand-new-domain.example/x")
 
 
-def test_the_deep_scan_drops_a_page_the_lists_never_heard_of():
+def test_the_deep_scan_drops_a_page_the_lists_never_heard_of_from_the_next_search_on():
+    # The page is read AFTER the search is answered, never before it: a
+    # fresh search must not wait on the slowest site in it. The verdict
+    # is in the cache for the next search that lists the host.
     pages = {
         "https://newsite.example/": "<title>Free XXX</title><p>live sex cams "
                                     "and porn videos, nude photos daily</p>",
@@ -199,8 +202,11 @@ def test_the_deep_scan_drops_a_page_the_lists_never_heard_of():
     f = make_filter({1001: {"mode": "filtered", "media_level": "none"}},
                     scanner=scanner)
     results = [{"url": u, "title": "", "content": ""} for u in pages]
-    kept = [r["url"] for r in f.filter_results(1001, results)]
-    assert kept == ["https://kosherblog.example/"]
+    first = [r["url"] for r in f.filter_results(1001, results)]
+    assert first == list(pages)            # nothing known yet; nothing waited for
+    assert scanner.idle()
+    second = [r["url"] for r in f.filter_results(1001, results)]
+    assert second == ["https://kosherblog.example/"]
 
 
 def test_a_page_that_cannot_be_read_is_left_alone():
@@ -221,11 +227,74 @@ def test_the_deep_scan_is_capped_per_search():
         fetched.append(url)
         return "<p>Chicken soup</p>"
 
-    f = make_filter({1001: {"mode": "filtered"}}, scanner=_scanner({}, fetch=record))
+    scanner = _scanner({}, fetch=record)
+    f = make_filter({1001: {"mode": "filtered"}}, scanner=scanner)
     results = [{"url": f"https://site{i}.example/", "title": "", "content": ""}
                for i in range(50)]
     f.filter_results(1001, results, max_scans=4)
+    assert scanner.idle()
     assert len(fetched) == 4
+
+
+def test_a_search_never_waits_for_a_page_to_be_read():
+    # The read happens after the search is answered. A site that never
+    # answers costs the search nothing at all.
+    import threading
+    import time
+    release = threading.Event()
+
+    def stall(url):
+        release.wait(5)
+        return "<p>Chicken soup</p>"
+
+    scanner = _scanner({}, fetch=stall)
+    f = make_filter({1001: {"mode": "filtered"}}, scanner=scanner)
+    results = [{"url": f"https://site{i}.example/", "title": "", "content": ""}
+               for i in range(10)]
+    started = time.monotonic()
+    kept = f.filter_results(1001, results)
+    release.set()
+    assert time.monotonic() - started < 0.5
+    assert len(kept) == 10
+
+
+def test_a_page_read_in_the_background_is_hidden_from_the_next_search():
+    import threading
+    release = threading.Event()
+
+    def stall(url):
+        release.wait(5)
+        return "<title>Free XXX</title><p>live sex cams and porn videos, nude photos</p>"
+
+    scanner = _scanner({}, fetch=stall)
+    f = make_filter({1001: {"mode": "filtered", "media_level": "none"}},
+                    scanner=scanner)
+    results = [{"url": "https://slow.example/", "title": "", "content": ""}]
+    assert len(f.filter_results(1001, results)) == 1   # not yet known
+    release.set()
+    assert scanner.idle()
+    assert f.filter_results(1001, results) == []       # now it is
+
+
+def test_a_host_already_being_read_is_not_queued_again():
+    import threading
+    release = threading.Event()
+    calls = []
+
+    def stall(url):
+        calls.append(url)
+        release.wait(5)
+        return "<p>Chicken soup</p>"
+
+    scanner = _scanner({}, fetch=stall)
+    f = make_filter({1001: {"mode": "filtered"}}, scanner=scanner)
+    results = [{"url": "https://slow.example/", "title": "", "content": ""}]
+    f.filter_results(1001, results)
+    f.filter_results(1001, results)
+    f.filter_results(1001, results)
+    release.set()
+    assert scanner.idle()
+    assert len(calls) == 1
 
 
 def test_verdicts_are_cached_so_the_same_host_is_read_once(tmp_path):
@@ -242,6 +311,44 @@ def test_verdicts_are_cached_so_the_same_host_is_read_once(tmp_path):
     scanner.verdict("https://a.example/1", "a.example")
     scanner.verdict("https://a.example/2", "a.example")
     assert len(calls) == 1
+
+
+def test_a_host_that_could_not_be_read_is_not_tried_again_on_every_search(tmp_path):
+    # Not a verdict: the result is still shown. But a site that answers
+    # scrapers by hanging used to be fetched on every search that listed
+    # it, and each time it cost the whole budget.
+    calls = []
+
+    def down(url):
+        calls.append(url)
+        raise OSError("connection reset")
+
+    from kosherd import pagescan
+    scanner = pagescan.PageScanner(
+        scorer=content.load(TERMS), fetch=down,
+        cache=pagescan.VerdictCache(tmp_path / "v.sqlite"))
+    assert scanner.verdict("https://down.example/1", "down.example") is None
+    assert scanner.verdict("https://down.example/2", "down.example") is None
+    assert len(calls) == 1
+    f = make_filter({1001: {"mode": "filtered"}}, scanner=scanner)
+    results = [{"url": "https://down.example/", "title": "", "content": ""}]
+    assert len(f.filter_results(1001, results)) == 1
+
+
+def test_a_remembered_failure_is_tried_again_later(tmp_path):
+    calls = []
+
+    def down(url):
+        calls.append(url)
+        raise OSError("connection reset")
+
+    from kosherd import pagescan
+    scanner = pagescan.PageScanner(
+        scorer=content.load(TERMS), fetch=down,
+        cache=pagescan.VerdictCache(tmp_path / "v.sqlite", retry=-1))
+    scanner.verdict("https://down.example/", "down.example")
+    scanner.verdict("https://down.example/", "down.example")
+    assert len(calls) == 2
 
 
 def test_an_expired_verdict_is_read_again(tmp_path):

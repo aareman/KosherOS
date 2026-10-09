@@ -820,6 +820,88 @@ def test_an_approved_channel_plays(addon):
     assert flow.response.content == body.encode() or flow.response.text == body
 
 
+# The shape of a real /youtubei/v1/player answer (ThePrimeTimeagen, October
+# 2026): the channel's handle appears ONLY in the microformat's profile
+# address. There is no canonicalBaseUrl anywhere in it.
+_PRIME_PLAYER = {
+    "videoDetails": {"channelId": "UCUyeluBRhGPCW4rPe_UvBZQ", "author": "The PrimeTime"},
+    "microformat": {"playerMicroformatRenderer": {
+        "ownerProfileUrl": "http://www.youtube.com/@ThePrimeTimeagen",
+        "externalChannelId": "UCUyeluBRhGPCW4rPe_UvBZQ",
+        "category": "Science & Technology"}},
+}
+
+
+def test_the_player_json_names_its_handle_only_by_profile_address(addon):
+    # "youtube channel allowed is still blocked": the admin approved the
+    # handle, as the dialog says to, and every video after the first was
+    # refused — the player JSON carries no canonicalBaseUrl, so the handle
+    # read as missing and matched nothing.
+    import json
+
+    body = json.dumps(_PRIME_PLAYER)
+    assert addon.YouTube.channel_of(body) == ("UCUyeluBRhGPCW4rPe_UvBZQ",
+                                              "@ThePrimeTimeagen")
+    filt = _yt_filter(addon, {"allowed_channels": ["@ThePrimeTimeagen"]})
+    flow = _player_flow(addon, body)
+    filt._filter_youtube(flow, 1001)
+    assert flow.response.content == body.encode() or flow.response.text == body
+
+
+@pytest.mark.parametrize("spelling", [
+    "@ThePrimeTimeagen", "@theprimetimeagen", "theprimetimeagen",
+    "https://www.youtube.com/@ThePrimeTimeagen",
+    "youtube.com/@ThePrimeTimeagen/videos",
+    "UCUyeluBRhGPCW4rPe_UvBZQ",
+    "https://www.youtube.com/channel/UCUyeluBRhGPCW4rPe_UvBZQ",
+])
+def test_a_channel_is_approved_however_the_admin_spelled_it(addon, spelling):
+    import json
+
+    body = json.dumps(_PRIME_PLAYER)
+    assert addon.KosherFilter._youtube_verdict(body, [spelling], [],
+                                               strict_unknown=True) is None
+
+
+def test_a_near_namesake_is_not_the_approved_channel(addon):
+    # The same person's other channel, one word apart in the handle.
+    import json
+
+    body = json.dumps(_PRIME_PLAYER)
+    why = addon.KosherFilter._youtube_verdict(body, ["@ThePrimeagen"], [],
+                                              strict_unknown=True)
+    assert why and "approved channels" in why
+
+
+def test_the_watch_page_handle_is_the_owners_not_a_suggestions(addon):
+    # A watch page names the owner in its player response and then every
+    # suggested video's channel further down; the owner's is the one read.
+    body = ('{"videoDetails":{"channelId":"UC1"},'
+            '"ownerProfileUrl":"http://www.youtube.com/@owner"}'
+            '... {"canonicalBaseUrl":"/@suggested"}')
+    assert addon.YouTube.channel_of(body) == ("UC1", "@owner")
+
+
+def test_channel_names_have_one_spelling(addon):
+    key = addon.YouTube.channel_key
+    assert key("@ThePrimeTimeagen") == key("theprimetimeagen") == "@theprimetimeagen"
+    assert key("https://www.youtube.com/@ThePrimeTimeagen?si=abc") == "@theprimetimeagen"
+    assert key("UCUyeluBRhGPCW4rPe_UvBZQ") == "UCUyeluBRhGPCW4rPe_UvBZQ"
+    assert key("www.youtube.com/channel/UCUyeluBRhGPCW4rPe_UvBZQ/videos") == \
+        "UCUyeluBRhGPCW4rPe_UvBZQ"
+    assert key("Torah Channel") == "torah channel"
+    assert key("") is None and key("  ") is None and key(None) is None
+
+
+def test_a_feed_matches_approved_channels_regardless_of_case(addon):
+    feed = {"contents": [_renderer("The PrimeTime", handle="@ThePrimeTimeagen",
+                                   browse_id="UCUyeluBRhGPCW4rPe_UvBZQ")]}
+    for allowed in ({"@theprimetimeagen"}, {"theprimetimeagen"},
+                    {"https://www.youtube.com/@ThePrimeTimeagen"}):
+        assert addon.YouTube.prune_feed(feed, allowed)["contents"], allowed
+    assert addon.YouTube.prune_feed(feed, {"@ThePrimeagen"})["contents"] == []
+
+
 def test_the_answer_is_json_the_player_understands(addon):
     # A 403 here spins forever and an HTML block page is a broken app;
     # this response is consumed by the player, not read by a person.

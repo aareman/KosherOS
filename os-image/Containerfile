@@ -237,7 +237,25 @@ RUN true && \
      semanage port -m -t dns_port_t -p tcp 5354) && \
     checkmodule -M -m -o /tmp/kosher-dnsmasq-nftset.mod /usr/share/kosher/selinux/kosher-dnsmasq-nftset.te && \
     semodule_package -o /tmp/kosher-dnsmasq-nftset.pp -m /tmp/kosher-dnsmasq-nftset.mod && \
-    semodule -i /tmp/kosher-dnsmasq-nftset.pp && rm -f /tmp/kosher-dnsmasq-nftset.*
+    semodule -i /tmp/kosher-dnsmasq-nftset.pp && rm -f /tmp/kosher-dnsmasq-nftset.* && \
+    # The Nix store: nothing in Fedora's policy names /nix, so it is
+    # default_t, and systemd labels a new socket from the rule for its
+    # PATH — which is how nix-daemon.socket failed with "Permission
+    # denied" on a booted image: init may not create a default_t socket.
+    # The store is var_lib_t, like the /var/lib it really lives in, and
+    # the daemon's socket directory is var_run_t, where init makes
+    # sockets. Both spellings of that directory, since the first boot
+    # labels it at /var/lib/nix before the bind mount is up. Order
+    # matters: the LAST matching rule wins, so the socket rules follow
+    # the general one. Asserted, because a wrong label here is a daemon
+    # that never starts and no error anywhere a person would look.
+    semanage fcontext -a -t var_lib_t '/nix(/.*)?' && \
+    semanage fcontext -a -t var_run_t '/nix/var/nix/daemon-socket(/.*)?' && \
+    semanage fcontext -a -t var_run_t '/var/lib/nix/var/nix/daemon-socket(/.*)?' && \
+    restorecon -R /nix && \
+    test "$(matchpathcon -n /nix/var/nix/daemon-socket/socket)" = system_u:object_r:var_run_t:s0 && \
+    test "$(matchpathcon -n /nix/store)" = system_u:object_r:var_lib_t:s0 && \
+    test "$(matchpathcon -n /var/lib/nix/var/nix/daemon-socket)" = system_u:object_r:var_run_t:s0
 
 # --- Lockdown ----------------------------------------------------------------
 # Identity: KosherOS, powered by Fedora (Fedora Remix terms). ID stays

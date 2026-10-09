@@ -17,6 +17,12 @@ if ! command -v nix >/dev/null 2>&1; then
 fi
 check "the store is on /var (nix.mount)" 0 mountpoint -q /nix
 check "nix-daemon.socket is active" 0 systemctl is-active --quiet nix-daemon.socket
+check_contains "the daemon's socket is labelled where init may make one" "var_run_t" ls -Zd /nix/var/nix/daemon-socket
+# The login screen must still come up: a session environment change for
+# Nix once replaced the greeter's XDG_DATA_DIRS and GDM gave up.
+check "the login screen is up (gdm active)" 0 systemctl is-active --quiet gdm
+check "and no GNOME session has crashed this boot" 1 \
+    sh -c 'coredumpctl list --no-legend --since=-1h 2>/dev/null | grep -q gnome-session'
 check "devbox is in the image" 0 test -x /usr/bin/devbox
 check "the devenv launcher is in the image" 0 test -x /usr/bin/devenv
 check "kosherd has written the daemon's user list" 0 test -f /etc/nix/kosheros-users.conf

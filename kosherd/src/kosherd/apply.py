@@ -16,7 +16,7 @@ import tempfile
 from pathlib import Path
 
 from . import categories as categories_mod
-from . import dns, mitmca, nft, nixdaemon
+from . import containers, dns, mitmca, nft, nixdaemon
 from . import search as search_mod
 from .policy import INSPECTED_MODES, SAFESEARCH_MODES, UNFILTERED_MODES, Policy
 
@@ -169,8 +169,16 @@ def _restart(service: str):
 
 def apply_policy(policy: Policy) -> None:
     """Render and load enforcement for `policy`. Raises ApplyError on failure."""
+    # Every managed account gets its block of subordinate ids (rootless
+    # containers), and the ruleset filters the block as the account.
+    try:
+        subids = containers.ensure(policy.effective_users())
+    except Exception:  # noqa: BLE001 - never leave the firewall unapplied
+        log.exception("could not read subordinate ids")
+        subids = {}
     ruleset = nft.render(policy, dns_uid=dnsmasq_uid(), mitm_uid=mitm_uid(),
-                         search_uid=search_uid(), build_gid=nixdaemon.build_gid())
+                         search_uid=search_uid(), build_gid=nixdaemon.build_gid(),
+                         subids=subids)
 
     # Syntax-check before touching the live ruleset or the boot file.
     with tempfile.NamedTemporaryFile("w", suffix=".nft") as check:

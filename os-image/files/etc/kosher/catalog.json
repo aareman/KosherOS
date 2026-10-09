@@ -61,6 +61,9 @@
     { "ref": "nixpkgs#cursor-cli", "name": "Cursor CLI", "summary": "Cursor's agent, in the terminal", "categories": ["Development", "ConsoleOnly"], "exec": "cursor-agent" },
     { "ref": "nixpkgs#antigravity-cli", "name": "Antigravity CLI", "summary": "Antigravity's agent, in the terminal", "categories": ["Development", "ConsoleOnly"], "exec": "agy" },
     { "ref": "nixpkgs#gh", "name": "GitHub CLI", "summary": "GitHub from the terminal", "categories": ["Development", "RevisionControl"] },
+    { "ref": "io.podman_desktop.PodmanDesktop", "name": "Podman Desktop", "summary": "See and manage your containers", "categories": ["Development", "System"] },
+    { "ref": "nixpkgs#devcontainer", "name": "Dev Containers CLI", "summary": "Build and open a project's dev container from the terminal", "categories": ["Development", "ConsoleOnly"] },
+    { "ref": "nixpkgs#vscode", "name": "Visual Studio Code (for Dev Containers)", "summary": "The same editor outside the Flatpak sandbox, so it can run your containers", "categories": ["Development", "IDE"] },
 
     { "ref": "org.gnome.Calculator", "name": "Calculator", "summary": "Everyday calculations", "categories": ["Utility"] },
     { "ref": "org.gnome.Clocks", "name": "Clocks", "summary": "Alarms, timers and world clocks", "categories": ["Utility"] },

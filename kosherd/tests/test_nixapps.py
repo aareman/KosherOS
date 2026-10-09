@@ -319,7 +319,12 @@ def test_the_shipped_catalog_names_the_command_of_every_terminal_tool():
     assert len(console) >= 8
     for app in console:
         assert app["ref"].startswith("nixpkgs#"), app["ref"]
-        assert re.fullmatch(r"[a-z][a-z0-9-]*", app.get("exec", "")), app["ref"]
+        # A tool a person opens and talks to names its command; one that
+        # only makes sense with arguments (the Dev Containers CLI) gets
+        # no launcher and names none.
+        if "exec" in app:
+            assert re.fullmatch(r"[a-z][a-z0-9-]*", app["exec"]), app["ref"]
+    assert sum("exec" in a for a in console) >= 8
     by_ref = {a["ref"]: a.get("exec") for a in apps}
     # The names nixpkgs gives these (meta.mainProgram), checked by hand.
     assert by_ref["nixpkgs#claude-code"] == "claude"

@@ -7,9 +7,16 @@ a search result from a site with no reputation either way.
 
 For those, KosherOS reads the page itself. The scan runs on the device
 (no query leaves the house beyond the fetch that a click would have made
-anyway), reads only the first 128 KB — the title, the description and the
-opening of the body carry the character of a page — and gives up after a
-couple of seconds so a search never hangs on a slow site.
+anyway) and reads only the first 128 KB — the title, the description and
+the opening of the body carry the character of a page.
+
+It runs AFTER the page is sent, never before. A search shows what the
+cheap checks allow and what the cache already knows; the hosts nobody
+has judged are read in the background, and the verdict applies from the
+next search on. Waiting for the fetch made every fresh search as slow as
+the slowest site in it, for a protection the filtering proxy gives
+anyway: in filtered mode it reads the page itself when the link is
+clicked, and the title and snippet are scored before anything is shown.
 
 Verdicts are cached on disk, because the expensive part is the fetch and
 the same handful of domains come up over and over. The cache is keyed by
@@ -25,7 +32,7 @@ import threading
 import time
 import urllib.error
 import urllib.request
-from concurrent.futures import ThreadPoolExecutor, wait
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from . import content
@@ -34,23 +41,19 @@ log = logging.getLogger(__name__)
 
 CACHE_PATH = Path("/var/lib/kosher-search/verdicts.sqlite")
 
-# How long a search waits for the scan, in wall-clock seconds for the
-# WHOLE batch. The same number is the socket timeout of each fetch: a
-# single read slower than the entire budget cannot make the page in time.
-#
-# It used to be a per-operation timeout only, and the page waited for the
-# last fetch to finish. DNS, each redirect hop and every read got their
-# own allowance, the results were collected one at a time with a fresh
-# wait each, and the pool was joined before the page went out — so a
-# search sat for the slowest site, and on a home connection that was
-# often most of ten seconds. Now the budget is a deadline and nothing on
-# the page waits past it.
-FETCH_TIMEOUT = 2.0
+# Socket timeout of a fetch. Nothing waits on it, so it can afford to be
+# generous: a slow site that does answer is worth more than a fast "could
+# not tell".
+FETCH_TIMEOUT = 5.0
 READ_LIMIT = 128 * 1024  # enough for the head and the top of the body
-# One thread per candidate, so a batch is one round rather than two:
-# these are all waiting on the network, and ten sleeping threads cost
-# nothing a two-core machine notices.
-MAX_PARALLEL = 10
+# Background readers. They are all waiting on the network, so this is not
+# a number of cores; it is how many sites are asked at once.
+MAX_PARALLEL = 6
+# How many hosts may be queued for reading before new ones are dropped on
+# the floor. A search queues at most ten, and each read finishes within a
+# few socket timeouts, so this only bites when the network has gone away
+# — and then there is nothing to learn anyway.
+MAX_PENDING = 40
 # Long enough that repeat searches are instant, short enough that a
 # domain that changes hands is re-judged within a week.
 TTL_SECONDS = 7 * 24 * 3600
@@ -140,6 +143,9 @@ class PageScanner:
         self.cache = cache if cache is not None else VerdictCache()
         self.timeout = timeout
         self._fetch = fetch or self._http_get
+        self._pool = None
+        self._pending: set[str] = set()
+        self._lock = threading.Lock()
 
     @property
     def scorer(self) -> content.Scorer:
@@ -184,38 +190,54 @@ class PageScanner:
         self.cache.put(host, verdict)
         return verdict
 
-    def verdicts(self, pairs, budget: float | None = None
-                 ) -> dict[str, content.Verdict | None]:
-        """Scan several pages at once. `pairs` is an iterable of (url, host).
+    def known_verdicts(self, pairs) -> dict[str, content.Verdict | None]:
+        """What the cache already says about these (url, host) pairs.
 
-        Returns within `budget` seconds (the fetch timeout by default)
-        whatever has been decided by then. A page still loading at the
-        deadline counts as "could not tell", exactly like one that failed:
-        the cheap checks stand and the result is shown. Its fetch is not
-        abandoned, though — it finishes on its own thread and its verdict
-        goes into the cache, so the NEXT search that turns up the same
-        host is judged instantly. A slow site is checked on the second
-        look rather than never, and no search waits for it.
+        Returns at once. A host with no cached verdict is None here and
+        is queued to be read in the background; its verdict is in the
+        cache by the time the next search lists it. A host already being
+        read is not queued twice.
         """
-        pairs = list(pairs)
-        if not pairs:
-            return {}
-        if budget is None:
-            budget = self.timeout
         results: dict[str, content.Verdict | None] = {}
-        pool = ThreadPoolExecutor(max_workers=min(MAX_PARALLEL, len(pairs)))
-        futures = {pool.submit(self.verdict, url, host): host
-                   for url, host in pairs}
-        done, _ = wait(futures, timeout=budget)
-        for future, host in futures.items():
-            if future not in done:
+        to_read = []
+        for url, host in pairs:
+            cached = self.cache.get(host)
+            if cached is None:
                 results[host] = None
-                continue
-            try:
-                results[host] = future.result()
-            except Exception:  # noqa: BLE001 - a scan must never break a search
-                results[host] = None
-        # Not `with`: the context manager joins every worker, which is the
-        # wait this method exists to avoid. The stragglers keep running.
-        pool.shutdown(wait=False)
+                to_read.append((url, host))
+            else:
+                results[host] = None if cached.level == UNREADABLE else cached
+        if to_read:
+            self.read_later(to_read)
         return results
+
+    def read_later(self, pairs) -> None:
+        """Fetch and judge these pages in the background."""
+        with self._lock:
+            if self._pool is None:
+                self._pool = ThreadPoolExecutor(
+                    max_workers=MAX_PARALLEL, thread_name_prefix="pagescan")
+            for url, host in pairs:
+                if host in self._pending or len(self._pending) >= MAX_PENDING:
+                    continue
+                self._pending.add(host)
+                self._pool.submit(self._read, url, host)
+
+    def _read(self, url: str, host: str) -> None:
+        try:
+            self.verdict(url, host)
+        except Exception:  # noqa: BLE001 - a background read must die quietly
+            log.debug("background scan of %s failed", url, exc_info=True)
+        finally:
+            with self._lock:
+                self._pending.discard(host)
+
+    def idle(self, timeout: float = 5.0) -> bool:
+        """True once nothing is being read. Mostly for tests."""
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            with self._lock:
+                if not self._pending:
+                    return True
+            time.sleep(0.02)
+        return False

@@ -71,7 +71,7 @@ def _no_scanner():
         def __init__(self):
             pass
 
-        def verdicts(self, pairs):
+        def known_verdicts(self, pairs):
             return {}
 
     return Never()

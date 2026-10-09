@@ -337,7 +337,7 @@ class ResultFilter:
 
     def scan_reason(self, uid: int | None, url: str,
                     verdict=None) -> str | None:
-        """Why the FETCHED page must be hidden, given its content verdict."""
+        """Why the READ page must be hidden, given its content verdict."""
         user = self.policy.for_uid(uid)
         mode = user.get("mode", "none")
         if mode in ("unfiltered", "whitelist"):
@@ -360,12 +360,14 @@ class ResultFilter:
                        media_of=lambda r: bool(r.get("img_src")
                                                or r.get("thumbnail")),
                        deep: bool = True, max_scans: int = 10) -> list:
-        """Filter a page of results: cheap checks first, then read what is left.
+        """Filter a page of results: cheap checks, then what the scan knows.
 
         Two passes rather than one because fetching is thousands of times
         more expensive than a list lookup, so it is worth doing only for
         the few results that survive everything cheaper — and only for
-        hosts nothing already knows about.
+        hosts nothing already knows about. The fetch itself never holds
+        the page: a host the cache has not judged is queued to be read
+        after this search is answered, and hidden from the next one on.
         """
         kept = [r for r in results
                 if self.allows(uid, url_of(r), text=text_of(r),
@@ -385,7 +387,7 @@ class ResultFilter:
                 break
         if not candidates:
             return kept
-        verdicts = self.scanner.verdicts(candidates)
+        verdicts = self.scanner.known_verdicts(candidates)
         return [r for r in kept
                 if self.scan_reason(uid, url_of(r),
                                     verdicts.get(_host_of(url_of(r)))) is None]

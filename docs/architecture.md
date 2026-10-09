@@ -152,6 +152,16 @@ The app index is parsed once per catalogue download on a worker thread and
 cached, so neither the Store nor a policy change waits on a forty-megabyte
 parse. `kosherctl apps` shows and sets an account's access and blocks.
 
+A second source sits beside Flathub for what has no Flatpak, the AI coding
+tools and a few editors and toolchains: upstream nixpkgs. A catalog entry
+whose ref is `nixpkgs#<package>` is installed by the daemon into the asking
+account's own Nix profile, as that account. The same rule decides it, and
+because the profile is that account's alone there is no second gate to run
+it. Each card in the Store says which of the two it is. The Nix daemon
+refuses an account on "No internet" outright, a build's downloads are held
+to the registries by the firewall, and a terminal tool installed this way
+gets a launcher in the app grid that opens a terminal running it.
+
 ## The policy
 
 One JSON document holds every account's settings and is the contract

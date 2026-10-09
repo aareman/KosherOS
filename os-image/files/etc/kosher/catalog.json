@@ -1,5 +1,5 @@
 {
-  "comment": "The approved app list. An account on 'Approved apps only' (the default) may install and run these and nothing else; an account opened to the whole store may have anything on Flathub that is not blocked for it, and an approval also overrides the computer's content ceiling for that one app. kosherd installs, from upstream Flathub. An admin adds to or removes from this list in KosherOS Admin; this is the starting shelf, chosen so an ordinary family, a student and a developer all find what they need on day one without anybody curating a list. Each entry carries the freedesktop categories the Store shelves it by. Later portal-managed.",
+  "comment": "The approved app list. An account on 'Approved apps only' (the default) may install and run these and nothing else; an account opened to the whole store may have anything on Flathub that is not blocked for it, and an approval also overrides the computer's content ceiling for that one app. kosherd installs, from upstream Flathub. An admin adds to or removes from this list in KosherOS Admin; this is the starting shelf, chosen so an ordinary family, a student and a developer all find what they need on day one without anybody curating a list. Each entry carries the freedesktop categories the Store shelves it by. An entry whose ref is nixpkgs#<package> comes from upstream nixpkgs instead and is installed into the asking account's own Nix profile; that is how the AI coding tools and the editors that have no Flatpak are here. Later portal-managed.",
   "apps": [
     { "ref": "org.mozilla.firefox", "name": "Firefox", "summary": "Browse the web", "categories": ["Network", "WebBrowser"] },
     { "ref": "org.chromium.Chromium", "name": "Chromium", "summary": "Browse the web", "categories": ["Network", "WebBrowser"] },
@@ -47,6 +47,20 @@
     { "ref": "io.dbeaver.DBeaverCommunity", "name": "DBeaver", "summary": "Work with databases", "categories": ["Development"] },
     { "ref": "com.jgraph.drawio.desktop", "name": "draw.io", "summary": "Draw diagrams", "categories": ["Development", "Graphics"] },
     { "ref": "org.gnome.Console", "name": "Console", "summary": "A terminal", "categories": ["System", "TerminalEmulator"] },
+
+    { "ref": "nixpkgs#neovim", "name": "Neovim", "summary": "Vim, carried on", "categories": ["Development", "TextEditor"] },
+    { "ref": "nixpkgs#code-cursor", "name": "Cursor", "summary": "A code editor with an AI in it", "categories": ["Development", "IDE"] },
+    { "ref": "nixpkgs#antigravity", "name": "Antigravity", "summary": "Google's code editor built around agents", "categories": ["Development", "IDE"] },
+    { "ref": "nixpkgs#github-copilot-app", "name": "GitHub Copilot", "summary": "Copilot's desktop app", "categories": ["Development", "IDE"] },
+    { "ref": "nixpkgs#claude-code", "name": "Claude Code", "summary": "Anthropic's coding agent, in the terminal", "categories": ["Development", "ConsoleOnly"], "exec": "claude" },
+    { "ref": "nixpkgs#codex", "name": "Codex", "summary": "OpenAI's coding agent, in the terminal", "categories": ["Development", "ConsoleOnly"], "exec": "codex" },
+    { "ref": "nixpkgs#gemini-cli", "name": "Gemini CLI", "summary": "Google's Gemini, in the terminal", "categories": ["Development", "ConsoleOnly"], "exec": "gemini" },
+    { "ref": "nixpkgs#github-copilot-cli", "name": "Copilot CLI", "summary": "GitHub Copilot, in the terminal", "categories": ["Development", "ConsoleOnly"], "exec": "copilot" },
+    { "ref": "nixpkgs#opencode", "name": "OpenCode", "summary": "An open coding agent for the terminal", "categories": ["Development", "ConsoleOnly"], "exec": "opencode" },
+    { "ref": "nixpkgs#aider-chat", "name": "Aider", "summary": "Pair programming with an AI, in the terminal", "categories": ["Development", "ConsoleOnly"], "exec": "aider" },
+    { "ref": "nixpkgs#cursor-cli", "name": "Cursor CLI", "summary": "Cursor's agent, in the terminal", "categories": ["Development", "ConsoleOnly"], "exec": "cursor-agent" },
+    { "ref": "nixpkgs#antigravity-cli", "name": "Antigravity CLI", "summary": "Antigravity's agent, in the terminal", "categories": ["Development", "ConsoleOnly"], "exec": "agy" },
+    { "ref": "nixpkgs#gh", "name": "GitHub CLI", "summary": "GitHub from the terminal", "categories": ["Development", "RevisionControl"] },
 
     { "ref": "org.gnome.Calculator", "name": "Calculator", "summary": "Everyday calculations", "categories": ["Utility"] },
     { "ref": "org.gnome.Clocks", "name": "Clocks", "summary": "Alarms, timers and world clocks", "categories": ["Utility"] },

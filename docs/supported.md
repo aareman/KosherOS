@@ -47,6 +47,19 @@ The environment points at the system bundle
 authority once inspection is set up and is Fedora's ordinary bundle
 otherwise, so it is harmless on an account that is not inspected.
 
+**AI tools and editors.** Claude Code, Codex, OpenCode, Gemini CLI,
+Copilot (the command line and the desktop app), Aider, the GitHub CLI,
+Cursor, Antigravity and Neovim are on the Store's Developer tools shelf.
+Most of them have no Flatpak, so they come from upstream nixpkgs instead
+of Flathub: an entry whose ref is `nixpkgs#<package>` is installed by
+kosherd into the asking account's own Nix profile, as that account, under
+the same approval rule as any other app. Nobody else's account sees it,
+and an account on "No internet" cannot install one, because the Nix
+daemon refuses it. The licence an unfree tool (Claude Code, Cursor,
+Copilot) comes with is the publisher's and the person installing agrees
+to it, as with a non-free app on Flathub. Claude's and Codex's desktop
+apps are not here: neither publishes a Linux build.
+
 **Nix.** Every KosherOS machine has Nix, with flakes on, the way Fedora
 packages it. The store is on `/var` (the rest of the system is read-only).
 Builds run in the sandbox as the build users, and a build that fetches its

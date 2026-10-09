@@ -1,9 +1,8 @@
 # What works on a filtered machine
 
 KosherOS filters the whole computer, not one browser. This page says what
-that covers, in the words a release note or a support answer can point
-at. Where something is listed as supported, there is a test behind it in
-the repository; where a limit is stated, it is a real one.
+that covers. Where something is listed as supported, there is a test
+behind it in the repository; where a limit is stated, it is a real one.
 
 ## Browsers and the web
 
@@ -112,6 +111,10 @@ Both settings are off until a parent sets them. See
 
 ## Hardware
 
+See the [minimum and recommended system requirements](install.md#system-requirements)
+before planning a test installation. These are provisional early-testing guidelines,
+not certified minimums. The current image supports Intel/AMD x86_64 PCs, not Apple Silicon or other ARM computers.
+
 | | |
 |---|---|
 | Architecture | x86_64. |
@@ -126,10 +129,10 @@ Both settings are off until a parent sets them. See
 | `edge` | the maintainer's own machine | every push to the repository |
 | `stable` | everyone else | a person promotes a version that has run well on edge |
 
-A machine installed from a release ISO follows its channel automatically;
-if an update boots without the filter enforcing, it goes back to the
-previous version on its own. **Admin → Updates** shows both channels and
-moves the computer between them — the download happens straight away and
-the new version is used from the next restart, with accounts, settings
-and files untouched. Changing it asks for the guardian password when one
-is set. See [deployment](deployment.md).
+A machine installed from a release ISO follows its channel, and a parent
+applies updates from the admin app. If an update boots without the filter
+enforcing, the machine goes back to the previous version on its own. The Updates page in KosherOS Admin shows
+both channels and moves the computer between them: the download happens
+straight away and the new version is used from the next restart, with
+accounts, settings and files untouched. Changing it asks for the guardian
+password when one is set. See [updates and channels](deployment.md).

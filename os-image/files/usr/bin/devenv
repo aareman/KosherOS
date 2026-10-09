@@ -1,0 +1,25 @@
+#!/bin/sh
+# devenv on KosherOS.
+#
+# devenv is not an RPM and cannot be installed at image build (there is no
+# Nix daemon then), so the first time an account runs it, it is added to
+# that account's own Nix profile from nixpkgs, as devenv's instructions say
+# (nix profile install nixpkgs#devenv). From then on the profile's copy is
+# first on PATH and this launcher is not used again. `nix profile upgrade
+# devenv` moves it on.
+set -e
+state="${XDG_STATE_HOME:-$HOME/.local/state}/nix/profile"
+for candidate in "$state/bin/devenv" "$HOME/.nix-profile/bin/devenv"; do
+    if [ -x "$candidate" ]; then
+        exec "$candidate" "$@"
+    fi
+done
+echo "Setting up devenv for this account (once; it comes from nixpkgs)..." >&2
+nix profile install nixpkgs#devenv
+for candidate in "$state/bin/devenv" "$HOME/.nix-profile/bin/devenv"; do
+    if [ -x "$candidate" ]; then
+        exec "$candidate" "$@"
+    fi
+done
+echo "devenv was installed but is not where a Nix profile puts it; try: nix profile list" >&2
+exit 1

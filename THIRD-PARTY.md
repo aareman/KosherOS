@@ -74,6 +74,9 @@ licence — but obligations that travel with the binaries still apply.
 | [ArcMenu](https://gitlab.com/arcmenu/ArcMenu) | GPL-family | GNOME extension, classic layout |
 | [NudeNet](https://github.com/notAI-tech/NudeNet) model | see upstream | the ONNX image detector |
 | [niri](https://github.com/YaLTeR/niri) / Noctalia | see upstream | advanced desktop session |
+| [Nix](https://nixos.org/) | LGPL-2.1-or-later | Fedora's packages; the daemon and the store on every machine (issue #34) |
+| [devbox](https://github.com/jetify-com/devbox) | Apache-2.0 | the release binary, fetched at image build and pinned by SHA-256 |
+| [devenv](https://devenv.sh/) | Apache-2.0 | not bundled: `/usr/bin/devenv` installs it from nixpkgs into the account's own profile on first use |
 
 Marked "see upstream" or "GPL-family" where the exact version has not yet
 been read at the source. Those are the remaining gaps in this audit.

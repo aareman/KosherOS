@@ -192,6 +192,16 @@ DEVELOPER_REGISTRIES = (
     "sum.golang.org",
     "go.dev",
     "storage.googleapis.com",     # Go toolchain downloads
+    # Nix, devenv, devbox. The daemon's own downloads (the binary cache) run
+    # as root and are not filtered; these are what the account's side of a
+    # build reaches: the flake registry, nixpkgs as a tarball from GitHub,
+    # and devbox's package search.
+    "cache.nixos.org",
+    "channels.nixos.org",         # the flake registry (nixpkgs = github:NixOS/nixpkgs)
+    "api.github.com",             # a flake's branch -> commit lookup
+    "codeload.github.com",        # where github.com sends an archive download
+    "devenv.cachix.org",
+    "search.devbox.sh",
 )
 
 

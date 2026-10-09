@@ -21,8 +21,9 @@ behind it in the repository; where a limit is stated, it is a real one.
 | ChatGPT in the browser, signed out | supported | Answers get the account's language filter and content level as they stream; an answer that fails is replaced by a notice. Watched working in a real browser. See [AI answers](ai-filtering.md). |
 | ChatGPT signed in, Claude in the browser | checked, not yet watched live | The same checks, written against the stream shapes those sites document. A stream the proxy cannot read is refused, not passed. |
 | Claude Code, Codex | supported | Their answers from api.anthropic.com and chatgpt.com get the same checks; tool calls are checked whole and refused rather than rewritten. Watched working through the proxy. |
-| Programs using the OpenAI, Anthropic, Gemini, xAI, Mistral, DeepSeek, Groq, OpenRouter, Together, Perplexity, Fireworks or Cerebras APIs | checked, not yet watched live | The four API shapes are recognised event by event. The program must trust the machine's certificate authority, as the developer tools below do. |
-| Other chat sites (Gemini, Copilot, Perplexity, Grok…) | not yet | Each has its own page protocol. |
+| Programs using the OpenAI, Anthropic, Gemini or an OpenAI-compatible API, on any host | checked, not yet watched live | The four API shapes are recognised event by event, and a request that names a model is read whatever the host. The program must trust the machine's certificate authority, as the developer tools below do. |
+| Any other site that streams its answers as text | checked, not yet watched live | Every string that reads as prose gets the language filter and the stream is scored as a whole. A word split between two events is not caught. |
+| Sites that answer over a WebSocket or a binary format (Grok uses gRPC) | not read | Only the sites the proxy knows are read over a WebSocket. |
 
 ## Developer tools
 

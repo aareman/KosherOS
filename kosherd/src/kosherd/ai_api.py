@@ -16,7 +16,9 @@ import json
 from collections.abc import Callable
 from typing import Final, final
 
+from .ai_generic import GenericText
 from .ai_json import ContentFilter, dumps, mapping, parse
+from .ai_lines import LineDecoder
 from .ai_sse import Decoder, Event
 from .ai_text import OutputBlocked, TextStream
 
@@ -53,6 +55,7 @@ class ApiEvents:
 
     def __init__(self, filters: ContentFilter) -> None:
         self.filters = filters
+        self.generic = GenericText(filters)
         self.streams: dict[tuple, tuple[TextStream, Template]] = {}
         self.inputs: dict[tuple, str] = {}
         self.ended = False
@@ -68,7 +71,8 @@ class ApiEvents:
             return self._chat(data)
         if isinstance(data.get("candidates"), list):
             return self._gemini(data)
-        return [self.filters.clean(data)]
+        # A shape nobody taught us: every string that reads as prose is checked.
+        return [self.generic.clean(data)]
 
     def finish(self) -> list[dict]:
         """The stream ended: release what was held back, once it is checked."""
@@ -274,10 +278,15 @@ class ApiEvents:
 
 @final
 class ApiStream:
-    """The events of one HTTP event stream, checked."""
+    """The events of one HTTP event stream, checked.
 
-    def __init__(self, filters: ContentFilter) -> None:
+    `lenient` is for a host nobody listed: an event whose data is not JSON
+    is treated as the prose it probably is, rather than refused.
+    """
+
+    def __init__(self, filters: ContentFilter, lenient: bool = False) -> None:
         self.api = ApiEvents(filters)
+        self.lenient = lenient
         self.decoder = Decoder()
         self.named = False
         self.events = 0
@@ -302,7 +311,17 @@ class ApiStream:
         if payload.strip() == "[DONE]":
             return b"".join(self.encode(item) for item in self.api.finish()) + event.encode()
         self.named = event.name != "message"
-        outputs = self.api.event(mapping(parse(payload)))
+        try:
+            document = parse(payload)
+        except OutputBlocked:
+            if not self.lenient:
+                raise
+            return event.encode(self.api.generic.text(payload))
+        if not isinstance(document, dict):
+            if not self.lenient:
+                raise OutputBlocked("Unsupported AI response structure")
+            return event.encode(dumps(self.api.generic.clean(document)))
+        outputs = self.api.event(document)
         extra = b"".join(self.encode(item) for item in outputs[:-1])
         return extra + event.encode(dumps(outputs[-1]))
 
@@ -310,3 +329,39 @@ class ApiStream:
         kind = data.get("type")
         lines = (f"event: {kind}".encode(),) if self.named and isinstance(kind, str) else ()
         return Event(lines).encode(dumps(data))
+
+
+@final
+class ApiLines:
+    """One JSON object per line, from a host with no page protocol of its own."""
+
+    def __init__(self, filters: ContentFilter, lenient: bool = False) -> None:
+        self.api = ApiEvents(filters)
+        self.lenient = lenient
+        self.decoder = LineDecoder()
+        self.lines = 0
+
+    def feed(self, chunk: bytes) -> bytes:
+        return b"".join(self.line(raw) for raw in self.decoder.feed(chunk))
+
+    def finish(self) -> bytes:
+        output = b"".join(self.line(raw) for raw in self.decoder.finish())
+        return output + b"".join(dumps(item).encode() + b"\n" for item in self.api.finish())
+
+    def line(self, raw: bytes) -> bytes:
+        if not raw.strip():
+            return raw + b"\n"
+        self.lines += 1
+        if self.lines > 100_000:
+            raise OutputBlocked("AI stream exceeds the line limit")
+        try:
+            document = parse(raw)
+        except OutputBlocked:
+            if not self.lenient:
+                raise
+            return self.api.generic.text(raw.decode("utf-8", "replace")).encode() + b"\n"
+        if not isinstance(document, dict):
+            if not self.lenient:
+                raise OutputBlocked("Unsupported AI response structure")
+            return dumps(self.api.generic.clean(document)).encode() + b"\n"
+        return b"".join(dumps(item).encode() + b"\n" for item in self.api.event(document))

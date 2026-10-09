@@ -23,7 +23,7 @@ from typing import Final, Literal, Protocol, final
 from mitmproxy import ctx, http
 
 from . import activity, content, language, siterules, vision
-from .ai_api import ApiStream
+from .ai_api import ApiEvents, ApiLines, ApiStream
 from .ai_browser import BrowserStream
 from .ai_images import ImageFilter
 from .ai_json import ContentFilter, dumps, parse
@@ -99,8 +99,14 @@ def is_asset(path: str) -> bool:
     return path.split("?", 1)[0].lower().endswith(ASSET_SUFFIXES)
 
 
-def body_kind(selected: Provider, flow: http.HTTPFlow) -> Kind | None:
-    """Which of the answer-carrying shapes this response is, if any."""
+def body_kind(selected: Provider | None, flow: http.HTTPFlow) -> Kind | None:
+    """Which of the answer-carrying shapes this response is, if any.
+
+    On a listed site, the answer-carrying JSON is known by its path. On any
+    other host, streamed text is read whatever the host (there are more AI
+    sites than anyone can list, and streaming is how they answer), and JSON
+    is read when the request looked like an AI call (see `looks_like_ai`).
+    """
     response = flow.response
     if response is None or response.status_code == 101 or response.status_code >= 300:
         return None
@@ -108,7 +114,7 @@ def body_kind(selected: Provider, flow: http.HTTPFlow) -> Kind | None:
     if mime == "text/event-stream":
         return "events"
     if mime.endswith("+ndjson") or mime in {"application/x-ndjson", "application/jsonl"}:
-        return "lines" if selected == "chatgpt" else None
+        return "lines"
     if mime == "application/json":
         path = flow.request.path.split("?", 1)[0]
         if selected == "api":
@@ -117,7 +123,30 @@ def body_kind(selected: Provider, flow: http.HTTPFlow) -> Kind | None:
             return "json"
         if selected == "claude" and "/chat_conversations" in path:
             return "json"
+        if selected is None and flow.metadata.get("kosher_ai"):
+            return "json"
     return None
+
+
+# What an AI request carries: a model, and something to answer.
+AI_REQUEST_KEYS: Final = frozenset({"messages", "input", "contents", "prompt"})
+MAX_SNIFFED_REQUEST: Final = 4 * 1024 * 1024
+
+
+def looks_like_ai(flow: http.HTTPFlow) -> bool:
+    """Is this request a call to a chat model, whatever the host?"""
+    request = flow.request
+    if request.method != "POST" or "json" not in mime_of(request.headers):
+        return False
+    body = request.raw_content
+    if not body or len(body) > MAX_SNIFFED_REQUEST or b'"model"' not in body:
+        return False
+    try:
+        document = json.loads(body)
+    except ValueError:
+        return False
+    return isinstance(document, dict) and "model" in document \
+        and any(key in document for key in AI_REQUEST_KEYS)
 
 
 def api_shaped(selected: Provider, flow: http.HTTPFlow) -> bool:
@@ -166,13 +195,14 @@ class ResponseBody:
     """The body callback: checked bytes out, and nothing after a refusal."""
 
     def __init__(self, filters: ContentFilter, kind: Kind, decoder: Decoder,
-                 stream: BrowserStream | LineStream | None,
-                 note: Callable[[OutputBlocked], None]) -> None:
+                 stream: BrowserStream | LineStream | ApiStream | ApiLines | None,
+                 note: Callable[[OutputBlocked], None], lenient: bool = False) -> None:
         self.filters = filters
         self.kind = kind
         self.decoder = decoder
         self.stream = stream
         self.note = note
+        self.lenient = lenient
         self.buffer = bytearray()
         self.refused = False
 
@@ -200,6 +230,9 @@ class ResponseBody:
                 return b""
             parsed = parse(bytes(self.buffer))
             self.buffer.clear()
+            if self.lenient:
+                # A JSON answer from a host nobody listed: its prose, wherever it is.
+                return dumps(ApiEvents(self.filters).generic.clean(parsed)).encode()
             return dumps(self.filters.clean(parsed)).encode()
         except (OutputBlocked, InvalidEventStream, UnicodeError, RecursionError) as error:
             self.refused = True
@@ -255,9 +288,13 @@ class AIFilter:
     # ---- hooks ------------------------------------------------------------
 
     def request(self, flow: http.HTTPFlow) -> None:
-        if flow.response is not None or provider(flow.request.pretty_host) is None:
+        if flow.response is not None or flow.metadata.get("kosher_uid") is None:
             return
-        if not is_asset(flow.request.path) or provider(flow.request.pretty_host) == "api":
+        selected = provider(flow.request.pretty_host)
+        if selected is None and looks_like_ai(flow):
+            flow.metadata["kosher_ai"] = True
+        if selected == "api" or flow.metadata.get("kosher_ai") \
+                or (selected is not None and not is_asset(flow.request.path)):
             # The body callback sees wire bytes; ask for them uncompressed.
             flow.request.headers["accept-encoding"] = "identity"
 
@@ -267,28 +304,32 @@ class AIFilter:
         if uid is None or response is None:
             return  # not a filtered account's connection (the main addon streams it)
         selected = provider(flow.request.pretty_host)
-        if selected is None:
-            return
         kind = body_kind(selected, flow)
         if kind is None:
             return
+        lenient = selected is None  # a host nobody listed: unreadable is not refused
         filters = self._filters(uid)
         note = lambda error, flow=flow, uid=uid: self._note(flow, uid, error)  # noqa: E731
         try:
             decoder = Decoder(header(response.headers, "content-encoding"))
         except OutputBlocked as error:
+            if lenient:
+                return  # an encoding we cannot read, on a host we do not know: leave it
             log.info("AI answer refused before its body: %s", error)
             note(error)
             if kind == "json":
                 response.status_code = 502
             response.stream = _refused(kind)
         else:
-            stream: BrowserStream | LineStream | ApiStream | None = None
+            stream: BrowserStream | LineStream | ApiStream | ApiLines | None = None
             if kind == "events":
-                stream = ApiStream(filters) if api_shaped(selected, flow) else BrowserStream(filters)
+                if selected == "chatgpt" and not api_shaped(selected, flow):
+                    stream = BrowserStream(filters)
+                else:
+                    stream = ApiStream(filters, lenient)
             elif kind == "lines":
-                stream = LineStream(filters, note)
-            response.stream = ResponseBody(filters, kind, decoder, stream, note)
+                stream = LineStream(filters, note) if selected == "chatgpt" else ApiLines(filters, lenient)
+            response.stream = ResponseBody(filters, kind, decoder, stream, note, lenient)
         for name in DROPPED_HEADERS:
             if name in response.headers:
                 del response.headers[name]

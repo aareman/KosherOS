@@ -73,6 +73,12 @@ def test_real_proxy_checks_stream_before_upstream_finishes(tmp_path: Path, malfo
                 self.end_headers()
                 self.wfile.write(body)
                 return
+            if self.path.endswith("/answer"):
+                self.send_response(200)
+                self.send_header("Content-Type", "text/event-stream")
+                self.end_headers()
+                self.wfile.write(b'data: {"piece":"a damn fine answer","id":"x_damn"}\n\n')
+                return
             if self.path.endswith("sdk.js"):
                 self.send_response(200)
                 self.send_header("Content-Type", "text/javascript; charset=utf-8")
@@ -132,6 +138,12 @@ def test_real_proxy_checks_stream_before_upstream_finishes(tmp_path: Path, malfo
                     "-H", "Host: chatgpt.com", f"http://127.0.0.1:{port}/backend-api/conversation/history",
                 ], capture_output=True, check=True).stdout
                 assert json.loads(history) == {"messages": [{"text": "a darn fine chat"}]}
+                # A stream of some site's own shape, on a host nobody listed, is read too.
+                other = subprocess.run([
+                    "curl", "--silent", "--show-error", "--max-time", "10",
+                    "-H", "Host: chat.example.org", f"http://127.0.0.1:{port}/answer",
+                ], capture_output=True, check=True).stdout
+                assert b'"piece":"a darn fine answer"' in other and b'"id":"x_damn"' in other
                 with subprocess.Popen([
                     "curl", "--silent", "--show-error", "--no-buffer", "--max-time", "15",
                     "-H", "Host: chatgpt.com", f"http://127.0.0.1:{port}/backend-api/conversation",

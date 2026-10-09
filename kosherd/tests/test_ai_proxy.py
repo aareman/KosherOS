@@ -47,7 +47,10 @@ def flow_for(url: str, status: int = 200, body: bytes = b"", uid: int | None = 1
              **headers: str) -> http.HTTPFlow:
     flow = tflow(resp=True)
     flow.request = http.Request.make("GET", url)
-    flow.response = http.Response.make(status, body, headers)
+    flow.response = http.Response.make(status, body)
+    for name, value in headers.items():
+        # Set afterwards: Response.make drops a content-encoding it cannot apply.
+        flow.response.headers[name] = value
     if uid is not None:
         flow.metadata["kosher_uid"] = uid
     return flow
@@ -107,6 +110,59 @@ def test_everything_that_is_not_an_answer_is_left_exactly_as_it_was(url, status,
     assert flow.response.status_code == status
     assert flow.response.stream is False
     assert list(flow.response.headers.items(multi=True)) == before
+
+
+def test_a_stream_on_a_host_nobody_listed_is_read_leniently() -> None:
+    # Given some AI site's own event stream, on a host not in any list.
+    addon = AIFilter(Owner())
+    flow = flow_for("https://chat.example.org/api/answer", **{"content-type": "text/event-stream"})
+    addon.responseheaders(flow)
+    assert flow.response.headers["x-kosheros"] == "ai-inspected"
+    # When its events are JSON of its own shape, or not JSON at all, then prose is checked
+    # and nothing is refused for its shape.
+    output = drive(flow, b'data: {"piece":"a damn fine answer","id":"x_damn"}\n\n', b"data: plain damn text\n\n")
+    assert b'"piece":"a darn fine answer"' in output and b'"id":"x_damn"' in output
+    assert b"data: plain darn text" in output
+
+
+def test_an_unreadable_encoding_on_a_host_nobody_listed_is_left_alone() -> None:
+    addon = AIFilter(Owner())
+    flow = flow_for("https://chat.example.org/api/answer",
+                    **{"content-type": "text/event-stream", "content-encoding": "x-secret"})
+    addon.responseheaders(flow)
+    assert flow.response.stream is False
+
+
+def test_a_request_that_looks_like_an_ai_call_marks_its_json_answer_for_reading() -> None:
+    # Given a chat completion request to a self-hosted gateway.
+    addon = AIFilter(Owner())
+    flow = flow_for("https://llm.example.org/v1/chat/completions")
+    flow.request = http.Request.make("POST", "https://llm.example.org/v1/chat/completions",
+                                     json.dumps({"model": "x", "messages": []}).encode(),
+                                     {"content-type": "application/json"})
+    flow.response = None
+    addon.request(flow)
+    assert flow.metadata.get("kosher_ai") is True
+    assert flow.request.headers["accept-encoding"] == "identity"
+    # When the JSON answer comes back, then it is checked whole.
+    flow.response = http.Response.make(200, b"", {"content-type": "application/json"})
+    addon.responseheaders(flow)
+    body = json.dumps({"id": "c_1", "choices": [{"message": {"content": "a damn fine answer"}}]}).encode()
+    assert json.loads(drive(flow, body))["choices"][0]["message"]["content"] == "a darn fine answer"
+
+
+def test_ordinary_json_on_an_unlisted_host_is_not_touched() -> None:
+    addon = AIFilter(Owner())
+    flow = flow_for("https://shop.example.org/api/cart")
+    flow.request = http.Request.make("POST", "https://shop.example.org/api/cart",
+                                     json.dumps({"items": [], "model": "T-800"}).encode(),
+                                     {"content-type": "application/json"})
+    flow.response = None
+    addon.request(flow)
+    assert "kosher_ai" not in flow.metadata
+    flow.response = http.Response.make(200, b"{}", {"content-type": "application/json"})
+    addon.responseheaders(flow)
+    assert flow.response.stream is False
 
 
 def test_an_unfiltered_connection_is_not_inspected() -> None:

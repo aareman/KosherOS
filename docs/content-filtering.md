@@ -351,6 +351,21 @@ reachable from every account, including approved-sites ones, because they
 hold code rather than pages. [What works](supported.md#developer-tools)
 has the table.
 
+Nix is the one tool that does not fetch as the account. Its daemon runs
+as root, and a build that fetches its source (`fetchurl`,
+`fetchFromGitHub`) runs as one of the `nixbld` users — below the first
+human uid, where the firewall accepts everything. So those users are
+dispatched by group before that accept, to a chain of their own
+(`nix_build`): the registries and the system domains on 80 and 443, and
+`reject`. Which registries a build may reach is the same list every
+account has, not the asking account's own, because the firewall cannot
+tell whose build it is. And the daemon only answers accounts kosherd has
+listed — every managed account whose kind of internet is not "No
+internet" — in `/etc/nix/kosheros-users.conf`, which the shipped
+`nix.conf` includes last after allowing root alone. The daemon's own
+downloads, from the binary caches named in `nix.conf`, run as root and are
+not filtered; only root may add a cache.
+
 ## Who is connecting: one port per user
 
 Two people at the same machine get different filtering, so the proxy has

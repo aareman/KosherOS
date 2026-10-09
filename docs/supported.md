@@ -37,12 +37,24 @@ are reachable from every account, including whitelist‑only ones.
 | go | system store (no change needed) | proxy.golang.org, sum.golang.org, go.dev |
 | git | system store; `GIT_SSL_CAINFO` for builds with a bundled OpenSSL | github.com and its release hosts |
 | curl, wget | system store (no change needed) | — |
+| nix, nix-shell, nix build | `ssl-cert-file` in `/etc/nix/nix.conf`; `NIX_SSL_CERT_FILE` for what a Nix shell brings | cache.nixos.org, channels.nixos.org, GitHub (nixpkgs and flakes) |
+| devenv | ships as a launcher; the first run adds it to the account's own Nix profile from nixpkgs | devenv.cachix.org, and nix's |
+| devbox | ships in the image, pinned by hash; uses the nix above | search.devbox.sh, and nix's |
 | Java (Maven, Gradle) | not set automatically | Fedora extracts a Java keystore at `/etc/pki/ca-trust/extracted/java/cacerts`; `JAVA_TOOL_OPTIONS` was left out because it prints a line on every JVM start. |
 
 The environment points at the system bundle
 (`/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem`), which contains the KosherOS
 authority once inspection is set up and is Fedora's ordinary bundle
 otherwise, so it is harmless on an account that is not inspected.
+
+**Nix.** Every KosherOS machine has Nix, with flakes on, the way Fedora
+packages it. The store is on `/var` (the rest of the system is read-only).
+Builds run in the sandbox as the build users, and a build that fetches its
+source reaches the registries above and nothing else: a build is nobody's
+in particular, so it does not get anybody's list of sites. An account whose
+kind of internet is "No internet" cannot use the daemon at all. `devbox`
+is in the image; `devenv` installs itself into your profile the first time
+you run it, from nixpkgs, with devenv's own cache already trusted.
 
 ## Accounts and filtering
 

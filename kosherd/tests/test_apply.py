@@ -60,6 +60,8 @@ def env(tmp_path, monkeypatch):
     monkeypatch.setattr(apply_mod, "SEARCH_DIR", tmp_path / "search")
     monkeypatch.setattr(apply_mod, "SEARCH_POLICY_PATH",
                         tmp_path / "search" / "policy.json")
+    monkeypatch.setattr(apply_mod, "NIX_USERS_PATH",
+                        tmp_path / "nix" / "kosheros-users.conf")
     monkeypatch.setattr(apply_mod, "search_uid", lambda: 987, raising=False)
     monkeypatch.setattr(apply_mod, "dnsmasq_uid", lambda: 989)
     monkeypatch.setattr(apply_mod, "mitm_uid", lambda: 988)

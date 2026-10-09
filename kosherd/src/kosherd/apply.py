@@ -16,7 +16,7 @@ import tempfile
 from pathlib import Path
 
 from . import categories as categories_mod
-from . import dns, mitmca, nft
+from . import dns, mitmca, nft, nixdaemon
 from . import search as search_mod
 from .policy import INSPECTED_MODES, SAFESEARCH_MODES, UNFILTERED_MODES, Policy
 
@@ -41,6 +41,8 @@ MITM_RULES_PATH = MITM_DIR / "rules.json"
 SEARCH_SERVICES = ("kosher-searxng.service", "kosher-search.service")
 SEARCH_DIR = Path("/var/lib/kosher-search")
 SEARCH_POLICY_PATH = Path(search_mod.SEARCH_POLICY_PATH)
+NIX_DAEMON_SERVICE = "nix-daemon.service"
+NIX_USERS_PATH = nixdaemon.CONF_PATH
 
 
 class ApplyError(Exception):
@@ -112,6 +114,31 @@ def write_search_policy(policy: Policy) -> None:
                   mode=0o644)
 
 
+def write_nix_users(policy: Policy) -> bool:
+    """Tell the Nix daemon who may use it (nixdaemon.py). Returns whether
+    the list changed, in which case the daemon was told to pick it up.
+
+    Nothing happens on a machine without Nix (no /etc/nix): the stage-1
+    dev VM, or an image built without it.
+    """
+    path = NIX_USERS_PATH
+    if not path.parent.is_dir():
+        return False
+    content = nixdaemon.render(policy)
+    try:
+        if path.read_text() == content:
+            return False
+    except OSError:
+        pass
+    _write_atomic(path, content, mode=0o644)
+    # try-restart: a daemon that is not running (socket-activated, nobody
+    # has used Nix yet) reads the new file when it starts; one that is
+    # running must be restarted to see it.
+    subprocess.run(["systemctl", "try-restart", NIX_DAEMON_SERVICE],
+                   capture_output=True, text=True)
+    return True
+
+
 def _write_atomic(path: Path, content: str, mode: int = 0o644) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp = tempfile.mkstemp(dir=path.parent)
@@ -143,7 +170,7 @@ def _restart(service: str):
 def apply_policy(policy: Policy) -> None:
     """Render and load enforcement for `policy`. Raises ApplyError on failure."""
     ruleset = nft.render(policy, dns_uid=dnsmasq_uid(), mitm_uid=mitm_uid(),
-                         search_uid=search_uid())
+                         search_uid=search_uid(), build_gid=nixdaemon.build_gid())
 
     # Syntax-check before touching the live ruleset or the boot file.
     with tempfile.NamedTemporaryFile("w", suffix=".nft") as check:
@@ -169,6 +196,8 @@ def apply_policy(policy: Policy) -> None:
             log.exception("could not prepare the inspection CA")
     _restart(MITM_SERVICE) if inspected else subprocess.run(
         ["systemctl", "stop", MITM_SERVICE], capture_output=True, text=True)
+
+    write_nix_users(policy)
 
     write_search_policy(policy)
     # Search is only useful to somebody whose results need filtering; an

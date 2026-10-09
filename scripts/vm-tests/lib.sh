@@ -86,6 +86,18 @@ assert_that() {
 # Run a command as a test user.
 as() { local u="$1"; shift; runuser -u "$u" -- "$@"; }
 
+# Run a command as a test user INSIDE a logind session. The polkit rule
+# for the org.kosherlinux.* actions answers only a local, active session
+# (the person at the keyboard); runuser gives none, so a call to kosherd
+# from `as` is refused. A seat-less session is one logind counts as
+# active, which is what PAMName=login makes here. stdin is passed, so a
+# python heredoc works.
+as_session() {
+    local u="$1"
+    shift
+    systemd-run --quiet --pipe --wait --collect --uid="$u" -p PAMName=login "$@"
+}
+
 # HTTP status code a user gets for a URL ("000" means the connection failed).
 http_code_as() {
     local u="$1" url="$2" out="${3:-/dev/null}"

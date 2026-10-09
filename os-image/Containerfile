@@ -65,11 +65,16 @@ RUN dnf -y install dnsmasq nftables python3-gobject python3-jsonschema python3-p
 # podman must STAY: bootc (the update mechanism) depends on it in F44+. The
 # skuid firewall contains rootless containers, and SUB_UID_COUNT=0 below
 # denies new users subordinate IDs anyway.
+# console-login-helper-messages-profile is a CoreOS habit the bootc base
+# carries: every interactive shell opens with "[systemd] Failed Units"
+# and a list. A server console wants that; a family's terminal does not,
+# and a developer opening Console saw it before the first prompt.
 RUN for p in sudo toolbox gnome-boxes gnome-software PackageKit \
-        PackageKit-command-not-found gnome-initial-setup gnome-classic-session; do \
+        PackageKit-command-not-found gnome-initial-setup gnome-classic-session \
+        console-login-helper-messages-profile; do \
         rpm -q "$p" >/dev/null 2>&1 && dnf -y --setopt=protected_packages= remove "$p"; \
     done; \
-    ! rpm -q sudo && rpm -q bootc
+    ! rpm -q sudo && rpm -q bootc && ! test -e /usr/share/console-login-helper-messages/profile.sh
 
 # Build/branding tooling in one early layer, so the later steps that use it
 # are cheap and local. Layer ORDER in this file is deliberate: the heavy,
@@ -106,6 +111,37 @@ RUN if [ -e /tmp/gnome-ext/FAILED ]; then \
         cp -a /tmp/gnome-ext/usr/. /usr/ \
         && glib-compile-schemas /usr/share/glib-2.0/schemas; \
     fi; rm -rf /tmp/gnome-ext
+
+# --- Developer tooling: Nix, devenv, devbox (issue #34) -----------------------
+# Fedora packages Nix, daemon and all, so it comes in like everything else
+# and its sysusers (nixbld, the build users) are created here at build.
+# nix-legacy is nix-shell, nix-build and nix-env, which every tutorial and
+# half of the tooling still call. The image is read-only, so the store the
+# packages lay out under /nix is only a skeleton: kosher-nix-store.service
+# copies it to /var/lib/nix on first boot and nix.mount binds it back.
+# /etc/nix/nix.conf is ours (files/etc/nix), and who may use the daemon is
+# kosherd's decision (apply.py writes /etc/nix/kosheros-users.conf).
+RUN dnf -y install nix nix-daemon nix-legacy && dnf clean all \
+    && getent group nixbld >/dev/null \
+    && test -f /usr/lib/systemd/system/nix-daemon.socket
+# devbox is a static Go binary released on GitHub; pinned by hash like the
+# person model. It uses the Nix above (it only installs Nix when none is
+# found) and its package search at search.devbox.sh, which is reachable
+# from every account (DEVELOPER_REGISTRIES). devenv has no RPM and no
+# binary release: /usr/bin/devenv (files/usr/bin) adds it to the account's
+# own Nix profile the first time it is run.
+ARG DEVBOX_VERSION=0.18.4
+RUN case "$(uname -m)" in \
+        x86_64)  arch=amd64; sum=4a466a8788186da73f3c692697917c79452b758f40b454b4761e6d1fcd2acad9 ;; \
+        aarch64) arch=arm64; sum=313ecedab221aa674484a5815006e17a065ba3bfd07ab6de8aeab38fa483db27 ;; \
+        *) echo "no devbox release for $(uname -m)"; exit 1 ;; \
+    esac \
+    && curl -fsSL -o /tmp/devbox.tar.gz \
+        "https://github.com/jetify-com/devbox/releases/download/${DEVBOX_VERSION}/devbox_${DEVBOX_VERSION}_linux_${arch}.tar.gz" \
+    && echo "${sum}  /tmp/devbox.tar.gz" | sha256sum -c - \
+    && tar -xzf /tmp/devbox.tar.gz -C /usr/bin devbox \
+    && chmod 755 /usr/bin/devbox && rm -f /tmp/devbox.tar.gz \
+    && test "$(/usr/bin/devbox version)" = "${DEVBOX_VERSION}"
 
 # mitmproxy is not packaged for Fedora 44, so install it from PyPI (with its
 # dependencies — unlike our own packages, which are --no-deps).
@@ -180,6 +216,21 @@ RUN flatpak remote-add --system --if-not-exists \
 # --- Static configuration (units, polkit, dbus, dnsmasq, baseline firewall) --
 COPY os-image/files/ /
 
+# Nix's own profile script exports NIX_SSL_CERT_FILE for the tools a Nix
+# shell brings (their curl, git, python carry nixpkgs' own cacert), and it
+# looks for the bundle at paths Fedora 44 no longer has — so it would fall
+# back to the shell's OWN cacert, which does not hold the filter's
+# certificate, and every download in a devenv shell on a filtered account
+# would fail with a certificate error. The system bundle goes first in its
+# list. (profile.d/kosher-ca.sh sets the same variable; this keeps nix.sh,
+# which runs after it, from overriding it.)
+RUN sed -i 's|^    if \[ -e /etc/ssl/certs/ca-certificates.crt \]; then|    if [ -e /etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem ]; then # KosherOS: the system bundle, with the filter CA\n        export NIX_SSL_CERT_FILE=/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem\n    elif [ -e /etc/ssl/certs/ca-certificates.crt ]; then|' \
+        /etc/profile.d/nix.sh \
+    && grep -q 'NIX_SSL_CERT_FILE=/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem' /etc/profile.d/nix.sh \
+    && sh -n /etc/profile.d/nix.sh \
+    && chmod 755 /usr/bin/devenv \
+    && grep -q '^!include /etc/nix/kosheros-users.conf' /etc/nix/nix.conf
+
 # SELinux: dnsmasq needs a netfilter netlink socket to feed the nft whitelist
 # sets (not covered by Fedora's stock dnsmasq policy).
 RUN true && \
@@ -191,7 +242,25 @@ RUN true && \
      semanage port -m -t dns_port_t -p tcp 5354) && \
     checkmodule -M -m -o /tmp/kosher-dnsmasq-nftset.mod /usr/share/kosher/selinux/kosher-dnsmasq-nftset.te && \
     semodule_package -o /tmp/kosher-dnsmasq-nftset.pp -m /tmp/kosher-dnsmasq-nftset.mod && \
-    semodule -i /tmp/kosher-dnsmasq-nftset.pp && rm -f /tmp/kosher-dnsmasq-nftset.*
+    semodule -i /tmp/kosher-dnsmasq-nftset.pp && rm -f /tmp/kosher-dnsmasq-nftset.* && \
+    # The Nix store: nothing in Fedora's policy names /nix, so it is
+    # default_t, and systemd labels a new socket from the rule for its
+    # PATH — which is how nix-daemon.socket failed with "Permission
+    # denied" on a booted image: init may not create a default_t socket.
+    # The store is var_lib_t, like the /var/lib it really lives in, and
+    # the daemon's socket directory is var_run_t, where init makes
+    # sockets. Both spellings of that directory, since the first boot
+    # labels it at /var/lib/nix before the bind mount is up. Order
+    # matters: the LAST matching rule wins, so the socket rules follow
+    # the general one. Asserted, because a wrong label here is a daemon
+    # that never starts and no error anywhere a person would look.
+    semanage fcontext -a -t var_lib_t '/nix(/.*)?' && \
+    semanage fcontext -a -t var_run_t '/nix/var/nix/daemon-socket(/.*)?' && \
+    semanage fcontext -a -t var_run_t '/var/lib/nix/var/nix/daemon-socket(/.*)?' && \
+    restorecon -R /nix && \
+    test "$(matchpathcon -n /nix/var/nix/daemon-socket/socket)" = system_u:object_r:var_run_t:s0 && \
+    test "$(matchpathcon -n /nix/store)" = system_u:object_r:var_lib_t:s0 && \
+    test "$(matchpathcon -n /var/lib/nix/var/nix/daemon-socket)" = system_u:object_r:var_run_t:s0
 
 # --- Lockdown ----------------------------------------------------------------
 # Identity: KosherOS, powered by Fedora (Fedora Remix terms). ID stays
@@ -306,6 +375,9 @@ RUN passwd -l root \
     && systemctl enable sshd.service \
     && systemctl enable kosherd.service kosher-firewall.service kosher-dns.service \
     && systemctl enable bootc-fetch-apply-updates.timer \
+    # Nix: the store on /var, and the daemon on its socket.
+    && systemctl enable nix.mount nix-daemon.socket \
+    && systemctl is-enabled nix.mount nix-daemon.socket \
     # An update that boots without the filter puts itself back. greenboot's
     # own [Install] carries Also=greenboot-set-rollback-trigger.service, so
     # enabling the health check arms the rollback too — verified against

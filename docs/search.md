@@ -27,6 +27,11 @@ itself, which is the only reliable way to learn the client's source port
 and therefore, via `/proc/net/tcp`, which user is searching. Filtering is
 per user, so that identity is the whole point.
 
+A results page is sent in two pieces. The head and the search bar go
+out the moment the query arrives, so the browser draws them at once,
+and the results follow in the same response when the engine has
+answered and the filter has read what it needed to.
+
 SearXNG sits behind it and does the one job that genuinely needs a large
 dependency: scraping a dozen search engines that keep changing. It is
 reached only over its JSON API, which is stable, so a SearXNG upgrade

@@ -25,7 +25,7 @@ import threading
 import time
 import urllib.error
 import urllib.request
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, wait
 from pathlib import Path
 
 from . import content
@@ -34,9 +34,23 @@ log = logging.getLogger(__name__)
 
 CACHE_PATH = Path("/var/lib/kosher-search/verdicts.sqlite")
 
-FETCH_TIMEOUT = 2.5      # seconds; a search must not wait longer than this
+# How long a search waits for the scan, in wall-clock seconds for the
+# WHOLE batch. The same number is the socket timeout of each fetch: a
+# single read slower than the entire budget cannot make the page in time.
+#
+# It used to be a per-operation timeout only, and the page waited for the
+# last fetch to finish. DNS, each redirect hop and every read got their
+# own allowance, the results were collected one at a time with a fresh
+# wait each, and the pool was joined before the page went out — so a
+# search sat for the slowest site, and on a home connection that was
+# often most of ten seconds. Now the budget is a deadline and nothing on
+# the page waits past it.
+FETCH_TIMEOUT = 2.0
 READ_LIMIT = 128 * 1024  # enough for the head and the top of the body
-MAX_PARALLEL = 6
+# One thread per candidate, so a batch is one round rather than two:
+# these are all waiting on the network, and ten sleeping threads cost
+# nothing a two-core machine notices.
+MAX_PARALLEL = 10
 # Long enough that repeat searches are instant, short enough that a
 # domain that changes hands is re-judged within a week.
 TTL_SECONDS = 7 * 24 * 3600
@@ -143,20 +157,38 @@ class PageScanner:
         self.cache.put(host, verdict)
         return verdict
 
-    def verdicts(self, pairs) -> dict[str, content.Verdict | None]:
-        """Scan several pages at once. `pairs` is an iterable of (url, host)."""
+    def verdicts(self, pairs, budget: float | None = None
+                 ) -> dict[str, content.Verdict | None]:
+        """Scan several pages at once. `pairs` is an iterable of (url, host).
+
+        Returns within `budget` seconds (the fetch timeout by default)
+        whatever has been decided by then. A page still loading at the
+        deadline counts as "could not tell", exactly like one that failed:
+        the cheap checks stand and the result is shown. Its fetch is not
+        abandoned, though — it finishes on its own thread and its verdict
+        goes into the cache, so the NEXT search that turns up the same
+        host is judged instantly. A slow site is checked on the second
+        look rather than never, and no search waits for it.
+        """
         pairs = list(pairs)
         if not pairs:
             return {}
+        if budget is None:
+            budget = self.timeout
         results: dict[str, content.Verdict | None] = {}
-        # One thread per page, capped: these are almost all waiting on the
-        # network, and the machine this runs on may have two cores.
-        with ThreadPoolExecutor(max_workers=min(MAX_PARALLEL, len(pairs))) as pool:
-            futures = {pool.submit(self.verdict, url, host): host
-                       for url, host in pairs}
-            for future, host in futures.items():
-                try:
-                    results[host] = future.result(timeout=self.timeout + 1)
-                except Exception:  # noqa: BLE001
-                    results[host] = None
+        pool = ThreadPoolExecutor(max_workers=min(MAX_PARALLEL, len(pairs)))
+        futures = {pool.submit(self.verdict, url, host): host
+                   for url, host in pairs}
+        done, _ = wait(futures, timeout=budget)
+        for future, host in futures.items():
+            if future not in done:
+                results[host] = None
+                continue
+            try:
+                results[host] = future.result()
+            except Exception:  # noqa: BLE001 - a scan must never break a search
+                results[host] = None
+        # Not `with`: the context manager joins every worker, which is the
+        # wait this method exists to avoid. The stragglers keep running.
+        pool.shutdown(wait=False)
         return results

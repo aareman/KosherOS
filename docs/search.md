@@ -72,10 +72,15 @@ because blocking those works against the family that installed this.
 leave open, and it is where new material lives. For results on hosts the
 category database has never heard of, `pagescan.py` fetches the first
 128 KB, scores it, and hides the result if the page reads worse than the
-account allows. Capped at ten scans per search, run in parallel with a
-2.5 s timeout, and cached by host for a week. A page that cannot be
-fetched is never treated as evidence: dropping every slow or offline site
-would make search useless on a bad connection.
+account allows. Capped at ten scans per search, all in parallel, and
+cached by host for a week.
+
+The whole batch gets one deadline of two seconds, and the page is sent
+when it passes. A page that cannot be fetched, or has not arrived by
+then, is never treated as evidence: dropping every slow or offline site
+would make search useless on a bad connection. The fetch is not thrown
+away either — it finishes in the background and its verdict goes into
+the cache, so a slow site is judged from the next search on.
 
 ## Where searching happens
 

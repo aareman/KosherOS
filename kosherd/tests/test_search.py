@@ -228,6 +228,81 @@ def test_the_deep_scan_is_capped_per_search():
     assert len(fetched) == 4
 
 
+def test_a_slow_page_does_not_hold_the_search_past_the_budget():
+    # The scan has one wall-clock ceiling for the whole batch. A site still
+    # loading at the deadline is "could not tell", the same as one that
+    # failed: the cheap checks stand and the result is shown.
+    import threading
+    import time
+    release = threading.Event()
+
+    def stall(url):
+        if "slow" in url:
+            release.wait(5)
+        return "<p>Chicken soup</p>"
+
+    scanner = _scanner({}, fetch=stall)
+    scanner.timeout = 0.2
+    f = make_filter({1001: {"mode": "filtered"}}, scanner=scanner)
+    results = [{"url": "https://slow.example/", "title": "", "content": ""},
+               {"url": "https://quick.example/", "title": "", "content": ""}]
+    started = time.monotonic()
+    kept = f.filter_results(1001, results)
+    release.set()
+    assert time.monotonic() - started < 1.0
+    assert [r["url"] for r in kept] == ["https://slow.example/",
+                                        "https://quick.example/"]
+
+
+def test_ten_stalled_pages_cost_one_budget_not_ten():
+    # Each straggler used to get its own wait, one after another, so a
+    # page of unreachable sites took ten timeouts, not one.
+    import threading
+    import time
+    release = threading.Event()
+
+    def stall(url):
+        release.wait(5)
+        return ""
+
+    scanner = _scanner({}, fetch=stall)
+    scanner.timeout = 0.2
+    f = make_filter({1001: {"mode": "filtered"}}, scanner=scanner)
+    results = [{"url": f"https://site{i}.example/", "title": "", "content": ""}
+               for i in range(10)]
+    started = time.monotonic()
+    kept = f.filter_results(1001, results)
+    release.set()
+    assert time.monotonic() - started < 1.0
+    assert len(kept) == 10
+
+
+def test_a_straggler_is_still_judged_for_the_next_search():
+    # The fetch the page did not wait for finishes on its own and lands in
+    # the cache, so a slow explicit site is hidden from the second search
+    # on, rather than never.
+    import threading
+    release = threading.Event()
+
+    def stall(url):
+        release.wait(5)
+        return "<title>Free XXX</title><p>live sex cams and porn videos, nude photos</p>"
+
+    scanner = _scanner({}, fetch=stall)
+    scanner.timeout = 0.2
+    f = make_filter({1001: {"mode": "filtered", "media_level": "none"}},
+                    scanner=scanner)
+    results = [{"url": "https://slow.example/", "title": "", "content": ""}]
+    assert len(f.filter_results(1001, results)) == 1   # not yet known
+    release.set()
+    for _ in range(50):
+        if scanner.cache.get("slow.example") is not None:
+            break
+        threading.Event().wait(0.05)
+    assert scanner.cache.get("slow.example") is not None
+    assert f.filter_results(1001, results) == []       # now it is
+
+
 def test_verdicts_are_cached_so_the_same_host_is_read_once(tmp_path):
     calls = []
 

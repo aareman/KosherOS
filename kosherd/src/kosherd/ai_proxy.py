@@ -20,9 +20,10 @@ import zlib
 from collections.abc import Callable
 from typing import Final, Literal, Protocol, final
 
-from mitmproxy import http
+from mitmproxy import ctx, http
 
 from . import activity, content, language, siterules, vision
+from .ai_api import ApiStream
 from .ai_browser import BrowserStream
 from .ai_images import ImageFilter
 from .ai_json import ContentFilter, dumps, parse
@@ -33,8 +34,9 @@ from .ai_text import OutputBlocked, TextFilter, TextPolicy
 
 log = logging.getLogger("kosher-filter")
 
-Provider = Literal["chatgpt", "claude"]
+Provider = Literal["chatgpt", "claude", "api"]
 Kind = Literal["events", "lines", "json"]
+REFUSED: Final = "refused"
 
 ERROR: Final = json.dumps({"type": "error", "error": {
     "type": "kosher_content_blocked", "message": BLOCKED_TEXT}}).encode()
@@ -65,10 +67,21 @@ class FilterOwner(Protocol):
     vision: vision.ImageFilter
 
 
+# The hosts whose answers are read, by the shape of what they send. "api"
+# is every API host a tool such as Claude Code or Codex talks to; which API
+# shape a host speaks is recognised event by event (ai_api).
+SITES: Final = {
+    "chatgpt": ("chatgpt.com", "chat.openai.com"),
+    "claude": ("claude.ai",),
+    "api": ("api.anthropic.com", "api.openai.com", "generativelanguage.googleapis.com",
+            "api.x.ai", "api.mistral.ai", "api.deepseek.com", "api.groq.com", "openrouter.ai",
+            "api.together.xyz", "api.perplexity.ai", "api.fireworks.ai", "api.cerebras.ai"),
+}
+
+
 def provider(host: str) -> Provider | None:
     host = host.lower().rstrip(".")
-    for name, sites in (("chatgpt", ("chatgpt.com", "chat.openai.com")),
-                        ("claude", ("claude.ai",))):
+    for name, sites in SITES.items():
         if any(host == site or host.endswith("." + site) for site in sites):
             return name
     return None
@@ -98,11 +111,18 @@ def body_kind(selected: Provider, flow: http.HTTPFlow) -> Kind | None:
         return "lines" if selected == "chatgpt" else None
     if mime == "application/json":
         path = flow.request.path.split("?", 1)[0]
-        if selected == "chatgpt" and "/conversation" in path:
+        if selected == "api":
+            return "json"
+        if selected == "chatgpt" and ("/conversation" in path or "/codex/" in path):
             return "json"
         if selected == "claude" and "/chat_conversations" in path:
             return "json"
     return None
+
+
+def api_shaped(selected: Provider, flow: http.HTTPFlow) -> bool:
+    """Does this event stream speak an API (ai_api) rather than ChatGPT's page protocol?"""
+    return selected != "chatgpt" or "/codex/" in flow.request.path.split("?", 1)[0]
 
 
 class Decoder:
@@ -196,7 +216,7 @@ class AIFilter:
 
     def __init__(self, owner: FilterOwner) -> None:
         self.owner = owner
-        self.sockets: dict[str, SocketFilter] = {}
+        self.sockets: dict[str, SocketFilter | str] = {}
 
     # ---- policy -----------------------------------------------------------
 
@@ -230,7 +250,7 @@ class AIFilter:
     def request(self, flow: http.HTTPFlow) -> None:
         if flow.response is not None or provider(flow.request.pretty_host) is None:
             return
-        if not is_asset(flow.request.path):
+        if not is_asset(flow.request.path) or provider(flow.request.pretty_host) == "api":
             # The body callback sees wire bytes; ask for them uncompressed.
             flow.request.headers["accept-encoding"] = "identity"
 
@@ -256,9 +276,9 @@ class AIFilter:
                 response.status_code = 502
             response.stream = _refused(kind)
         else:
-            stream: BrowserStream | LineStream | None = None
+            stream: BrowserStream | LineStream | ApiStream | None = None
             if kind == "events":
-                stream = BrowserStream(selected, filters)
+                stream = ApiStream(filters) if api_shaped(selected, flow) else BrowserStream(filters)
             elif kind == "lines":
                 stream = LineStream(filters, note)
             response.stream = ResponseBody(filters, kind, decoder, stream, note)
@@ -269,32 +289,51 @@ class AIFilter:
         response.headers["x-kosheros"] = "ai-inspected"
 
     def websocket_message(self, flow: http.HTTPFlow) -> None:
-        if flow.websocket is None or flow.metadata.get("kosher_uid") is None:
+        uid = flow.metadata.get("kosher_uid")
+        if flow.websocket is None or uid is None:
             return
-        if provider(flow.request.pretty_host) != "chatgpt":
+        if provider(flow.request.pretty_host) not in {"chatgpt", "api"}:
             return
         message = flow.websocket.messages[-1]
+        if getattr(message, "injected", False):
+            return  # a frame this addon added, already checked
+        state = self.sockets.get(flow.id)
+        if state == REFUSED:
+            # The notice went out on the last frame; nothing more passes either way.
+            message.drop()
+            flow.kill()
+            return
         if message.from_client:
             return
         try:
             if not message.is_text:
                 raise OutputBlocked("Unsupported AI websocket protocol")
-            socket = self.sockets.setdefault(
-                flow.id, SocketFilter(self._filters(flow.metadata["kosher_uid"])))
-            message.content = socket.feed(message.content)
+            socket = state or self.sockets.setdefault(flow.id, SocketFilter(self._filters(uid)))
+            frames = socket.feed(message.content)
+            message.content = frames[0] if frames else b""
+            for extra in frames[1:]:
+                _inject(flow, extra)
         except (OutputBlocked, InvalidEventStream, UnicodeError, RecursionError) as error:
-            message.drop()
-            flow.kill()
-            self.sockets.pop(flow.id, None)
+            message.content = ERROR
+            self.sockets[flow.id] = REFUSED
             log.info("AI websocket refused: %s", error)
             blocked = error if isinstance(error, OutputBlocked) else OutputBlocked(str(error))
-            self._note(flow, flow.metadata["kosher_uid"], blocked)
+            self._note(flow, uid, blocked)
 
     def websocket_end(self, flow: http.HTTPFlow) -> None:
         self.sockets.pop(flow.id, None)
 
     def error(self, flow: http.HTTPFlow) -> None:
         self.sockets.pop(flow.id, None)
+
+
+def _inject(flow: http.HTTPFlow, frame: bytes) -> None:
+    """Send one more frame to the client, after the one being handled."""
+    master = getattr(ctx, "master", None)
+    if master is None:  # outside a running proxy (tests)
+        log.debug("no proxy master to inject a websocket frame into")
+        return
+    master.commands.call("inject.websocket", flow, True, frame, True)
 
 
 def _refused(kind: Kind) -> Callable[[bytes], bytes]:

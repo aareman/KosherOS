@@ -27,6 +27,8 @@ TEXT_TABLES: Final = frozenset({"constants"})
 EMBEDDED_JSON: Final = frozenset({"conversationState"})
 ALL_TEXT: Final = "*"
 IMAGE_FIELDS: Final = frozenset({"b64_json", "partial_image_b64"})
+# Objects that are a tool call: checked whole and refused, never rewritten.
+TOOL_CALLS: Final = frozenset({"tool_use", "server_tool_use", "function_call", "custom_tool_call", "mcp_call"})
 MAX_DEPTH: Final = 64
 
 
@@ -55,12 +57,14 @@ class ContentFilter:
     images: ImageFilter
 
     def tool(self, value) -> None:
-        """Refuse unsafe tool arguments without rewriting executable source."""
-        if self.clean(value) != value:
-            raise OutputBlocked("AI tool output requires a content change")
+        """Refuse unsafe tool arguments without rewriting executable source.
+
+        A listed word in a file an assistant writes, or in a command it
+        runs, cannot be swapped the way a word on a page is: the program
+        would be changed under the person's feet. The call is refused."""
         if isinstance(value, str):
             if self.string(value) != value:
-                raise OutputBlocked("AI tool output blocked by language policy",
+                raise OutputBlocked("AI tool arguments need a change the filter cannot make",
                                     reason="language")
         elif isinstance(value, list):
             for item in value:
@@ -97,6 +101,9 @@ class ContentFilter:
         if isinstance(value, list):
             return [self.clean(item, field, depth + 1) for item in value]
         if isinstance(value, dict):
+            if value.get("type") in TOOL_CALLS:
+                self.tool(value)
+                return value
             result = {}
             for key, item in value.items():
                 child = ALL_TEXT if field == ALL_TEXT else "text" if field in TEXT_TABLES else str(key)

@@ -319,6 +319,44 @@ def test_verdicts_are_cached_so_the_same_host_is_read_once(tmp_path):
     assert len(calls) == 1
 
 
+def test_a_host_that_could_not_be_read_is_not_tried_again_on_every_search(tmp_path):
+    # Not a verdict: the result is still shown. But a site that answers
+    # scrapers by hanging used to be fetched on every search that listed
+    # it, and each time it cost the whole budget.
+    calls = []
+
+    def down(url):
+        calls.append(url)
+        raise OSError("connection reset")
+
+    from kosherd import pagescan
+    scanner = pagescan.PageScanner(
+        scorer=content.load(TERMS), fetch=down,
+        cache=pagescan.VerdictCache(tmp_path / "v.sqlite"))
+    assert scanner.verdict("https://down.example/1", "down.example") is None
+    assert scanner.verdict("https://down.example/2", "down.example") is None
+    assert len(calls) == 1
+    f = make_filter({1001: {"mode": "filtered"}}, scanner=scanner)
+    results = [{"url": "https://down.example/", "title": "", "content": ""}]
+    assert len(f.filter_results(1001, results)) == 1
+
+
+def test_a_remembered_failure_is_tried_again_later(tmp_path):
+    calls = []
+
+    def down(url):
+        calls.append(url)
+        raise OSError("connection reset")
+
+    from kosherd import pagescan
+    scanner = pagescan.PageScanner(
+        scorer=content.load(TERMS), fetch=down,
+        cache=pagescan.VerdictCache(tmp_path / "v.sqlite", retry=-1))
+    scanner.verdict("https://down.example/", "down.example")
+    scanner.verdict("https://down.example/", "down.example")
+    assert len(calls) == 2
+
+
 def test_an_expired_verdict_is_read_again(tmp_path):
     from kosherd import pagescan
     cache = pagescan.VerdictCache(tmp_path / "v.sqlite", ttl=-1)

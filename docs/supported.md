@@ -20,7 +20,9 @@ behind it in the repository; where a limit is stated, it is a real one.
 |---|---|---|
 | ChatGPT in the browser, signed out | supported | Answers get the account's language filter and content level as they stream; an answer that fails is replaced by a notice. Watched working in a real browser. See [AI answers](ai-filtering.md). |
 | ChatGPT signed in, Claude in the browser | checked, not yet watched live | The same checks, written against the stream shapes those sites document. A stream the proxy cannot read is refused, not passed. |
-| Desktop apps and command-line AI tools | not yet | They reach the companies' APIs directly; those are not read yet. |
+| Claude Code, Codex | supported | Their answers from api.anthropic.com and chatgpt.com get the same checks; tool calls are checked whole and refused rather than rewritten. Watched working through the proxy. |
+| Programs using the OpenAI, Anthropic, Gemini, xAI, Mistral, DeepSeek, Groq, OpenRouter, Together, Perplexity, Fireworks or Cerebras APIs | checked, not yet watched live | The four API shapes are recognised event by event. The program must trust the machine's certificate authority, as the developer tools below do. |
+| Other chat sites (Gemini, Copilot, Perplexity, Grok…) | not yet | Each has its own page protocol. |
 
 ## Developer tools
 

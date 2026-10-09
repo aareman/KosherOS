@@ -1,14 +1,36 @@
 # AI answers
 
 ChatGPT and Claude write their answers into the page while they are being
-generated. On a filtered account, the inspection proxy reads those answers
-the way it reads a page, and the account's language filter and content level
-apply to them. There is no separate setting: an account whose pages have
-words replaced gets the same in its AI answers, and an account whose pages
-are refused at "immodest" has its AI answers refused at the same level.
+generated, and tools such as Claude Code and Codex read theirs from the
+companies' APIs the same way. On a filtered account, the inspection proxy
+reads those answers the way it reads a page, and the account's language
+filter and content level apply to them. There is no separate setting: an
+account whose pages have words replaced gets the same in its AI answers,
+and an account whose pages are refused at "immodest" has its AI answers
+refused at the same level.
 
 The site has to be reachable first. An account whose categories or rules
-block chatgpt.com or claude.ai never gets this far.
+block chatgpt.com, claude.ai or an API host never gets this far.
+
+## Where it applies
+
+- **ChatGPT and Claude in the browser.**
+- **Claude Code**, which reads its answers from api.anthropic.com, and
+  **Codex**, which reads them from chatgpt.com over a WebSocket when signed
+  in with a ChatGPT account, or from api.openai.com with a key. Both were
+  watched working through the proxy.
+- **Anything else that talks to an AI API.** The proxy recognises the four
+  shapes these APIs send, event by event: Anthropic Messages, OpenAI
+  Responses, OpenAI Chat Completions (which xAI, Mistral, DeepSeek, Groq,
+  OpenRouter, Together, Perplexity, Fireworks and Cerebras copy) and
+  Gemini. So a program that uses one of those APIs is covered whichever
+  host it calls, as long as the host is one the proxy reads
+  (`SITES` in `kosherd/ai_proxy.py`).
+
+A program that pins its own certificate, or that does not trust the
+machine's certificate authority, cannot be read; that traffic fails rather
+than passing. Claude Code and Codex both trust it through the environment
+the image sets (see [what works](supported.md)).
 
 ## What is checked
 
@@ -27,6 +49,11 @@ block chatgpt.com or claude.ai never gets this far.
   account's picture level: hidden when the level is "all", otherwise judged
   by the same detector as a picture on a page. A picture downloaded by the
   page as a file goes through the ordinary picture filter.
+- **What a tool is told to do.** When an assistant calls a tool (writes a
+  file, runs a command), the arguments are held until they are complete and
+  checked whole. They are never rewritten, because a changed word in a
+  program is a changed program; a call that would need a change is refused
+  instead, and the tool sees an error.
 
 An answer that reads as the account's content level is not shown. The page
 gets a short notice in its place: *This answer was not shown. It did not
@@ -41,17 +68,19 @@ replaced by the notice, never passed on as it came.
 
 ## Limits
 
-- ChatGPT was watched working in a real browser, signed out, in October
-  2026. Signed-in ChatGPT and Claude use the stream shapes their
-  documentation and public captures describe, and have not yet been watched
-  live. These protocols are the sites' own and change without notice; when
-  one changes in a way the proxy does not understand, the answer is refused,
+- ChatGPT in the browser (signed out), Claude Code and Codex were watched
+  working through the proxy in October 2026. Signed-in ChatGPT, Claude in
+  the browser and the other APIs use the stream shapes their documentation
+  and public captures describe, and have not yet been watched live. These
+  protocols are the companies' own and change without notice; when one
+  changes in a way the proxy does not understand, the answer is refused,
   not shown unchecked.
 - Text already shown cannot be taken back. A long answer that only earns its
   verdict near the end is cut off from that point, and what came before
   stays on the page.
 - The word list and the content terms are the ones used for pages, with the
   same reach and the same misses. This is not a model judging meaning.
-- Desktop apps and command-line tools that talk to the AI companies' APIs
-  directly are not covered by this page's checks. They are the next part of
-  the same work.
+- Other chat sites (Gemini, Copilot, Perplexity, Grok and the rest) each
+  have their own page protocol and are not read yet. A site whose answers
+  come through one of the four API shapes above is covered once its host
+  is added to the list.

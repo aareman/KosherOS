@@ -176,7 +176,14 @@ class ResponseBody:
         self.buffer = bytearray()
         self.refused = False
 
-    def __call__(self, chunk: bytes) -> bytes:
+    def __call__(self, chunk: bytes) -> list[bytes]:
+        # A list, never b"": mitmproxy writes whatever bytes come back, and
+        # on HTTP/1.1 an empty chunk is the end of the body. Chrome speaks
+        # HTTP/2 and never noticed; Claude Code's HTTP/1.1 client did.
+        output = self.output(chunk)
+        return [output] if output else []
+
+    def output(self, chunk: bytes) -> bytes:
         if self.refused:
             return b""
         try:
@@ -336,19 +343,19 @@ def _inject(flow: http.HTTPFlow, frame: bytes) -> None:
     master.commands.call("inject.websocket", flow, True, frame, True)
 
 
-def _refused(kind: Kind) -> Callable[[bytes], bytes]:
+def _refused(kind: Kind) -> Callable[[bytes], list[bytes]]:
     """A body callback that drops every upstream byte and sends the notice once."""
     sent = False
 
-    def body(chunk: bytes) -> bytes:
+    def body(chunk: bytes) -> list[bytes]:
         nonlocal sent
         if sent:
-            return b""
+            return []
         sent = True
         if kind == "events":
-            return b"event: error\ndata: " + ERROR + b"\n\n"
+            return [b"event: error\ndata: " + ERROR + b"\n\n"]
         if kind == "lines":
-            return dumps({"version": 1, "type": "end"}).encode() + b"\n"
-        return ERROR
+            return [dumps({"version": 1, "type": "end"}).encode() + b"\n"]
+        return [ERROR]
 
     return body

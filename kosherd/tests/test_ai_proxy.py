@@ -53,11 +53,18 @@ def flow_for(url: str, status: int = 200, body: bytes = b"", uid: int | None = 1
     return flow
 
 
-def drive(flow: http.HTTPFlow, *chunks: bytes) -> bytes:
-    """Feed the body callback the way mitmproxy does, ending with b''."""
+def out(flow: http.HTTPFlow, chunk: bytes) -> bytes:
+    """One call of the body callback: the bytes it hands mitmproxy to send."""
     stream = flow.response.stream
     assert callable(stream)
-    return b"".join(stream(chunk) for chunk in (*chunks, b""))
+    sent = stream(chunk)
+    assert isinstance(sent, list), "an empty chunk would end an HTTP/1.1 body"
+    return b"".join(sent)
+
+
+def drive(flow: http.HTTPFlow, *chunks: bytes) -> bytes:
+    """Feed the body callback the way mitmproxy does, ending with b''."""
+    return b"".join(out(flow, chunk) for chunk in (*chunks, b""))
 
 
 @pytest.mark.parametrize("host, expected", [
@@ -141,9 +148,9 @@ def test_conversation_lines_are_checked_as_they_stream() -> None:
                        "mode": "append", "baseRevision": 1, "status": "complete",
                        "markdown": ""}).encode() + b"\n"
     # When the first line arrives, then checked text is already on its way.
-    early = flow.response.stream(first)
+    early = out(flow, first)
     assert b"darn long" in early and b"damn" not in early
-    rest = flow.response.stream(done) + flow.response.stream(b"")
+    rest = out(flow, done) + out(flow, b"")
     assert b"damn" not in rest
     assert json.loads(rest.split(b"\n")[0])["status"] == "complete"
 
@@ -182,9 +189,9 @@ def test_a_malformed_stream_emits_an_error_and_drops_what_follows() -> None:
     flow = flow_for("https://claude.ai/api/organizations/o/chat_conversations/c/completion",
                     **{"content-type": "text/event-stream"})
     addon.responseheaders(flow)
-    output = flow.response.stream(b"event: content_block_delta\ndata: {broken}\n\n")
+    output = out(flow, b"event: content_block_delta\ndata: {broken}\n\n")
     assert b"kosher_content_blocked" in output
-    assert flow.response.stream(b"data: unchecked following payload\n\n") == b""
+    assert flow.response.stream(b"data: unchecked following payload\n\n") == []
 
 
 def test_history_json_is_checked_before_any_byte_is_released() -> None:
@@ -196,10 +203,10 @@ def test_history_json_is_checked_before_any_byte_is_released() -> None:
     source = json.dumps({"chat_messages": [{"text": "damn", "content": [
         {"type": "image", "source": {"type": "base64", "media_type": "image/jpeg", "data": "YQ=="}},
     ]}]}).encode()
-    # When it arrives in incomplete chunks.
-    assert flow.response.stream(source[:20]) == b""
-    assert flow.response.stream(source[20:]) == b""
-    output = json.loads(flow.response.stream(b""))
+    # When it arrives in incomplete chunks, then nothing is sent (not even an empty chunk).
+    assert flow.response.stream(source[:20]) == []
+    assert flow.response.stream(source[20:]) == []
+    output = json.loads(out(flow, b""))
     # Then the only released document carries checked text and image data.
     message = output["chat_messages"][0]
     assert message["text"] == "darn"

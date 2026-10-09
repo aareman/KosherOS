@@ -64,6 +64,15 @@ def test_real_proxy_checks_stream_before_upstream_finishes(tmp_path: Path, malfo
 
     class Origin(BaseHTTPRequestHandler):
         def do_GET(self) -> None:
+            if self.path.endswith("/history"):
+                # A conversation being opened: JSON the addon holds until it is whole.
+                body = json.dumps({"messages": [{"text": "a damn fine chat"}]}).encode()
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+                return
             if self.path.endswith("sdk.js"):
                 self.send_response(200)
                 self.send_header("Content-Type", "text/javascript; charset=utf-8")
@@ -116,6 +125,13 @@ def test_real_proxy_checks_stream_before_upstream_finishes(tmp_path: Path, malfo
                 ], capture_output=True, check=True).stdout
                 assert script.split(b"\r\n", 1)[0].endswith(b" 200 OK")
                 assert script.endswith(SCRIPT)
+                # A held JSON body reaches an HTTP/1.1 client whole: nothing the
+                # addon returns while holding it may read as the end of the body.
+                history = subprocess.run([
+                    "curl", "--silent", "--show-error", "--http1.1", "--max-time", "10",
+                    "-H", "Host: chatgpt.com", f"http://127.0.0.1:{port}/backend-api/conversation/history",
+                ], capture_output=True, check=True).stdout
+                assert json.loads(history) == {"messages": [{"text": "a darn fine chat"}]}
                 with subprocess.Popen([
                     "curl", "--silent", "--show-error", "--no-buffer", "--max-time", "15",
                     "-H", "Host: chatgpt.com", f"http://127.0.0.1:{port}/backend-api/conversation",

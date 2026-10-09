@@ -1532,6 +1532,8 @@ def test_block_reasons_read_in_the_familys_words():
     assert labels.why_text("rule:youtube.com/shorts*") == "a page rule (youtube.com/shorts*)"
     assert labels.why_text("content:nsfw") == "the page reads as explicit"
     assert labels.why_text("language") == "bad language on the page"
+    assert labels.why_text("ai:content") == "an AI answer that did not pass the filter"
+    assert labels.why_text("ai:language") == "an AI answer with bad language"
     assert labels.why_text("youtube:channel") == "not an approved channel"
     assert labels.why_text("") == ""
 

@@ -14,6 +14,14 @@ behind it in the repository; where a limit is stated, it is a real one.
 | Sites behind a captive portal (hotel, airport Wi‑Fi) | supported | "Allow Wi‑Fi sign‑in" on the person's page opens a ten‑minute window; filtering resumes on its own. |
 | Certificate pinning inside an app | not filtered, not broken | An app that pins its own certificate refuses the filter's; such traffic is blocked rather than passed through. |
 
+## AI chat sites
+
+| Site | On a filtered account | Notes |
+|---|---|---|
+| ChatGPT in the browser, signed out | supported | Answers get the account's language filter and content level as they stream; an answer that fails is replaced by a notice. Watched working in a real browser. See [AI answers](ai-filtering.md). |
+| ChatGPT signed in, Claude in the browser | checked, not yet watched live | The same checks, written against the stream shapes those sites document. A stream the proxy cannot read is refused, not passed. |
+| Desktop apps and command-line AI tools | not yet | They reach the companies' APIs directly; those are not read yet. |
+
 ## Developer tools
 
 In "Filtered internet" mode the machine reads HTTPS with its own

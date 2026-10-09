@@ -76,18 +76,21 @@ because blocking those works against the family that installed this.
 **Results nothing has ever classified.** This is the gap domain lists
 leave open, and it is where new material lives. For results on hosts the
 category database has never heard of, `pagescan.py` fetches the first
-128 KB, scores it, and hides the result if the page reads worse than the
-account allows. Capped at ten scans per search, all in parallel, and
-cached by host for a week.
+128 KB, scores it, and remembers the verdict by host for a week. A result
+whose host is known to read worse than the account allows is hidden.
 
-The whole batch gets one deadline of two seconds, and the page is sent
-when it passes. A page that cannot be fetched, or has not arrived by
-then, is never treated as evidence: dropping every slow or offline site
-would make search useless on a bad connection. The fetch is not thrown
-away either — it finishes in the background and its verdict goes into
-the cache, so a slow site is judged from the next search on. A host
-that could not be read at all is left alone for an hour rather than
-fetched again by every search that lists it.
+The reading happens after the search is answered, never before it. A
+search shows what the cheap checks allow and what the cache already
+knows; up to ten unknown hosts are queued and read in the background, and
+each verdict applies from the next search on. Waiting for the fetch made
+every fresh search as slow as the slowest site in it, and the protection
+it bought is given anyway: the title and snippet are scored before
+anything is shown, and in filtered mode the proxy reads the page itself
+when the link is clicked.
+
+A page that cannot be fetched is never treated as evidence, and a host
+that could not be read is left alone for an hour rather than tried again
+by every search that lists it.
 
 ## Where searching happens
 

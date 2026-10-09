@@ -19,7 +19,8 @@ Everything the family sees is made from two files in `branding/`:
 those two:
 
 - the boot-splash logo;
-- a house in the brand blue for the classic desktop's Apps button, drawn
+- the front of the Bais Hamikdosh in the brand blue for the classic
+  desktop's Apps button, drawn from the measurements in Mishnah Middos
   rather than taken from the mark, because the mark is the admin app's
   icon and read as "admin" on the taskbar;
 - the admin app's icon at every size, named `org.kosherlinux.Admin`. The

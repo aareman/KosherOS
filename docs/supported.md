@@ -86,6 +86,10 @@ Both settings are off until a parent sets them. See
 
 ## Hardware
 
+See the [minimum and recommended system requirements](install.md#system-requirements)
+before planning a test installation. These are provisional early-testing guidelines,
+not certified minimums. The current image supports Intel/AMD x86_64 PCs, not Apple Silicon or other ARM computers.
+
 | | |
 |---|---|
 | Architecture | x86_64. |

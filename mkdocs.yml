@@ -1,5 +1,5 @@
 site_name: KosherOS
-site_description: A family computer that is filtered, locked down, and still a real computer.
+site_description: A better everyday computer for frum families. Explore KosherOS, with filtering and family settings built in, and help test an early build.
 site_url: https://aareman.github.io/KosherOS/
 repo_url: https://github.com/aareman/KosherOS
 repo_name: aareman/KosherOS
@@ -44,6 +44,7 @@ theme:
 nav:
   - Home: index.md
   - What it is: overview.md
+  - Try on a spare computer: install.md
   - What works: supported.md
   - Releases: releases.md
   - How it is built:

@@ -4,6 +4,9 @@ Description=KosherOS: put the Nix store on /var
 # skeleton. The first boot copies that skeleton to /var/lib/nix (ownership
 # and modes included: the store directory belongs to the nixbld group);
 # every boot after that finds it there, and nix.mount puts it in place.
+# The copy is relabelled afterwards: cp kept the skeleton's default_t,
+# and the daemon's socket may only be created in a var_run_t directory
+# (the file contexts the image sets for /var/lib/nix and /nix).
 DefaultDependencies=no
 RequiresMountsFor=/var/lib
 Before=nix.mount
@@ -12,3 +15,4 @@ Before=nix.mount
 Type=oneshot
 ExecStart=/usr/bin/mkdir -p /var/lib/nix
 ExecStart=/usr/bin/cp -a --no-clobber --no-preserve=context /nix/. /var/lib/nix/
+ExecStart=/usr/sbin/restorecon -R /var/lib/nix

@@ -61,6 +61,17 @@ Copilot) comes with is the publisher's and the person installing agrees
 to it, as with a non-free app on Flathub. Claude's and Codex's desktop
 apps are not here: neither publishes a Linux build.
 
+**Languages and toolchains.** Nothing is baked into the image beyond the
+Python the system itself runs on (with pip). Node.js with npm, pnpm,
+Yarn and Bun; the newest Python, uv, Poetry and Pipenv; Rust through
+rustup; Go; PHP and Composer; Ruby with gem and bundler; and Zig are on
+the Store's Developer tools shelf, each from nixpkgs into the account's
+own profile. A project that wants its own versions pins them in a
+`devenv.nix` or a `devbox.json` and gets exactly those, on this machine
+and the next; both tools are on every KosherOS machine. The registries
+every toolchain fetches from are reachable from every account (the
+table above), and the filter's certificate is trusted by each.
+
 **Containers.** Podman is the container engine, rootless, and `docker` is
 Podman's own shim, so a script or an extension that looks for `docker`
 finds it; `podman-compose` reads compose files. A rootless container's

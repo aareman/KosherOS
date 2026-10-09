@@ -31,7 +31,7 @@ def test_refs_look_like_flatpak_app_ids_or_nixpkgs_packages_and_are_unique():
     assert len(refs) == len(set(refs))
     for ref in refs:
         assert (re.fullmatch(r"[A-Za-z][\w-]*(\.[A-Za-z0-9][\w-]*){2,}", ref)
-                or re.fullmatch(r"nixpkgs#[a-z0-9][a-z0-9_.-]*", ref)), ref
+                or re.fullmatch(r"nixpkgs#[A-Za-z0-9][A-Za-z0-9_.-]*", ref)), ref
 
 
 def test_the_ai_tools_and_editors_come_from_nixpkgs():
@@ -46,6 +46,19 @@ def test_the_ai_tools_and_editors_come_from_nixpkgs():
     for app in APPS:
         if app["ref"] in nix:
             assert appkinds.kind_of(app) == "develop", app["ref"]
+
+
+def test_the_languages_from_the_issue_are_there_and_not_baked_into_the_image():
+    # Issue #34: node (npm, bun, pnpm, yarn), python (uv, pip, pipenv,
+    # poetry), rust, go, php, ruby, zig. From nixpkgs into the account's
+    # profile, not into the image: pip comes with the system Python.
+    nix = {a["ref"] for a in APPS if a["ref"].startswith("nixpkgs#")}
+    for package in ("nodejs", "bun", "pnpm", "yarn", "python3", "uv", "pipenv", "poetry",
+                    "rustup", "go", "php", "phpPackages.composer", "ruby", "zig"):
+        assert f"nixpkgs#{package}" in nix, package
+    containerfile = (ROOT / "os-image/Containerfile").read_text()
+    for rpm in ("nodejs", "golang", "rust", "cargo", "php", "ruby", "zig"):
+        assert not re.search(rf"dnf -y install[^\n]*\b{rpm}\b", containerfile), rpm
 
 
 def test_nothing_falls_off_the_shelves():

@@ -77,11 +77,17 @@ RUN dnf -y install dnsmasq nftables python3-gobject python3-jsonschema python3-p
 # sudo is on dnf's protected list; removing it here is the whole point.
 # (podman stays, and not only for containers: bootc, the update
 # mechanism, depends on it in F44+.)
+# console-login-helper-messages-profile is a CoreOS habit the bootc base
+# carries: every interactive shell opens with "[systemd] Failed Units"
+# and a list. A server console wants that; a family's terminal does not,
+# and a developer opening Console saw it before the first prompt.
 RUN for p in sudo toolbox gnome-boxes gnome-software PackageKit \
-        PackageKit-command-not-found gnome-initial-setup gnome-classic-session; do \
+        PackageKit-command-not-found gnome-initial-setup gnome-classic-session \
+        console-login-helper-messages-profile; do \
         rpm -q "$p" >/dev/null 2>&1 && dnf -y --setopt=protected_packages= remove "$p"; \
     done; \
-    ! rpm -q sudo && rpm -q bootc && test -x /usr/bin/docker && test -x /usr/bin/podman-compose
+    ! rpm -q sudo && rpm -q bootc && test -x /usr/bin/docker && test -x /usr/bin/podman-compose \
+    && ! test -e /usr/share/console-login-helper-messages/profile.sh
 
 # Build/branding tooling in one early layer, so the later steps that use it
 # are cheap and local. Layer ORDER in this file is deliberate: the heavy,

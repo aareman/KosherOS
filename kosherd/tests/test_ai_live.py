@@ -119,9 +119,13 @@ def test_real_proxy_checks_stream_before_upstream_finishes(tmp_path: Path, malfo
     command = ["mitmdump", "--mode", f"reverse:http://127.0.0.1:{server.server_port}",
                "--listen-host", "127.0.0.1", "--listen-port", "0", "--set", "keep_host_header=true",
                "--set", f"confdir={tmp_path / 'ca'}", "-s", str(addon)]
+    # The spawned mitmdump imports kosherd like the pytest process does; the
+    # path pytest adds for itself (pyproject's pythonpath) is not inherited.
+    source = str(Path(__file__).resolve().parents[1] / "src")
+    python_path = source + os.pathsep + os.environ["PYTHONPATH"] if os.environ.get("PYTHONPATH") else source
     try:
         with subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                              env=os.environ | {"PYTHONUNBUFFERED": "1"}) as proxy:
+                              env=os.environ | {"PYTHONUNBUFFERED": "1", "PYTHONPATH": python_path}) as proxy:
             try:
                 port = _proxy_port(proxy)
                 # The anti-bot script on the same site is not an answer: it arrives as sent.
@@ -173,6 +177,8 @@ def test_real_proxy_checks_stream_before_upstream_finishes(tmp_path: Path, malfo
             finally:
                 proxy.terminate()
                 proxy.wait(timeout=5)
+                # Shown by pytest when the test fails: what the proxy itself said.
+                print(proxy.stdout.read().decode(errors="replace"))
     finally:
         finish.set()
         server.shutdown()

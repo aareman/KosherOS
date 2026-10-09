@@ -1,273 +1,240 @@
-# Kosher Linux — Architecture
+# Architecture
 
-A family-friendly, filtered Linux distribution: Fedora bootc/ostree immutable
-base, GNOME desktop (three per-account layouts — see
-[desktop.md](desktop.md)), per-user filter modes, and administration without
-root.
+KosherOS is an immutable Fedora base, a GNOME desktop with three
+per-account layouts, a content filter enforced per account at the network
+layer, and administration without root. This page is the map; the pages
+after it go into each part.
 
-## The core idea: admin without root
+```mermaid
+flowchart LR
+    subgraph desktop [GNOME desktop]
+        Admin[KosherOS Admin]
+        Store[KosherOS Store]
+        MyFilter[My Filter]
+        Setup[First-boot wizard]
+    end
+    subgraph daemon [kosherd, the only privileged surface]
+        DBus[D-Bus API, polkit gated]
+        Policy[(policy.json)]
+        Activity[(activity log)]
+    end
+    subgraph enforcement [Enforcement, per account]
+        NFT[nftables: per-user rules]
+        DNS[dnsmasq: family DNS, ad blocking]
+        Proxy[mitmproxy: pages, pictures, video]
+        Search[SearXNG + KosherOS front end]
+        MCT[malcontent: which apps each account may run]
+    end
+    Admin -->|unlock once, then every call| DBus
+    Store --> DBus
+    MyFilter -->|read own settings| DBus
+    Setup --> DBus
+    DBus --> Policy
+    Policy -->|rendered on every change| NFT & DNS & Proxy & Search & MCT
+    Proxy & Search -->|what they blocked| Activity
+    Activity --> Admin
+    Portal[Self-hosted portal, optional] -->|signed policy and lists| DBus
+```
 
-Nobody on the machine has root: no sudo is shipped, the root account is
-locked, and a polkit rule removes all polkit *admin* identities, which kills
-every stock privileged action (adding flatpak remotes, rebasing the OS,
-system network changes).
+## Nobody has root
 
-The only privilege surface is **kosherd**, a root daemon exposing a D-Bus API
-(`org.kosherlinux.Daemon1`). Members of the `kosher-admin` group are granted
-its `org.kosherlinux.*` polkit actions outright from their own signed-in
-session — signing in is the proof, and an administrator is never asked for a
-password to manage users, install catalog apps, connect wifi, or apply
-updates. On any other account those actions ask for an administrator's
-password (GNOME's polkit agent handles the prompt), which polkit keeps for
-the sitting and kosherd extends as a sliding session. kosherd leans on
-existing privileged services (accountsservice, flatpak, bootc, NetworkManager)
-instead of reimplementing them. There are otherwise no polkit admin identities
-at all, so every stock action that defaults to `auth_admin` is unsatisfiable —
-except a named list of everyday ones (time zone, language, device name, joining
-a Wi-Fi network, printers, colour profiles) that
-`45-kosher-admin-system.rules` grants back to `kosher-admin` without a
-prompt, so GNOME Settings works for the parent without ever reaching
-services, packages or the image.
+No `sudo` is shipped, the root account is locked, and a polkit rule removes
+every polkit admin identity. That switches off every stock privileged
+action: adding Flatpak remotes, rebasing the OS, changing the system
+network. Stock update and package actions are denied quietly, with no
+prompt, so desktop components do not pop a password dialog nothing could
+satisfy.
 
-**Guardian dual-control**: optionally, filter-weakening calls
-(`SetFilterMode`, `SetWhitelist`, `SetUrlRules`, `SetGuestConfig`,
-`DisableGuardian`) additionally require a
-second password (e.g. the other spouse's), stored as a yescrypt hash in
-`/etc/kosher/guardian.shadow`, rate-limited (5 tries → 15 min lockout).
+The one privileged surface is **kosherd**, a root daemon with a D-Bus API.
+Members of the `kosher-admin` group hold its `org.kosherlinux.*` polkit
+actions from their own signed-in session, so an administrator is never
+asked for a password to manage accounts, install apps, connect Wi-Fi or
+apply updates. On any other account those actions ask for an
+administrator's password once, through GNOME's own polkit agent, and the
+daemon keeps a sliding session so nothing prompts again that sitting.
 
-## Device security, and what GNOME's panel can say
+A short list of everyday settings is granted back to administrators without
+a prompt, time zone, language, device name, joining a Wi-Fi network,
+printers, colour profiles, so GNOME Settings works for a parent without
+ever reaching services, packages or the image.
 
-Settings → Privacy & Security → **Device Security** reports fwupd's Host
-Security ID. Three of its checks are an operating system's to answer, and
-the image sets all three in `/usr/lib/bootc/kargs.d/20-kosheros-security.toml`:
+The daemon leans on the services that already exist, accountsservice,
+Flatpak, bootc and NetworkManager, rather than reimplementing them.
 
-| kernel argument | what it answers |
-|---|---|
-| `lockdown=integrity` | the kernel refuses the paths that would let root rewrite the running kernel. Secure Boot turns this on by itself; saying it explicitly means a machine booted without Secure Boot still gets the same floor |
-| `intel_iommu=on` | devices sit behind the IOMMU. Modern kernels do this where the firmware exposes VT-d; older Intel parts need asking, and it costs nothing where it is already on |
-| `mem_sleep_default=s2idle` | suspend to idle rather than deep S3, which fwupd marks down because S3 leaves the memory image where firmware attacks can reach it |
+**The guardian password.** Optionally, every call that weakens the filter
+needs a second password on top, meant for the other spouse: changing an
+account's mode, its sites, rules, categories, pictures, language, YouTube,
+time limits or ports beyond the web; putting an account in a group or
+changing the group; editing a list; approving a request; opening the store
+or changing app blocks; the guest account; ad blocking; the update channel;
+enrolling in or leaving a portal; making someone an administrator; and
+turning the guardian off. It is stored as a yescrypt hash and rate limited, five tries
+and then a fifteen-minute lockout.
 
-Nothing in the image loads an out-of-tree kernel module — no proprietary
-drivers ship, and none can be installed — so lockdown costs the family
-nothing.
+## Two planes of enforcement
 
-**The rest of that panel is not ours.** Secure Boot, the TPM, VT-d and the
-firmware revision are the owner's settings, in the machine's firmware
-setup; Intel BootGuard, SPI flash write protection, the ME's manufacturing
-mode, pre-boot DMA protection and the CPU's CET and SMAP status are the
-vendor's, fixed when the machine was built. On ordinary consumer hardware
-the panel will keep saying "checks failed" however well the OS behaves, and
-one item stays red by design: Fedora swaps to zram, which fwupd counts as
-unencrypted swap.
+**DNS.** systemd-resolved is masked. dnsmasq is the only resolver, on
+loopback, with its upstream fixed to a family-filtered service. nftables
+redirects every human account's port-53 traffic to it, so picking another
+resolver is impossible. Everyone gets family-filtered DNS and ad blocking
+as a baseline; per-account differences happen at the packet layer. There
+are two resolver instances, one for filtered accounts and a plain one for
+unfiltered accounts, and the ad list is rendered into both.
 
-So the panel is worth reading for the four firmware settings a person can
-actually change, and is not a verdict on the filter. Nothing on that screen
-affects whether KosherOS is filtering.
+**Packets.** One nftables table, rendered from the policy and loaded
+fail-closed before the network comes up. Every packet is dispatched by the
+owning uid:
 
-## Filtering: the DNS and packet planes
-
-Per-user modes, enforced in two planes:
-
-**DNS plane.** systemd-resolved is masked. dnsmasq (`kosher-dns.service`)
-is the only resolver: 127.0.0.1:53, upstream hardcoded to Cloudflare family
-(1.1.1.3). nftables redirects every human user's port-53 traffic to it, so
-picking another resolver is impossible. Everyone therefore gets
-family-filtered DNS as a baseline; per-user differences happen at the IP
-layer.
-
-**Packet plane.** `table inet kosher` (rendered by `kosherd.nft`, loaded
-fail-closed before the network by `kosher-firewall.service`):
-
-| mode | enforcement |
-|---|---|
-| `none` | loopback + LAN print/mDNS only; everything else rejected |
-| `whitelist` | only IPs in the `@wl4/@wl6` sets (populated by dnsmasq's `nftset=` as it resolves whitelisted domains — direct-IP browsing is blocked for free) plus `@sys4/@sys6` system domains |
-| `dnsfilter` | open, behind family DNS + evasion blocking |
-| `inspect` | as `dnsfilter`, plus URL rules applied by the local proxy (below) |
-
-Users are dispatched by `meta skuid`; unknown human UIDs fall through to
-`mode_none` (fail closed). A shared `evasion_block` chain rejects DoT (853),
-QUIC/HTTP3 (udp 443 — also blocks DoH3/ECH), and a curated set of
-DoH-on-tcp-443 resolver IPs, including the unfiltered 1.1.1.1/8.8.8.8.
-
-Rootless containers don't escape this: a user netns egresses via
-pasta/slirp4netns, an ordinary process owned by that user in the host netns,
-so skuid rules still match.
-
-**Captive portals**: an admin can open a temporary per-UID window
-(`SetCaptiveMode`) implemented as an nft set element with a timeout.
-
-## Inspect mode: URL-level filtering
-
-At the DNS/IP layer a request is only ever "some host" — the path is
-encrypted, so `site.com/videos` cannot be told from `site.com/learn`.
-Inspect mode is the fourth filter mode, and the only one that can act on
-paths: it terminates TLS locally so the full URL is visible.
-
-- **Rules** (`kosherd/urlrules.py`) are an ordered allow/block list, first
-  match wins, matched case-insensitively and ignoring scheme and `www`
-  (a rule blocking `/videos` must not be dodged with `/Videos`). Bare hosts
-  cover the whole site, `*.host` includes subdomains, `host/dir/*` covers
-  the directory itself. Unmatched requests are allowed — inspect mode sits
-  on the family-DNS baseline — so a trailing `block *` makes it
-  deny-by-default.
-- **Plumbing**: nftables redirects *only inspected users'* tcp/80,443 into
-  a local mitmproxy (`kosher-mitm.service`), which runs as the unprivileged
-  `kosher-mitm` user. kosherd starts it when someone is in the mode and
-  stops it when nobody is.
-- **Whose request is it?** Packets carry no user identity, so the addon
-  resolves the client's source port through `/proc/net/tcp{,6}` to the
-  owning uid, then applies that user's rules and serves a branded block
-  page. The proxy never reads the policy: kosherd renders only
-  `uid -> rules` into `/var/lib/kosher-mitm/rules.json`.
-- **The certificate**: reading URLs requires the proxy to present its own
-  certificates, so kosherd generates a CA once, installs it in the system
-  trust store, and enables Firefox's enterprise-roots policy. The honest
-  cost — this user's HTTPS is decrypted on this machine — is stated in the
-  admin app next to the mode.
-
-Manage rules with `kosherctl rules <uid> list|allow|block|remove|clear`, or
-the Page rules editor in each profile. `scripts/inspect-verify.sh` drives
-the whole path in a VM (11 checks).
-
-## Apps: the whole store, decided per account
-
-KosherOS does not host a package repository. Upstream **Flathub is the
-source**, and **only kosherd installs**:
-
-- polkit denies the Flatpak system-helper actions to every non-root subject
-  (a user running `flatpak install` gets "system operation Deploy not
-  allowed"), and malcontent blocks user-scope installs;
-- the **KosherOS Store** (`store-app/`) is open to every user, including
-  supervised ones — safety comes from kosherd's decision, not from hiding
-  the store. It asks kosherd what this account may have (`ListStoreApps`,
-  judged for the uid on the connection), asks it to install, and shows live
-  progress streamed back over D-Bus (`AppProgress`/`AppFinished` signals);
-- kosherd resolves the real remote ref (branches aren't always `stable`)
-  and runs a libflatpak transaction on a worker thread.
-
-A second source sits beside Flathub for what has no Flatpak — the AI
-coding tools and a couple of editors (issue #34): **upstream nixpkgs**.
-A catalog entry whose ref is `nixpkgs#<package>` is installed by kosherd
-into the asking account's *own* Nix profile, as that account
-(`nixapps.py`): the same approval rule decides it, and because the
-profile is that account's alone there is no second gate to run it. The
-Nix daemon refuses an account on "No internet" outright (`nixdaemon.py`),
-and a build's downloads are held to the registries by the firewall.
-
-What an account may have is one rule, `appaccess.decide`, asked by the
-Store, by the installer and by malcontent (so what cannot be installed
-cannot be run either):
-
-1. **Blocks first.** `blocked_apps` (single Flatpak ids) and
-   `blocked_app_kinds` (the Store's shelves — Internet, Work, Learning,
-   Games, Music, Pictures & video, Developer tools, Utilities, Everything
-   else — one vocabulary in `kosherd.appkinds`, folded from Flathub's
-   freedesktop categories) apply whatever else says.
-2. **An approval settles it.** The **approved list**
-   (`/etc/kosher/catalog.json`, later portal-managed) is what an
-   administrator has said yes to by name.
-3. **`app_access`.** `approved` — the default for every account, and
-   today's allowlist — refuses anything else. `store` — what a new
-   administrator gets, and what a parent can give an account or a group —
-   goes on to judge the app.
-4. **The content ceiling.** Flathub rates every app with OARS; kosherd
-   parses `<content_rating>` from appstream and refuses anything above a
-   fixed ceiling per attribute (`appaccess.CEILING`: nudity, sexual
-   themes, profanity, gambling, narcotics and graphic violence at none;
-   cartoon and fantasy violence up to moderate; alcohol, tobacco and
-   realistic violence up to mild). A short list of filter-circumvention
-   tools (Tor launchers, VPN clients) is refused the same way. An app the
-   index does not know is refused too — offline fails closed.
-
-The app index (name, summary, categories, icon file, rating for every app
-on the remote) is parsed once per appstream download on a worker thread
-at daemon start and cached in memory and at `/var/lib/kosher/appindex.json`,
-so neither the Store nor a policy apply ever waits on a forty-megabyte
-parse; malcontent is re-applied once the index is warm. Two things about
-the download matter. flatpak cuts the apps a remote filter denies out of
-the appstream it deploys, and names the deployed directory
-`<commit>-<sha256 of the filter>`, so kosherd fetches again whenever the
-deployed copy was built under a different filter than the one in force
-(the upgrade from the allow-list filter otherwise left a fifty-app index
-for a day), as well as when it is a day old. And the first fetch at boot
-usually runs before the network is up, so a failed refresh is tried again
-in two minutes rather than at the six-hour tick, and opening the Store
-with no index asks at once.
-
-The flatpak remote *filter* is deny-only: it keeps the circumvention tools
-out of enumeration unless one is approved. It is not a boundary against
-root — but nobody can become root here. `kosherctl apps` shows and sets an
-account's access and blocks; `kosherctl check-catalog` verifies every
-approved app exists on the remote.
-
-## Policy
-
-`/var/lib/kosher/policy.json` (schema in `policy/schema/`) is the single
-contract between kosherd, the admin app, and the portal. `revision` and
-`source` are what make a second writer safe.
-
-## Portal sync
-
-The portal (`portal/`, FastAPI + SQLite, self-hostable) is a **second
-writer** of that policy, so the device has to distinguish a genuine
-document from anything else. It does that with signatures, not trust in the
-connection:
-
-- the portal generates an Ed25519 key on first start and signs every policy
-  document; a device pins the public half when it enrols with a one-time
-  code;
-- the device (`kosherd/sync.py`) accepts a document only if the signature
-  matches that pinned key **and** the revision is higher than the one it
-  already applied — which is what stops an old, looser policy being
-  replayed at it;
-- verification only lives on the device: it never signs and never holds the
-  private key, so a stolen device cannot forge policy for another one;
-- sync is **outbound-only** — `kosher-sync.timer` polls every 15 minutes,
-  so no family machine opens an inbound port. `kosherctl sync` pulls now.
-
-Enrolling and unenrolling are guardian-gated, because they hand filter
-control to a portal and take it back. Losing the portal does not unlock a
-device: the last applied policy keeps being enforced, and unenrolling
-leaves it in place.
-
-## Installation & first boot
-
-`just iso` produces an Anaconda installer ISO (bootc-image-builder) that
-installs KosherOS with **no preset users and no passwords** — the installer's
-user-creation screens are disabled, because accounts are created by the
-first-boot wizard instead.
-
-On first boot `kosher-firstboot.service` runs *instead of* the login screen
-(there is nobody to log in as yet): a `cage` kiosk session showing only
-`kosher-setup`, so the machine cannot be used before it is configured. The
-wizard creates the administrator (a real password, added to `kosher-admin`,
-filter mode `dnsfilter`), optionally sets the guardian password and a GRUB
-boot-menu password (pbkdf2 into `/boot/grub2/user.cfg`), and shows the
-firmware checklist KosherOS cannot enforce itself (UEFI password, disable
-USB/network boot, keep Secure Boot). Finishing writes
-`/var/lib/kosher/setup-complete`, disables the unit, and starts GDM.
-
-The setup D-Bus interface is the one path that runs without an authorized
-admin — necessarily, since none exists yet. It is bounded precisely:
-`CreateFirstAdmin` refuses once any admin is in the policy, and every setup
-method is refused once the stamp exists, so it is not a standing escalation
-path. (A wizard interrupted after creating the admin can still resume,
-because completion is the stamp — not the mere existence of an admin.)
-
-## Update & release
-
-The OS is a container image (`os-image/Containerfile`) on `fedora-bootc`.
-CI builds, cosign-signs, and pushes it; devices auto-update atomically via
-bootc with ostree rollback. `/etc/containers/policy.json` will pin the
-device to images signed for our registry (stage 2).
-
-## Developer loop
-
-| loop | command | speed |
+| Mode | In the admin app | Enforcement |
 |---|---|---|
-| policy engine | `just test`, `just render` | < 1 s |
-| daemon in a dev VM | `just deploy-kosherd VM` | ~1 s |
-| stock-VM stack install | `just dev-install VM` | ~1 min |
-| OS image |  `just build` → `just vm-upgrade` | ~minutes, layer-cached |
-| full disk image | `just vm` | ~10 min |
+| `none` | No internet | loopback and LAN printing only; everything else refused |
+| `whitelist` | Approved sites only | only addresses in the whitelist sets, which dnsmasq fills as it resolves approved names, so browsing by bare address is blocked for free |
+| `dnsfilter` | Basic protection | open on 80 and 443 and the named mail ports, behind family DNS and evasion blocking |
+| `filtered` | Filtered internet | every TCP connection diverted into the account's own proxy listener |
+| `unfiltered` | No filtering | open |
+
+An account with no policy falls through to `none`. A shared chain refuses
+DNS over TLS, QUIC and a set of DNS-over-HTTPS resolver addresses,
+including the unfiltered public resolvers. Rootless containers do not
+escape any of this: a user's network namespace reaches the host through an
+ordinary process owned by that user, so the uid rules still match. A
+captive-portal window, for hotel and airport Wi-Fi, is a set element with a
+timeout.
+
+## Filtered mode
+
+At the DNS and packet layers a request is only ever "some host". The path
+is encrypted, so `site.com/videos` cannot be told from `site.com/learn`.
+Filtered mode terminates TLS locally so the full address and the page are
+visible, and it is the only mode that can read a page, judge a picture, or
+apply YouTube limits.
+
+The daemon generates a certificate authority once, installs it in the
+system trust store, and enables Firefox's enterprise-roots policy. The
+cost, that this account's HTTPS is decrypted on this machine, is stated in
+the admin app beside the mode. The proxy runs as its own unprivileged user,
+one loopback listener per filtered account, and never reads the policy: the
+daemon renders only what each account needs into a file the proxy can
+read. [Content filtering](content-filtering.md) and [pictures and
+video](media-filtering.md) describe what it does with what it sees.
+
+## Apps
+
+KosherOS hosts no package repository. Upstream Flathub is the source, and
+only the daemon installs: polkit denies the Flatpak system-helper actions
+to every non-root subject, and malcontent blocks user-scope installs. The
+KosherOS Store is open to every account, supervised ones included, because
+safety comes from the daemon's decision rather than from hiding the store.
+The Store asks the daemon what this account may have, asks it to install,
+and shows progress streamed back over D-Bus.
+
+What an account may have is one rule, asked by the Store, by the installer
+and by malcontent, so what cannot be installed cannot be run either:
+
+1. **Blocks first.** Single apps and kinds of app a parent has blocked
+   apply whatever else says. The kinds are the Store's own shelves,
+   Internet, Work, Learning, Games, Music, Pictures & video, Developer
+   tools, Utilities, folded from Flathub's categories.
+2. **An approval settles it.** The approved list is what an administrator
+   has said yes to by name.
+3. **Approved only, or the whole store.** Every account starts with the
+   approved list. A parent can open an account, or a group, to the whole
+   store, and then:
+4. **The content ceiling.** Flathub rates every app, and the daemon
+   refuses anything above a fixed ceiling: nudity, sexual themes, bad
+   language, gambling, drugs and graphic violence at none; cartoon and
+   fantasy violence up to moderate; alcohol, tobacco and realistic
+   violence up to mild. A short list of filter-circumvention tools, Tor
+   launchers and VPN clients, is refused the same way. An app the index
+   does not know is refused too, so being offline fails closed.
+
+The app index is parsed once per catalogue download on a worker thread and
+cached, so neither the Store nor a policy change waits on a forty-megabyte
+parse. `kosherctl apps` shows and sets an account's access and blocks.
+
+A second source sits beside Flathub for what has no Flatpak, the AI coding
+tools and a few editors and toolchains: upstream nixpkgs. A catalog entry
+whose ref is `nixpkgs#<package>` is installed by the daemon into the asking
+account's own Nix profile, as that account. The same rule decides it, and
+because the profile is that account's alone there is no second gate to run
+it. Each card in the Store says which of the two it is. The Nix daemon
+refuses an account on "No internet" outright, a build's downloads are held
+to the registries by the firewall, and a terminal tool installed this way
+gets a launcher in the app grid that opens a terminal running it.
+
+## The policy
+
+One JSON document holds every account's settings and is the contract
+between the daemon, the admin app and the portal. Its schema is in the
+repository. A revision number and a source field are what make a second
+writer safe.
+
+## The portal
+
+The portal is self-hostable and optional. It is a second writer of the
+policy, so the device has to tell a genuine document from anything else,
+and it does that with signatures rather than trust in the connection. The
+portal generates an Ed25519 key on first start and signs every document; a
+device pins the public half when it enrols with a one-time code, and
+accepts a document only if the signature matches and the revision is
+higher than the one it already applied, which is what stops an old,
+looser policy being replayed at it. The device never signs and never holds
+a private key, so a stolen device cannot forge policy for another one.
+
+Sync is outbound only, every fifteen minutes, so no family machine opens
+an inbound port. Enrolling and unenrolling take the guardian password.
+Losing the portal does not unlock a device: the last applied policy keeps
+being enforced.
+
+## First boot
+
+The installer creates no users and asks no passwords. On first boot a
+kiosk session runs the setup wizard instead of the login screen, so the
+machine cannot be used before it is configured. The wizard creates the
+administrator, optionally sets the guardian password and a boot-menu
+password, and shows the firmware checklist KosherOS cannot enforce itself:
+a firmware password, USB and network boot off, Secure Boot kept on.
+Finishing writes a stamp, disables the unit and starts the login screen.
+
+The setup interface is the one path that runs without an authorised
+administrator, because none exists yet, and it is bounded: creating the
+first administrator is refused once any administrator is in the policy,
+and every setup method is refused once the stamp exists. A wizard
+interrupted after creating the administrator can still resume, because
+completion is the stamp, not the existence of an administrator.
+
+## Device security
+
+Settings, Privacy & Security, Device Security reports the firmware's
+security checks. Three of them are the operating system's to answer, and
+the image sets all three on the kernel command line:
+
+| Kernel argument | What it answers |
+|---|---|
+| `lockdown=integrity` | the kernel refuses the paths that would let root rewrite the running kernel. Secure Boot turns this on by itself; saying it explicitly gives a machine booted without Secure Boot the same floor |
+| `intel_iommu=on` | devices sit behind the IOMMU. Modern kernels do this where the firmware allows; older Intel parts need asking, and it costs nothing where it is already on |
+| `mem_sleep_default=s2idle` | suspend to idle rather than deep sleep, which leaves the memory image where firmware attacks can reach it |
+
+Nothing in the image loads an out-of-tree kernel module, so lockdown costs
+the family nothing.
+
+The rest of that panel is not the operating system's. Secure Boot, the
+TPM, VT-d and the firmware revision are the owner's settings, in the
+machine's firmware setup. Intel BootGuard, SPI flash write protection, the
+management engine's manufacturing mode, pre-boot DMA protection and the
+CPU's own protections are the vendor's, fixed when the machine was built.
+On ordinary consumer hardware the panel will keep saying "checks failed"
+however well the OS behaves, and one item stays red by design, because
+Fedora swaps to zram and the check counts that as unencrypted swap.
+
+So the panel is worth reading for the firmware settings a person can
+change, and is not a verdict on the filter. Nothing on that screen affects
+whether KosherOS is filtering.
+
+## Updates
+
+The OS is a container image built on Fedora bootc. CI builds it, signs it
+and publishes it. A parent applies an update from the Updates page in
+KosherOS Admin; the machine restarts into it atomically and keeps the
+previous version to go back to. Updates are not applied on their own.
+[Updates and channels](deployment.md) has the detail.

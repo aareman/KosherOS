@@ -62,6 +62,7 @@ CSS = b"""
 .app-card { padding: 12px 14px; }
 .app-card button.pill { min-height: 26px; padding: 2px 16px; font-size: 0.92em; }
 .app-card:hover { background-color: alpha(currentColor, 0.04); }
+.app-card .source-tag { padding: 0 6px; border-radius: 6px; background-color: alpha(currentColor, 0.08); }
 .shelf-tile { padding: 8px; }
 .app-letter { border-radius: 12px; }
 .shelf-tile:hover { background-color: alpha(currentColor, 0.05); }
@@ -85,6 +86,17 @@ def _run_async(work, on_done, on_error) -> None:
             GLib.idle_add(on_done, result)
 
     threading.Thread(target=runner, daemon=True).start()
+
+
+SOURCE_LABELS = {"flatpak": "Flatpak", "nix": "Nix", "image": "Built in"}
+
+
+def source_of(app: dict) -> str:
+    """How an app is installed, as the card says it: an entry may say so
+    (`source`), else the ref does — nixpkgs#… is a Nix package into the
+    account's profile, anything else a Flatpak from Flathub."""
+    key = app.get("source") or ("nix" if str(app.get("ref", "")).startswith("nixpkgs#") else "flatpak")
+    return SOURCE_LABELS.get(key, key.capitalize())
 
 
 def shelf_of(app: dict) -> str:
@@ -170,7 +182,19 @@ class AppCard(Gtk.Box):
         title = Gtk.Label(label=app.get("name", self.ref), xalign=0, ellipsize=3,
                           max_width_chars=18)
         title.add_css_class("heading")
-        names.append(title)
+        # How it is installed, beside the name: a Flatpak from Flathub or a
+        # Nix package into this account's own profile. Two different things
+        # (one is system-wide and sandboxed, the other is yours and on your
+        # PATH), and a person choosing between the two VS Codes needs to
+        # see which is which.
+        heading = Gtk.Box(spacing=6)
+        heading.append(title)
+        tag = Gtk.Label(label=source_of(app), valign=Gtk.Align.CENTER)
+        tag.add_css_class("caption")
+        tag.add_css_class("dim-label")
+        tag.add_css_class("source-tag")
+        heading.append(tag)
+        names.append(heading)
         subtitle = Gtk.Label(label=app.get("summary") or self.ref, xalign=0, wrap=True,
                              lines=2, ellipsize=3, max_width_chars=24,
                              valign=Gtk.Align.START)
@@ -569,8 +593,11 @@ class Window(Adw.ApplicationWindow):
     def shelves_with_apps(self) -> list[tuple[str, str]]:
         counts = self.shelf_counts()
         found = [(key, label) for key, label, _claims in SHELVES if counts.get(key)]
+        # "Other", not "Everything else": next to an "All apps" tile the
+        # latter read as the same thing twice. This is the shelf for apps
+        # that fit no category, and that is all it is.
         if counts.get("other"):
-            found.append(("other", "Everything else"))
+            found.append(("other", "Other"))
         return found
 
     # -- home ---------------------------------------------------------------------
@@ -587,21 +614,17 @@ class Window(Adw.ApplicationWindow):
         counts = self.shelf_counts()
         self.heading.set_label("Apps" if self.access == "store" else "Approved apps")
         self.home_subtitle.set_label(self.home_words(counts["all"]))
-        tiles = []
-        if counts["installing"]:
-            tiles.append(("installing", "Installing", "folder-download-symbolic"))
-        # Updates is always here, with or without one waiting: a shelf that
-        # appeared only when something needed updating was a feature nobody
-        # could find — "where is the feature to update apps".
-        tiles.append(("updates", "Updates", "software-update-available-symbolic"))
-        if counts["installed"]:
-            tiles.append(("installed", "Installed", "emblem-ok-symbolic"))
-        tiles += [(key, label, SHELF_ICONS.get(key, (FALLBACK_ICON,))[0])
-                  for key, label in self.shelves_with_apps()]
+        # The home page is the shelves: the kinds of app, and all of them.
+        # Updates, Installed and Installing are not kinds of app, and as
+        # tiles here they crowded the categories out; they live in the
+        # sidebar, always, with their counts — Updates with or without one
+        # waiting, so the feature can be found.
+        tiles = [(key, label, SHELF_ICONS.get(key, (FALLBACK_ICON,))[0])
+                 for key, label in self.shelves_with_apps()]
         tiles.append(("all", "All apps", "view-grid-symbolic"))
         for key, label, icon in tiles:
             child = Gtk.FlowBoxChild()
-            words = "Up to date" if key == "updates" and not counts["updates"] else ""
+            words = ""
             child.set_child(ShelfTile(key, label, counts.get(key, 0), icon, words))
             child.key = key
             child.set_cursor_from_name("pointer")

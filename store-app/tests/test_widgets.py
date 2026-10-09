@@ -70,9 +70,10 @@ def test_it_opens_on_the_categories(window):
     assert window.stack.get_visible_child_name() == "home"
     assert not window.back.get_visible()
     tiles = [c.key for c in _children(window.tiles)]
-    # Updates first when there are any (the demo has two), Installed next,
-    # everything last.
-    assert tiles[:2] == ["updates", "installed"] and tiles[-1] == "all"
+    # The kinds of app, then everything. Updates and Installed are not
+    # kinds of app: they are in the sidebar, with counts, not here.
+    assert tiles[-1] == "all"
+    assert "updates" not in tiles and "installed" not in tiles and "installing" not in tiles
     assert "internet" in tiles and "games" in tiles
     assert str(len(window.catalog)) in window.home_subtitle.get_label()
 
@@ -350,10 +351,11 @@ def test_the_store_offers_updates_one_by_one_and_all_at_once(window):
     # update all, etc.)". The pretend daemon says two installed apps have a
     # newer build.
     assert len(window.updates) == 2
-    tiles = [c.get_child() for c in _children(window.tiles)]
-    assert tiles[0].key == "updates" if hasattr(tiles[0], "key") else True
-    home_keys = [c.key for c in _children(window.tiles)]
-    assert home_keys[0] == "updates", "an update is the first thing a store says"
+    # The sidebar says so, with the count; the home tiles are the kinds of
+    # app and do not carry Updates.
+    assert ("updates", "Updates") in _sidebar_rows(window)
+    assert window.shelf_counts()["updates"] == 2
+    assert all(c.key != "updates" for c in _children(window.tiles))
     window.show_shelf("updates")
     drain()
     cards = list(window.cards.values())
@@ -528,10 +530,8 @@ def test_updates_are_always_findable_even_with_nothing_to_update(monkeypatch):
     win = store.Window()
     drain()
     assert ("updates", "Updates") in _sidebar_rows(win)
-    tiles = [c.get_child() for c in _children(win.tiles)]
-    updates_tile = next(t for t in tiles if t.key == "updates")
-    words = [w.get_label() for w in _children(updates_tile) if isinstance(w, Gtk.Label)]
-    assert "Up to date" in words
+    # ...and not among the home tiles, which are the kinds of app.
+    assert all(c.key != "updates" for c in _children(win.tiles))
     win.show_shelf("updates")
     drain()
     assert win.check_button.get_visible(), "and a way to go and look"

@@ -80,7 +80,9 @@ when it passes. A page that cannot be fetched, or has not arrived by
 then, is never treated as evidence: dropping every slow or offline site
 would make search useless on a bad connection. The fetch is not thrown
 away either — it finishes in the background and its verdict goes into
-the cache, so a slow site is judged from the next search on.
+the cache, so a slow site is judged from the next search on. A host
+that could not be read at all is left alone for an hour rather than
+fetched again by every search that lists it.
 
 ## Where searching happens
 

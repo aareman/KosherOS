@@ -54,6 +54,15 @@ MAX_PARALLEL = 10
 # Long enough that repeat searches are instant, short enough that a
 # domain that changes hands is re-judged within a week.
 TTL_SECONDS = 7 * 24 * 3600
+# A host that could not be read is remembered too, for this long. It is
+# not a verdict — the result is still shown — but without it a site that
+# answers scrapers by hanging, or serves nothing readable, was fetched
+# again on every search that listed it, and each time cost the whole
+# budget. An hour is long enough to pay that once rather than every
+# search, short enough that a site that was merely down is tried again.
+RETRY_SECONDS = 3600
+# The level stored for such a host. Never returned as a verdict.
+UNREADABLE = "unreadable"
 
 USER_AGENT = "Mozilla/5.0 (X11; Linux x86_64) KosherOS-scan/1.0"
 
@@ -68,9 +77,11 @@ CREATE TABLE IF NOT EXISTS verdicts (
 
 
 class VerdictCache:
-    def __init__(self, path: Path = CACHE_PATH, ttl: int = TTL_SECONDS):
+    def __init__(self, path: Path = CACHE_PATH, ttl: int = TTL_SECONDS,
+                 retry: int = RETRY_SECONDS):
         self.path = Path(path)
         self.ttl = ttl
+        self.retry = retry
         self._lock = threading.Lock()
         self._db = None
 
@@ -83,6 +94,8 @@ class VerdictCache:
         return self._db
 
     def get(self, host: str) -> content.Verdict | None:
+        """The cached verdict, or one at level UNREADABLE for a host that
+        recently could not be read, or None for a host to fetch."""
         try:
             with self._lock:
                 row = self._conn().execute(
@@ -90,11 +103,22 @@ class VerdictCache:
                     (host,)).fetchone()
         except sqlite3.Error:
             return None
-        if not row or time.time() - row[2] > self.ttl:
+        if not row:
+            return None
+        ttl = self.retry if row[0] == UNREADABLE else self.ttl
+        if time.time() - row[2] > ttl:
             return None
         return content.Verdict(row[0], row[1], ())
 
     def put(self, host: str, verdict: content.Verdict) -> None:
+        self._store(host, verdict.level, verdict.points)
+
+    def remember_unreadable(self, host: str) -> None:
+        """Note that this host could not be read, so it is not tried again
+        on every search for the next RETRY_SECONDS."""
+        self._store(host, UNREADABLE, 0)
+
+    def _store(self, host: str, level: str, points: int) -> None:
         try:
             with self._lock:
                 db = self._conn()
@@ -102,7 +126,7 @@ class VerdictCache:
                     "INSERT INTO verdicts (host, level, points, seen) "
                     "VALUES (?, ?, ?, ?) ON CONFLICT(host) DO UPDATE SET "
                     "level=excluded.level, points=excluded.points, seen=excluded.seen",
-                    (host, verdict.level, verdict.points, int(time.time())))
+                    (host, level, points, int(time.time())))
                 db.commit()
         except sqlite3.Error:
             log.debug("could not cache a verdict for %s", host, exc_info=True)
@@ -143,15 +167,18 @@ class PageScanner:
         """Score one page. None means we could not tell (fetch failed)."""
         cached = self.cache.get(host)
         if cached is not None:
-            return cached
+            return None if cached.level == UNREADABLE else cached
         try:
             html = self._fetch(url)
         except (urllib.error.URLError, OSError, ValueError, TimeoutError):
+            self.cache.remember_unreadable(host)
             return None
         except Exception:  # noqa: BLE001 - a scan must never break a search
             log.debug("scan of %s failed", url, exc_info=True)
+            self.cache.remember_unreadable(host)
             return None
         if not html:
+            self.cache.remember_unreadable(host)
             return None
         verdict = content.score_html(html, self.scorer)
         self.cache.put(host, verdict)

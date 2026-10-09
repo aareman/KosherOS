@@ -22,7 +22,7 @@ check_contains "the daemon's socket is labelled where init may make one" "var_ru
 # Nix once replaced the greeter's XDG_DATA_DIRS and GDM gave up.
 check "the login screen is up (gdm active)" 0 systemctl is-active --quiet gdm
 check "and no GNOME session has crashed this boot" 1 \
-    sh -c 'coredumpctl list --no-legend --since=-1h 2>/dev/null | grep -q gnome-session'
+    sh -c 'journalctl -b --no-pager -t systemd-coredump 2>/dev/null | grep -q gnome-session'
 check "devbox is in the image" 0 test -x /usr/bin/devbox
 check "the devenv launcher is in the image" 0 test -x /usr/bin/devenv
 check "kosherd has written the daemon's user list" 0 test -f /etc/nix/kosheros-users.conf
@@ -35,11 +35,14 @@ fi
 
 section "Who may use the daemon"
 wait_for_dns || bad "resolver did not come back"
-out=$(as nokid nix store info 2>&1)
-case "$out" in
-    *"not allowed to connect"*|*"not allowed"*) ok "an account with no internet is refused by the daemon" ;;
-    *) bad "the no-internet account reached the daemon: $(printf '%s' "$out" | head -c 120)" ;;
-esac
+# The daemon closes the connection on an account it does not allow; the
+# client reports that as "connection reset", and says "not allowed" only
+# in the daemon's own log. The exit code is the fact.
+if out=$(as nokid nix store info 2>&1); then
+    bad "the no-internet account reached the daemon: $(printf '%s' "$out" | head -c 120)"
+else
+    ok "an account with no internet is refused by the daemon"
+fi
 if out=$(as wlkid nix store info 2>&1); then
     ok "a filtered account may use the daemon"
 else
@@ -62,7 +65,11 @@ section "An app from nixpkgs, through the Store"
 # the install is queued and reported on D-Bus signals, so wait for the
 # profile to carry it rather than for the call to return.
 check "nixpkgs#gh is on the approved list" 0 grep -q '"nixpkgs#gh"' /etc/kosher/catalog.json
-out=$(as wlkid python3 - <<'PY' 2>&1
+# The Store's calls are answered for a local, active session only (polkit),
+# so they run inside one (as_session); removal is an administrator's
+# action, so root does it, as the admin app would.
+has_gh() { as_session "$1" python3 -c 'import sys; from kosherd.client import DaemonClient; sys.exit(0 if "nixpkgs#gh" in DaemonClient().list_installed() else 1)' 2>/dev/null; }
+out=$(as_session wlkid python3 - <<'PY' 2>&1
 from kosherd.client import DaemonClient
 DaemonClient().install_app("nixpkgs#gh")
 print("QUEUED")
@@ -70,19 +77,19 @@ PY
 )
 case "$out" in
     *QUEUED*) ok "a filtered account may ask for it" ;;
-    *) bad "the install was refused: $(printf '%s' "$out" | head -c 160)" ;;
+    *) bad "the install was refused: $(printf '%s' "$out" | tail -2 | head -c 240)" ;;
 esac
 for _ in $(seq 1 120); do
-    as wlkid python3 -c 'import sys; from kosherd.client import DaemonClient; sys.exit(0 if "nixpkgs#gh" in DaemonClient().list_installed() else 1)' 2>/dev/null && break
+    has_gh wlkid && break
     sleep 5
 done
-check "it is installed for that account" 0 as wlkid python3 -c 'import sys; from kosherd.client import DaemonClient; sys.exit(0 if "nixpkgs#gh" in DaemonClient().list_installed() else 1)'
+check "it is installed for that account" 0 has_gh wlkid
 check_contains "and runs from a login shell" "gh version" as wlkid bash -lc 'gh --version'
-check "but not for another account" 1 as dnskid python3 -c 'import sys; from kosherd.client import DaemonClient; sys.exit(0 if "nixpkgs#gh" in DaemonClient().list_installed() else 1)'
+check "but not for another account" 1 has_gh dnskid
 check "the Store's installed list knows who asked" 0 python3 -c 'import sys; from kosherd.client import DaemonClient; d=[x for x in DaemonClient().list_installed_details() if x["ref"]=="nixpkgs#gh"]; sys.exit(0 if d and d[0]["installed_by"]=="wlkid" else 1)'
-as wlkid python3 -c 'from kosherd.client import DaemonClient; DaemonClient().remove_app("nixpkgs#gh")' >/dev/null 2>&1
+python3 -c 'from kosherd.client import DaemonClient; DaemonClient().remove_app("nixpkgs#gh")' >/dev/null 2>&1
 for _ in $(seq 1 24); do
-    as wlkid python3 -c 'import sys; from kosherd.client import DaemonClient; sys.exit(1 if "nixpkgs#gh" in DaemonClient().list_installed() else 0)' 2>/dev/null && break
+    has_gh wlkid || break
     sleep 5
 done
 check "and can be removed again" 1 as wlkid bash -lc 'command -v gh'

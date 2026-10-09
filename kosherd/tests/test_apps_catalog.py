@@ -150,7 +150,11 @@ def test_shipped_catalog_entries_are_well_formed():
     assert refs and len(refs) == len(set(refs)), "duplicate refs in the catalog"
     for entry in entries:
         assert entry.get("name"), f"{entry['ref']} has no display name"
-        # flatpak application ids are reverse-DNS; a typo here ships an app
-        # nobody can install (kosherctl check-catalog verifies against the
-        # real remote, which needs a network and so is not a unit test).
+        # flatpak application ids are reverse-DNS, and a nixpkgs entry names
+        # its package; a typo here ships an app nobody can install
+        # (kosherctl check-catalog verifies against the real sources, which
+        # needs a network and so is not a unit test).
+        if entry["ref"].startswith("nixpkgs#"):
+            assert entry["ref"][len("nixpkgs#"):], f"{entry['ref']} names no package"
+            continue
         assert entry["ref"].count(".") >= 2, f"{entry['ref']} is not an app id"

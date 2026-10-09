@@ -202,6 +202,13 @@ DEVELOPER_REGISTRIES = (
     "codeload.github.com",        # where github.com sends an archive download
     "devenv.cachix.org",
     "search.devbox.sh",
+    # Where the AI tools and editors the Store carries from nixpkgs are
+    # published (the unfree ones are not on the binary cache, so a build
+    # fetches the release itself): Claude Code, Cursor, Antigravity. The
+    # rest are GitHub releases, already above.
+    "downloads.claude.ai",
+    "downloads.cursor.com",
+    "edgedl.me.gvt1.com",         # Google's download host (Antigravity)
 )
 
 

@@ -50,6 +50,37 @@ case "$out" in
     *) bad "nix run failed: $(printf '%s' "$out" | tail -3 | head -c 300)" ;;
 esac
 
+section "An app from nixpkgs, through the Store"
+# The GitHub CLI is on the shipped approved list as nixpkgs#gh. The Store
+# asks kosherd, which installs it into the asking account's own profile;
+# the install is queued and reported on D-Bus signals, so wait for the
+# profile to carry it rather than for the call to return.
+check "nixpkgs#gh is on the approved list" 0 grep -q '"nixpkgs#gh"' /etc/kosher/catalog.json
+out=$(as wlkid python3 - <<'PY' 2>&1
+from kosherd.client import DaemonClient
+DaemonClient().install_app("nixpkgs#gh")
+print("QUEUED")
+PY
+)
+case "$out" in
+    *QUEUED*) ok "a filtered account may ask for it" ;;
+    *) bad "the install was refused: $(printf '%s' "$out" | head -c 160)" ;;
+esac
+for _ in $(seq 1 120); do
+    as wlkid python3 -c 'import sys; from kosherd.client import DaemonClient; sys.exit(0 if "nixpkgs#gh" in DaemonClient().list_installed() else 1)' 2>/dev/null && break
+    sleep 5
+done
+check "it is installed for that account" 0 as wlkid python3 -c 'import sys; from kosherd.client import DaemonClient; sys.exit(0 if "nixpkgs#gh" in DaemonClient().list_installed() else 1)'
+check_contains "and runs from a login shell" "gh version" as wlkid bash -lc 'gh --version'
+check "but not for another account" 1 as dnskid python3 -c 'import sys; from kosherd.client import DaemonClient; sys.exit(0 if "nixpkgs#gh" in DaemonClient().list_installed() else 1)'
+check "the Store's installed list knows who asked" 0 python3 -c 'import sys; from kosherd.client import DaemonClient; d=[x for x in DaemonClient().list_installed_details() if x["ref"]=="nixpkgs#gh"]; sys.exit(0 if d and d[0]["installed_by"]=="wlkid" else 1)'
+as wlkid python3 -c 'from kosherd.client import DaemonClient; DaemonClient().remove_app("nixpkgs#gh")' >/dev/null 2>&1
+for _ in $(seq 1 24); do
+    as wlkid python3 -c 'import sys; from kosherd.client import DaemonClient; sys.exit(1 if "nixpkgs#gh" in DaemonClient().list_installed() else 0)' 2>/dev/null && break
+    sleep 5
+done
+check "and can be removed again" 1 as wlkid bash -lc 'command -v gh'
+
 section "What a build may fetch"
 # A fixed-output build runs as a nixbld user with the network. The wrong
 # hash is deliberate: "hash mismatch" means the fetch SUCCEEDED (the

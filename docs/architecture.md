@@ -146,6 +146,15 @@ source**, and **only kosherd installs**:
 - kosherd resolves the real remote ref (branches aren't always `stable`)
   and runs a libflatpak transaction on a worker thread.
 
+A second source sits beside Flathub for what has no Flatpak — the AI
+coding tools and a couple of editors (issue #34): **upstream nixpkgs**.
+A catalog entry whose ref is `nixpkgs#<package>` is installed by kosherd
+into the asking account's *own* Nix profile, as that account
+(`nixapps.py`): the same approval rule decides it, and because the
+profile is that account's alone there is no second gate to run it. The
+Nix daemon refuses an account on "No internet" outright (`nixdaemon.py`),
+and a build's downloads are held to the registries by the firewall.
+
 What an account may have is one rule, `appaccess.decide`, asked by the
 Store, by the installer and by malcontent (so what cannot be installed
 cannot be run either):

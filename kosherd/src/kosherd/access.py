@@ -205,7 +205,11 @@ SETUP_READS = frozenset({"IsComplete", "AdminExists"})
 
 # Methods that need to know which uid called them (session management).
 UID_AWARE = frozenset({"Unlock", "Lock", "Status", "VerifyGuardian", "InstallApp",
-                       "ListStoreApps", "GetMyLayout", "GetMySettings"})
+                       "ListStoreApps", "GetMyLayout", "GetMySettings",
+                       # A nixpkgs app is in one account's profile: what is
+                       # installed, and whose copy to update or remove,
+                       # depends on who is asking.
+                       "ListInstalled", "UpdateApp", "RemoveApp"})
 
 # Calls that change how the machine is set up, written to the activity log
 # with the admin who made them so "who changed this?" has an answer. Reads,

@@ -888,9 +888,18 @@ def cmd_check_catalog(args) -> int:
     """Verify every approved app actually exists on the remote."""
     from kosherd import apps
 
+    from kosherd import nixapps
+
     available = apps.available_refs()
     catalog = apps.load_catalog().get("apps", [])
-    missing = [a["ref"] for a in catalog if a["ref"] not in available]
+    missing = []
+    for a in catalog:
+        if nixapps.is_nix(a["ref"]):
+            # Asked of nixpkgs itself; a machine without nix cannot say.
+            if nixapps.exists(a["ref"]) is False:
+                missing.append(a["ref"])
+        elif a["ref"] not in available:
+            missing.append(a["ref"])
     print(f"{len(catalog)} approved apps, {len(missing)} unavailable")
     for ref in missing:
         print(f"  MISSING: {ref}", file=sys.stderr)

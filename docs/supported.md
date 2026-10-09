@@ -100,9 +100,9 @@ Both settings are off until a parent sets them. See
 | `edge` | the maintainer's own machine | every push to the repository |
 | `stable` | everyone else | a person promotes a version that has run well on edge |
 
-A machine installed from a release ISO follows its channel automatically.
-If an update boots without the filter enforcing, the machine goes back to
-the previous version on its own. The Updates page in KosherOS Admin shows
+A machine installed from a release ISO follows its channel, and a parent
+applies updates from the admin app. If an update boots without the filter
+enforcing, the machine goes back to the previous version on its own. The Updates page in KosherOS Admin shows
 both channels and moves the computer between them: the download happens
 straight away and the new version is used from the next restart, with
 accounts, settings and files untouched. Changing it asks for the guardian

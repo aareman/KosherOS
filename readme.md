@@ -58,10 +58,11 @@ with a content filter that lives on the machine itself and a parent in charge wi
 
 <br>
 
-Most kosher filters are a service you subscribe to and a browser you are told to use. KosherOS is an
-operating system. The filter runs on the machine, works for every browser and every app, cannot be
-uninstalled by the person it applies to, and is configured by a parent in the family's own words:
-*hide immodest pictures*, *replace bad language with a milder word*.
+KosherOS comes at filtering from a different direction: it builds the operating system around
+what a Jewish family needs. The filter runs on the machine, works for every browser and every
+app, cannot be uninstalled by the person it applies to, and is configured by a parent in the
+family's own words: *hide immodest pictures*, *replace bad language with a milder word*. It is
+also a kosher filter for Linux, which has not had one, and which many developers use.
 
 Three ideas hold it together:
 

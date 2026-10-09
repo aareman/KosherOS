@@ -139,22 +139,36 @@ def _run(ref: str, argv: list[str], on_progress: Callable[[str, int, str], None]
         raise NixAppError(reason.removeprefix("error:").strip())
 
 
+def _desktop(uid: int) -> None:
+    """Link the profile's desktop files and icons into the account's own
+    ~/.local/share (nixdesktop.py), as the account. Never a failure: an
+    app that installed but has no desktop entry yet is still installed."""
+    argv = _argv(uid)
+    argv[argv.index("nix"):] = ["kosher-nix-desktop", "-q"]
+    res = subprocess.run(argv, capture_output=True, text=True)
+    if res.returncode != 0:
+        log.warning("desktop entries for uid %d not linked: %s", uid, (res.stderr or "").strip())
+
+
 def install(ref: str, uid: int, on_progress) -> None:
     name = package(ref)
     on_progress(ref, 0, "Looking up…")
     _run(ref, _argv(uid, "profile", "install", "--impure", PREFIX + name), on_progress)
+    _desktop(uid)
 
 
 def remove(ref: str, uid: int, on_progress) -> None:
     name = package(ref)
     on_progress(ref, 0, "Removing…")
     _run(ref, _argv(uid, "profile", "remove", name), on_progress)
+    _desktop(uid)
 
 
 def upgrade(ref: str, uid: int, on_progress) -> None:
     name = package(ref)
     on_progress(ref, 0, "Updating…")
     _run(ref, _argv(uid, "profile", "upgrade", "--impure", name), on_progress)
+    _desktop(uid)
 
 
 def exists(ref: str) -> bool | None:

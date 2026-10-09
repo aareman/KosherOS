@@ -4,6 +4,7 @@ a Flatpak.
 """
 
 import json
+import os
 import re
 import subprocess
 from pathlib import Path
@@ -86,12 +87,29 @@ def test_nix_runs_as_the_account_with_its_own_home_and_unfree_allowed(home):
 
 
 class _Proc:
-    def __init__(self, lines, code):
+    """A fake Popen: iterable stderr for nixapps._run, and enough of the
+    protocol for subprocess.run (the desktop helper call after it)."""
+
+    def __init__(self, lines, code, args=()):
         self.stderr = iter(lines)
         self._code = code
+        self.returncode = code
+        self.args = list(args)
 
-    def wait(self):
+    def wait(self, timeout=None):
         return self._code
+
+    def poll(self):
+        return self._code
+
+    def communicate(self, input=None, timeout=None):
+        return "", ""
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
 
 
 def test_progress_is_reported_from_nix_log_lines(home, monkeypatch):
@@ -120,8 +138,9 @@ def test_remove_and_upgrade_name_the_package(home, monkeypatch):
     monkeypatch.setattr(nixapps.subprocess, "Popen", popen)
     nixapps.remove("nixpkgs#gh", 1001, lambda *a: None)
     nixapps.upgrade("nixpkgs#gh", 1001, lambda *a: None)
-    assert calls[0][calls[0].index("nix"):] == ["nix", "profile", "remove", "gh"]
-    assert calls[1][calls[1].index("nix"):] == ["nix", "profile", "upgrade", "--impure", "gh"]
+    nix = [c for c in calls if "nix" in c]  # the desktop helper runs between
+    assert nix[0][nix[0].index("nix"):] == ["nix", "profile", "remove", "gh"]
+    assert nix[1][nix[1].index("nix"):] == ["nix", "profile", "upgrade", "--impure", "gh"]
 
 
 # -- the queue -------------------------------------------------------------------
@@ -185,16 +204,73 @@ def test_installed_details_include_the_nix_apps_kosherd_installed(home, monkeypa
 
 # -- the image ---------------------------------------------------------------------
 
-def test_the_session_sees_the_profiles_desktop_files():
-    conf = (ROOT / "os-image/files/etc/environment.d/60-kosher-nix.conf").read_text()
-    line = next(l for l in conf.splitlines() if l.startswith("XDG_DATA_DIRS="))
-    value = line.split("=", 1)[1]
-    assert value.startswith("${XDG_DATA_DIRS:-/usr/local/share:/usr/share}"), "the defaults stay first"
-    for path in ("${HOME}/.local/state/nix/profile/share", "${HOME}/.nix-profile/share",
-                 "/nix/var/nix/profiles/default/share"):
-        assert path in value
-    # environment.d knows ${VAR} and ${VAR:-default} and nothing else.
-    assert not re.search(r"\$[A-Z_]+[^{A-Z_]", value.replace("${", ""))
+def test_the_session_environment_is_left_alone():
+    # Setting XDG_DATA_DIRS from environment.d replaced the greeter's and
+    # took the login screen down ("No GSettings schemas are installed").
+    # Desktop entries reach the app grid through ~/.local/share instead.
+    for conf in (ROOT / "os-image/files/etc/environment.d").glob("*"):
+        assert "XDG_DATA_DIRS" not in conf.read_text(), conf.name
+    assert "kosher-nix-desktop" in (ROOT / "kosherd/pyproject.toml").read_text()
+    assert "test -x /usr/bin/kosher-nix-desktop" in (ROOT / "os-image/Containerfile").read_text()
+
+
+def test_desktop_entries_are_linked_after_every_change(home, monkeypatch):
+    calls = []
+
+    def popen(argv, **k):
+        calls.append(argv)
+        return _Proc([], 0)
+
+    def run(argv, **k):
+        calls.append(argv)
+        return subprocess.CompletedProcess(argv, 0, "", "")
+    monkeypatch.setattr(nixapps.subprocess, "Popen", popen)
+    monkeypatch.setattr(nixapps.subprocess, "run", run)
+    nixapps.install("nixpkgs#gh", 1001, lambda *a: None)
+    nixapps.remove("nixpkgs#gh", 1001, lambda *a: None)
+    nixapps.upgrade("nixpkgs#gh", 1001, lambda *a: None)
+    helper = [c for c in calls if c[-2:] == ["kosher-nix-desktop", "-q"]]
+    assert len(helper) == 3
+    # As the account, with the account's HOME: the links are its own.
+    assert helper[0][:3] == ["runuser", "-u", "u1001"]
+    assert f"HOME={home / 'u1001'}" in helper[0]
+
+
+def test_the_desktop_helper_links_and_unlinks(tmp_path, monkeypatch):
+    from kosherd import nixdesktop
+
+    monkeypatch.setattr(nixdesktop, "STORE", str(tmp_path / "store"))
+    home = tmp_path / "home"
+    store = tmp_path / "store" / "abc-cursor"
+    (store / "share/applications").mkdir(parents=True)
+    (store / "share/icons/hicolor/48x48/apps").mkdir(parents=True)
+    (store / "share/applications/cursor.desktop").write_text("[Desktop Entry]\n")
+    (store / "share/icons/hicolor/48x48/apps/cursor.png").write_bytes(b"png")
+    (store / "share/applications/notes.txt").write_text("not a desktop file")
+    profile = home / ".local/state/nix/profiles/profile"
+    profile.parent.mkdir(parents=True)
+    profile.symlink_to(store)
+    (home / ".nix-profile").symlink_to(profile)
+    (home / ".local/share/applications").mkdir(parents=True)
+    (home / ".local/share/applications/mine.desktop").write_text("theirs")
+    stale = home / ".local/share/applications/old.desktop"
+    stale.symlink_to(tmp_path / "store" / "gone" / "old.desktop")
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.delenv("XDG_STATE_HOME", raising=False)
+    monkeypatch.delenv("XDG_DATA_HOME", raising=False)
+
+    assert nixdesktop.sync(home) == (2, 1)
+    link = home / ".local/share/applications/cursor.desktop"
+    assert link.is_symlink() and os.readlink(link) == str(store / "share/applications/cursor.desktop")
+    assert (home / ".local/share/icons/hicolor/48x48/apps/cursor.png").is_symlink()
+    assert not (home / ".local/share/applications/notes.txt").exists()
+    assert (home / ".local/share/applications/mine.desktop").read_text() == "theirs"
+    assert not stale.exists() and not stale.is_symlink()
+    # Idempotent.
+    assert nixdesktop.sync(home) == (0, 0)
+    # The profile moves on without the app: its links go.
+    (store / "share/applications/cursor.desktop").unlink()
+    assert nixdesktop.sync(home) == (0, 1)
 
 
 def test_the_download_hosts_of_the_unfree_tools_are_registries():

@@ -304,6 +304,9 @@ def why_text(why: str) -> str:
         return "the page reads as " + CONTENT_LEVEL_WORDS.get(rest, rest or "inappropriate")
     if kind == "language":
         return "bad language on the page"
+    if kind == "ai":
+        return ("an AI answer with bad language" if rest == "language"
+                else "an AI answer that did not pass the filter")
     if kind == "shop":
         return rest or "a blocked department"
     if kind == "youtube":

@@ -120,9 +120,16 @@ def test_refused_answer_becomes_a_notice_and_nothing_more() -> None:
     assert "restricted" not in raw
     lines = [item for item in output if item.get("type") == "content"]
     notice = next(item for item in lines if item["markdown"] == BLOCKED_TEXT)
-    assert notice["mode"] == "replace" and "dil" not in notice
+    # The line keeps the shape the page expects: its snapshot shows the notice and nothing else.
+    assert notice["mode"] == "append" and notice["revision"] > 1
+    constants = list(notice["dil"]["constants"].values())
+    assert constants[0] == BLOCKED_TEXT and all(value == "" for value in constants[1:])
+    assert notice["dil"]["fallbackMarkdown"] == BLOCKED_TEXT
+    assert notice["dil"]["code"].startswith("DIL.render")
     after = lines[lines.index(notice) + 1:]
     assert all(item["markdown"] == "" and item["mode"] == "append" for item in after)
+    assert all(list(item["dil"]["constants"].values())[0] == BLOCKED_TEXT
+               for item in after if "dil" in item)
     assert after[-1]["status"] == "complete"
     # The template that repeats the answer is kept for the page, emptied of it.
     shared = [item for item in output if item.get("type") == "shared"][0]

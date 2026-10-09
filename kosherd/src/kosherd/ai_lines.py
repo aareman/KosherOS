@@ -23,8 +23,6 @@ from .ai_text import OutputBlocked, TextStream
 
 BLOCKED_TEXT: Final = ("This answer was not shown. "
                        "It did not pass the filter set for this account.")
-# What stays on a content line that is replaced by the notice.
-KEPT_FIELDS: Final = ("version", "type", "messageId", "revision", "status", "streamingParent")
 
 
 @final
@@ -153,7 +151,22 @@ class LineStream:
         return full, held
 
     def _notice(self, data: dict, *, first: bool) -> bytes:
-        line = {key: data[key] for key in KEPT_FIELDS if key in data}
-        line["mode"] = "replace" if first else "append"
+        """The line as the page expects it, with the notice as its only prose.
+
+        The page stops with "Unable to connect" when a streaming line
+        arrives without its renderer snapshot or its reference lists, so
+        the shape of the line is kept and only the words change. The
+        snapshot shows the notice; later snapshots keep showing it."""
+        line = self.filters.blank(data)
         line["markdown"] = BLOCKED_TEXT if first else ""
+        snapshot = line.get("dil")
+        original = data.get("dil")
+        if isinstance(snapshot, dict) and isinstance(original, dict):
+            if isinstance(original.get("code"), str):
+                snapshot["code"] = original["code"]  # the renderer's own program, not prose
+            constants = snapshot.get("constants")
+            if isinstance(constants, dict) and constants:
+                constants[next(iter(constants))] = BLOCKED_TEXT
+            if "fallbackMarkdown" in snapshot:
+                snapshot["fallbackMarkdown"] = BLOCKED_TEXT
         return dumps(line).encode() + b"\n"

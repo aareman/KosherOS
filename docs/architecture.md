@@ -197,17 +197,28 @@ completion is the stamp, not the existence of an administrator.
 
 Settings, Privacy & Security, Device Security reports the firmware's
 security checks. Three of them are the operating system's to answer, and
-the image sets all three on the kernel command line: lockdown in integrity
-mode, so root cannot rewrite the running kernel even on a machine booted
-without Secure Boot; the IOMMU on; and suspend-to-idle rather than deep
-sleep, which leaves the memory image where firmware attacks can reach it.
+the image sets all three on the kernel command line:
+
+| Kernel argument | What it answers |
+|---|---|
+| `lockdown=integrity` | the kernel refuses the paths that would let root rewrite the running kernel. Secure Boot turns this on by itself; saying it explicitly gives a machine booted without Secure Boot the same floor |
+| `intel_iommu=on` | devices sit behind the IOMMU. Modern kernels do this where the firmware allows; older Intel parts need asking, and it costs nothing where it is already on |
+| `mem_sleep_default=s2idle` | suspend to idle rather than deep sleep, which leaves the memory image where firmware attacks can reach it |
+
 Nothing in the image loads an out-of-tree kernel module, so lockdown costs
 the family nothing.
 
-The rest of that panel is the owner's or the vendor's. On ordinary consumer
-hardware it will keep saying "checks failed" however well the OS behaves,
-and one item stays red by design, because Fedora swaps to zram and the
-check counts that as unencrypted swap. Nothing on that screen affects
+The rest of that panel is not the operating system's. Secure Boot, the
+TPM, VT-d and the firmware revision are the owner's settings, in the
+machine's firmware setup. Intel BootGuard, SPI flash write protection, the
+management engine's manufacturing mode, pre-boot DMA protection and the
+CPU's own protections are the vendor's, fixed when the machine was built.
+On ordinary consumer hardware the panel will keep saying "checks failed"
+however well the OS behaves, and one item stays red by design, because
+Fedora swaps to zram and the check counts that as unencrypted swap.
+
+So the panel is worth reading for the firmware settings a person can
+change, and is not a verdict on the filter. Nothing on that screen affects
 whether KosherOS is filtering.
 
 ## Updates

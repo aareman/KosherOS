@@ -20,6 +20,7 @@ gets one, and anything the person put there themselves is left alone.
 
 from __future__ import annotations
 
+import json
 import os
 import sys
 from pathlib import Path
@@ -75,6 +76,73 @@ def sync_tree(source: Path | None, dest: Path, suffixes: tuple[str, ...]) -> tup
     return made, removed
 
 
+CATALOG = Path("/etc/kosher/catalog.json")
+MARK = "X-KosherOS-Nix"
+
+
+def launcher(entry: dict, command: Path) -> str:
+    """A desktop entry for a terminal tool the Store installed: the app
+    grid shows "Claude Code", and opening it is a terminal running it.
+    The command's absolute path through the profile link, since nothing
+    a desktop launches has the profile on its PATH."""
+    name = entry.get("name") or entry["ref"]
+    return (
+        "[Desktop Entry]\n"
+        "Type=Application\n"
+        f"Name={name}\n"
+        f"Comment={entry.get('summary', '')}\n"
+        f"Exec={command}\n"
+        "Terminal=true\n"
+        "Icon=utilities-terminal\n"
+        "Categories=Development;ConsoleOnly;\n"
+        f"{MARK}={entry['ref']}\n"
+    )
+
+
+def sync_launchers(profile: Path | None, dest: Path, catalog: Path | None = None) -> tuple[int, int]:
+    """Terminal tools from the catalog (entries with an `exec`): a launcher
+    for each one whose command is in the profile, none for the rest.
+    Returns (written, removed)."""
+    try:
+        entries = json.loads((catalog or CATALOG).read_text()).get("apps", [])
+    except (OSError, ValueError):
+        entries = []
+    wanted: dict[str, str] = {}
+    for entry in entries:
+        ref, cmd = entry.get("ref", ""), entry.get("exec")
+        if not cmd or not ref.startswith("nixpkgs#") or profile is None:
+            continue
+        command = profile / "bin" / cmd
+        if command.exists():
+            wanted[f"kosheros-{ref.replace('#', '-')}.desktop"] = launcher(entry, command)
+    written = removed = 0
+    if dest.is_dir():
+        for file in dest.glob("kosheros-nixpkgs-*.desktop"):
+            if file.name not in wanted:
+                try:
+                    if MARK in file.read_text():
+                        file.unlink()
+                        removed += 1
+                except OSError:
+                    pass
+    for name, text in wanted.items():
+        file = dest / name
+        try:
+            if file.read_text() == text:
+                continue
+        except OSError:
+            pass
+        dest.mkdir(parents=True, exist_ok=True)
+        file.write_text(text)
+        written += 1
+    return written, removed
+
+
+def profile_link(home: Path) -> Path | None:
+    share = profile_share(home)
+    return share.parent if share else None
+
+
 def sync(home: Path) -> tuple[int, int]:
     share = profile_share(home)
     data = Path(os.environ.get("XDG_DATA_HOME") or home / ".local/share")
@@ -82,7 +150,8 @@ def sync(home: Path) -> tuple[int, int]:
                               data / "applications", (".desktop",))
     m2, r2 = sync_tree(share / "icons" if share else None, data / "icons",
                        (".png", ".svg", ".xpm"))
-    return made + m2, removed + r2
+    m3, r3 = sync_launchers(profile_link(home), data / "applications")
+    return made + m2 + m3, removed + r2 + r3
 
 
 def main(argv: list[str] | None = None) -> int:

@@ -273,6 +273,62 @@ def test_the_desktop_helper_links_and_unlinks(tmp_path, monkeypatch):
     assert nixdesktop.sync(home) == (0, 1)
 
 
+def test_a_terminal_tool_gets_a_launcher_from_the_catalog(tmp_path, monkeypatch):
+    # Claude Code has no desktop file: it is a terminal program. The Store
+    # installed it, so the app grid shows it, and opening it is a terminal
+    # running it — by the catalog's `exec`, through the profile's path.
+    from kosherd import nixdesktop
+
+    home = tmp_path / "home"
+    profile = home / ".local/state/nix/profiles/profile"
+    (profile / "bin").mkdir(parents=True)
+    (profile / "share").mkdir()
+    (profile / "bin/claude").write_text("#!/bin/sh\n")
+    (home / ".nix-profile").symlink_to(profile)
+    catalog = tmp_path / "catalog.json"
+    catalog.write_text(json.dumps({"apps": [
+        {"ref": "nixpkgs#claude-code", "name": "Claude Code", "summary": "Anthropic's coding agent, in the terminal",
+         "categories": ["Development", "ConsoleOnly"], "exec": "claude"},
+        {"ref": "nixpkgs#codex", "name": "Codex", "summary": "x", "exec": "codex"},   # not installed
+        {"ref": "nixpkgs#gh", "name": "GitHub CLI", "summary": "x"},                 # no exec: no launcher
+        {"ref": "com.visualstudio.code", "name": "VS Code", "exec": "code"},        # a flatpak: not ours
+    ]}))
+    monkeypatch.setattr(nixdesktop, "CATALOG", catalog)
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.delenv("XDG_STATE_HOME", raising=False)
+    monkeypatch.delenv("XDG_DATA_HOME", raising=False)
+
+    assert nixdesktop.sync(home) == (1, 0)
+    apps = home / ".local/share/applications"
+    assert sorted(p.name for p in apps.iterdir()) == ["kosheros-nixpkgs-claude-code.desktop"]
+    text = (apps / "kosheros-nixpkgs-claude-code.desktop").read_text()
+    assert "Name=Claude Code\n" in text
+    assert f"Exec={home}/.nix-profile/bin/claude\n" in text
+    assert "Terminal=true\n" in text
+    assert "X-KosherOS-Nix=nixpkgs#claude-code\n" in text
+    # Idempotent; and gone when the tool is removed from the profile.
+    assert nixdesktop.sync(home) == (0, 0)
+    (profile / "bin/claude").unlink()
+    assert nixdesktop.sync(home) == (0, 1)
+    assert not list(apps.iterdir())
+
+
+def test_the_shipped_catalog_names_the_command_of_every_terminal_tool():
+    apps = json.loads((ROOT / "os-image/files/etc/kosher/catalog.json").read_text())["apps"]
+    console = [a for a in apps if "ConsoleOnly" in a.get("categories", [])]
+    assert len(console) >= 8
+    for app in console:
+        assert app["ref"].startswith("nixpkgs#"), app["ref"]
+        assert re.fullmatch(r"[a-z][a-z0-9-]*", app.get("exec", "")), app["ref"]
+    by_ref = {a["ref"]: a.get("exec") for a in apps}
+    # The names nixpkgs gives these (meta.mainProgram), checked by hand.
+    assert by_ref["nixpkgs#claude-code"] == "claude"
+    assert by_ref["nixpkgs#gemini-cli"] == "gemini"
+    assert by_ref["nixpkgs#github-copilot-cli"] == "copilot"
+    assert by_ref["nixpkgs#cursor-cli"] == "cursor-agent"
+    assert by_ref["nixpkgs#antigravity-cli"] == "agy"
+
+
 def test_the_download_hosts_of_the_unfree_tools_are_registries():
     for host in ("downloads.claude.ai", "downloads.cursor.com", "edgedl.me.gvt1.com",
                  "github.com", "storage.googleapis.com"):

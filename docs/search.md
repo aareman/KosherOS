@@ -2,9 +2,9 @@
 
 ## Why the OS ships a search engine
 
-A filter that only blocks pages makes searching miserable. Every search
+A filter that only blocks pages makes searching hard. Every search
 returns ten links, some of which lead to a block page, and the person has
-to guess which. In approved-sites mode it is worse: the list is invisible,
+to guess which. In approved-sites mode it is harder: the list is invisible,
 so there is no way to find out what the computer will open short of typing
 addresses and seeing what happens.
 

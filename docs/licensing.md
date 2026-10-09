@@ -6,25 +6,26 @@ the files still to add. It is not legal advice.*
 
 ## Intent
 
-The goal is not a business. It is to give the Jewish community the option
-of easy, cheap filtered computers without paying hundreds of dollars per
-device per year, which is what the existing offerings cost. That sentence
-decides most of what follows: there is no product to protect, no revenue to
-preserve, and no reason to make anything harder than it needs to be.
+The goal is a good operating system for a family: powerful, private and
+secure, and easy for a family to configure to its own needs. It is also
+meant for people who use Linux, which many developers do and which has not
+had a kosher filter. That it costs a family nothing is a consequence of how
+it is built rather than the reason for it. The goal is not a business:
+there is no product to protect, no revenue to preserve, and no reason to
+make anything harder than it needs to be.
 
 Within that, three things at once:
 
 1. **Free and open source.** Nobody should have to pay to protect their
    family.
-2. **Nobody takes it closed.** A competitor must not be able to take this
-   work, close the source and sell it back to the same community at the
-   prices this project exists to undercut.
+2. **Nobody takes it closed.** It must not be possible to take this work,
+   close the source and sell it.
 3. **People can set it up for themselves and for others**, and frum
    developers can contribute.
 
 The third point is easy to get wrong. Someone installing and configuring
 KosherOS for another family, for their shul or for a school is a use to
-encourage. "Stolen" means a competitor closing the source, not a neighbour
+encourage. "Stolen" means somebody closing the source, not a neighbour
 helping a neighbour. No licence term and no activation gate should make
 third-party setup awkward.
 
@@ -35,7 +36,7 @@ contributions, and a trademark on the name.** Each piece does one job.
 
 | Piece | What it does |
 |---|---|
-| AGPL-3.0-or-later | a competitor cannot close it, including behind a network service, which the plain GPL would permit |
+| AGPL-3.0-or-later | nobody can close it, including behind a network service, which the plain GPL would permit |
 | DCO, not a CLA | a contributor certifies they wrote what they submitted, in one line of the commit message. No paperwork, no rights assignment |
 | trademark on "KosherOS" | a fork may use the code but must rebrand |
 
@@ -55,8 +56,8 @@ believed by exactly the people least able to check. Owning the name is how
 that gets stopped.
 
 A permissive licence (MIT, Apache-2.0) would satisfy the first and third
-requirements and fail the second outright. This niche has well-funded
-incumbents who would face no obstacle at all.
+requirements and fail the second outright: nothing would stand in the way
+of a closed derivative.
 
 ## The imported lists
 

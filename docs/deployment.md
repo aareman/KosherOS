@@ -1,8 +1,9 @@
 # Updates and channels
 
-KosherOS is a container image. A machine updates by pulling the newest
-version of the image it follows and rebooting into it atomically, with the
-previous version kept to go back to. This page describes how a build gets
+KosherOS is a container image. When a parent applies an update from the
+Updates page in KosherOS Admin, the machine pulls the newest version of
+the image it follows and restarts into it atomically, with the previous
+version kept to go back to. Updates are not applied on their own today. This page describes how a build gets
 from a merge to a family's machine, what a machine does when an update goes
 wrong, and what is still to be done before the first family installs it.
 
@@ -10,7 +11,7 @@ wrong, and what is still to be done before the first family installs it.
 
 | What | How it ships | Size |
 |---|---|---|
-| the OS | a container registry; the machine runs `bootc upgrade` on a timer | a few GB on first pull, small differences after |
+| the OS | a container registry; a parent applies updates from the admin app | a few GB on first pull, small differences after |
 | the category database | a signed manifest and a hash-verified download | about 190 MB, pulled on refresh |
 | word lists, site rules, search terms | inside the signed portal bundle | kilobytes |
 | the installer ISO | a file, for the first install only | GBs, pulled once |
@@ -127,11 +128,11 @@ and no licence gate on the OS. Besides being the point of the project, it
 keeps the free tier of a public registry available, which is the largest
 hosting subsidy the project gets.
 
-**Zero cost per device is a requirement.** Existing kosher filters charge
-hundreds of dollars per device per year. Any design that puts a per-family
-cost in the update path, metered egress, hosting that scales with
-installs, a subscription in the way of lists, contradicts the reason the
-project exists.
+**No cost per device.** KosherOS is free to install and free to keep
+updated, and the filter lists refresh without an account. Any design that
+puts a per-family cost in the update path, metered egress, hosting that
+scales with installs, a subscription in the way of lists, contradicts
+that.
 
 **Hosting is GitHub-first.** ghcr.io for the image, GitHub Releases for the
 ISO, GitHub Pages for this site, GitHub Actions for CI, and one small VPS
@@ -172,10 +173,11 @@ In the order it blocks a family installing KosherOS.
    seed list. A nightly job should build the database, publish it as a
    release asset, and publish the signed manifest; the image then carries
    the last good snapshot and machines pull newer on their own.
-4. **What the update timer does.** The stock bootc timer is enabled, and
-   it restarts the machine into an update once one is downloaded. Whether
-   it should instead stage the update and wait for the next natural
-   restart, rather than interrupting a parent, is not decided.
+4. **Updates in the background.** Today a parent checks for and applies
+   updates from the Updates page. Fetching them in the background, and
+   whether a fetched update should wait for the next natural restart
+   rather than interrupt anyone, is
+   [issue #19](https://github.com/aareman/KosherOS/issues/19).
 5. **Downloads.** A download page with the ISO, its SHA-256, its signature
    and instructions for checking them.
 

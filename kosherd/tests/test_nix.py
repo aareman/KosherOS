@@ -100,6 +100,16 @@ def test_devbox_is_pinned_by_hash_and_checked():
     assert 'test "$(/usr/bin/devbox version)" = "${DEVBOX_VERSION}"' in CONTAINERFILE
 
 
+def test_a_terminal_opens_without_a_failed_units_banner():
+    # Seen on the first booted image: "[systemd] Failed Units: 1 mcelog"
+    # before every prompt. The CoreOS profile script goes, and mcelog
+    # does not start on a virtual machine, where it can only fail.
+    assert re.search(r"RUN for p in sudo[^;]*console-login-helper-messages-profile", CONTAINERFILE, re.S)
+    assert "! test -e /usr/share/console-login-helper-messages/profile.sh" in CONTAINERFILE
+    dropin = (FILES / "usr/lib/systemd/system/mcelog.service.d/10-kosheros-vm.conf").read_text()
+    assert "ConditionVirtualization=!vm" in dropin
+
+
 # -- /etc/nix/nix.conf ---------------------------------------------------------
 
 def _conf() -> dict:

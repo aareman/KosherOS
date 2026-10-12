@@ -98,86 +98,50 @@ What BY-SA requires:
   and travels with it. Fine here — it just means the curation is a gift
   to the commons rather than an asset.
 
-### StevenBlack unified hosts — must be replaced
+### The advertising lists: why two were dropped
 
-The source used to be described as "(MIT)". That is true of Steven
-Black's own wrapper and scripts and false of the merged `hosts` file that
-was actually fetched, which aggregates sixteen upstream lists. Two cannot
-be used:
+The `ads` category is built from fourteen hosts lists fetched
+individually, each named with its licence in
+[third-party notices](third-party.md). Two lists that ride inside Steven
+Black's merged unified-hosts file, MVPS and someonewhocares, are
+NonCommercial and are deliberately left out, which is why the merged file
+is not fetched whole.
 
-| source | licence | problem |
-|---|---|---|
-| MVPS hosts | CC BY-NC-SA 4.0 | NonCommercial |
-| someonewhocares (Dan Pollock) | "non-commercial with attribution" | NonCommercial |
-
-A third, **yoyo.org**, has no formal licence but turned out to be usable:
-its page grants the use in as many words — "Feel free to combine this
-list with yours or lists from other sites and put it up on the web,
-though!" — and restricts nothing about commercial use, so it can live in
-a BY-SA database.
-
-**Why this is still a blocker even though KosherOS is free.** Not because
-of the NonCommercial terms themselves — a free distribution could
-plausibly satisfy those. Because of **licence incompatibility inside the
+The reason is not the NonCommercial terms themselves; a free distribution
+could plausibly satisfy those. It is **licence incompatibility inside the
 database**: the UT1 data is BY-SA 4.0, ShareAlike requires the adaptation
 to be licensed BY-SA 4.0, and BY-SA 4.0 *permits commercial use*. A work
 cannot be licensed under terms permitting commercial use while containing
 material that forbids it. Merging NC rows into this database produces a
-file that cannot legally be licensed at all.
+file that cannot legally be licensed at all. Two secondary reasons not to
+rely on NC material even so: "non-commercial" has no settled meaning, so
+donations, a nonprofit preloading machines at cost, or a shul buying
+hardware would all be grey areas; and a merged file gives no way to tell
+which domains came from which upstream, so tainted rows could not be
+stripped out later.
 
-Two secondary reasons not to rely on NC material even so: "non-commercial"
-has no settled meaning, so donations, a nonprofit preloading machines at
-cost, or a shul buying hardware would all be grey areas; and the merged
-file gives no way to tell which domains came from which upstream, so the
-tainted rows cannot be stripped out later.
-
-**Done** (`fetch-categories.py`, `PLAIN_SOURCES`). The merged file is no
-longer fetched; the fourteen compatible upstreams are fetched
-individually instead. It was a data change rather than a code change —
-the loop already iterated several sources per category and inserts with
-`INSERT OR IGNORE`, so overlapping domains across fourteen lists
-deduplicate themselves.
-
-**What it cost, measured rather than estimated:**
-
-| | domains |
-|---|---:|
-| merged file, before | 79,962 |
-| fourteen sources, after | 65,746 |
-| lost with MVPS and someonewhocares | 18,986 (23.7%) |
-| gained by fetching live upstreams | 4,770 |
-
-Nearly a quarter of the advertising coverage goes with those two lists,
-which is more than a rounding error and worth knowing plainly. It is
-also not a choice: an NC list inside a BY-SA database produces a file
-that cannot be licensed at all. Recovering some of that coverage from
-another compatible source — EasyList is CC BY-SA 3.0 and therefore
-compatible, though it is in adblock-filter syntax and would need a
-different parser — is worthwhile follow-up work.
-
-Attribution for all fourteen is recorded in
-[THIRD-PARTY.md](third-party.md) and in the database's own `meta`
-`source` row, which the admin app displays.
+Dropping them costs nearly a quarter of the advertising coverage, which is
+worth knowing plainly. Recovering some of it from another compatible
+source (EasyList is CC BY-SA 3.0, though it is in adblock-filter syntax
+and would need a different parser) is worthwhile follow-up work.
 
 ## Other obligations already in the image
 
-Confirmed this session: **mitmproxy** is MIT. Still to confirm as part of
-the attribution file: **SearXNG** is AGPLv3 — cloned in the Containerfile
-and run as a separate process behind the KosherOS front end, which is
-aggregation rather than derivation and so does not reach kosherd, but any
-modification to SearXNG itself must be published. **PaperWM** and
-**ArcMenu** are GPL-family GNOME extensions. **Fedora's trademark
-guidelines** govern how a remix may describe itself, which bears directly
-on the "powered by Fedora" branding.
-
-The base image is Fedora bootc, so the ISO redistributes a great deal of
-GPL and LGPL software. Fedora publishes its own sources, which is
-ordinarily what satisfies the offer-of-source obligation.
+Every bundled component and its licence is in
+[third-party notices](third-party.md). The ones with obligations beyond
+attribution: **SearXNG** is AGPLv3, run as a separate process behind the
+KosherOS front end, which is aggregation rather than derivation and so does
+not reach kosherd, but any modification to SearXNG itself must be
+published. **Fedora's trademark guidelines** govern how a remix may describe
+itself, which bears directly on the "powered by Fedora" branding. The base
+image is Fedora bootc, so the ISO redistributes a great deal of GPL and
+LGPL software; Fedora publishes its own sources, which is ordinarily what
+satisfies the offer-of-source obligation.
 
 ## Files still to add
 
-- `LICENSE` — AGPL-3.0-or-later
-- `CONTRIBUTING.md` — the DCO and how to sign off a commit
-- `THIRD-PARTY.md` — every imported list and bundled component with its
-  licence and attribution. Doubles as the audit trail above
+- `LICENSE`: AGPL-3.0-or-later
+- `CONTRIBUTING.md`: the DCO and how to sign off a commit
 - SPDX headers across the source tree
+
+`THIRD-PARTY.md` exists and is the attribution file the lists require.

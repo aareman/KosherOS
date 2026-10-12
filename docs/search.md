@@ -101,69 +101,44 @@ it.
 
 ## Images
 
-`image_proxy` is off. With it on, every thumbnail would be served from
-127.0.0.1 and would therefore bypass the filtering proxy entirely — image
-results would be the one part of the web nothing inspected. With it off,
-thumbnails load from their origin, so a whitelist user simply does not get
-them and a filtered user gets them through the proxy like any other
-picture.
-
-Beyond that, whether an account gets image results depends on whether
-anything will actually look at the thumbnails.
-
-In **filtered** mode they do. `image_proxy` is off, so a thumbnail loads
-from its origin, through the proxy, and is judged exactly like any other
-picture — withholding image search from those accounts would be refusing
-something the filter is already handling.
-
-In every other mode they do not, because no other mode reads the
-connection. A grid of pictures chosen by a search engine from pages nobody
-has vetted is not something to hand an account that asked for pictures to
-be filtered, and there is nowhere else to check them.
+SearXNG's `image_proxy` is off. With it on, every thumbnail would be served
+from 127.0.0.1 and would bypass the filtering proxy entirely; image results
+would be the one part of the web nothing inspected. With it off, thumbnails
+load from their origin, so whether an account gets image results depends on
+whether anything will look at them on the way. In **filtered** mode a
+thumbnail comes through the proxy and is judged like any other picture, so
+image search is shown. In every other mode it is not, because no other mode
+reads the connection, and a grid of pictures chosen by a search engine from
+pages nobody has vetted is not something to hand an account that asked for
+pictures to be filtered.
 
 ## Lists
 
 Both lists ship complete and are meant to stay that way. An administrator
 may add or remove a handful of terms; nobody should have to build one.
 
-* `/usr/share/kosher/search-blocklist.json` — 119 explicit search terms.
-* `/usr/share/kosher/content-terms.json` — 173 weighted content terms.
+* `/usr/share/kosher/search-blocklist.json`: 119 explicit search terms.
+* `/usr/share/kosher/content-terms.json`: 173 weighted content terms.
 
-An admin- or portal-supplied copy under `/var/lib/kosher/` overrides the
-shipped one. Both are checked against ordinary text in the test suite:
+A portal update or a family's own edits override the shipped copy, as
+[content filtering](content-filtering.md#lists-shipped-portal-and-the-familys-own-edits)
+describes. Both are checked against ordinary text in the test suite:
 chicken breast recipes, breast cancer information, biology lessons,
 Sussex, Middlesex and a page arguing *for* modest dress all come back
 clean.
 
 ## Verified against a running stack
 
-The unit tests exercise the decision engine with a stubbed back end. That
-is not enough for this part of the system, and three faults proved it —
-each one shipped, and none of them was reachable from a unit test:
+The unit tests exercise the decision engine with a stubbed back end, which
+cannot see whether SearXNG installs, starts, or accepts our settings. So
+the image build loads our `settings.yml` against the SearXNG it just
+installed and fails if it is refused or names an engine that does not
+exist, and `just check-services` starts the stack as its unit starts it
+and runs a real search through the front end, an explicit query that must
+be refused, and an "ask for this page" that must land in the spool. See
+[testing](testing.md#just-check-services).
 
-* **SearXNG was not installed at all.** `pip install` of its repository
-  fails outright: its `setup.py` imports `searx/__init__.py`, which
-  imports `msgspec` before anything is installed. The build swallowed that
-  into a warning. It is now cloned and its `requirements.txt` installed,
-  which is upstream's own instruction, and the unit runs it from the tree.
-* **Our `settings.yml` was invalid.** `preferences.lock` carried
-  `safe_search`, which is not a lockable preference (the name is
-  `safesearch`, already on the list). SearXNG validates this and refuses
-  to start — correctly, and it is how this was found.
-* **Three "disabled" engines did not exist.** Naming an engine SearXNG
-  does not ship does not disable anything; it *defines* a new one with no
-  `engine:` field, which fails to load and logs an error at every startup.
-
-The last two are now build-time checks: the image build loads our
-`settings.yml` against the SearXNG it just installed and fails if either
-disagrees, so a bad setting cannot ship again.
-
-The whole stack is exercised against a live back end — SearXNG started
-exactly as its unit starts it, a real search through the front end, 27
-results in and 27 rendered, an explicit query still refused, and an
-"ask for this page" landing in the spool.
-
-One log line remains and is upstream's: SearXNG loads the `torch` onion
+One log line at startup is upstream's: SearXNG loads the `torch` onion
 engine's module before it checks whether the engine is disabled, so it
-logs a registration failure at startup for an engine that has no Tor proxy
-to reach and that we disable anyway.
+logs a registration failure for an engine that has no Tor proxy to reach
+and that we disable anyway.

@@ -1,9 +1,10 @@
-# Kosher Linux — Architecture
+# Architecture
 
-A family-friendly, filtered Linux distribution: Fedora bootc/ostree immutable
-base, GNOME desktop (three per-account layouts — see
-[desktop.md](desktop.md)), per-user filter modes, and administration without
-root.
+Fedora bootc/ostree immutable base, GNOME desktop (three per-account
+layouts, see [desktop](desktop.md)), per-user filter modes, and
+administration without root. This page is the shape of the system; what
+each filtering layer does is on [content filtering](content-filtering.md)
+and [media filtering](media-filtering.md).
 
 ## The core idea: admin without root
 
@@ -111,15 +112,16 @@ paths: it terminates TLS locally so the full URL is visible.
   the directory itself. Unmatched requests are allowed — inspect mode sits
   on the family-DNS baseline — so a trailing `block *` makes it
   deny-by-default.
-- **Plumbing**: nftables redirects *only inspected users'* tcp/80,443 into
-  a local mitmproxy (`kosher-mitm.service`), which runs as the unprivileged
-  `kosher-mitm` user. kosherd starts it when someone is in the mode and
-  stops it when nobody is.
-- **Whose request is it?** Packets carry no user identity, so the addon
-  resolves the client's source port through `/proc/net/tcp{,6}` to the
-  owning uid, then applies that user's rules and serves a branded block
-  page. The proxy never reads the policy: kosherd renders only
-  `uid -> rules` into `/var/lib/kosher-mitm/rules.json`.
+- **Plumbing**: nftables redirects every TCP connection an inspected user
+  opens into a local mitmproxy (`kosher-mitm.service`), which runs as the
+  unprivileged `kosher-mitm` user. kosherd starts it when someone is in the
+  mode and stops it when nobody is. Which ports escape the proxy (mail,
+  video calls, granted extras) is on [content filtering](content-filtering.md#which-ports-an-account-may-use).
+- **Whose request is it?** Each inspected user is redirected to a loopback
+  port of their own, and the proxy reads the user from the port a
+  connection arrived on ([why](content-filtering.md#who-is-connecting-one-port-per-user)).
+  The proxy never reads the policy: kosherd renders only `uid -> rules`
+  into `/var/lib/kosher-mitm/rules.json`.
 - **The certificate**: reading URLs requires the proxy to present its own
   certificates, so kosherd generates a CA once, installs it in the system
   trust store, and enables Firefox's enterprise-roots policy. The honest
@@ -127,8 +129,8 @@ paths: it terminates TLS locally so the full URL is visible.
   admin app next to the mode.
 
 Manage rules with `kosherctl rules <uid> list|allow|block|remove|clear`, or
-the Page rules editor in each profile. `scripts/inspect-verify.sh` drives
-the whole path in a VM (11 checks).
+the Page rules editor in each profile. The `50-inspect` VM suite and
+`just check-redirect` drive the whole path; see [testing](testing.md).
 
 ## Apps: the whole store, decided per account
 
@@ -259,15 +261,7 @@ because completion is the stamp — not the mere existence of an admin.)
 
 The OS is a container image (`os-image/Containerfile`) on `fedora-bootc`.
 CI builds, cosign-signs, and pushes it; devices auto-update atomically via
-bootc with ostree rollback. `/etc/containers/policy.json` will pin the
-device to images signed for our registry (stage 2).
-
-## Developer loop
-
-| loop | command | speed |
-|---|---|---|
-| policy engine | `just test`, `just render` | < 1 s |
-| daemon in a dev VM | `just deploy-kosherd VM` | ~1 s |
-| stock-VM stack install | `just dev-install VM` | ~1 min |
-| OS image |  `just build` → `just vm-upgrade` | ~minutes, layer-cached |
-| full disk image | `just vm` | ~10 min |
+bootc with ostree rollback, and greenboot returns a machine to its previous
+image if the filter is not enforcing after an update. Channels, rollback
+and what still blocks a real install are on [deployment](deployment.md);
+the developer loop is in the repository readme and on [testing](testing.md).

@@ -1,10 +1,10 @@
-# KosherOS branding (roadmap stage)
+# Branding
 
-Primary brand: **KosherOS**. Secondary attribution: **powered by Fedora** —
-this matches Fedora's trademark policy for derivatives ("Fedora Remix"), so
+Primary brand: **KosherOS**. Secondary attribution: **powered by Fedora**,
+which matches Fedora's trademark policy for derivatives ("Fedora Remix"), so
 Fedora references don't need scrubbing; only primary branding changes.
 
-**Status:** the pipeline is built and wired into the image. The wallpaper
+The pipeline is built and wired into the image. The wallpaper
 is real artwork (`branding/wallpaper.png`, 4978×3340, light sepia — the
 reason the desktop, greeter and Noctalia all default to the light scheme;
 its GIMP source `wallpaper.xcf` stays in the repo and out of the image).
@@ -89,8 +89,8 @@ after bib writes `install.iso`, `scripts/brand-iso.py` builds a small
 `product.img` and puts it at `images/product.img` on the ISO with xorriso
 (boot records replayed, so it still boots on BIOS and UEFI), then names the
 result `KosherOS-<version>-<arch>.iso`, leaving `install.iso` as a
-link to it. The version comes from the `VERSION` file at the repo root,
-which the Containerfile also puts in os-release.
+link to it. The version is the one `scripts/version.py` counts from the git
+tags, the same number the Containerfile puts in os-release.
 
 How it takes effect, all of it stock Anaconda and verified against its
 source: the initramfs finds `images/product.img` on the install media and
@@ -123,21 +123,12 @@ builds the archive, reads it back with the system cpio, and rehearses the
 xorriso injection on a stand-in ISO. **Not yet seen on a booted installer**:
 that needs `just iso` and `just boot-iso`, which need sudo.
 
-| surface | mechanism | needs artwork? |
-|---|---|---|
-| ISO installer | ✅ `product.img` on the ISO: `.buildstamp`, a conf.d drop-in, our stylesheet and logo | wordmark for the top bar, eventually |
+## Artwork still to make
 
-## Asset checklist (create once, SVG-first)
+- A dark variant of the logomark, and a wordmark as an SVG rather than the
+  serif lockup `rasters.py` sets.
+- Icons for the Store and the Setup wizard; both still use stock icons.
+- A dark wallpaper to pair with the light one.
 
-- KosherOS logomark (symbol) — light + dark variants
-- Wordmark ("KosherOS") and lockup with "powered by Fedora" line
-- Plymouth splash animation (can start as static logo on dark background)
-- Default wallpaper (light/dark)
-- App icon for the admin app (hicolor + symbolic)
-
-## Notes
-
-- Keep `ID=fedora` and `VERSION_ID` in os-release — tooling (dnf repos,
-  bootc, scripts) keys off `ID`; only NAME/PRETTY_NAME/VARIANT carry brand.
-- dconf branding lives in `/etc/dconf/db/local.d/` + locks; ship in
-  os-image/files once assets exist.
+Keep `ID=fedora` and `VERSION_ID` in os-release: tooling (dnf repos, bootc,
+scripts) keys off `ID`, and only NAME/PRETTY_NAME/VARIANT carry the brand.

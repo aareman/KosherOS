@@ -16,11 +16,10 @@ wrong, and what is still to be done before the first family installs it.
 | word lists, site rules, search terms | inside the signed portal bundle | kilobytes |
 | the installer ISO | a file, for the first install only | GBs, pulled once |
 
-Filter lists must never need an OS release. The portal signs a manifest
-with the database's URL, size and SHA-256; the device fetches the file from
-wherever the manifest says and checks it against the hash before it goes
-near the filter. [Content filtering](content-filtering.md#the-lists-shipped-updated-edited)
-describes the list layers.
+Filter lists must never need an OS release, which is why the second and
+third rows ship through the portal; [content
+filtering](content-filtering.md#the-lists-shipped-updated-edited) describes
+how the bundle and the database manifest are signed and checked.
 
 ## Versions
 
@@ -188,9 +187,8 @@ ghcr is free for public images with no meaningful egress cap, and bootc
 pulls only changed layers. GitHub Pages and Releases are free.
 
 The category database should be a GitHub Release asset rather than a file
-on the VPS. The manifest's signature covers the hash, so the download needs
-no trust and can come from anywhere; GitHub Releases are free, CDN-backed
-and need no authentication for a public repository. That leaves the VPS
-serving only the signed manifest and the policy endpoints, kilobytes per
-device per day, so the recurring bill is one small VPS whether ten families
-or ten thousand are running KosherOS.
+on the VPS: its manifest is signed, so the download itself can come from
+anywhere free and CDN-backed. That leaves the VPS serving only the signed
+manifest and the policy endpoints, kilobytes per device per day, so the
+recurring bill is one small VPS whether ten families or ten thousand are
+running KosherOS.

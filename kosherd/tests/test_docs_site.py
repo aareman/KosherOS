@@ -227,7 +227,9 @@ def test_generate_runs_offline(tmp_path, monkeypatch):
 def test_the_diagram_is_handed_to_the_theme_to_draw():
     nav = (ROOT / "mkdocs.yml").read_text()
     assert "name: mermaid" in nav and "fence_code_format" in nav
-    assert "```mermaid" in (ROOT / "docs/overview.md").read_text()
+    # The diagram lives on the architecture page alone; the overview links to it.
+    assert "```mermaid" in (ROOT / "docs/architecture.md").read_text()
+    assert "```mermaid" not in (ROOT / "docs/overview.md").read_text()
 
 
 def test_the_releases_page_sorts_by_date_whatever_order_github_gives():

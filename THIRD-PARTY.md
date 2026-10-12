@@ -72,7 +72,6 @@ licence — but obligations that travel with the binaries still apply.
 | [SearXNG](https://github.com/searxng/searxng) | AGPLv3 | run as a separate process behind the KosherOS search front end. **Any modification to SearXNG itself must be published** |
 | [PaperWM](https://github.com/paperwm/PaperWM) | GPL-family | GNOME extension, tiling layout |
 | [ArcMenu](https://gitlab.com/arcmenu/ArcMenu) | GPL-family | GNOME extension, classic layout |
-| [NudeNet](https://github.com/notAI-tech/NudeNet) model | see upstream | the ONNX image detector |
 | [niri](https://github.com/YaLTeR/niri) / Noctalia | see upstream | advanced desktop session |
 
 Marked "see upstream" or "GPL-family" where the exact version has not yet

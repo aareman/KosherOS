@@ -16,6 +16,8 @@ install, an upgrade or a removal), so the links are the account's own
 files, and it is idempotent: a link that points into the store and no
 longer resolves is removed, a file in the profile that has no link yet
 gets one, and anything the person put there themselves is left alone.
+Fonts are copied separately by nixfonts so Flatpak apps can read them
+without access to /nix/store.
 """
 
 from __future__ import annotations
@@ -144,6 +146,8 @@ def profile_link(home: Path) -> Path | None:
 
 
 def sync(home: Path) -> tuple[int, int]:
+    from . import nixfonts
+
     share = profile_share(home)
     data = Path(os.environ.get("XDG_DATA_HOME") or home / ".local/share")
     made, removed = sync_tree(share / "applications" if share else None,
@@ -151,14 +155,15 @@ def sync(home: Path) -> tuple[int, int]:
     m2, r2 = sync_tree(share / "icons" if share else None, data / "icons",
                        (".png", ".svg", ".xpm"))
     m3, r3 = sync_launchers(profile_link(home), data / "applications")
-    return made + m2 + m3, removed + r2 + r3
+    m4, r4 = nixfonts.sync(share / "fonts" if share else None, data / "fonts/kosher-nix")
+    return made + m2 + m3 + m4, removed + r2 + r3 + r4
 
 
 def main(argv: list[str] | None = None) -> int:
     home = Path(os.environ.get("HOME") or os.path.expanduser("~"))
     made, removed = sync(home)
     if "-q" not in (argv if argv is not None else sys.argv[1:]):
-        print(f"desktop entries: {made} linked, {removed} stale removed")
+        print(f"desktop files: {made} added or updated, {removed} removed")
     return 0
 
 

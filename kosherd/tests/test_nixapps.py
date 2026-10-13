@@ -354,3 +354,18 @@ def test_check_catalog_asks_nixpkgs_only_where_nix_is(monkeypatch):
                         lambda argv, **k: subprocess.CompletedProcess(argv, 0 if "gh.name" in argv[-1] else 1, "", ""))
     assert nixapps.exists("nixpkgs#gh") is True
     assert nixapps.exists("nixpkgs#no-such-thing") is False
+
+
+def test_nested_package_refs_use_manifest_names_for_updates_and_removal(home, monkeypatch):
+    _manifest(home, 1001, {"version": 3, "elements": {
+        "jetbrains-mono": {"active": True,
+                           "attrPath": "legacyPackages.x86_64-linux.nerd-fonts.jetbrains-mono"}}})
+    ref = "nixpkgs#nerd-fonts.jetbrains-mono"
+    assert nixapps.installed(1001) == {ref}
+    commands = []
+    monkeypatch.setattr(nixapps, "_run", lambda _ref, argv, _progress: commands.append(argv))
+    monkeypatch.setattr(nixapps, "_desktop", lambda uid: None)
+    nixapps.upgrade(ref, 1001, lambda *a: None)
+    nixapps.remove(ref, 1001, lambda *a: None)
+    assert commands[0][-4:] == ["profile", "upgrade", "--impure", "jetbrains-mono"]
+    assert commands[1][-3:] == ["profile", "remove", "jetbrains-mono"]

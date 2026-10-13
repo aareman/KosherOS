@@ -147,7 +147,9 @@ class DetailsPage(Gtk.ScrolledWindow):
                                                 halign=Gtk.Align.START))
         if source_of(self.app) == "Nix":
             self.content.append(Gtk.Label(
-                label="Nix packages are installed for your account. Command-line tools may not appear in the app menu.",
+                label=("Fonts are installed for your account. Reopen an app if its font list has not updated."
+                       if "Font" in self.app.get("categories", []) else
+                       "Nix packages are installed for your account. Command-line tools may not appear in the app menu."),
                 xalign=0, wrap=True, css_classes=["dim-label"]))
 
     def show_screenshot(self, index):

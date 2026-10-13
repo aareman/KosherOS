@@ -83,8 +83,39 @@ assert_that() {
     if "$@"; then ok "$desc"; else bad "$desc"; fi
 }
 
-# Run a command as a test user.
-as() { local u="$1"; shift; runuser -u "$u" -- "$@"; }
+# Run a command as a test user, with that user's HOME and USER: runuser
+# alone keeps root's, and a login shell then set up /root's Nix profile
+# on the PATH and could not find what was installed for the account.
+as() {
+    local u="$1" home
+    shift
+    home=$(getent passwd "$u" | cut -d: -f6)
+    runuser -u "$u" -- env HOME="$home" USER="$u" LOGNAME="$u" "$@"
+}
+
+# Run a command as a test user INSIDE a logind session. The polkit rule
+# for the org.kosherlinux.* actions answers only a local, active session
+# (the person at the keyboard); runuser gives none, so a call to kosherd
+# from `as` is refused. A seat-less session is one logind counts as
+# active, which is what PAMName=login makes here. stdin is passed, so a
+# python heredoc works.
+as_session() {
+    local u="$1"
+    shift
+    systemd-run --quiet --pipe --wait --collect --uid="$u" -p PAMName=login "$@"
+}
+
+# Run a command as a test user INSIDE a logind session. The polkit rule
+# for the org.kosherlinux.* actions answers only a local, active session
+# (the person at the keyboard); runuser gives none, so a call to kosherd
+# from `as` is refused. A seat-less session is one logind counts as
+# active, which is what PAMName=login makes here. stdin is passed, so a
+# python heredoc works.
+as_session() {
+    local u="$1"
+    shift
+    systemd-run --quiet --pipe --wait --collect --uid="$u" -p PAMName=login "$@"
+}
 
 # HTTP status code a user gets for a URL ("000" means the connection failed).
 http_code_as() {

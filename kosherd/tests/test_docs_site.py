@@ -209,7 +209,8 @@ def test_the_supported_page_matches_what_the_image_actually_sets():
     from kosherd.policy import DEVELOPER_REGISTRIES
 
     for domain in ("registry.npmjs.org", "pypi.org", "rubygems.org", "crates.io",
-                   "deno.land", "proxy.golang.org", "astral.sh", "bun.sh"):
+                   "deno.land", "proxy.golang.org", "astral.sh", "bun.sh",
+                   "cache.nixos.org", "devenv.cachix.org", "search.devbox.sh"):
         assert domain in supported and domain in DEVELOPER_REGISTRIES, domain
 
 

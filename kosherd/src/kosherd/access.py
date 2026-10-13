@@ -143,6 +143,9 @@ ACTIONS = {
     "ListStoreApps": ACTION_USE_STORE,
     "ListInstalled": ACTION_USE_STORE,
     "InstallApp": ACTION_USE_STORE,
+    # An administrator installing for an account: an admin's action, not
+    # the store's, which is open to the account alone.
+    "InstallAppFor": ACTION_INSTALL_APPS,
     "ListInstalledDetails": ACTION_READ_CONFIG,
     # Updating an installed, approved app is for everyone the store is for:
     # it widens nothing, and the newer build is the safer one to be on.
@@ -205,7 +208,11 @@ SETUP_READS = frozenset({"IsComplete", "AdminExists"})
 
 # Methods that need to know which uid called them (session management).
 UID_AWARE = frozenset({"Unlock", "Lock", "Status", "VerifyGuardian", "InstallApp",
-                       "ListStoreApps", "GetMyLayout", "GetMySettings"})
+                       "ListStoreApps", "GetMyLayout", "GetMySettings",
+                       # A nixpkgs app is in one account's profile: what is
+                       # installed, and whose copy to update or remove,
+                       # depends on who is asking.
+                       "ListInstalled", "UpdateApp", "RemoveApp"})
 
 # Calls that change how the machine is set up, written to the activity log
 # with the admin who made them so "who changed this?" has an answer. Reads,
@@ -218,7 +225,7 @@ CHANGES = frozenset({
     "DismissRequest", "AllowUrl", "EditList", "SetMediaLevel",
     "SetLanguageFilter", "SetYouTube", "SetUserAdmin", "SetLayout",
     "SetCoverStyle", "SetAdBlock", "SetTimeLimits", "SetNetworkAccess", "SetGuestConfig", "CreateUser",
-    "AdoptUser", "RemoveUser", "ResetPassword", "SetUserApps", "RemoveApp", "ApproveApp",
+    "AdoptUser", "RemoveUser", "ResetPassword", "SetUserApps", "RemoveApp", "InstallAppFor", "ApproveApp",
     "UnapproveApp", "SetUserCanInstall", "SetUserAppAccess",
     "SetUserBlockedAppKinds", "SetUserBlockedApps", "SetCaptiveMode",
     "SetGuardianPassword", "DisableGuardian", "Enrol", "Unenrol",

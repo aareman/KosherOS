@@ -1,0 +1,15 @@
+[Unit]
+Description=Nix store
+# Where a KosherOS machine's Nix store really is. The daemon's units carry
+# RequiresMountsFor=/nix/store, so they wait for this.
+Requires=kosher-nix-store.service
+After=kosher-nix-store.service
+
+[Mount]
+What=/var/lib/nix
+Where=/nix
+Type=none
+Options=bind
+
+[Install]
+WantedBy=local-fs.target

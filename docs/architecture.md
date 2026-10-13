@@ -152,7 +152,11 @@ The app index is parsed once per catalogue download on a worker thread and
 cached, so neither the Store nor a policy change waits on a forty-megabyte
 parse. `kosherctl apps` shows and sets an account's access and blocks;
 `kosherctl store` lists what is installed, what has an update, and updates
-it, for a shell, a VM suite or a support call.
+it, for a shell, a VM suite or a support call. For a person at a
+terminal there is `kosher`, in the words apt and dnf taught: `kosher
+install claude-code`, `kosher search`, `kosher list`, `kosher update`,
+`kosher upgrade`, `kosher remove`, `kosher info`. It talks to the same
+daemon under the same rules and shows the install as it happens.
 
 ## The policy
 

@@ -62,11 +62,9 @@ filtered mode also applies the account's page rules and shop department
 rules.
 
 **Each result, by content.** The title and snippet are scored by the same
-weighted terms that judge a page. Terms sit at the strongest verdict they
-can support, and points earned at one level count toward every milder
-level, so explicit words also make a result immodest but no pile of
-swimwear vocabulary can add up to explicit. Pages that talk about the
-problem need twice the evidence.
+weighted terms and the same rules that
+[judge a page by its words](content-filtering.md#judging-a-page-by-its-words),
+including the extra evidence a page that talks about the problem needs.
 
 **Results nothing has ever classified.** This is the gap domain lists
 leave open, and it is where new material lives. For results on hosts the
@@ -124,17 +122,13 @@ account unexamined.
 
 ## Lists
 
-Both lists ship complete and are meant to stay that way. An administrator
-may add or remove a handful of terms; nobody should have to build one.
-
-- the search blocklist, explicit terms that will not run at all;
-- the content terms, the weighted words a page or a result is judged by.
-
-Both ship in sixteen languages, and a family's edits or a portal's update
-override the shipped copy. Both are checked against ordinary text in the
-test suite: chicken breast recipes, breast cancer information, biology
-lessons, Sussex, Middlesex and a page arguing for modest dress all come
-back clean.
+Two lists do the work: the search blocklist, explicit terms that will not
+run at all, and the content terms a page or a result is judged by. Both
+ship complete in sixteen languages and are updated and edited like
+[every other list](content-filtering.md#the-lists-shipped-updated-edited).
+Both are checked against ordinary text in the test suite: chicken breast
+recipes, breast cancer information, biology lessons, Sussex, Middlesex and
+a page arguing for modest dress all come back clean.
 
 ## Checked against a running stack
 

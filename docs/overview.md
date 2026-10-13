@@ -132,58 +132,18 @@ the sidebar and its page says exactly what is not being enforced.
 
 ## How it works
 
-```mermaid
-flowchart LR
-    subgraph desktop [GNOME desktop]
-        Admin[KosherOS Admin]
-        Store[KosherOS Store]
-        MyFilter[My Filter]
-    end
-    subgraph daemon [kosherd, the only privileged surface]
-        DBus[D-Bus API, polkit gated]
-        Policy[(policy.json)]
-        Activity[(activity log)]
-    end
-    subgraph enforcement [Enforcement, per account]
-        NFT[nftables: per-user rules]
-        DNS[dnsmasq: family DNS, ad blocking]
-        Proxy[mitmproxy: pages, pictures, video]
-        Search[SearXNG + KosherOS front end]
-        MCT[malcontent: which apps each account may run]
-    end
-    Admin -->|Unlock once| DBus
-    Store --> DBus
-    MyFilter -->|read own settings| DBus
-    DBus --> Policy
-    Policy -->|rendered on every change| NFT & DNS & Proxy & Search & MCT
-    Proxy & Search -->|what they blocked| Activity
-    Activity --> Admin
-```
-
-Nobody has root: no `sudo` is shipped, the root account is locked, and a polkit rule
-removes every polkit admin identity. Members of the `kosher-admin` group are granted the
-`org.kosherlinux.*` actions instead, and one unlock opens a sliding session so nothing
-prompts again. Full detail in [architecture](architecture.md).
+Nobody has root: no `sudo` is shipped, the root account is locked, and the one privileged
+surface is a small daemon the apps talk to over D-Bus. The daemon turns the family's policy
+into per-account firewall rules, resolver configuration, proxy filtering, search filtering
+and app permissions, and everything the filter blocks goes into one activity log the admin
+app reads. [Architecture](architecture.md) has the map.
 
 ## Getting started
 
-KosherOS is pre-alpha and nothing is hosted for download yet, so trying it means building
-it. From a clone, inside the [devenv](https://devenv.sh) shell:
-
-```sh
-just build        # build the OS image
-just vm           # make a bootable disk from it (needs sudo)
-just try          # boot a throwaway copy; the first boot runs the setup wizard
-```
-
-To install on real hardware, `just release-iso` builds an installer ISO from a published
-channel, so the machine it installs follows that channel and updates itself.
-`just usb-image` writes a system you can try from a USB stick without touching the internal
-disk.
-
-To look at the apps without installing anything, `just admin-demo` and `just store-demo`
-open them against a pretend daemon with a sample family. [How to
-contribute](contributing.md) has the rest of the developer setup.
+Nothing is hosted for download yet. To try KosherOS on a spare computer once an installer
+is published, follow [the installation guide](install.md). To build it yourself, or to open
+the admin app and the Store against a sample family without installing anything, see
+[how to contribute](contributing.md#the-loops).
 
 ## Status
 

@@ -445,6 +445,69 @@ def cmd_apps(args) -> int:
     return 2
 
 
+def _size_words(size: int) -> str:
+    """'412 MB', or '-' when the daemon does not know (a nixpkgs app)."""
+    if not size:
+        return "-"
+    if size >= 1024 ** 3:
+        return f"{size / 1024 ** 3:.1f} GB"
+    return f"{max(1, round(size / 1024 ** 2))} MB"
+
+
+def cmd_store(args) -> int:
+    """What is installed from the Store, what has an update, and updating.
+
+    The Store window has had these for a while; over ssh, in a VM suite
+    or on a support call, "what is installed and is it current" needs an
+    answer from a shell too. Nothing new in the daemon: every method here
+    is the one the Store calls.
+    """
+    c = _client()
+    if args.action == "installed":
+        try:
+            details = c.list_installed_details()
+        except Exception:  # noqa: BLE001 - an older daemon has only the refs
+            details = [{"ref": r, "name": r} for r in c.list_installed()]
+        if not details:
+            print("nothing is installed from the Store")
+            return 0
+        for app in sorted(details, key=lambda a: (a.get("name") or a["ref"]).lower()):
+            by = app.get("installed_by") or ""
+            print(f"  {app['ref']:<42} {(app.get('name') or ''):<26} "
+                  f"{_size_words(app.get('size', 0)):>8}  {by}")
+        print(f"{len(details)} installed")
+        return 0
+    if args.action == "updates":
+        found = c.check_app_updates() if args.check else c.list_app_updates()
+        if not found:
+            print("everything installed from the Store is up to date"
+                  + ("" if args.check else " (as far as this computer knows; --check asks the store)"))
+            return 0
+        for app in found:
+            version = app.get("version") or app.get("commit") or ""
+            latest = app.get("latest") or ""
+            print(f"  {app['ref']:<42} {(app.get('name') or ''):<26} "
+                  f"{version} -> {latest}" if latest else
+                  f"  {app['ref']:<42} {(app.get('name') or ''):<26} {version}")
+        print(f"{len(found)} with an update; 'kosherctl store update --all' takes them")
+        return 0
+    if args.action == "update":
+        if args.all:
+            count = c.update_all_apps()
+            print(f"queued {count} update{'s' if count != 1 else ''}"
+                  if count else "nothing to update")
+        elif not args.apps:
+            print("usage: kosherctl store update <app>... | --all", file=sys.stderr)
+            return 2
+        else:
+            for ref in args.apps:
+                c.update_app(ref)
+                print(f"queued {ref}")
+        print("the Store shows the progress; 'kosherctl store updates' says what is left")
+        return 0
+    return 2
+
+
 def cmd_layout(args) -> int:
     from .policy import LAYOUT_LABELS
 
@@ -1140,6 +1203,14 @@ def main(argv: list[str] | None = None) -> int:
                    help="approved|store, kinds (see 'kinds'), or app ids")
     s.add_argument("--guardian-password")
     s.set_defaults(func=cmd_apps)
+
+    s = sub.add_parser("store", help="what is installed from the Store, and updates")
+    s.add_argument("action", choices=["installed", "updates", "update"])
+    s.add_argument("apps", nargs="*", default=[], help="apps to update (update)")
+    s.add_argument("--check", action="store_true",
+                   help="ask the store for news before listing updates")
+    s.add_argument("--all", action="store_true", help="update everything that has an update")
+    s.set_defaults(func=cmd_store)
 
     s = sub.add_parser("categories", help="content categories to block for a user")
     s.add_argument("uid", type=int, nargs="?", default=0)

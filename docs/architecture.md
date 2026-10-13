@@ -150,7 +150,9 @@ and by malcontent, so what cannot be installed cannot be run either:
 
 The app index is parsed once per catalogue download on a worker thread and
 cached, so neither the Store nor a policy change waits on a forty-megabyte
-parse. `kosherctl apps` shows and sets an account's access and blocks.
+parse. `kosherctl apps` shows and sets an account's access and blocks;
+`kosherctl store` lists what is installed, what has an update, and updates
+it, for a shell, a VM suite or a support call.
 
 ## The policy
 

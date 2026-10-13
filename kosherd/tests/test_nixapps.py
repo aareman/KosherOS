@@ -210,12 +210,20 @@ def test_the_session_environment_is_left_alone():
     # Desktop entries reach the app grid through ~/.local/share instead.
     for conf in (ROOT / "os-image/files/etc/environment.d").glob("*"):
         assert "XDG_DATA_DIRS" not in conf.read_text(), conf.name
-    # ...but the profile IS on the session's PATH, added in front of what
-    # the session already had, so a program the desktop starts or a shell
-    # that does not read the profile scripts finds what the Store put there.
+    # ...but the profile IS on the session's PATH, after the system's own
+    # directories, so a program the desktop starts or a shell that does not
+    # read the profile scripts finds what the Store put there.
     conf = (ROOT / "os-image/files/etc/environment.d/60-kosher-nix-path.conf").read_text()
     line = next(l for l in conf.splitlines() if l.startswith("PATH="))
-    assert line == "PATH=${HOME}/.nix-profile/bin:/nix/var/nix/profiles/default/bin:${PATH}"
+    assert line == ("PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+                    ":${HOME}/.nix-profile/bin:/nix/var/nix/profiles/default/bin")
+    # The system's directories are literal text, never "${PATH}": in the
+    # login screen's launch environment that expands to nothing, and a
+    # PATH of two Nix directories left 0.13.0 on a black screen (#110).
+    for conf in (ROOT / "os-image/files/etc/environment.d").glob("*"):
+        for l in conf.read_text().splitlines():
+            if l.startswith("PATH="):
+                assert "${PATH" not in l and ":/usr/bin:" in l, conf.name
     assert "kosher-nix-desktop" in (ROOT / "kosherd/pyproject.toml").read_text()
     assert "test -x /usr/bin/kosher-nix-desktop" in (ROOT / "os-image/Containerfile").read_text()
 

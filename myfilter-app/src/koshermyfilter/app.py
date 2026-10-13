@@ -34,33 +34,31 @@ APP_ID = "org.kosherlinux.MyFilter"
 MODES = {
     "none": (
         "No internet",
-        "This account cannot reach the internet. Printers and other "
-        "computers in the house still work.",
+        ("Internet access is blocked. Printers and other devices on the local network "
+            "are still available."),
         "network-offline-symbolic",
     ),
     "whitelist": (
         "Approved sites only",
-        "You can visit the sites on the list below, and nothing else. "
-        "Searching in KosherOS Search shows you what is on it.",
+        ("You can visit the approved sites listed below. Use KosherOS Search to find "
+            "pages on those sites."),
         "view-list-bullet-symbolic",
     ),
     "dnsfilter": (
-        "Family filtering",
-        "Sites known to be unsuitable are blocked before they load. "
-        "Pages themselves are not inspected, so this is the lightest of "
-        "the filters.",
+        "DNS filter",
+        ("Sites on the blocked lists are blocked before they load. Pages and pictures "
+            "are not checked."),
         "network-wireless-signal-ok-symbolic",
     ),
     "filtered": (
-        "Filtered browsing",
-        "Pages are checked as they load. Unsuitable sites are blocked, "
-        "pictures are looked at, and bad language is cleaned up.",
+        "Filtered internet",
+        "Pages are checked as they load, using the settings below.",
         "security-high-symbolic",
     ),
     "unfiltered": (
         "Not filtered",
-        "This account has no content filtering. Ads and trackers are "
-        "still blocked.",
+        ("Content filtering is off for this account. The ad and tracker setting is "
+            "shown below."),
         "dialog-information-symbolic",
     ),
 }
@@ -71,16 +69,17 @@ MODES = {
 # with kosherd.language.MODES.
 LANGUAGE = {
     "off": "Bad language is not filtered",
-    "substitute": "Bad language is replaced with hyphens",
+    "substitute": "Bad language is replaced",
     "block": "Pages with bad language are blocked",
 }
 
 # No "YouTube:" prefix — the row this fills is already titled YouTube, and
 # the first render read "YouTube / YouTube: strictest setting".
 YOUTUBE = {
-    "strict": "Strictest setting",
-    "moderate": "Moderate setting",
-    "off": "No restriction",
+    "strict": "Strict Restricted Mode",
+    "moderate": "Moderate Restricted Mode",
+    "off": "Restricted Mode off",
+    "none": "Restricted Mode off",
 }
 
 # Your time on the computer. Shown to everyone, limited or not: "no limit"
@@ -93,8 +92,8 @@ TIME = {
     "limit": "Time each day",
     "left": "{left} left today",
     "used": "{used} used of {limit}",
-    "none_left": "Today's time is used up",
-    "today": "Today you can use this computer",
+    "none_left": "No time left today",
+    "today": "Allowed hours today",
     "today_any": "Any time",
     "today_never": "Not today",
     "until": "Allowed until {clock}",
@@ -106,9 +105,9 @@ TIME = {
 def apps_words(s: dict) -> str:
     """What the Store offers you, in one line: the approved list or the
     whole store, and which kinds of app are blocked."""
-    words = ("Anything in the store that is not blocked for you"
+    words = ("Store apps, except those blocked for your account"
              if s.get("app_access") == "store" else
-             "Only the apps an administrator has approved")
+             "Approved apps only")
     kinds = [k.get("label") for k in s.get("blocked_app_kinds") or [] if k.get("label")]
     if kinds:
         words += " · blocked: " + ", ".join(kinds)
@@ -140,14 +139,24 @@ class Window(Adw.ApplicationWindow):
                          default_width=560, default_height=680)
 
         self.view = Adw.ToolbarView()
-        self.view.add_top_bar(Adw.HeaderBar())
         self.set_content(self.view)
+        refresh = Gtk.Button(icon_name="view-refresh-symbolic",
+                             tooltip_text="Refresh settings")
+        refresh.connect("clicked", lambda _b: self.reload())
+        self.refresh_button = refresh
+        header = Adw.HeaderBar()
+        header.pack_end(refresh)
+        self.view.add_top_bar(header)
+        self.reload()
+
+    def reload(self) -> None:
+        self.refresh_button.set_sensitive(False)
 
         # A spinner rather than an empty window: the call crosses D-Bus and
         # polkit, which is quick but not instant, and a window that appears
         # blank reads as broken.
         self.view.set_content(Adw.StatusPage(
-            title="Reading your settings", paintable=None,
+            title="Loading your settings…", paintable=None,
             child=Gtk.Spinner(spinning=True, width_request=32,
                               height_request=32)))
 
@@ -157,16 +166,20 @@ class Window(Adw.ApplicationWindow):
     # ---- states ----------------------------------------------------------
 
     def _on_error(self, e: Exception) -> None:
+        self.refresh_button.set_sensitive(True)
+        retry = Gtk.Button(label="Try again", halign=Gtk.Align.CENTER)
+        retry.add_css_class("suggested-action")
+        retry.connect("clicked", lambda _b: self.reload())
         page = Adw.StatusPage(
             icon_name="dialog-warning-symbolic",
-            title="Cannot read your settings",
-            description=(f"{_error_text(e)}\n\nThe filter itself is not "
-                         "affected by this — it runs in the system, not in "
-                         "this window. Ask whoever manages this computer to "
-                         "look at KosherOS Admin."))
+            title="Could not load your settings",
+            description=(f"{_error_text(e)}\n\nTry again. If this continues, "
+                         "ask an administrator to check the filter status in KosherOS Admin."),
+            child=retry)
         self.view.set_content(page)
 
     def _on_loaded(self, settings: dict) -> None:
+        self.refresh_button.set_sensitive(True)
         if not settings.get("managed", False):
             self.view.set_content(Adw.StatusPage(
                 icon_name="dialog-information-symbolic",
@@ -187,8 +200,7 @@ class Window(Adw.ApplicationWindow):
 
         mode = s.get("mode", "")
         title, description, icon = MODES.get(
-            mode, (mode or "Unknown", "This mode is not one this version of "
-                   "My Filter knows how to describe.",
+            mode, (mode or "Unknown", "This version of My Filter does not recognize this mode.",
                    "dialog-question-symbolic"))
 
         banner = Adw.PreferencesGroup()
@@ -203,10 +215,10 @@ class Window(Adw.ApplicationWindow):
             page.add(self._time(s["time"]))
 
         blocked = s.get("blocked_categories", [])
-        if blocked:
+        if blocked and mode in ("dnsfilter", "filtered"):
             group = Adw.PreferencesGroup(
-                title="Blocked subjects",
-                description="Sites about these are not allowed.")
+                title="Blocked site categories",
+                description="Sites in these categories are blocked.")
             for entry in blocked:
                 group.add(Adw.ActionRow(title=entry["label"]))
             page.add(group)
@@ -217,8 +229,7 @@ class Window(Adw.ApplicationWindow):
                 title="Sites you can visit",
                 description=(f"{len(whitelist)} approved."
                              if whitelist else
-                             "Nothing has been approved yet. Ask whoever "
-                             "manages this computer to add a site."))
+                             "No sites approved yet. Ask an administrator to add a site."))
             for domain in whitelist:
                 group.add(Adw.ActionRow(title=domain))
             page.add(group)
@@ -227,7 +238,7 @@ class Window(Adw.ApplicationWindow):
         return page
 
     def _what_applies(self, s: dict) -> Adw.PreferencesGroup:
-        group = Adw.PreferencesGroup(title="What applies to you")
+        group = Adw.PreferencesGroup(title="Your settings")
 
         if "media_level" in s:
             level = s["media_level"]
@@ -236,9 +247,15 @@ class Window(Adw.ApplicationWindow):
                 subtitle=MEDIA_LEVEL_LABELS.get(level, level)))
 
         language = s.get("language_filter", OFF)
+        mode = s.get("mode")
+        language_text = LANGUAGE.get(language, language)
+        if mode in ("none", "unfiltered"):
+            language_text = "Language filtering does not apply in this mode"
+        elif mode in ("dnsfilter", "whitelist") and language != OFF:
+            language_text = "Searches with bad language are blocked; words on pages are not changed"
         group.add(Adw.ActionRow(
             title="Language",
-            subtitle=LANGUAGE.get(language, language)))
+            subtitle=language_text))
 
         youtube = s.get("youtube") or {}
         restrict = youtube.get("restrict")
@@ -246,7 +263,8 @@ class Window(Adw.ApplicationWindow):
             allowed = youtube.get("allowed_channels") or []
             subtitle = YOUTUBE.get(restrict, restrict)
             if allowed:
-                subtitle += f" · {len(allowed)} channels allowed"
+                subtitle += (f" · {len(allowed)} approved "
+                             + ("channel" if len(allowed) == 1 else "channels"))
             group.add(Adw.ActionRow(title="YouTube", subtitle=subtitle))
 
         group.add(Adw.ActionRow(
@@ -255,7 +273,7 @@ class Window(Adw.ApplicationWindow):
                       if s.get("can_install_apps") else
                       "Only an administrator can install apps")))
         if "app_access" in s:
-            group.add(Adw.ActionRow(title="Which apps", subtitle=apps_words(s)))
+            group.add(Adw.ActionRow(title="Available apps", subtitle=apps_words(s)))
         return group
 
     def _time(self, t: dict) -> Adw.PreferencesGroup:
@@ -318,8 +336,9 @@ class Window(Adw.ApplicationWindow):
                 title="This is an administrator account",
                 subtitle="You can change settings in KosherOS Admin."))
         note = Gtk.Label(
-            label="This window only shows your settings. It cannot change "
-                  "them.",
+            label=("Change these settings in KosherOS Admin."
+                   if s.get("admin") else
+                   "To change these settings, ask an administrator to open KosherOS Admin."),
             wrap=True, justify=Gtk.Justification.CENTER,
             margin_top=18, css_classes=["dim-label", "caption"])
         group.add(note)

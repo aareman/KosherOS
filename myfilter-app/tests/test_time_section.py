@@ -54,13 +54,13 @@ def _page(settings):
 
 def test_which_apps_is_said_in_words():
     assert app.apps_words({"app_access": "approved"}) == \
-        "Only the apps an administrator has approved"
+        "Approved apps only"
     assert app.apps_words({"app_access": "store",
                            "blocked_app_kinds": [{"key": "games", "label": "Games"}]}) == \
-        "Anything in the store that is not blocked for you · blocked: Games"
+        "Store apps, except those blocked for your account · blocked: Games"
     page = _page({**_settings(), "app_access": "approved", "blocked_app_kinds": []})
-    row = next(r for r in _rows(page) if r.get_title() == "Which apps")
-    assert row.get_subtitle() == "Only the apps an administrator has approved"
+    row = next(r for r in _rows(page) if r.get_title() == "Available apps")
+    assert row.get_subtitle() == "Approved apps only"
 
 
 def test_a_limited_account_sees_its_limit_what_is_left_and_todays_hours():
@@ -68,7 +68,7 @@ def test_a_limited_account_sees_its_limit_what_is_left_and_todays_hours():
     rows = {r.get_title(): r for r in _rows(page)}
     assert "Time each day" in rows
     assert rows["Time each day"].get_subtitle() == "1 h 20 min used of 2 h · 40 min left today"
-    assert rows["Today you can use this computer"].get_subtitle() == "06:00–21:00"
+    assert rows["Allowed hours today"].get_subtitle() == "06:00–21:00"
 
 
 def test_a_spent_day_and_a_block_end_are_said_plainly():
@@ -77,8 +77,8 @@ def test_a_spent_day_and_a_block_end_are_said_plainly():
     ends = int(time.time()) + 1800
     page = _page(_settings(used=120 * 60, left=0, block_ends=ends))
     rows = {r.get_title(): r for r in _rows(page)}
-    assert rows["Time each day"].get_subtitle().endswith("Today's time is used up")
-    assert rows["Today you can use this computer"].get_subtitle() == \
+    assert rows["Time each day"].get_subtitle().endswith("No time left today")
+    assert rows["Allowed hours today"].get_subtitle() == \
         "06:00–21:00 · Allowed until " + time.strftime("%H:%M", time.localtime(ends))
 
 
@@ -95,3 +95,33 @@ def test_an_answer_from_an_older_daemon_without_time_still_builds():
     del settings["time"]
     page = _page(settings)
     assert "Your time" not in {r.get_title() for r in _rows(page)}
+
+
+def test_language_summary_matches_the_filter_mode():
+    for mode in ("none", "unfiltered", "dnsfilter", "whitelist"):
+        page = _page({**_settings(), "mode": mode})
+        language = next(r for r in _rows(page) if r.get_title() == "Language")
+        expected = "does not apply" if mode in ("none", "unfiltered") else "words on pages are not changed"
+        assert expected in language.get_subtitle()
+        if mode != "dnsfilter":
+            assert "Adult" not in {r.get_title() for r in _rows(page)}
+    assert "Ads and trackers are still blocked" not in app.MODES["unfiltered"][1]
+
+
+def test_load_failure_can_be_retried(monkeypatch):
+    pending = []
+    monkeypatch.setattr(app, "_run_async", lambda work, done, failed: pending.append((done, failed)))
+    application = Adw.Application(application_id="org.kosherlinux.MyFilterTest")
+    application.register(None)
+    window = app.Window(application)
+    done, failed = pending.pop()
+    failed(RuntimeError("Service unavailable"))
+    status = window.view.get_content()
+    assert status.get_title() == "Could not load your settings"
+    status.get_child().emit("clicked")
+    assert not window.refresh_button.get_sensitive()
+    done, failed = pending.pop()
+    done(_settings())
+    assert window.refresh_button.get_sensitive()
+    assert isinstance(window.view.get_content(), Adw.PreferencesPage)
+    window.destroy()

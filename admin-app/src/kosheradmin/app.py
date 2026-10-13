@@ -66,7 +66,7 @@ class Window(Adw.ApplicationWindow):
         # (An amber health banner used to stack under it; two bars
         # shouting before the title was the crowding. Health is now the
         # amber badge on Protection and the first group on that page.)
-        self.requests_banner = Adw.Banner(button_label="Deal with them")
+        self.requests_banner = Adw.Banner(button_label="Review requests")
         self.requests_banner.add_css_class("requests-banner")
         self.requests_banner.connect("button-clicked", lambda _b: self.show_requests())
 
@@ -349,7 +349,7 @@ class Window(Adw.ApplicationWindow):
 
         dialog = Adw.AlertDialog(
             heading="Guardian password",
-            body="Required once per session to change filter settings.")
+            body="Required once per session to reduce filtering restrictions.")
         entry = Gtk.PasswordEntry(show_peek_icon=True, hexpand=True)
         dialog.set_extra_child(entry)
         dialog.add_response("cancel", "Cancel")

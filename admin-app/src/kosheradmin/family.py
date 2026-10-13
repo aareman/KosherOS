@@ -70,10 +70,8 @@ class GuestPage(_Page):
         guest = win.policy.get("guest", {"enabled": False})
         group = Adw.PreferencesGroup(
             title="Guest account",
-            description="Anyone can sign in as the guest without a password, and "
-                        "everything they did is erased at sign-out. Turn it on and "
-                        "it gets a page like every other account: filter mode, "
-                        "blocked kinds of sites, pictures, language, YouTube.")
+            description=("Guests sign in without a password. Their files and session data are erased "
+                "at sign-out. Enable the account to configure its filter settings."))
 
         mode = guest.get("mode", "whitelist")
         wl_domains = guest.get("whitelist", [])
@@ -90,7 +88,7 @@ class GuestPage(_Page):
 
         switch = Adw.SwitchRow(
             title="Guest account",
-            subtitle="Turning it on opens its page, where everything can be set.",
+            subtitle="Enable the guest account to configure its settings.",
             active=guest["enabled"])
         switch.connect("notify::active",
                        lambda s, _p: s.get_active() != guest["enabled"] and
@@ -103,7 +101,7 @@ class GuestPage(_Page):
         # gets pictures, language and YouTube handled.
         kinds = list(GUEST_KINDS)
         mode_row = Adw.ComboRow(
-            title="Start the guest off with",
+            title="Guest filter mode",
             model=Gtk.StringList.new([labels.MODE_LABELS[m] for m in kinds]))
         mode_row.set_selected(kinds.index(mode) if mode in kinds else 0)
         mode_row.set_subtitle(GUEST_KIND_HINTS.get(mode, labels.MODE_HINTS.get(mode, "")))
@@ -127,7 +125,7 @@ class GuestPage(_Page):
             lambda new: push(guest["enabled"], mode, new)).present(win))
         if mode != "whitelist":
             wl_row.set_sensitive(False)
-            wl_row.set_subtitle("Only used in Whitelist only mode")
+            wl_row.set_subtitle("Applies only in Approved sites only mode")
         group.add(wl_row)
         self.prefs.add(group)
 

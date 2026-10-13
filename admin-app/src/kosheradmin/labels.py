@@ -19,22 +19,21 @@ from kosherd.policy import YOUTUBE_CATEGORIES
 
 MODE_LABELS = {
     "none": "No internet",
-    "whitelist": "Whitelist only",
+    "whitelist": "Approved sites only",
     "dnsfilter": "DNS filter",
     "filtered": "Filtered internet",
     "unfiltered": "Unfiltered",
 }
 
 MODE_HINTS = {
-    "none": "No web access at all. Printing and local network still work.",
-    "whitelist": "Only the sites on the approved list, and safe search is forced.",
-    "dnsfilter": "Basic protection only: blocks known bad sites and forces "
-                 "safe search. Pages and pictures are NOT checked in this "
-                 "mode — for that, use Filtered internet.",
-    "filtered": "Safe search, page rules and content filtering. To judge "
-                "pages this reads the connection, so this user's HTTPS is "
-                "decrypted on this computer.",
-    "unfiltered": "No filtering of any kind for this account.",
+    "none": "Blocks internet access. Printers and the local network remain available.",
+    "whitelist": "Allows approved sites only, with SafeSearch enabled.",
+    "dnsfilter": ("Blocks listed sites and enables SafeSearch. To check pages and pictures too,"
+        " choose Filtered internet."),
+    "filtered": ("Checks pages and content, applies page rules and enables SafeSearch. HTTPS "
+        "traffic for this account is decrypted on this computer for inspection."),
+    "unfiltered": ("No content filtering for this account. Computer-wide ad blocking still "
+        "applies if enabled."),
 }
 
 # Pictures and video, in the words a parent would use. The order matches
@@ -49,17 +48,13 @@ MEDIA_LABELS = {
 }
 MEDIA_HINTS = {
     "none": "No filtering of pictures or video.",
-    "nsfw": "Hides pictures on pages that read as explicit.",
-    "suggestive": "Also hides pictures on pages that read as suggestive.",
-    "immodest": "Also hides pictures on pages about immodest dress. The "
-                "strictest setting that still judges each picture.",
-    "people": "Also hides any picture with a person in it, whatever they "
-              "wear. Tight or sheer clothing is not something the filter can "
-              "judge, and this is the honest answer to it: landscapes, "
-              "products, diagrams and text still show.",
-    "all": "No pictures from the web at all. Nothing here depends on a "
-           "judgement call, which is why it is the only setting that is "
-           "right every time.",
+    "nsfw": "Hides pictures on pages identified as explicit.",
+    "suggestive": "Also hides pictures on pages identified as suggestive.",
+    "immodest": ("Also hides pictures identified as immodest, including on pages about "
+        "immodest dress."),
+    "people": ("Hides pictures when a person is detected, regardless of clothing. Detection "
+        "can miss people."),
+    "all": "Blocks all web pictures without checking their content.",
 }
 # The same levels as one short line on a card or a chip.
 MEDIA_SHORT = {
@@ -77,21 +72,19 @@ COVER_LABELS = {
     "skin": "Paint over skin",
 }
 COVER_HINTS = {
-    "frost": "The person is frosted out: the shape is gone, the rest of the "
-             "picture and the page stay. The default.",
-    "skin": "Skin inside the picture is painted a solid grey, with a margin; "
-            "clothing and background stay. Where the colour check finds no "
-            "skin to paint, the figure is frosted instead.",
+    "frost": "Covers the person with a frosted area and keeps the rest of the picture.",
+    "skin": ("Covers detected skin with solid grey. If no skin is detected, covers the "
+        "figure with a frosted area."),
 }
 COVER_ORDER = ("frost", "skin")
 
 LANGUAGE_LABELS = {
-    "off": "Leave bad language alone",
-    "substitute": "Replace bad language with a milder word",
+    "off": "Show bad language",
+    "substitute": "Replace bad language",
     "block": "Block pages with bad language",
 }
 LANGUAGE_SHORT = {
-    "off": "Bad language left alone",
+    "off": "Bad language shown",
     "substitute": "Bad language replaced",
     "block": "Pages with bad language blocked",
 }
@@ -100,7 +93,7 @@ LANGUAGE_ORDER = ("off", "substitute", "block")
 # What the Store offers an account, as one short line.
 APP_ACCESS_SHORT = {
     "approved": "Approved apps only",
-    "store": "The whole store",
+    "store": "All available apps",
 }
 
 
@@ -112,7 +105,7 @@ def app_name(ref: str) -> str:
 
 def apps_line(user: dict) -> tuple[str, bool]:
     """The apps chip: what this account may have, and whether that is a
-    restriction (drawn blue) or the open store (drawn amber)."""
+    restriction (drawn red) or the open store (drawn amber)."""
     access = appaccess.access_of(user)
     kinds = len(user.get("blocked_app_kinds") or [])
     singles = len(user.get("blocked_apps") or [])
@@ -169,16 +162,12 @@ LAYOUT_LABELS = {
     "advanced": "Advanced (niri)",
 }
 LAYOUT_HINTS = {
-    "classic": "A taskbar along the bottom, a start button, windows that "
-               "minimise. What a Windows, Mac or ChromeOS user already knows. "
-               "The right choice for almost everyone.",
-    "tiling": "Windows arrange themselves in a scrolling row and are "
-              "driven from the keyboard (PaperWM). Same lock screen, "
-              "settings and accessibility as the classic desktop.",
-    "advanced": "A separate session for power users, picked at the login "
-                "screen: the niri window manager with the Noctalia shell, "
-                "configured by text files. No GNOME Settings, and less "
-                "accessibility support. Filtering is unaffected.",
+    "classic": "A familiar desktop with a taskbar, start menu and movable windows.",
+    "tiling": ("Arranges windows in a scrolling row with keyboard controls. Uses the same "
+        "settings and accessibility tools as the classic desktop."),
+    "advanced": ("A separate niri session with the Noctalia shell, selected at sign-in and "
+        "configured through text files. GNOME Settings is unavailable, and "
+        "accessibility support is limited."),
 }
 LAYOUT_ORDER = ("classic", "tiling", "advanced")
 
@@ -196,7 +185,7 @@ TIME_LIMIT_LABELS = {
     0: "No daily limit",
 }
 TIME_LIMIT_ORDER = (0, 30, 60, 120, 180)
-TIME_LIMIT_CUSTOM = "A different amount…"
+TIME_LIMIT_CUSTOM = "Custom limit…"
 TIME_LIMIT_HINT = ("Counts the time this person is signed in and using the "
                    "computer; a screen left idle is not counted. They are "
                    "warned 15 and 5 minutes before it runs out, then signed "
@@ -218,18 +207,15 @@ SCHEDULE_PRESET_HINTS = {
 }
 SCHEDULE_PRESET_ORDER = ("always", "after_school", "not_late", "weekdays")
 SCHEDULE_TITLE = "When this account may be used"
-SCHEDULE_HINT = ("Click or drag across the calendar to paint the hours. Amber "
-                 "hours are allowed; blue hours are not. Signing in outside "
-                 "the amber hours is refused, and a session that runs into a "
-                 "blue hour is warned and then signed out.")
+SCHEDULE_HINT = (("Click or drag to change the hours. Amber means allowed; red means blocked. "
+    "Use arrow keys to move and Space to change an hour. The account is signed "
+    "out when allowed hours end."))
 SCHEDULE_LEGEND_ALLOWED = "Allowed"
 SCHEDULE_LEGEND_BLOCKED = "Not allowed"
-TIME_ADMIN_NOTE = ("Administrators are never limited. A parent must always be "
-                   "able to sign in and change a setting; to limit this "
-                   "person, make the account a user account first.")
+TIME_ADMIN_NOTE = (("Time limits do not apply to administrators. Change this to a standard user "
+    "account to set a limit."))
 TIME_TODAY_TITLE = "Today"
-TIME_TAB_INTRO = ("How long, and when, this person may use the computer. "
-                  "Nothing here is set until you set it.")
+TIME_TAB_INTRO = ("Set a daily time limit and allowed hours. Changes save automatically.")
 # Why a session ended, for the activity feed (activity.TIME events).
 TIME_WHY = {
     "time:limit": "today's time was used up",
@@ -239,7 +225,7 @@ TIME_WHY = {
 
 MODE_NOTHING_APPLIES = {
     "none": "This account has no internet access, so nothing here applies.",
-    "unfiltered": "An unfiltered account enforces nothing.",
+    "unfiltered": "Content filtering is off for this account.",
 }
 
 # The lists a family may add to or take from, in their words. Everything
@@ -247,14 +233,12 @@ MODE_NOTHING_APPLIES = {
 # this house or it is not.
 EDITABLE_LISTS = (
     ("wordlist.json", "Bad language",
-     "Words replaced with a milder one on the page, for accounts set to "
-     "clean up bad language.", "word"),
+     "Words replaced on pages when language replacement is enabled.", "word"),
     ("search-blocklist.json", "Blocked searches",
-     "Searches that will not run at all, because the results page would "
-     "show the words even with every link removed.", "search"),
-    ("content-terms.json", "Words pages are judged by",
-     "Words that count as evidence when deciding whether a page is "
-     "inappropriate. No single one blocks a page on its own.", "term"),
+     "Search terms that the filter blocks before showing results.", "search"),
+    ("content-terms.json", "Content filter terms",
+     ("Terms used to check page content. A single term does not block a page on its"
+         " own."), "term"),
 )
 
 # Where a term a family adds sits on the ladder, in plain words. Weights
@@ -272,10 +256,9 @@ CONTENT_LEVELS = (
 PICTURE_STATE = {
     "too_slow": (
         "This computer is hiding pictures instead of checking them",
-        "Checking each picture takes about {ms} ms here, which would make "
-        "pages slow to load and still leave many unchecked. Hiding them is "
-        "faster and never wrong. Set “Pictures and video” to “Show all "
-        "pictures” if you would rather have them."),
+        ("Checking each picture takes about {ms} ms on this computer. Pictures are "
+            "hidden to avoid slow page loads. Choosing “Show all pictures” turns off "
+            "picture filtering.")),
     "no_model": (
         "Pictures are being hidden, not checked",
         "The picture model is not installed on this computer, so any "
@@ -623,7 +606,7 @@ def mode_badge(user: dict) -> tuple[str, bool]:
 def protection_lines(user: dict) -> list[tuple[str, str, bool]]:
     """(icon, text, protects) × 4: web, pictures, video, apps. Always the
     same order, so the eye can compare across the family; the last element
-    says whether that line is blocking something (drawn blue) or leaving it
+    says whether that line is blocking something (drawn red) or leaving it
     open (drawn amber), which is what a parent is scanning for."""
     mode = user.get("mode", "filtered")
     kinds = len(user.get("blocked_categories") or [])

@@ -44,7 +44,7 @@ def health_rows(status: dict | None) -> list[tuple[str, str, bool]]:
 
     if status is None:
         return [("Could not check the filter",
-                 "kosherd did not answer. Try again in a moment.", False)]
+                 "The filter service did not respond. Try again.", False)]
     rows = []
     state = status.get("pictures")
     if state in labels.PICTURE_STATE:
@@ -116,7 +116,7 @@ class ProtectionPage(_Page):
 
     def __init__(self, win):
         super().__init__(win, "Protection", "protection")
-        self.health_group = Adw.PreferencesGroup(title="Is the filter working?")
+        self.health_group = Adw.PreferencesGroup(title="Filter status")
         check = Gtk.Button(label="Check again", valign=Gtk.Align.CENTER)
         check.connect("clicked", lambda _b: self._check())
         self.health_group.set_header_suffix(check)
@@ -127,18 +127,14 @@ class ProtectionPage(_Page):
 
         everyone = Adw.PreferencesGroup(
             title="Applies to everyone",
-            description="One answer for the whole computer: every account, "
-                        "the guest included, and every browser and app. "
-                        "These cannot be set per person.")
+            description=("These settings apply to all accounts, including guests, in every browser and"
+                " app."))
         self.ads_row = Adw.SwitchRow(
             title="Block ads and trackers",
-            subtitle="At this computer's own resolver, like a Pi-hole, so it "
-                     "covers every account and every app rather than one "
-                     "browser. An ad network is also where immodest pictures "
-                     "arrive uninvited, so on is the right answer for almost "
-                     "everyone.",
+            subtitle="Blocks known ad and tracking domains for everyone on this computer.",
             subtitle_lines=4,
             active=win.policy.get("adblock", {}).get("enabled", True))
+        self.ads_row.add_css_class("blocking")
         self.ads_row.connect("notify::active", self._on_ads)
         everyone.add(self.ads_row)
         for name, title, description, noun in labels.EDITABLE_LISTS:
@@ -151,11 +147,9 @@ class ProtectionPage(_Page):
         self.prefs.add(everyone)
 
         locking = Adw.PreferencesGroup(
-            title="Who may change all this",
-            description="Every setting in KosherOS Admin already needs an "
-                        "administrator. A guardian password adds a second one "
-                        "— the other spouse's, say — that any weakening of "
-                        "the filter also needs.")
+            title="Administrator access",
+            description=("Only administrators can change these settings. A guardian password adds an "
+                "extra check before reducing filter restrictions."))
         self.guardian_row = Adw.ActionRow(
             title="Guardian password", subtitle="—", activatable=True)
         self.guardian_row.add_suffix(Gtk.Image(icon_name="go-next-symbolic"))
@@ -183,8 +177,9 @@ class ProtectionPage(_Page):
 
         on = self.win.policy.get("guardian", {}).get("enabled", False)
         self.guardian_row.set_subtitle(
-            "On. Weakening the filter asks for it once per session."
-            if on else "Off. Any administrator can weaken the filter alone.")
+            "Enabled. Required once per session to reduce filtering restrictions."
+            if on else ("Disabled. Administrators can change filtering without an additional "
+                "password."))
 
     def _check(self) -> None:
         self.win.toast("Checking the filter…")
@@ -242,10 +237,8 @@ class AppsPage(_Page):
             self.prefs.remove(self.group)
         group = Adw.PreferencesGroup(
             title=f"Approved apps ({len(self.approved)})",
-            description="What an account on \"Approved apps only\" may install from the "
-                        "KosherOS Store, which is every account unless its Apps tab says "
-                        "otherwise. An approval also lets an account opened to the whole "
-                        "store have an app rated above the computer's content ceiling.")
+            description=("Apps available to accounts set to Approved apps only. Approval also permits "
+                "apps that would otherwise be excluded by their content rating."))
         if not self.approved:
             row = Adw.ActionRow(title="No apps approved yet",
                                 subtitle="Search below to approve apps")
@@ -275,9 +268,8 @@ class AppsPage(_Page):
     def _build_search(self) -> None:
         group = Adw.PreferencesGroup(
             title="Add apps",
-            description="Search everything on Flathub, then approve what every "
-                        "account on this computer may install. To open one account "
-                        "to the whole store instead, use its Apps tab.")
+            description=("Search Flathub to approve an app. To give an account broader store access, "
+                "use its Apps tab."))
         entry = Adw.EntryRow(title="Search all apps")
         entry.set_show_apply_button(True)
         self.search_entry = entry
@@ -377,7 +369,7 @@ class UpdatesPage(_Page):
         # what it means, and the choice is made by pressing the thing you
         # want instead of by picking a word out of a list.
         self.channel_group = Adw.PreferencesGroup(
-            title="Which updates this computer gets",
+            title="Update channel",
             description=CHANNEL_INTRO)
         self.channel_box = Gtk.ListBox(selection_mode=Gtk.SelectionMode.NONE)
         self.channel_box.add_css_class("boxed-list")
@@ -390,10 +382,9 @@ class UpdatesPage(_Page):
         # a bare button: a "Roll back" with no target is the control that
         # gets clicked by accident.
         back = Adw.PreferencesGroup(
-            title="If an update went wrong",
-            description="The previous version stays on disk. Going back to it "
-                        "takes effect at the next restart and keeps every "
-                        "setting and file.")
+            title="Restore a previous version",
+            description=("Restore the previous system version at the next restart. Files and settings "
+                "are kept."))
         # No "running now" row: the Operating system row above already
         # names the version, and two rows saying it read as two things.
         self.back_row = Adw.ActionRow(title="Go back to the previous version",
@@ -608,8 +599,7 @@ class UpdatesPage(_Page):
         if ok:
             self.win.update_state = "Update ready — restart to use it"
             self.status_row.set_subtitle(
-                "The update is ready. Restart the computer to start using it; "
-                "until then everything carries on as it is.")
+                "Restart to apply the update. Save your work first.")
             self.restart_button.set_visible(True)
             self.apply_button.set_visible(False)
             self.win.toast("Update ready — restart to apply")
@@ -620,7 +610,7 @@ class UpdatesPage(_Page):
             self.win.toast(error or "The update did not finish")
 
 
-CHANNEL_INTRO = "Almost everyone should be on Stable."
+CHANNEL_INTRO = "Stable is recommended for everyday use."
 
 
 def channel_note(info: dict) -> str:

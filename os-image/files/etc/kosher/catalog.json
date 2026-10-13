@@ -47,6 +47,11 @@
     { "ref": "io.dbeaver.DBeaverCommunity", "name": "DBeaver", "summary": "Work with databases", "categories": ["Development"] },
     { "ref": "com.jgraph.drawio.desktop", "name": "draw.io", "summary": "Draw diagrams", "categories": ["Development", "Graphics"] },
     { "ref": "org.gnome.Console", "name": "Console", "summary": "A terminal", "categories": ["System", "TerminalEmulator"] },
+    { "ref": "nixpkgs#kitty", "name": "kitty", "summary": "A fast terminal that draws with the GPU", "categories": ["System", "TerminalEmulator"] },
+    { "ref": "nixpkgs#ghostty", "name": "Ghostty", "summary": "A fast, native terminal", "categories": ["System", "TerminalEmulator"] },
+    { "ref": "nixpkgs#foot", "name": "foot", "summary": "A small, quick Wayland terminal", "categories": ["System", "TerminalEmulator"] },
+    { "ref": "nixpkgs#alacritty", "name": "Alacritty", "summary": "A simple terminal that draws with the GPU", "categories": ["System", "TerminalEmulator"] },
+    { "ref": "nixpkgs#cool-retro-term", "name": "Cool Retro Term", "summary": "A terminal that looks like an old screen", "categories": ["System", "TerminalEmulator"] },
 
     { "ref": "nixpkgs#neovim", "name": "Neovim", "summary": "Vim, carried on", "categories": ["Development", "TextEditor"] },
     { "ref": "nixpkgs#code-cursor", "name": "Cursor", "summary": "A code editor with an AI in it", "categories": ["Development", "IDE"] },

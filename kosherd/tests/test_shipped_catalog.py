@@ -44,8 +44,18 @@ def test_the_ai_tools_and_editors_come_from_nixpkgs():
     # ...and every one of them sits on the Developer tools shelf, not on
     # Learning (ArtificialIntelligence is a Learning category).
     for app in APPS:
-        if app["ref"] in nix:
+        if app["ref"] in nix and "TerminalEmulator" not in app["categories"]:
             assert appkinds.kind_of(app) == "develop", app["ref"]
+
+
+def test_the_terminals_come_from_nixpkgs_and_sit_with_console():
+    # A terminal in a Flatpak sandbox cannot see the host's PATH, the Nix
+    # profile or podman, which is the whole point of a developer's
+    # terminal; these come from nixpkgs and shelve with Console.
+    terminals = {a["ref"]: a for a in APPS if "TerminalEmulator" in a.get("categories", [])}
+    for package in ("kitty", "ghostty", "foot", "alacritty", "cool-retro-term"):
+        assert f"nixpkgs#{package}" in terminals, package
+        assert appkinds.kind_of(terminals[f"nixpkgs#{package}"]) == appkinds.kind_of(terminals["org.gnome.Console"])
 
 
 def test_the_languages_from_the_issue_are_there_and_not_baked_into_the_image():

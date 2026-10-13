@@ -12,7 +12,7 @@ Use a Windows PC or a Mac to prepare an installer USB, then install KosherOS on 
 
 ## System requirements
 
-These are **provisional planning requirements for early testing**, not a tested minimum or a guarantee of compatibility. The recommended column gives more room for local picture checking, browser tabs, apps and updates. We still need complete installation and everyday-use tests on machines at the minimum.
+These are **provisional requirements for early testing**, not a tested minimum. The lower column is [Fedora Workstation's own baseline](https://fedoraproject.org/workstation/download/); the recommended column is planning headroom for picture checking, browser tabs, apps and updates, not a measured threshold. Nobody has yet run a full installation and everyday use on a machine at the minimum.
 
 | Part | Minimum to plan an early test | Recommended for family testing |
 |---|---|---|
@@ -23,11 +23,9 @@ These are **provisional planning requirements for early testing**, not a tested 
 | Startup firmware | USB boot with UEFI or legacy BIOS | UEFI |
 | Network | Internet access for obtaining the installer, updates and online apps | Ethernet for initial setup if Wi-Fi support is uncertain |
 
-**Apple Silicon and other ARM computers are not supported by the current KosherOS image.** This guide targets an Intel/AMD PC, not installation on a Mac. A Mac, including an Apple Silicon Mac with a compatible USB-writing app, can be the computer you use to prepare the USB for that PC.
+**Apple Silicon and other ARM computers are not supported.** This guide installs on an Intel/AMD PC. A Mac of either kind can be the computer you prepare the USB on.
 
-Fedora Workstation lists 4 GB RAM and 40 GB storage as its recommended baseline. Our provisional lower column uses that baseline; it does not establish that all KosherOS workloads fit comfortably. The larger recommendation is planning headroom, not a measured performance threshold. See [Fedora's hardware guidance](https://fedoraproject.org/workstation/download/).
-
-KosherOS's [picture-filter measurements](media-filtering.md#running-on-the-familys-own-computer) show that checking can be slow on two cores. When the filter cannot keep up, it hides pictures instead of checking and displaying them, and reports the condition in Protection. Core count alone does not guarantee a particular speed. Check [supported hardware and tools](supported.md#hardware) for further limits.
+Picture checking is slow on two cores; when the filter cannot keep up it hides pictures instead of checking them and says so in Protection. [Pictures and video](media-filtering.md#running-on-the-familys-own-computer) has the measurements and [what works](supported.md#hardware) the other hardware limits.
 
 ## What you need
 
@@ -57,7 +55,7 @@ Download the Windows installer for Fedora Media Writer, open it, and follow its 
 
 Download the macOS disk image for your Mac's processor: Apple Silicon/ARM64 or Intel/x64. Open the `.dmg`, copy Fedora Media Writer into Applications, and open it there. Check the app's [current macOS requirements](https://github.com/FedoraQt/MediaWriter/blob/main/MAC.md) if it does not run on your Mac.
 
-The USB-writing app must match the Mac you are using. **The KosherOS ISO must still be x86_64 for the separate Intel/AMD PC.**
+The USB-writing app must match the Mac you are using; the KosherOS ISO is the same x86_64 file either way.
 
 ## 3. Write the USB
 
@@ -103,4 +101,4 @@ If you want to build an installer, run the apps without installing, or test in a
 
 ## What has been verified
 
-This guide follows the repository's installer configuration and first-boot flow, plus Fedora Media Writer's published instructions. The Windows/macOS USB-writing and physical installation sequence has **not yet been rehearsed end to end for a published KosherOS ISO**. The hardware figures above remain provisional until that testing is complete.
+This guide follows the repository's installer configuration and first-boot flow, plus Fedora Media Writer's published instructions. The USB-writing and installation sequence has **not yet been rehearsed end to end for a published KosherOS ISO**.

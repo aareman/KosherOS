@@ -58,6 +58,10 @@ A *Basic protection* account has no proxy, so for it the web is ports 80
 and 443 to anywhere, plus the same named protocols. *Approved sites only*
 and *No internet* allow nothing beyond the approved sites.
 
+The package registries developer tools fetch from are reachable from every
+account, and the image points each tool at the filter's certificate;
+[what works](supported.md#developer-tools) has the table.
+
 ## The category database
 
 The image imports the University of Toulouse blacklists at build time:
@@ -338,46 +342,6 @@ merged with them. `kosherctl site-lists` shows the bundles and switches
 them on. In the admin app an approved-sites account is not asked which
 kinds of site to block, since it reaches its list and nothing else; the
 bundles take that tab's place.
-
-## Developer tools on a filtered machine
-
-Browsers, curl, git and Go trust the filter's certificate through the
-system store. The language package managers carry their own certificate
-bundles and would refuse every download, which to a student looks like a
-broken internet. So the image sets, for every account, the environment
-variable each tool honours, pointing at the system bundle, in login shells
-and in the desktop session. The registries those tools fetch from are
-reachable from every account, including approved-sites ones, because they
-hold code rather than pages. [What works](supported.md#developer-tools)
-has the table.
-
-Containers fetch as the account, with one wrinkle. A rootless container's
-network is pasta, a process owned by the account, so the firewall sees
-the account's uid on everything the container sends and dispatches it
-as usual. But a process inside the container that is not root there runs
-on the host as one of the account's *subordinate* ids, and with
-`--network=host` its sockets carry that id. So every rule that names an
-account's uid names its subordinate block too (`nft.py`, from
-`/etc/subuid` through `containers.py`): the vmap, the proxy redirect,
-the extra ports, the video-call switch, the plain resolver. A block is
-filtered as its owner, whichever id inside it is talking. kosherd gives
-each managed account a block of 65536 when it has none, which is what
-lets images with files of many owners unpack at all.
-
-Nix is the one tool that does not fetch as the account. Its daemon runs
-as root, and a build that fetches its source (`fetchurl`,
-`fetchFromGitHub`) runs as one of the `nixbld` users — below the first
-human uid, where the firewall accepts everything. So those users are
-dispatched by group before that accept, to a chain of their own
-(`nix_build`): the registries and the system domains on 80 and 443, and
-`reject`. Which registries a build may reach is the same list every
-account has, not the asking account's own, because the firewall cannot
-tell whose build it is. And the daemon only answers accounts kosherd has
-listed — every managed account whose kind of internet is not "No
-internet" — in `/etc/nix/kosheros-users.conf`, which the shipped
-`nix.conf` includes last after allowing root alone. The daemon's own
-downloads, from the binary caches named in `nix.conf`, run as root and are
-not filtered; only root may add a cache.
 
 ## Who is connecting: one port per user
 

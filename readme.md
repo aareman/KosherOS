@@ -144,47 +144,15 @@ Release notes are on the [Releases page](https://aareman.github.io/KosherOS/rele
 
 ## Development
 
-The [contributor guide](https://aareman.github.io/KosherOS/contributing/) covers setup,
-development loops, commit conventions and CI.
-
-All tooling comes from [devenv](https://devenv.sh). From the development shell above,
-run the unit suites without root or a VM:
+All tooling comes from [devenv](https://devenv.sh); entering the shell also installs the
+git hooks. The [contributor guide](https://aareman.github.io/KosherOS/contributing/) covers
+setup, the hooks, commit conventions and what CI does after a merge, and
+[updates and channels](docs/deployment.md#versions) explains how each merge gets its version.
+From the development shell, run the unit suites without root or a VM:
 
 ```sh
 just test
 ```
-
-Entering the shell also installs git hooks (on commit, and on push for the
-large-file check): merge-conflict markers,
-stray large files, Python syntax, YAML and shellcheck, all of which rewrite
-nothing and take milliseconds. `just check` runs them over every file rather
-than the staged ones, and `just hooks` installs the hook into a checkout
-whose shell has not been entered.
-
-If you work in `git worktree`s, note that git keeps **one** hooks directory
-for a repository and all of its worktrees. The installed hooks are therefore
-one dispatcher that names no checkout: it asks git which tree is being
-committed to or pushed from and runs that tree's own configuration
-(`scripts/git-hook-dispatch.sh`). Do not replace it with one that hard-codes
-a path — a hook naming a worktree breaks every commit and push in the
-repository the moment that worktree is deleted.
-
-Every merge carries its own version, plain `0.x.x` semver, and the git tag
-is the version: nothing in the tree records it. `scripts/version.py` counts
-any commit's number from the last tag reachable from it, and CI's release
-job pushes that tag once the build has passed, last of all, so a run that
-fails spends no number. Each released image and ISO can be told apart and a
-bug report can say which build it came from. The number reaches os-release,
-the installer's welcome screen, the ISO's file name and the admin app's
-Updates page; a build made anywhere but CI calls itself
-`0.7.0-dev.3+g2049571`, so it is never mistaken for a release.
-
-How far it steps comes from the commit subjects since the last tag: a
-`feat` moves the minor, anything else moves the patch, and a breaking change
-moves the minor too, which is what a zero major version is for. The major
-never moves on its own — 1.0.0 is a decision, made by pushing the tag
-`v1.0.0` by hand. `python3 scripts/version.py show` says what your checkout
-would be called.
 
 The daemons are ordinary Python projects. Most work needs no image at all:
 

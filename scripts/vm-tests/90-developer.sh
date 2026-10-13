@@ -65,18 +65,21 @@ section "An app from nixpkgs, through the Store"
 # the install is queued and reported on D-Bus signals, so wait for the
 # profile to carry it rather than for the call to return.
 check "nixpkgs#gh is on the approved list" 0 grep -q '"nixpkgs#gh"' /etc/kosher/catalog.json
-# The Store's calls are answered for a local, active session only (polkit),
-# so they run inside one (as_session); removal is an administrator's
-# action, so root does it, as the admin app would.
-has_gh() { as_session "$1" python3 -c 'import sys; from kosherd.client import DaemonClient; sys.exit(0 if "nixpkgs#gh" in DaemonClient().list_installed() else 1)' 2>/dev/null; }
-out=$(as_session wlkid python3 - <<'PY' 2>&1
+# The Store's own call is answered only for the person at the keyboard
+# (polkit: a local, active session — one with a seat, which nothing a
+# harness makes has). An administrator installing FOR the account is the
+# path open to root, and the one the admin app takes; the result is the
+# same profile, judged by the same rule.
+has_gh() { test -x "/home/$1/.local/state/nix/profiles/profile/bin/gh"; }
+out=$(python3 - <<'PY' 2>&1
+import pwd
 from kosherd.client import DaemonClient
-DaemonClient().install_app("nixpkgs#gh")
+DaemonClient().install_app_for(pwd.getpwnam("wlkid").pw_uid, "nixpkgs#gh")
 print("QUEUED")
 PY
 )
 case "$out" in
-    *QUEUED*) ok "a filtered account may ask for it" ;;
+    *QUEUED*) ok "an administrator may install it for a filtered account" ;;
     *) bad "the install was refused: $(printf '%s' "$out" | tail -2 | head -c 240)" ;;
 esac
 for _ in $(seq 1 120); do
@@ -86,7 +89,8 @@ done
 check "it is installed for that account" 0 has_gh wlkid
 check_contains "and runs from a login shell" "gh version" as wlkid bash -lc 'gh --version'
 check "but not for another account" 1 has_gh dnskid
-check "the Store's installed list knows who asked" 0 python3 -c 'import sys; from kosherd.client import DaemonClient; d=[x for x in DaemonClient().list_installed_details() if x["ref"]=="nixpkgs#gh"]; sys.exit(0 if d and d[0]["installed_by"]=="wlkid" else 1)'
+check "the Store's installed list knows who it is for" 0 python3 -c 'import sys; from kosherd.client import DaemonClient; d=[x for x in DaemonClient().list_installed_details() if x["ref"]=="nixpkgs#gh"]; sys.exit(0 if d and d[0]["installed_by"]=="wlkid" else 1)'
+check "a no-internet account cannot have it (the daemon refuses)" 1 python3 -c 'import pwd; from kosherd.client import DaemonClient; DaemonClient().install_app_for(pwd.getpwnam("nokid").pw_uid, "nixpkgs#gh"); import time; time.sleep(20); import os, sys; sys.exit(0 if os.path.exists("/home/nokid/.local/state/nix/profiles/profile/bin/gh") else 1)'
 python3 -c 'from kosherd.client import DaemonClient; DaemonClient().remove_app("nixpkgs#gh")' >/dev/null 2>&1
 for _ in $(seq 1 24); do
     has_gh wlkid || break

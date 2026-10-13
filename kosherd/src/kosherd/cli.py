@@ -399,6 +399,16 @@ def cmd_apps(args) -> int:
     from kosherd import appaccess, appkinds
 
     c = _client()
+    if args.action == "install":
+        # For an account: a nixpkgs app lands in that account's own
+        # profile, which is why "for" exists. Queued; the outcome is on
+        # the AppProgress/AppFinished signals, as in the Store.
+        if len(args.values) != 1:
+            print("usage: kosherctl apps install <uid> <app>", file=sys.stderr)
+            return 2
+        c.install_app_for(args.uid, args.values[0])
+        print(f"queued {args.values[0]} for uid {args.uid}")
+        return 0
     if args.action == "kinds":
         for key in appkinds.KIND_KEYS:
             print(f"  {key:<10} {appkinds.label(key)}")
@@ -1143,10 +1153,11 @@ def main(argv: list[str] | None = None) -> int:
 
     s = sub.add_parser("apps", help="what the Store offers a user, and what is blocked")
     s.add_argument("action", choices=["show", "access", "block-kind", "unblock-kind",
-                                      "block", "unblock", "kinds"])
+                                      "block", "unblock", "kinds", "install"])
     s.add_argument("uid", type=int, nargs="?", default=0)
     s.add_argument("values", nargs="*", default=[],
-                   help="approved|store, kinds (see 'kinds'), or app ids")
+                   help="approved|store, kinds (see 'kinds'), app ids, or "
+                        "for 'install' the app to install for that account")
     s.add_argument("--guardian-password")
     s.set_defaults(func=cmd_apps)
 

@@ -37,7 +37,7 @@ from collections import deque
 from pathlib import Path
 from typing import Callable
 
-from . import appaccess
+from . import appaccess, nixapps
 
 try:
     import gi
@@ -561,16 +561,52 @@ def installed_details() -> list[dict]:
             "rating": dict(known.get("rating") or {}),
             "kind": appkinds.kind_of(known) if known else appkinds.OTHER,
         })
+    details += nix_installed_details(catalog, ledger)
     details.sort(key=lambda a: a["name"].lower())
     return details
 
 
-def installed_refs() -> set[str]:
+def nix_installed_details(catalog: dict, ledger: dict) -> list[dict]:
+    """The nixpkgs apps kosherd installed, each in the profile of the
+    account that asked (the ledger says which), still there."""
+    from . import appkinds
+
+    details = []
+    present: dict[int, set[str]] = {}
+    for ref, entry in ledger.items():
+        if not nixapps.is_nix(ref):
+            continue
+        uid = entry.get("uid", -1)
+        if uid not in present:
+            present[uid] = nixapps.installed(uid) if uid >= 0 else set()
+        if ref not in present[uid]:
+            continue
+        known = catalog.get(ref) or {}
+        details.append({
+            "ref": ref,
+            "name": known.get("name") or nixapps.package(ref),
+            "size": 0,
+            "installed_by": entry.get("username", ""),
+            "installed_by_uid": uid,
+            "approved": ref in catalog,
+            "categories": list(known.get("categories") or []),
+            "rating": {},
+            "kind": appkinds.kind_of(known) if known else appkinds.OTHER,
+        })
+    return details
+
+
+def installed_refs(uid: int | None = None) -> set[str]:
+    """What is installed as far as `uid` is concerned: every Flatpak (they
+    are system-wide) and the nixpkgs apps in that account's own profile."""
     installation = Flatpak.Installation.new_system(None)
-    return {
+    refs = {
         r.get_name() for r in installation.list_installed_refs(None)
         if r.get_kind() == Flatpak.RefKind.APP
     }
+    if uid is not None and uid > 0:
+        refs |= nixapps.installed(uid)
+    return refs
 
 
 def installed_ref_string(app_id: str) -> str:
@@ -684,25 +720,48 @@ class AppManager:
         with self._lock:
             return set(self._pending)
 
-    def install(self, ref: str, *, permit: Callable[[str], str | None] | None = None) -> None:
+    def install(self, ref: str, *, permit: Callable[[str], str | None] | None = None,
+                uid: int | None = None) -> None:
         """Queue an install. `permit(ref)` says why it may not happen, or
         None; without one the approved list decides (what a caller with no
-        account behind it — the CLI as root — gets)."""
+        account behind it — the CLI as root — gets). `uid` is the account
+        a nixpkgs app is installed for (nixapps.py); a Flatpak needs none."""
         if permit is None:
             def permit(r: str) -> str | None:
                 return None if r in allowed_refs() else "not on the approved app list"
         refusal = permit(ref)
         if refusal:
             raise AppError(f"{ref} is {refusal}")
-        self._enqueue(ref, self._do_install)
+        if nixapps.is_nix(ref):
+            self._enqueue(ref, self._nix_work(nixapps.install, uid))
+        else:
+            self._enqueue(ref, self._do_install)
 
-    def remove(self, ref: str) -> None:
-        self._enqueue(ref, self._do_remove)
+    def remove(self, ref: str, *, uid: int | None = None) -> None:
+        if nixapps.is_nix(ref):
+            self._enqueue(ref, self._nix_work(nixapps.remove, uid))
+        else:
+            self._enqueue(ref, self._do_remove)
 
-    def update(self, ref: str) -> None:
+    def update(self, ref: str, *, uid: int | None = None) -> None:
         """Bring one installed app up to the remote's build. Queued like an
         install, reported on the same signals."""
-        self._enqueue(ref, self._do_update)
+        if nixapps.is_nix(ref):
+            self._enqueue(ref, self._nix_work(nixapps.upgrade, uid))
+        else:
+            self._enqueue(ref, self._do_update)
+
+    def _nix_work(self, action, uid: int | None):
+        """A queue job for a nixpkgs app: the action, as the account."""
+        if uid is None or uid == 0:
+            raise AppError("a nixpkgs app is installed for an account, not for the computer")
+
+        def work(ref: str) -> None:
+            try:
+                action(ref, uid, self._on_progress)
+            except nixapps.NixAppError as e:
+                raise AppError(str(e)) from e
+        return work
 
     def _enqueue(self, ref: str, work) -> None:
         with self._lock:

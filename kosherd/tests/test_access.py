@@ -42,7 +42,7 @@ READS = ["GetPolicy", "Status", "IsEnabled", "ListCatalog", "ListInstalled",
          "ListInstalledDetails", "SearchApps", "CheckUpdate", "Lock",
          "VerifyGuardian", "PortalStatus", "SyncNow", "GetMyLayout", "GetTimeUsage"]
 CHANGES = ["SetFilterMode", "SetWhitelist", "SetUrlRules", "CreateUser",
-           "AdoptUser", "RemoveUser", "RemoveApp", "ApproveApp",
+           "AdoptUser", "RemoveUser", "RemoveApp", "InstallAppFor", "ApproveApp",
            "UnapproveApp", "SetUserApps", "SetUserCanInstall", "SetUserAppAccess",
            "SetUserBlockedAppKinds", "SetUserBlockedApps", "ApplyUpdate",
            "SetCaptiveMode", "SetGuardianPassword", "DisableGuardian",
@@ -77,6 +77,16 @@ def test_store_actions_are_open_to_ordinary_users():
     # What the store shows depends on who is asking, so the daemon must be
     # told the caller's uid.
     assert "ListStoreApps" in access.UID_AWARE
+
+
+def test_installing_for_an_account_is_an_admins_action():
+    # The Store's own action is answered only for the person at the
+    # keyboard (a local, active session). Installing FOR an account is
+    # how an administrator puts a tool on a child's account, and how a
+    # shell or a test does it at all — an admin action, logged as one.
+    assert ACTIONS["InstallAppFor"] == access.ACTION_INSTALL_APPS
+    assert "InstallAppFor" in access.CHANGES
+    assert "InstallAppFor" not in access.UID_AWARE  # the account is named
 
 
 def test_reading_your_own_layout_is_open_to_ordinary_users():

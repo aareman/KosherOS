@@ -260,6 +260,10 @@ INTROSPECTION_XML = """
     <method name="InstallApp">
       <arg direction="in" type="s" name="ref"/>
     </method>
+    <method name="InstallAppFor">
+      <arg direction="in" type="i" name="uid"/>
+      <arg direction="in" type="s" name="ref"/>
+    </method>
     <method name="RemoveApp">
       <arg direction="in" type="s" name="ref"/>
     </method>
@@ -1948,8 +1952,10 @@ class Daemon:
     def impl_ListCatalog(self):
         return GLib.Variant("(s)", (json.dumps(apps.load_catalog()),))
 
-    def impl_ListInstalled(self):
-        return GLib.Variant("(as)", (sorted(apps.installed_refs()),))
+    def impl_ListInstalled(self, *, _uid: int):
+        # For the uid on the connection: a nixpkgs app lives in one
+        # account's profile and is installed for nobody else.
+        return GLib.Variant("(as)", (sorted(apps.installed_refs(_uid)),))
 
     def impl_ListInstalledDetails(self):
         return GLib.Variant("(s)", (json.dumps(apps.installed_details()),))
@@ -2004,11 +2010,29 @@ class Daemon:
         return None
 
     def impl_InstallApp(self, ref: str, *, _uid: int):
-        import pwd
-
         account = self._account_for(_uid)
         if _uid != 0 and not account.can_install_apps:
             raise PolicyError("app installation is turned off for this user")
+        self._install_for(account, _uid, ref)
+        return None
+
+    def impl_InstallAppFor(self, uid: int, ref: str):
+        """An administrator installs an app for an account: the same rule
+        as the account asking for itself, judged for that account. What
+        makes it worth having: a nixpkgs app goes into one account's own
+        profile, so there is no other way to put a tool on a child's
+        account from the admin's chair — and no way to do it at all from
+        a shell or a test, since the Store's own action is answered only
+        for the person at the keyboard."""
+        account = self.policy.user(uid)
+        if account is None:
+            raise PolicyError(f"uid {uid} is not managed")
+        self._install_for(account, uid, ref)
+        return None
+
+    def _install_for(self, account, uid: int, ref: str) -> None:
+        import pwd
+
         approved = apps.load_catalog().get("apps", [])
         approved_refs = {a["ref"] for a in approved}
 
@@ -2016,13 +2040,23 @@ class Daemon:
             reason = appaccess.decide(account, self._app_entry(r, approved), approved_refs)
             return None if reason is None else appaccess.REASONS[reason]
 
-        self.app_manager.install(ref, permit=permit)
+        self.app_manager.install(ref, permit=permit, uid=uid)
         try:
-            username = pwd.getpwuid(_uid).pw_name
+            username = pwd.getpwuid(uid).pw_name
         except KeyError:
-            username = str(_uid)
-        apps.record_install(ref, _uid, username)
-        return None
+            username = str(uid)
+        apps.record_install(ref, uid, username)
+
+    def _nix_owner(self, ref: str, _uid: int) -> int:
+        """Whose profile a nixpkgs app is acted on in: the caller's when it
+        is there, else the account the ledger says asked for it (what an
+        administrator removing it from the Installed list gets)."""
+        if _uid > 0 and ref in apps.nixapps.installed(_uid):
+            return _uid
+        owner = apps._load_ledger().get(ref, {}).get("uid", -1)
+        if owner is None or owner < 0:
+            raise PolicyError(f"{ref} is not installed for any account")
+        return owner
 
     def impl_ListAppUpdates(self):
         try:
@@ -2046,11 +2080,14 @@ class Daemon:
             found = []
         return GLib.Variant("(s)", (json.dumps(found),))
 
-    def impl_UpdateApp(self, ref: str):
+    def impl_UpdateApp(self, ref: str, *, _uid: int):
         """Update one installed app. Not gated on can_install_apps: an
         update widens nothing, and a newer build of an approved app is the
         safer one to be running."""
-        self.app_manager.update(ref)
+        if apps.nixapps.is_nix(ref):
+            self.app_manager.update(ref, uid=self._nix_owner(ref, _uid))
+        else:
+            self.app_manager.update(ref)
         return None
 
     def impl_UpdateAllApps(self):
@@ -2066,8 +2103,11 @@ class Daemon:
                 log.warning("could not queue %s: %s", entry["ref"], e)
         return GLib.Variant("(i)", (queued,))
 
-    def impl_RemoveApp(self, ref: str):
-        self.app_manager.remove(ref)
+    def impl_RemoveApp(self, ref: str, *, _uid: int):
+        if apps.nixapps.is_nix(ref):
+            self.app_manager.remove(ref, uid=self._nix_owner(ref, _uid))
+        else:
+            self.app_manager.remove(ref)
         apps.forget_install(ref)
         return None
 

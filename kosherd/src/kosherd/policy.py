@@ -202,6 +202,26 @@ DEVELOPER_REGISTRIES = (
     "codeload.github.com",        # where github.com sends an archive download
     "devenv.cachix.org",
     "search.devbox.sh",
+    # Where the AI tools and editors the Store carries from nixpkgs are
+    # published (the unfree ones are not on the binary cache, so a build
+    # fetches the release itself): Claude Code, Cursor, Antigravity. The
+    # rest are GitHub releases, already above.
+    "downloads.claude.ai",
+    "downloads.cursor.com",
+    "edgedl.me.gvt1.com",         # Google's download host (Antigravity)
+    # Container image registries, for rootless podman: Docker Hub (not
+    # hub.docker.com, which is a site), Quay, Microsoft's (every
+    # devcontainer image), Red Hat's; Fedora's and GitHub's are above.
+    "docker.io",
+    "registry-1.docker.io",
+    "auth.docker.io",
+    "index.docker.io",
+    "production.cloudflare.docker.com",
+    "quay.io",
+    "*.quay.io",
+    "mcr.microsoft.com",
+    "*.data.mcr.microsoft.com",
+    "registry.access.redhat.com",
 )
 
 

@@ -59,6 +59,74 @@ case "$out" in
     *) bad "nix run failed: $(printf '%s' "$out" | tail -3 | head -c 300)" ;;
 esac
 
+section "An app from nixpkgs, through the Store"
+# The GitHub CLI is on the shipped approved list as nixpkgs#gh. The Store
+# asks kosherd, which installs it into the asking account's own profile;
+# the install is queued and reported on D-Bus signals, so wait for the
+# profile to carry it rather than for the call to return.
+check "nixpkgs#gh is on the approved list" 0 grep -q '"nixpkgs#gh"' /etc/kosher/catalog.json
+# The Store's own call is answered only for the person at the keyboard
+# (polkit: a local, active session — one with a seat, which nothing a
+# harness makes has). An administrator installing FOR the account is the
+# path open to root, and the one the admin app takes; the result is the
+# same profile, judged by the same rule.
+has_gh() { test -x "/home/$1/.local/state/nix/profiles/profile/bin/gh"; }
+out=$(python3 - <<'PY' 2>&1
+import pwd
+from kosherd.client import DaemonClient
+DaemonClient().install_app_for(pwd.getpwnam("wlkid").pw_uid, "nixpkgs#gh")
+print("QUEUED")
+PY
+)
+case "$out" in
+    *QUEUED*) ok "an administrator may install it for a filtered account" ;;
+    *) bad "the install was refused: $(printf '%s' "$out" | tail -2 | head -c 240)" ;;
+esac
+for _ in $(seq 1 120); do
+    has_gh wlkid && break
+    sleep 5
+done
+check "it is installed for that account" 0 has_gh wlkid
+check_contains "and runs from a login shell" "gh version" as wlkid bash -lc 'gh --version'
+check "but not for another account" 1 has_gh dnskid
+check "the Store's installed list knows who it is for" 0 python3 -c 'import sys; from kosherd.client import DaemonClient; d=[x for x in DaemonClient().list_installed_details() if x["ref"]=="nixpkgs#gh"]; sys.exit(0 if d and d[0]["installed_by"]=="wlkid" else 1)'
+check "a no-internet account cannot have it (the daemon refuses)" 1 python3 -c 'import pwd; from kosherd.client import DaemonClient; DaemonClient().install_app_for(pwd.getpwnam("nokid").pw_uid, "nixpkgs#gh"); import time; time.sleep(20); import os, sys; sys.exit(0 if os.path.exists("/home/nokid/.local/state/nix/profiles/profile/bin/gh") else 1)'
+python3 -c 'from kosherd.client import DaemonClient; DaemonClient().remove_app("nixpkgs#gh")' >/dev/null 2>&1
+for _ in $(seq 1 24); do
+    has_gh wlkid || break
+    sleep 5
+done
+check "and can be removed again" 1 as wlkid bash -lc 'command -v gh'
+
+section "Containers are the account's"
+check "docker is podman's shim" 0 test -x /usr/bin/docker
+check_contains "and says so" "podman" docker --version
+check "podman-compose is in the image" 0 test -x /usr/bin/podman-compose
+# podman wants the account's own runtime directory (/run/user/<uid>),
+# which a signed-in account has and runuser does not give: it kept root's
+# and the first run failed on "mkdir /run/user/0/libpod: permission
+# denied". A session (as_session) is what provides it.
+pod() { as_session "$@"; }
+check_contains "the whitelist account has subordinate ids" "wlkid" cat /etc/subuid
+check_contains "and the firewall maps its block to its chain" "$(awk -F: '/^wlkid:/{print $2"-"($2+$3-1)}' /etc/subuid)" nft list chain inet kosher output
+# A small image with curl: Fedora's own registry is a system domain.
+img=registry.fedoraproject.org/fedora-minimal:44
+if pod wlkid timeout 600 podman pull -q "$img" >/dev/null 2>&1; then
+    ok "a whitelist account pulls from a registry"
+    check "a container on a whitelist account reaches a registry" 0 \
+        pod wlkid podman run --rm "$img" curl -sS --max-time 20 -o /dev/null https://registry.npmjs.org/
+    check "but not a site off the list" 1 \
+        pod wlkid podman run --rm "$img" curl -sS --max-time 20 -o /dev/null https://example.com/
+    check "inside the container the system bundle is in place" 0 \
+        pod wlkid podman run --rm "$img" grep -q BEGIN /etc/ssl/certs/ca-certificates.crt
+    check_contains "and the tools inside are pointed at it" "ca-certificates.crt" \
+        pod wlkid podman run --rm "$img" printenv SSL_CERT_FILE
+    pod wlkid podman rmi -f "$img" >/dev/null 2>&1
+else
+    bad "a whitelist account could not pull $img"
+fi
+check "a no-internet account cannot pull" 1 pod nokid timeout 120 podman pull -q "$img"
+
 section "What a build may fetch"
 # A fixed-output build runs as a nixbld user with the network. The wrong
 # hash is deliberate: "hash mismatch" means the fetch SUCCEEDED (the

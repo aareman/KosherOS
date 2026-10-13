@@ -47,6 +47,56 @@ The environment points at the system bundle
 authority once inspection is set up and is Fedora's ordinary bundle
 otherwise, so it is harmless on an account that is not inspected.
 
+**AI tools and editors.** Claude Code, Codex, OpenCode, Gemini CLI,
+Copilot (the command line and the desktop app), Aider, the GitHub CLI,
+Cursor, Antigravity and Neovim are on the Store's Developer tools shelf.
+Most of them have no Flatpak, so they come from upstream nixpkgs instead
+of Flathub: an entry whose ref is `nixpkgs#<package>` is installed by
+kosherd into the asking account's own Nix profile, as that account, under
+the same approval rule as any other app. Nobody else's account sees it,
+and an account on "No internet" cannot install one, because the Nix
+daemon refuses it. The licence an unfree tool (Claude Code, Cursor,
+Copilot) comes with is the publisher's and the person installing agrees
+to it, as with a non-free app on Flathub. Claude's and Codex's desktop
+apps are not here: neither publishes a Linux build.
+
+**Languages and toolchains.** Nothing is baked into the image beyond the
+Python the system itself runs on (with pip). Node.js with npm, pnpm,
+Yarn and Bun; the newest Python, uv, Poetry and Pipenv; Rust through
+rustup; Go; PHP and Composer; Ruby with gem and bundler; and Zig are on
+the Store's Developer tools shelf, each from nixpkgs into the account's
+own profile. A project that wants its own versions pins them in a
+`devenv.nix` or a `devbox.json` and gets exactly those, on this machine
+and the next; both tools are on every KosherOS machine. The registries
+every toolchain fetches from are reachable from every account (the
+table above), and the filter's certificate is trusted by each.
+
+**Containers.** Podman is the container engine, rootless, and `docker` is
+Podman's own shim, so a script or an extension that looks for `docker`
+finds it; `podman-compose` reads compose files. A rootless container's
+network is a process owned by the account, so what the container sends
+is filtered exactly as the account is: a container on a whitelist
+account reaches the approved sites and the registries and nothing else,
+and a "No internet" account's containers have none. Every account has a
+block of subordinate ids, so images carrying files of many owners unpack,
+and the firewall maps that block to the account's own rules, so a
+container running as another id (`--network=host`) is still filtered as
+its owner. Inside every container the system bundle is put over the
+bundle paths Debian, Alpine and Fedora images read, and the tools that
+carry their own bundle are pointed at it, so HTTPS from a container works
+on a filtered account as it does outside one. There is no Docker daemon:
+its bridge leaves through the kernel with no owner to filter by.
+
+**Dev Containers.** They work with Podman: the Dev Containers CLI is in
+the Store, and so is Visual Studio Code from nixpkgs beside the Flatpak
+one, because the Flatpak cannot reach the host's Podman from inside its
+sandbox (Cursor from the Store is in the same position as the nixpkgs
+VS Code). In the editor, point the extension at Podman
+(`dev.containers.dockerPath`: `podman`) and give the project
+`"runArgs": ["--userns=keep-id"]` so files in the workspace keep your
+ownership. Devcontainer images come from Microsoft's registry, which is
+reachable from every account like the other registries.
+
 **Nix.** Every KosherOS machine has Nix, with flakes on, the way Fedora
 packages it. The store is on `/var` (the rest of the system is read-only).
 Builds run in the sandbox as the build users, and a build that fetches its

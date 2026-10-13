@@ -26,11 +26,49 @@ def test_every_entry_has_what_the_store_draws():
         assert app.get("categories"), f"{app['ref']} has no categories to shelve it by"
 
 
-def test_refs_look_like_flatpak_app_ids_and_are_unique():
+def test_refs_look_like_flatpak_app_ids_or_nixpkgs_packages_and_are_unique():
     refs = [a["ref"] for a in APPS]
     assert len(refs) == len(set(refs))
     for ref in refs:
-        assert re.fullmatch(r"[A-Za-z][\w-]*(\.[A-Za-z0-9][\w-]*){2,}", ref), ref
+        assert (re.fullmatch(r"[A-Za-z][\w-]*(\.[A-Za-z0-9][\w-]*){2,}", ref)
+                or re.fullmatch(r"nixpkgs#[A-Za-z0-9][A-Za-z0-9_.-]*", ref)), ref
+
+
+def test_the_ai_tools_and_editors_come_from_nixpkgs():
+    # Issue #34: most have no Flatpak. The shelf a developer finds.
+    nix = {a["ref"] for a in APPS if a["ref"].startswith("nixpkgs#")}
+    for package in ("claude-code", "codex", "opencode", "gemini-cli", "github-copilot-cli",
+                    "github-copilot-app", "aider-chat", "gh", "code-cursor", "cursor-cli",
+                    "antigravity", "antigravity-cli", "neovim"):
+        assert f"nixpkgs#{package}" in nix, package
+    # ...and every one of them sits on the Developer tools shelf, not on
+    # Learning (ArtificialIntelligence is a Learning category).
+    for app in APPS:
+        if app["ref"] in nix and "TerminalEmulator" not in app["categories"]:
+            assert appkinds.kind_of(app) == "develop", app["ref"]
+
+
+def test_the_terminals_come_from_nixpkgs_and_sit_with_console():
+    # A terminal in a Flatpak sandbox cannot see the host's PATH, the Nix
+    # profile or podman, which is the whole point of a developer's
+    # terminal; these come from nixpkgs and shelve with Console.
+    terminals = {a["ref"]: a for a in APPS if "TerminalEmulator" in a.get("categories", [])}
+    for package in ("kitty", "ghostty", "foot", "alacritty", "cool-retro-term"):
+        assert f"nixpkgs#{package}" in terminals, package
+        assert appkinds.kind_of(terminals[f"nixpkgs#{package}"]) == appkinds.kind_of(terminals["org.gnome.Console"])
+
+
+def test_the_languages_from_the_issue_are_there_and_not_baked_into_the_image():
+    # Issue #34: node (npm, bun, pnpm, yarn), python (uv, pip, pipenv,
+    # poetry), rust, go, php, ruby, zig. From nixpkgs into the account's
+    # profile, not into the image: pip comes with the system Python.
+    nix = {a["ref"] for a in APPS if a["ref"].startswith("nixpkgs#")}
+    for package in ("nodejs", "bun", "pnpm", "yarn", "python3", "uv", "pipenv", "poetry",
+                    "rustup", "go", "php", "phpPackages.composer", "ruby", "zig"):
+        assert f"nixpkgs#{package}" in nix, package
+    containerfile = (ROOT / "os-image/Containerfile").read_text()
+    for rpm in ("nodejs", "golang", "rust", "cargo", "php", "ruby", "zig"):
+        assert not re.search(rf"dnf -y install[^\n]*\b{rpm}\b", containerfile), rpm
 
 
 def test_nothing_falls_off_the_shelves():

@@ -65,6 +65,27 @@ def test_every_version_that_passes_gets_a_release():
     assert "needs.image.result != 'failure'" not in condition
 
 
+def test_what_changed_is_counted_from_the_last_version_tag():
+    """A merge whose run failed got no tag and no build; its image changes
+    are still waiting for the next run. Diffing only the push once built
+    nothing for a shellcheck fix while the developer-tooling stack and a
+    new wallpaper, merged just before with failing runs, sat unbuilt, and
+    that release said "no new image" (#103)."""
+    ci = (ROOT / ".github/workflows/ci.yml").read_text()
+    assert "git describe --tags --abbrev=0 --match 'v*'" in ci
+    assert 'git diff --name-only "$since" "$GITHUB_SHA"' in ci
+    assert 'git diff --name-only "$BASE" "$GITHUB_SHA"' not in ci
+
+
+def test_the_image_push_is_retried():
+    # One 502 from the registry, mid-layer, cost a release its image (#103).
+    ci = (ROOT / ".github/workflows/ci.yml").read_text()
+    assert 'retry podman push "$IMAGE:${SHA::12}"' in ci
+    assert 'retry podman push "$IMAGE:edge"' in ci
+    assert 'retry cosign sign --yes "$IMAGE:edge"' in ci
+    assert ci.count("for n in 1 2 3 4 5; do") == 2
+
+
 def test_the_release_says_when_there_is_no_new_image():
     # The wording lives in scripts/release-notes.py now; the workflow only
     # tells it which case this is (see test_release_notes.py).

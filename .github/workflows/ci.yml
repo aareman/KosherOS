@@ -134,7 +134,15 @@ jobs:
             echo "not an ordinary push: building"
             exit 0
           fi
-          changed="$(git diff --name-only "$BASE" "$GITHUB_SHA")"
+          # From the last version tag, not from the previous push: a merge
+          # whose run failed got no tag and no build, and its image
+          # changes are still waiting. Diffing only this push once built
+          # nothing for a shellcheck fix while the developer-tooling stack
+          # and a new wallpaper, merged just before it with failing runs,
+          # sat unbuilt — and that release said "no new image" (#103).
+          since="$(git describe --tags --abbrev=0 --match 'v*' "$GITHUB_SHA~1" 2>/dev/null || echo "$BASE")"
+          echo "changes since $since"
+          changed="$(git diff --name-only "$since" "$GITHUB_SHA")"
           echo "$changed"
           if echo "$changed" | grep -E -q \
                '^(os-image/|kosherd/src/|kosherd/pyproject|admin-app/src/|store-app/src/|setup-app/src/|myfilter-app/src/|search-app/kosher_search/|mitm/|branding/|policy/|scripts/fetch-categories\.py|scripts/curated-sites\.json|scripts/check-searxng-settings\.py|scripts/version\.py)'; then
@@ -181,19 +189,43 @@ jobs:
             -t "$IMAGE:${SHA::12}" -t "$IMAGE:edge" -f os-image/Containerfile .
 
       - name: Push
+        # Retried: the registry answered a 502 once, in the middle of a
+        # layer, and that one answer cost a release its image — the
+        # version was spent and :edge stayed a build behind until the next
+        # image-building merge (#103). A transient error gets five tries
+        # over a few minutes before the job fails.
         run: |
+          retry() {
+            local n
+            for n in 1 2 3 4 5; do
+              "$@" && return 0
+              echo "attempt $n of 5 failed: $*; waiting $((n * 30))s"
+              sleep $((n * 30))
+            done
+            return 1
+          }
           podman login ghcr.io -u "$GITHUB_ACTOR" -p "${{ secrets.GITHUB_TOKEN }}"
-          podman push "$IMAGE:${SHA::12}"
-          podman push "$IMAGE:edge"
+          retry podman push "$IMAGE:${SHA::12}"
+          retry podman push "$IMAGE:edge"
 
       - name: Sign (cosign keyless)
         uses: sigstore/cosign-installer@v3
       - run: |
           # cosign reads Docker's credential store, not podman's auth.json,
-          # so it needs its own login to push signatures to ghcr.
+          # so it needs its own login to push signatures to ghcr. Retried
+          # like the push: a signature is pushed to the same registry.
+          retry() {
+            local n
+            for n in 1 2 3 4 5; do
+              "$@" && return 0
+              echo "attempt $n of 5 failed: $*; waiting $((n * 30))s"
+              sleep $((n * 30))
+            done
+            return 1
+          }
           cosign login ghcr.io -u "$GITHUB_ACTOR" -p "${{ secrets.GITHUB_TOKEN }}"
-          cosign sign --yes "$IMAGE:${SHA::12}"
-          cosign sign --yes "$IMAGE:edge"
+          retry cosign sign --yes "$IMAGE:${SHA::12}"
+          retry cosign sign --yes "$IMAGE:edge"
 
   release:
     name: Release this version

@@ -260,6 +260,10 @@ INTROSPECTION_XML = """
     <method name="InstallApp">
       <arg direction="in" type="s" name="ref"/>
     </method>
+    <method name="InstallAppFor">
+      <arg direction="in" type="i" name="uid"/>
+      <arg direction="in" type="s" name="ref"/>
+    </method>
     <method name="RemoveApp">
       <arg direction="in" type="s" name="ref"/>
     </method>
@@ -2006,11 +2010,29 @@ class Daemon:
         return None
 
     def impl_InstallApp(self, ref: str, *, _uid: int):
-        import pwd
-
         account = self._account_for(_uid)
         if _uid != 0 and not account.can_install_apps:
             raise PolicyError("app installation is turned off for this user")
+        self._install_for(account, _uid, ref)
+        return None
+
+    def impl_InstallAppFor(self, uid: int, ref: str):
+        """An administrator installs an app for an account: the same rule
+        as the account asking for itself, judged for that account. What
+        makes it worth having: a nixpkgs app goes into one account's own
+        profile, so there is no other way to put a tool on a child's
+        account from the admin's chair — and no way to do it at all from
+        a shell or a test, since the Store's own action is answered only
+        for the person at the keyboard."""
+        account = self.policy.user(uid)
+        if account is None:
+            raise PolicyError(f"uid {uid} is not managed")
+        self._install_for(account, uid, ref)
+        return None
+
+    def _install_for(self, account, uid: int, ref: str) -> None:
+        import pwd
+
         approved = apps.load_catalog().get("apps", [])
         approved_refs = {a["ref"] for a in approved}
 
@@ -2018,13 +2040,12 @@ class Daemon:
             reason = appaccess.decide(account, self._app_entry(r, approved), approved_refs)
             return None if reason is None else appaccess.REASONS[reason]
 
-        self.app_manager.install(ref, permit=permit, uid=_uid)
+        self.app_manager.install(ref, permit=permit, uid=uid)
         try:
-            username = pwd.getpwuid(_uid).pw_name
+            username = pwd.getpwuid(uid).pw_name
         except KeyError:
-            username = str(_uid)
-        apps.record_install(ref, _uid, username)
-        return None
+            username = str(uid)
+        apps.record_install(ref, uid, username)
 
     def _nix_owner(self, ref: str, _uid: int) -> int:
         """Whose profile a nixpkgs app is acted on in: the caller's when it

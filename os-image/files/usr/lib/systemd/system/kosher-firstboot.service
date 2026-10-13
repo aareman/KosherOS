@@ -66,7 +66,14 @@ TTYVTDisallocate=yes
 # Give the console back. Conflicts= stops the getty and nothing restarts
 # it on its own, which would leave a serial or headless machine with no
 # way to log in after setup finished.
-ExecStopPost=-/usr/bin/systemctl --no-block start getty.target
+# ...the SERIAL consoles, that is, the ones a headless or test machine
+# logs in on. Not getty.target: that pulls in the getty on tty1, which
+# the login screen conflicts with, and once this unit stopped staying
+# active after the wizard (a daemon restart used to take it down, and
+# the login screen with it) the hook ran the moment the wizard finished,
+# started that getty, and GDM lost the console — a fresh machine ended
+# its first boot at a black text login.
+ExecStopPost=-/bin/sh -c 'for c in ttyS0 hvc0; do [ -e "/dev/$c" ] && systemctl --no-block start "serial-getty@$c.service"; done; true'
 
 [Install]
 WantedBy=graphical.target

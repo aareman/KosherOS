@@ -37,5 +37,12 @@ def test_the_wizard_still_runs_before_the_login_screen_and_only_once():
     before = " ".join(v for k, v in _directives("Unit") if k == "Before")
     assert "gdm.service" in before
     assert unit["ConditionPathExists"] == "!/var/lib/kosher/setup-complete"
-    # The console is still handed back after the wizard, on its exit.
-    assert any(k == "ExecStopPost" and "getty.target" in v for k, v in _directives("Service"))
+    # The serial consoles are handed back after the wizard, on its exit —
+    # and only those. getty.target pulls in the getty on tty1, which the
+    # login screen conflicts with: a fresh machine ended its first boot at
+    # a black text login once this hook ran at the wizard's exit.
+    hooks = [v for k, v in _directives("Service") if k == "ExecStopPost"]
+    assert len(hooks) == 1
+    assert "getty.target" not in hooks[0] and "getty@tty1" not in hooks[0]
+    assert "serial-getty@$c.service" in hooks[0] and "ttyS0" in hooks[0] and "hvc0" in hooks[0]
+    assert '[ -e "/dev/$c" ]' in hooks[0], "only a console that exists; a missing one would fail its unit"

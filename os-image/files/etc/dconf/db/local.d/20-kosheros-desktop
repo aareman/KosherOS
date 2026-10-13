@@ -10,7 +10,7 @@
 # in kosherd/layout.py and must not be locked here.
 
 [org/gnome/shell]
-enabled-extensions=['dash-to-panel@jderose9.github.com', 'arcmenu@arcmenu.com', 'appindicatorsupport@rgcjonas.gmail.com']
+enabled-extensions=['dash-to-panel@jderose9.github.com', 'arcmenu@arcmenu.com', 'appindicatorsupport@rgcjonas.gmail.com', 'blur-my-shell@aunetx', 'user-theme@gnome-shell-extensions.gcampax.github.com']
 # Extensions come with the image. Shell code fetched from the internet is
 # not something a family computer needs, and a broken one takes the whole
 # desktop down with it. Locked: the same answer for every account.
@@ -29,6 +29,38 @@ show-apps-icon-side-padding=10
 # way the Windows taskbar does; previews on hover so a group is legible.
 group-apps=true
 show-window-previews=true
+# A compact floating taskbar, with a solid enough tint to remain legible
+# without blur. The shell theme provides its 16px outer corners.
+panel-size=48
+panel-top-bottom-margins=6
+panel-side-margins=10
+panel-side-padding=6
+appicon-margin=4
+appicon-padding=6
+global-border-radius=10
+highlight-appicon-hover-border-radius=10
+tray-padding=6
+status-icon-padding=6
+trans-use-custom-bg=true
+trans-bg-color='#0b1a33'
+trans-use-custom-opacity=true
+trans-panel-opacity=0.88
+trans-use-dynamic-opacity=false
+trans-use-border=true
+trans-border-width=1
+trans-border-use-custom-color=true
+trans-border-custom-color='rgba(210,225,245,0.16)'
+dot-style-focused='DASHES'
+dot-style-unfocused='DOTS'
+dot-color-override=true
+dot-color-1='#8bb8ff'
+dot-color-2='#8bb8ff'
+dot-color-3='#8bb8ff'
+dot-color-4='#8bb8ff'
+focus-highlight-color='#8bb8ff'
+focus-highlight-opacity=18
+highlight-appicon-hover-background-color='rgba(210,225,245,0.12)'
+highlight-appicon-pressed-background-color='rgba(210,225,245,0.20)'
 
 [org/gnome/shell/extensions/arcmenu]
 # The start menu. A picture alone does not say "this is where the apps
@@ -43,7 +75,7 @@ menu-button-text='Apps'
 # rather than "your apps". The pill is cream so the blue and the word stand on it.
 menu-button-icon='/usr/share/pixmaps/kosheros-home.png'
 menu-button-icon-size=24
-menu-button-padding=8
+menu-button-padding=6
 menu-button-bg-color=(true, 'rgba(250,247,240,0.96)')
 menu-button-hover-bg-color=(true, 'rgba(255,255,255,1.0)')
 menu-button-fg-color=(true, 'rgb(29,78,216)')

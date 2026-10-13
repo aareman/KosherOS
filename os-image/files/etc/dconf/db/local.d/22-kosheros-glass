@@ -1,0 +1,37 @@
+# Aura Glass shell surfaces, adapted to KosherOS. Preferences, not locks.
+[org/gnome/shell/extensions/user-theme]
+name='KosherOS-Aura'
+
+[org/gnome/shell/extensions/blur-my-shell]
+# Static wallpaper blur avoids continuous repaints on laptops and VMs.
+hacks-level=1
+settings-version=2
+# Keep the built-in pipelines and add rounded clipping for the floating bar.
+pipelines={'pipeline_default': {'name': <'Default'>, 'effects': <[<{'type': <'native_static_gaussian_blur'>, 'id': <'pipeline_default_blur'>, 'params': <{'unscaled_radius': <20.0>, 'brightness': <0.80000000000000004>}>}>]>}, 'pipeline_default_rounded': {'name': <'Default rounded'>, 'effects': <[<{'type': <'native_static_gaussian_blur'>, 'id': <'pipeline_default_rounded_blur'>, 'params': <{'unscaled_radius': <20.0>, 'brightness': <0.80000000000000004>}>}>, <{'type': <'corner'>, 'id': <'pipeline_default_rounded_corner'>, 'params': <{'radius': <24>}>}>]>}, 'kosher_panel': {'name': <'KosherOS taskbar'>, 'effects': <[<{'type': <'native_static_gaussian_blur'>, 'id': <'kosher_panel_blur'>, 'params': <{'unscaled_radius': <20.0>, 'brightness': <0.80000000000000004>}>}>, <{'type': <'corner'>, 'id': <'kosher_panel_corner'>, 'params': <{'radius': <16>}>}>]>}}
+
+[org/gnome/shell/extensions/blur-my-shell/panel]
+blur=true
+static-blur=true
+override-background=false
+corner-radius=16
+pipeline='kosher_panel'
+
+[org/gnome/shell/extensions/blur-my-shell/dash-to-panel]
+blur-original-panel=false
+
+[org/gnome/shell/extensions/blur-my-shell/popup]
+blur=true
+static-blur=true
+override-background=false
+notification=false
+menu-corner-radius=26
+quick-settings-corner-radius=33
+notification-corner-radius=20
+dialog-corner-radius=20
+osd-corner-radius=12
+
+[org/gnome/shell/extensions/blur-my-shell/applications]
+blur=false
+
+[org/gnome/shell/extensions/blur-my-shell/lockscreen]
+blur=false

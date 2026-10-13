@@ -354,6 +354,24 @@ def test_the_noctalia_seed_parses_and_turns_the_polkit_agent_on():
     assert doc["shell"]["telemetry_enabled"] is False
     assert doc["wallpaper"]["directory"] == "/usr/share/backgrounds/kosheros"
     assert layout_mod.NOCTALIA_SEED == Path("/usr/share/kosher/desktop/noctalia.toml")
+
+
+def test_the_advanced_desktop_wears_the_kosheros_colours():
+    # Issue #95: a light theme built on the wallpaper, the default on the
+    # Noctalia desktop, with the bundled palettes still there to pick.
+    doc = tomllib.loads(NOCTALIA_SEED.read_text())
+    theme = doc["theme"]
+    assert theme["mode"] == "light"
+    assert theme["source"] == "wallpaper"
+    assert theme["wallpaper_scheme"] in ("m3-tonal-spot", "m3-content", "m3-fruit-salad",
+                                         "m3-rainbow", "m3-monochrome", "vibrant",
+                                         "faithful", "soft", "dysfunctional", "muted")
+    assert theme["pure_black_dark"] is False
+    # The palette is generated from the default wallpaper, so one has to
+    # be declared, and it is the file the build writes.
+    assert doc["wallpaper"]["default"]["path"] == "/usr/share/backgrounds/kosheros/kosheros.png"
+    rasters = (ROOT / "branding/rasters.py").read_text()
+    assert "usr/share/backgrounds/kosheros/kosheros.png" in rasters
     assert NOCTALIA_SEED.relative_to(FILES) == Path(str(layout_mod.NOCTALIA_SEED).lstrip("/"))
 
 

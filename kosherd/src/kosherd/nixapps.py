@@ -63,8 +63,8 @@ def profile_dir(uid: int) -> Path:
     return Path(pwd.getpwuid(uid).pw_dir) / ".local/state/nix/profiles/profile"
 
 
-def installed(uid: int) -> set[str]:
-    """The refs in this account's profile, read from nix's own manifest.
+def _profile_entries(uid: int) -> dict[str, str]:
+    """Map installed refs to Nix profile element names for upgrade/removal.
 
     No nix invocation: the manifest is a small JSON file, and this is
     asked on every Store open. Version 3 keys the elements by package
@@ -73,20 +73,26 @@ def installed(uid: int) -> set[str]:
     try:
         doc = json.loads((profile_dir(uid) / "manifest.json").read_text())
     except (KeyError, OSError, ValueError):
-        return set()
+        return {}
     elements = doc.get("elements")
-    found: set[str] = set()
+    found: dict[str, str] = {}
     if isinstance(elements, dict):
         items = elements.items()
     elif isinstance(elements, list):
-        items = ((e.get("attrPath", "").rsplit(".", 1)[-1], e) for e in elements
-                 if isinstance(e, dict))
+        items = ((str(i), e) for i, e in enumerate(elements) if isinstance(e, dict))
     else:
         return found
     for name, element in items:
         if name and isinstance(element, dict) and element.get("active", True):
-            found.add(PREFIX + name)
+            attribute = element.get("attrPath") or name
+            if attribute.startswith(("legacyPackages.", "packages.")):
+                attribute = attribute.split(".", 2)[-1]
+            found[PREFIX + attribute] = name
     return found
+
+
+def installed(uid: int) -> set[str]:
+    return set(_profile_entries(uid))
 
 
 def _argv(uid: int, *nix_args: str) -> list[str]:
@@ -159,6 +165,7 @@ def install(ref: str, uid: int, on_progress) -> None:
 
 def remove(ref: str, uid: int, on_progress) -> None:
     name = package(ref)
+    name = _profile_entries(uid).get(ref, name)
     on_progress(ref, 0, "Removing…")
     _run(ref, _argv(uid, "profile", "remove", name), on_progress)
     _desktop(uid)
@@ -166,6 +173,7 @@ def remove(ref: str, uid: int, on_progress) -> None:
 
 def upgrade(ref: str, uid: int, on_progress) -> None:
     name = package(ref)
+    name = _profile_entries(uid).get(ref, name)
     on_progress(ref, 0, "Updating…")
     _run(ref, _argv(uid, "profile", "upgrade", "--impure", name), on_progress)
     _desktop(uid)

@@ -44,7 +44,8 @@ def test_the_ai_tools_and_editors_come_from_nixpkgs():
     # ...and every one of them sits on the Developer tools shelf, not on
     # Learning (ArtificialIntelligence is a Learning category).
     for app in APPS:
-        if app["ref"] in nix and "TerminalEmulator" not in app["categories"]:
+        if (app["ref"] in nix and "TerminalEmulator" not in app["categories"]
+                and "Font" not in app["categories"]):
             assert appkinds.kind_of(app) == "develop", app["ref"]
 
 
@@ -109,3 +110,13 @@ def test_the_store_and_the_shipped_list_use_one_vocabulary():
     store = (ROOT / "store-app/src/kosherstore/app.py").read_text()
     assert "from kosherd import appkinds" in store or "kosherd.appkinds" in store
     assert 'SHELVES = (' not in store
+
+
+def test_fonts_have_their_own_shelf_and_no_app_launchers():
+    fonts = [a for a in APPS if appkinds.kind_of(a) == "fonts"]
+    refs = {a["ref"] for a in fonts}
+    assert {"nixpkgs#nerd-fonts.jetbrains-mono", "nixpkgs#nerd-fonts.fira-code",
+            "nixpkgs#nerd-fonts.hack", "nixpkgs#noto-fonts", "nixpkgs#inter",
+            "nixpkgs#liberation_ttf", "nixpkgs#noto-fonts-color-emoji"} <= refs
+    assert all("exec" not in font for font in fonts)
+    assert len(refs) == len(fonts)

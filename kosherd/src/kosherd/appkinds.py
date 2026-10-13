@@ -2,9 +2,9 @@
 
 Flathub describes every app with freedesktop menu categories (Network,
 Game, AudioVideo, ...): dozens of them, several per app, and not a
-vocabulary a parent should have to learn. KosherOS folds them into nine
+vocabulary a parent should have to learn. KosherOS folds them into ten
 kinds — Internet, Work, Learning, Games, Music, Pictures & video,
-Developer tools, Utilities and Everything else — which are the shelves
+Developer tools, Fonts, Utilities and Everything else — which are the shelves
 the Store shows and the switches an administrator blocks with. One
 vocabulary in one place, so an app blocked as a game in the admin app is
 exactly an app the Store would have put on the Games shelf.
@@ -57,6 +57,7 @@ KINDS = (
         "FileTools", "TerminalEmulator", "Security", "Compression",
         "Calculator", "Clock", "Monitor", "FileManager", "PackageManager",
         "TextTools", "Filesystem", "DesktopSettings", "HardwareSettings")),
+    ("fonts", "Fonts", ("Font",)),
 )
 
 # Categories that say only "it plays or records something" — a music app
@@ -76,6 +77,7 @@ KIND_TINTS = {
     "internet": "#3584e4", "work": "#9141ac", "learning": "#1c71d8",
     "pictures": "#c64600", "music": "#e5a50a", "games": "#2ec27e",
     "develop": "#613583", "utilities": "#5e5c64", OTHER: "#5e5c64",
+    "fonts": "#986a44",
 }
 KIND_ICONS = {
     "internet": ("web-browser", "applications-internet"),
@@ -86,6 +88,7 @@ KIND_ICONS = {
     "games": ("applications-games", "input-gaming"),
     "develop": ("applications-engineering", "text-x-script"),
     "utilities": ("applications-utilities", "applications-system"),
+    "fonts": ("preferences-desktop-font", "font-x-generic"),
     OTHER: ("application-x-executable",),
 }
 

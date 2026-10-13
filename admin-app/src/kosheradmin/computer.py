@@ -345,7 +345,7 @@ class UpdatesPage(_Page):
                                         "checks on its own in the background.")
         check = Gtk.Button(label="Check", valign=Gtk.Align.CENTER)
         check.connect("clicked", self._check)
-        apply_btn = Gtk.Button(label="Update Now", valign=Gtk.Align.CENTER)
+        apply_btn = Gtk.Button(label="Download Update", valign=Gtk.Align.CENTER)
         apply_btn.add_css_class("suggested-action")
         apply_btn.connect("clicked", self._apply)
         # Shown once an update is staged — by this page or by the timer —
@@ -551,6 +551,9 @@ class UpdatesPage(_Page):
             sentence, short = check_words(info, self._running_version())
             self.win.update_state = short
             self.status_row.set_subtitle(sentence)
+            if info.get("available"):
+                self.apply_button.set_visible(True)
+                self.restart_button.set_visible(False)
             self.win.sidebar.refresh() if hasattr(self.win, "sidebar") else None
 
         run_async(self.win.client.check_update, on_done,

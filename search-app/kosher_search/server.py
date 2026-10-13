@@ -111,7 +111,14 @@ h1 { font-size:1.15rem; margin:0 0 .75rem; }
 footer { color:var(--muted); font-size:.8rem; text-align:center; padding:2rem 1rem; }
 """
 
-PAGE = """<!doctype html>
+# In two halves, because a results page is sent in two pieces: the head
+# and the search bar go out the moment the query arrives, and the results
+# follow when the engine has answered and the filter has read what it
+# needed to. The browser draws the first half at once, so the page is
+# there — with the words that were typed in the box — while the rest is
+# still being worked out. Before this the whole page was built first and
+# sent at once, and a search was a blank tab for as long as that took.
+PAGE_HEAD = """<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{title}</title>
@@ -128,10 +135,14 @@ PAGE = """<!doctype html>
   </form>
   <nav>{tabs}</nav>
 </div></header>
-<main><div class="wrap">{body}</div></main>
+<main><div class="wrap">"""
+
+PAGE_TAIL = """</div></main>
 <footer>KosherOS search &middot; results are filtered for this account</footer>
 </body></html>
 """
+
+PAGE = PAGE_HEAD + "{body}" + PAGE_TAIL
 
 OPENSEARCH = """<?xml version="1.0" encoding="UTF-8"?>
 <OpenSearchDescription xmlns="http://a9.com/-/spec/opensearch/1.1/">
@@ -217,16 +228,52 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(raw)
 
-    def _page(self, body: str, *, query: str = "", category: str = "general",
-              title: str = "KosherOS Search", status: int = 200) -> None:
-        tabs = "".join(
+    @staticmethod
+    def _tabs(query: str, category: str) -> str:
+        return "".join(
             f'<a class="{"on" if key == category else ""}" '
             f'href="/search?q={urllib.parse.quote(query)}&amp;category={key}">'
             f"{label}</a>"
             for key, label in TABS) if query else ""
+
+    def _page(self, body: str, *, query: str = "", category: str = "general",
+              title: str = "KosherOS Search", status: int = 200) -> None:
         self._send(PAGE.format(title=esc(title), style=STYLE, query=esc(query),
-                               category=esc(category), tabs=tabs, body=body),
+                               category=esc(category),
+                               tabs=self._tabs(query, category), body=body),
                    status=status)
+
+    def _page_in_two(self, body, *, query: str, category: str,
+                     title: str) -> None:
+        """Send the head now and the body when `body()` has produced it.
+
+        Chunked, so the browser can draw the search bar while the engine
+        and the filter are still at work. The status is fixed at 200 by
+        the time the body is known, which is why the body says in words
+        when something went wrong rather than relying on a code.
+        """
+        self.send_response(200)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Transfer-Encoding", "chunked")
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        self._chunk(PAGE_HEAD.format(title=esc(title), style=STYLE,
+                                     query=esc(query), category=esc(category),
+                                     tabs=self._tabs(query, category)))
+        try:
+            text = body()
+        except Exception:  # noqa: BLE001 - the page is half sent; finish it
+            log.exception("could not build the results")
+            text = ('<div class="note"><strong>Something went wrong.</strong>'
+                    "<p>Please try again.</p></div>")
+        self._chunk(text + PAGE_TAIL)
+        self.wfile.write(b"0\r\n\r\n")
+        self.wfile.flush()
+
+    def _chunk(self, text: str) -> None:
+        raw = text.encode("utf-8")
+        self.wfile.write(f"{len(raw):x}\r\n".encode() + raw + b"\r\n")
+        self.wfile.flush()
 
     # -- routes ---------------------------------------------------------------
 
@@ -301,22 +348,20 @@ class Handler(BaseHTTPRequestHandler):
                 "</div>",
                 query=query, category=category, title="Blocked — KosherOS Search")
 
-        try:
-            payload = self.backend.search(query, category, page)
-        except (urllib.error.URLError, OSError, ValueError, TimeoutError):
-            log.warning("the search backend did not answer", exc_info=True)
-            return self._page(
-                '<div class="note"><strong>Search is unavailable.</strong>'
-                "<p>The search service on this computer is not answering. "
-                "It may still be starting up.</p></div>",
-                query=query, category=category, status=503)
+        def body() -> str:
+            try:
+                payload = self.backend.search(query, category, page)
+            except (urllib.error.URLError, OSError, ValueError, TimeoutError):
+                log.warning("the search backend did not answer", exc_info=True)
+                return ('<div class="note"><strong>Search is unavailable.'
+                        "</strong><p>The search service on this computer is "
+                        "not answering. It may still be starting up.</p></div>")
+            results = payload.get("results", [])
+            kept = self.result_filter.filter_results(uid, results)
+            return self._results(uid, query, category, page, results, kept)
 
-        results = payload.get("results", [])
-        kept = self.result_filter.filter_results(uid, results)
-        return self._page(self._results(uid, query, category, page,
-                                        results, kept),
-                          query=query, category=category,
-                          title=f"{query} — KosherOS Search")
+        return self._page_in_two(body, query=query, category=category,
+                                 title=f"{query} — KosherOS Search")
 
     # -- rendering ------------------------------------------------------------
 

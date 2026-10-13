@@ -625,6 +625,43 @@ class YouTube:
         path = (path or "").split("?", 1)[0]
         return any(path.startswith(p) for p in YouTube.FEED_PATHS)
 
+    # A channel id as YouTube mints them: "UC" and twenty-two more.
+    CHANNEL_ID = re.compile(r"UC[\w-]{22}")
+
+    @staticmethod
+    def channel_key(value) -> str | None:
+        """One spelling for every way a person or YouTube names a channel.
+
+        The admin pastes what they see — "@ThePrimeTimeagen",
+        "theprimetimeagen", the channel's address, its UC… id — and
+        YouTube names the same channel with whatever case it likes. A
+        handle is one name regardless of case; an id is kept as it is.
+        A handle comes back with its "@" so it can never be mistaken
+        for an id or a title.
+        """
+        value = (value or "").strip()
+        if not value:
+            return None
+        value = re.sub(r"^(https?:)?//", "", value)
+        value = re.sub(r"^(www\.|m\.)?(youtube\.com|youtu\.be)/", "",
+                       value, flags=re.IGNORECASE)
+        value = value.split("?", 1)[0].split("#", 1)[0].strip("/")
+        value = re.sub(r"^(channel|c|user)/", "", value, flags=re.IGNORECASE)
+        value = value.split("/", 1)[0].strip()
+        if not value:
+            return None
+        if YouTube.CHANNEL_ID.fullmatch(value):
+            return value
+        if value.startswith("@") or " " not in value:
+            return "@" + value.lstrip("@").lower()
+        # A channel's displayed title, which the feeds name alongside the
+        # id and handle; compared as written, case aside.
+        return value.lower()
+
+    @staticmethod
+    def channel_keys(values) -> set:
+        return {key for key in map(YouTube.channel_key, values or ()) if key}
+
     @staticmethod
     def renderer_channel(item: dict) -> set:
         """Every way this item names its channel: id, handle and title."""
@@ -658,6 +695,8 @@ class YouTube:
         """
         if depth > 24:
             return node
+        if depth == 0:
+            allowed = YouTube.channel_keys(allowed)
         if isinstance(node, list):
             kept = []
             for item in node:
@@ -666,7 +705,7 @@ class YouTube:
                     for value in item.values():
                         if not isinstance(value, dict):
                             continue
-                        named = YouTube.renderer_channel(value)
+                        named = YouTube.channel_keys(YouTube.renderer_channel(value))
                         if named and not (named & allowed):
                             dropped = True
                             break
@@ -742,12 +781,21 @@ class YouTube:
 
     @staticmethod
     def channel_of(body: str) -> tuple[str | None, str | None]:
-        """(channel id, handle) from the watch page, either of which may be
-        what an admin listed."""
+        """(channel id, handle) from the player JSON or the watch page,
+        either of which may be what an admin listed.
+
+        The handle is read from the owner's profile address first: the
+        player JSON, which answers every video after the first, names
+        the channel ONLY there — it carries no canonicalBaseUrl at all,
+        so a handle the admin approved used to match nothing and every
+        video of an approved channel was refused. The watch page carries
+        both, and its first canonicalBaseUrl is the owner's.
+        """
         import re
 
         channel_id = re.search(r'"channelId"\s*:\s*"([^"]+)"', body)
-        handle = re.search(r'"canonicalBaseUrl"\s*:\s*"/(@[^"]+)"', body)
+        handle = (re.search(r'"ownerProfileUrl"\s*:\s*"[^"]*/(@[^"/]+)"', body)
+                  or re.search(r'"canonicalBaseUrl"\s*:\s*"/(@[^"]+)"', body))
         return (channel_id.group(1) if channel_id else None,
                 handle.group(1) if handle else None)
 
@@ -1602,8 +1650,8 @@ class KosherFilter:
         for a page's HTML, which may simply not carry it.
         """
         if allowed:
-            channel_id, handle = YouTube.channel_of(body)
-            if not ({channel_id, handle} & set(allowed)):
+            named = YouTube.channel_keys(YouTube.channel_of(body))
+            if not (named & YouTube.channel_keys(allowed)):
                 return " because only approved channels are allowed"
         kinds = set(blocked) - {YouTube.SHORTS_KIND}
         if kinds:

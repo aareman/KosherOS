@@ -240,7 +240,7 @@ def test_the_machine_wide_default_is_the_classic_layout():
     assert cp["org/gnome/mutter"]["dynamic-workspaces"] == "false"
 
 
-def test_the_start_button_is_a_house_in_the_brand_blue_and_says_apps():
+def test_the_start_button_is_the_bais_hamikdosh_in_the_brand_blue_and_says_apps():
     cp = _dconf(DESKTOP_DCONF)
     arc = cp["org/gnome/shell/extensions/arcmenu"]
     # A picture alone did not tell anyone where the apps were.
@@ -249,8 +249,8 @@ def test_the_start_button_is_a_house_in_the_brand_blue_and_says_apps():
     # A filled button, so it stands out from the taskbar's other icons.
     assert arc["menu-button-bg-color"].startswith("(true,")
     assert arc["menu-layout"] == "'windows'"
-    # A house, not the KosherOS mark: the mark is the admin app's icon and
-    # read as "admin" on the taskbar. Drawn at build by branding/rasters.py.
+    # The Bais Hamikdosh, not the KosherOS mark: the mark is the admin app's
+    # icon and read as "admin" on the taskbar. Drawn at build by branding/rasters.py.
     icon = arc["menu-button-icon"].strip("'")
     assert icon.endswith("kosheros-home.png")
     assert icon.lstrip("/") in (ROOT / "branding/rasters.py").read_text()
@@ -396,7 +396,7 @@ def test_the_schema_copies_agree_on_the_layout():
         assert schema["$defs"]["user"]["properties"]["layout"]["enum"] == list(LAYOUTS)
 
 
-def test_the_house_icon_is_drawn_in_the_brand_blue_with_a_doorway():
+def test_the_apps_icon_is_the_bais_hamikdosh_in_the_brand_blue():
     import importlib.util
 
     spec = importlib.util.spec_from_file_location("rasters", ROOT / "branding/rasters.py")
@@ -404,10 +404,23 @@ def test_the_house_icon_is_drawn_in_the_brand_blue_with_a_doorway():
     spec.loader.exec_module(rasters)
     icon = rasters.home_icon(256)
     assert icon.size == (256, 256) and icon.mode == "RGBA"
-    roof = icon.getpixel((128, 100))
-    assert roof[3] == 255 and roof[2] > roof[0], "opaque, and blue"
-    assert icon.getpixel((128, 200))[3] == 0, "the doorway is cut out"
+    facade = icon.getpixel((60, 100))
+    assert facade[3] == 255 and facade[2] > facade[0], "opaque, and blue"
+    # The Ulam's entrance, 20 amos wide and 40 high, has no doors: open
+    # above the Heichal's doorway, which stands 20 amos tall inside it.
+    assert icon.getpixel((128, 150))[3] == 0, "the entrance is open"
+    assert icon.getpixel((128, 200)) == rasters.BRAND_BLUE_DEEP, "the Heichal doorway"
+    # The lowest beam above the entrance is an amah wider on each side
+    # than the opening; the top one is five amos wider.
+    assert icon.getpixel((110, 135)) == rasters.BRAND_BLUE_DEEP
+    assert icon.getpixel((102, 135))[3] == 255 and icon.getpixel((102, 135)) != rasters.BRAND_BLUE_DEEP
+    assert icon.getpixel((102, 111)) == rasters.BRAND_BLUE_DEEP
+    # Steps below the facade, wider than it; nothing in the corners.
+    assert icon.getpixel((10, 240))[3] == 255, "the bottom step"
+    assert icon.getpixel((10, 200))[3] == 0, "beside the facade"
     assert icon.getpixel((8, 8))[3] == 0, "transparent corners"
+    # Every size comes from the one description, down to the taskbar's.
+    assert rasters.home_icon(24).size == (24, 24)
 
 
 def test_gnome_never_asks_the_family_for_a_donation():

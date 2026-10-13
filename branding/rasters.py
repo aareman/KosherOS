@@ -7,8 +7,8 @@ what it makes. Pillow only — it is already in the image for the picture
 filter.
 
 From branding/logo.png:
-  - the boot splash logo (256 px; the start button is a house of its own,
-    fitted in a square, transparent padding);
+  - the boot splash logo (256 px, fitted in a square, transparent
+    padding; the start button is the Bais Hamikdosh's facade, drawn here);
   - the login-screen lockup: the logo with the word "KosherOS" beside it.
     GDM's logo key takes one image and draws it at native size, and a
     faint ellipse on its own said nothing — the name has to be in the
@@ -81,33 +81,67 @@ def fitted(src: Image.Image, size: int) -> Image.Image:
 # The brand blue, from the logo's shield: light at the top, deep below.
 BRAND_BLUE_TOP = (59, 130, 246, 255)
 BRAND_BLUE_BOTTOM = (29, 78, 216, 255)
+# Deeper still, for the beams and the Heichal doorway on the facade.
+BRAND_BLUE_DEEP = (30, 58, 138, 255)
 
 
 def home_icon(size: int = 256) -> Image.Image:
-    """A house in the brand blue: the taskbar's Apps button.
+    """The front of the Bais Hamikdosh in the brand blue: the Apps button.
 
-    The KosherOS mark is the admin app's own icon, and the same mark on
-    the taskbar said "admin" rather than "your apps" — the user asked for
-    "just a home / house icon for the apps", in the branding colour. Drawn
-    here rather than shipped as a bitmap so every size comes from one
-    description: a roof, a body with a doorway cut out, a chimney, filled
-    with the logo's own gradient.
+    A house on the taskbar was any house. This is the Ulam's face, drawn
+    from the measurements in Mishnah Middos at two pixels to the amah:
+    the facade a square of 100 by 100 (4:6, 4:7), which from the front
+    hides everything behind it; the entrance 20 wide and 40 high with no
+    doors (3:7), so it is cut out; above it the five oak beams, each an
+    amah wider than the one below with a row of stones between (3:7);
+    through it the Heichal's doorway, 10 by 20 (4:1); the kalya orev, the
+    spikes an amah high along the roof (4:6); and the twelve steps up to
+    the Ulam (3:6), drawn as four and taller than a half-amah so they
+    show at all. Drawn here rather than shipped as a bitmap so every size
+    comes from one description, filled with the logo's own gradient.
     """
     s = size / 256
+    amah = 2 * s
+    left, top = 28 * s, 20 * s
+    right, floor = left + 100 * amah, top + 100 * amah
+
+    def box(draw, x0, y0, x1, y1, fill):
+        # Inclusive corners; at small sizes a beam is under a pixel.
+        draw.rectangle([x0, y0, max(x1 - 1, x0), max(y1 - 1, y0)], fill=fill)
+
     mask = Image.new("L", (size, size), 0)
     draw = ImageDraw.Draw(mask)
-    draw.polygon([(128 * s, 34 * s), (16 * s, 134 * s), (240 * s, 134 * s)], fill=255)
-    draw.rounded_rectangle([52 * s, 118 * s, 204 * s, 224 * s], radius=14 * s, fill=255)
-    draw.rounded_rectangle([170 * s, 52 * s, 198 * s, 112 * s], radius=6 * s, fill=255)
-    draw.rounded_rectangle([104 * s, 158 * s, 152 * s, 224 * s], radius=8 * s, fill=0)
+    box(draw, left, top, right, floor, 255)
+    for i in range(4):                       # the steps, out and down
+        out, y = 6 * s * (i + 1), floor + 6 * s * i
+        box(draw, left - out, y, right + out, y + 6 * s, 255)
+    x = left + 4 * s                         # the kalya orev
+    while x + 6 * s <= right - 2 * s:
+        draw.polygon([(x, top), (x + 3 * s, top - 5 * s), (x + 6 * s, top)], fill=255)
+        x += 10 * s
+    mid = (left + right) / 2
+    entrance_top = floor - 40 * amah
+    box(draw, mid - 10 * amah, entrance_top, mid + 10 * amah, floor, 0)
+
     fill = Image.new("RGBA", (size, size), BRAND_BLUE_BOTTOM)
-    top, bottom = BRAND_BLUE_TOP, BRAND_BLUE_BOTTOM
+    top_c, bottom_c = BRAND_BLUE_TOP, BRAND_BLUE_BOTTOM
     for y in range(size):
         t = y / max(1, size - 1)
-        colour = tuple(int(top[i] + (bottom[i] - top[i]) * t) for i in range(4))
+        colour = tuple(int(top_c[i] + (bottom_c[i] - top_c[i]) * t) for i in range(4))
         ImageDraw.Draw(fill).line([(0, y), (size, y)], fill=colour)
     icon = Image.new("RGBA", (size, size), (0, 0, 0, 0))
     icon.paste(fill, (0, 0), mask)
+
+    # The beams and the Heichal doorway, in the deep blue so they read
+    # against the facade.
+    deep = ImageDraw.Draw(icon)
+    beam = 3 * s
+    y = entrance_top - beam
+    for i in range(5):
+        half = (11 + i) * amah
+        box(deep, mid - half, y - beam, mid + half, y, BRAND_BLUE_DEEP)
+        y -= 2 * beam
+    box(deep, mid - 5 * amah, floor - 20 * amah, mid + 5 * amah, floor, BRAND_BLUE_DEEP)
     return icon
 
 
@@ -266,7 +300,7 @@ def build(src_dir: Path, out: Path, version: str = "0") -> list[Path]:
     logo = Image.open(src_dir / "logo.png").convert("RGBA")
     save(fitted(logo, 256), "usr/share/plymouth/themes/kosheros/logo.png")
     save(fitted(logo, 256), "usr/share/pixmaps/kosheros-logo.png")
-    # The taskbar's Apps button: a house, not the mark (see home_icon).
+    # The taskbar's Apps button: the Bais Hamikdosh, not the mark (see home_icon).
     save(home_icon(256), "usr/share/pixmaps/kosheros-home.png")
     save(lockup(logo), "usr/share/pixmaps/kosheros-logo-login.png")
     # The admin app's icon is the KosherOS mark: it is the one app that IS

@@ -1,143 +1,109 @@
-# KosherOS branding (roadmap stage)
+# Branding
 
-Primary brand: **KosherOS**. Secondary attribution: **powered by Fedora** —
-this matches Fedora's trademark policy for derivatives ("Fedora Remix"), so
-Fedora references don't need scrubbing; only primary branding changes.
+The product is **KosherOS**, with **powered by Fedora** as the secondary
+line. That matches Fedora's trademark policy for derivatives, a Fedora
+Remix, so Fedora references do not need scrubbing; only the primary
+branding changes.
 
-**Status:** the pipeline is built and wired into the image. The wallpaper
-is real artwork (`branding/wallpaper.png`, 4978×3340, light sepia — the
-reason the desktop, greeter and Noctalia all default to the light scheme;
-its GIMP source `wallpaper.xcf` stays in the repo and out of the image).
-The logo is `branding/logo.png` (1316×1088 with alpha, source `logo.xcf`).
-`branding/rasters.py`, run at image build, makes every raster from the two
-artwork files:
+## Two artwork files
 
-- the boot-splash logo (256 px, fitted in a square), a house in the brand
-  blue for the classic desktop's Apps button (drawn by `rasters.py`, not a
-  bitmap: the mark is the admin app's icon and read as "admin" on the
-  taskbar), and the admin app's icon in hicolor at 48–512 px,
-  named `org.kosherlinux.Admin` — the one app that IS the product carries
-  the mark; the Store and Setup keep stock icons until they get their own;
-- the **login-screen lockup**: the logo with "KosherOS" set beside it in an
-  italic serif (Noto Serif in the image), because GDM's logo key is one
-  image drawn at native size and the ellipse alone read as a faint blob;
-- the wallpaper plus a **crop per screen shape** (16:9, 16:10, 3:2, 4:3,
-  5:4, 21:9), each anchored top-left so the wordmark painted into the
-  corner survives, and `kosheros.xml`, which lists them so gnome-bg picks
-  the one matching the screen. GNOME's zoom on the single 3:2 picture
-  cropped from the centre and cut the word off on 16:9 and 4:3 screens.
+Everything the family sees is made from two files in `branding/`:
+
+- `wallpaper.png`, a light sepia painting with the wordmark in a corner.
+  It is the reason the desktop, the login screen and the advanced session
+  all default to the light scheme. Its GIMP source stays in the repository
+  and out of the image.
+- `logo.png`, the mark with transparency, and its GIMP source.
+
+`branding/rasters.py` runs at image build and makes every raster from
+those two:
+
+- the boot-splash logo;
+- the front of the Bais Hamikdosh in the brand blue for the classic
+  desktop's Apps button, drawn from the measurements in Mishnah Middos
+  rather than taken from the mark, because the mark is the admin app's
+  icon and read as "admin" on the taskbar;
+- the admin app's icon at every size, named `org.kosherlinux.Admin`. The
+  one app that is the product carries the mark; the Store and Setup keep
+  stock icons until they get their own;
+- the login-screen lockup, the logo with "KosherOS" set beside it in an
+  italic serif, because the login screen draws one image at native size
+  and the mark alone read as a faint blob;
+- the wallpaper plus a crop per screen shape (16:9, 16:10, 3:2, 4:3, 5:4,
+  21:9), each anchored top-left so the wordmark survives, and the XML that
+  lists them so GNOME picks the one matching the screen. GNOME's own zoom
+  on a single picture cropped from the centre and cut the word off;
+- the GRUB menu's background and theme.
 
 Replacing either artwork file re-brands everything on the next build. If
-the wallpaper is ever repainted, a wordmark kept ~10% in from every edge
-would need none of the cropping care. `kosheros-logo.svg` and
-`wallpaper.svg` are the earlier placeholders, kept in the repo but no longer
-drawn anywhere except the SVG wallpaper copy installed for anything still
-pointing at it.
+the wallpaper is ever repainted, a wordmark kept about 10% in from every
+edge would need none of the cropping care.
 
-## Surfaces, boot → desktop (in user-visible order)
+## Where the brand appears
 
-| surface | mechanism | needs artwork? |
-|---|---|---|
-| OS identity (About dialog, `hostnamectl`, portal/device lists) | ✅ `/usr/lib/os-release` NAME/PRETTY_NAME/VARIANT | no |
-| Boot splash | ✅ Plymouth script theme `kosheros` (navy gradient, pulsing logo, LUKS prompt) | real logo |
-| GRUB menu (one second, every boot) | ✅ a GRUB theme: navy, the mark and name, the entries, a countdown bar (see below) | no |
-| Login screen | ✅ GDM logo + banner via locked dconf keys | real logo |
-| First-boot welcome wizard (stage 5) | our own GTK app — brand it from day one | logo + wordmark |
-| Desktop defaults | ✅ dconf: wallpaper (unlocked), light scheme, favourites incl. the Store, classic taskbar layout (see [desktop.md](desktop.md)) | ✅ `branding/wallpaper.png` (source: `wallpaper.xcf`, kept out of the image) |
-| Admin app / Store | ✅ Admin: the KosherOS mark (hicolor, from `rasters.py`); Store and Setup still stock icons | Store + Setup icons |
-| ISO installer | ✅ `product.img` injected by `just iso`: `.buildstamp`, a conf.d drop-in, our stylesheet and logo (see below) | wordmark for the top bar, eventually |
-| Portal web UI (stage 5) | shared asset set | logo + wordmark |
+| Surface | How |
+|---|---|
+| OS identity: the About dialog, `hostnamectl`, device lists | `/usr/lib/os-release` carries the name, pretty name and variant. `ID` stays `fedora` and `VERSION_ID` stays Fedora's, because tooling keys off them |
+| Boot splash | a Plymouth theme: navy gradient, pulsing logo, the disk-password prompt |
+| GRUB menu | a theme: navy, the mark and name, the entries, a countdown bar |
+| Login screen | the lockup and a banner, through locked dconf keys |
+| First-boot wizard | the project's own GTK app |
+| Desktop defaults | wallpaper, light scheme, favourites including the Store, the classic taskbar layout; see [desktop](desktop.md) |
+| Admin app | the mark as its icon |
+| Installer | a product image injected onto the ISO; see below |
 
 ## The GRUB menu
 
-bootupd shows GRUB's menu for one second on every boot (`timeout_style=menu`
-in its static config), which is long enough to notice white-on-black text
-listing "KosherOS 0.1 (powered by Fedora 44) (ostree:0)". So the menu is
-drawn from a theme: `branding/rasters.py` writes `theme.txt` and a navy
-1920×1080 background with the lockup, and
-`os-image/files/usr/lib/bootupd/grub2-static/configs.d/09_kosheros_theme.cfg`
-— concatenated into grub.cfg by bootupd at install — loads the font, switches
-to `gfxterm` and sets `theme`.
+The boot loader shows its menu for one second on every boot, which is long
+enough to notice white-on-black text listing the OS. So the menu is drawn
+from a theme, loaded by a configuration snippet that bootupd concatenates
+into the boot configuration at install.
 
 The theme has to be readable before the OS is up, and that differs by
-firmware, so it is written twice:
+firmware, so it is installed twice. For UEFI it lives under the EFI
+component directory bootupd copies onto the EFI system partition, with its
+own copy of the font. For BIOS it takes the name of the one theme
+directory GRUB's installer copies onto the boot partition. If neither the
+theme nor a font is found the snippet changes nothing and the plain menu is
+shown. Under Secure Boot GRUB will not load modules from disk, but the
+graphics, PNG and video modules are built into Fedora's signed loader, so
+the theme works there too.
 
-- **UEFI**: under `/usr/lib/efi/kosheros-grub-theme/<version>/EFI/fedora/kosheros/`,
-  with its own copy of `unicode.pf2`. bootupd treats every
-  `/usr/lib/efi/<component>/<version>/EFI` tree as a component and copies it
-  onto the EFI system partition; the Containerfile re-runs
-  `bootupctl backend generate-update-metadata` so it is listed. GRUB finds
-  it as `${cmdpath}/kosheros/`.
-- **BIOS**: under `/usr/share/grub/themes/starfield/`. grub2-install copies
-  exactly one theme directory onto the boot partition and by default it is
-  the one named `starfield`; Fedora ships none, so the KosherOS theme takes
-  the name. GRUB finds it as `${prefix}/themes/starfield/`, and the font at
-  `${prefix}/fonts/unicode.pf2`, which grub2-install also copies.
+This has not yet been seen on a booted machine.
 
-If neither the theme nor a font is found the snippet changes nothing and
-the plain menu is shown. Under Secure Boot GRUB will not load modules from
-disk, but `gfxterm`, `png` and `all_video` are built into Fedora's signed
-`grubx64.efi`, so the theme works there too. **Not yet seen on a booted
-machine.**
+## The installer
 
-## Anaconda installer
+The installer ISO comes out of the image builder wearing Fedora's branding,
+which broke the illusion at the first thing a new owner sees. Anaconda has
+a hook for this, and `just iso` uses it: after the ISO is written, a small
+product image is built and placed on it, with the boot records replayed so
+it still boots on BIOS and UEFI, and the result is named
+`KosherOS-<version>-<arch>.iso`. The version comes from the git tag, which
+is the version everywhere.
 
-The installer ISO comes out of bootc-image-builder wearing Fedora's
-branding, which broke the illusion at the very first thing a new owner
-sees. Anaconda has a hook for exactly this, and `just iso` now uses it:
-after bib writes `install.iso`, `scripts/brand-iso.py` builds a small
-`product.img` and puts it at `images/product.img` on the ISO with xorriso
-(boot records replayed, so it still boots on BIOS and UEFI), then names the
-result `KosherOS-<version>-<arch>.iso`, leaving `install.iso` as a
-link to it. The version comes from the `VERSION` file at the repo root,
-which the Containerfile also puts in os-release.
+The installer's initramfs finds that image on the install media and copies
+it over the installer's root before Anaconda starts, so it replaces three
+things:
 
-How it takes effect, all of it stock Anaconda and verified against its
-source: the initramfs finds `images/product.img` on the install media and
-unpacks it into `/updates` (`dracut/anaconda-lib.sh`,
-`anaconda_auto_updates`), and dracut's `apply-live-updates` copies that
-over the installer's root before Anaconda starts. So the archive replaces
-three things:
+- the build stamp Anaconda reads its product name and version from, so
+  the welcome screen says KosherOS;
+- a configuration drop-in that points at the KosherOS stylesheet and
+  hides every hub screen the kickstart already answers: keyboard,
+  language, time zone, network, source, software. The disk question
+  answers itself when the machine has exactly one internal drive that is
+  not the installer stick, so the hub arrives complete and the install is
+  a single Begin Installation button; with two or more candidate disks the
+  installer asks, so a second drive is never wiped unseen;
+- the stylesheet, a navy sidebar and top bar with the mark at the top of
+  the sidebar, and the logo.
 
-- `/.buildstamp` — where Anaconda reads its product name and version
-  (`pyanaconda/core/product.py`), so the welcome screen says KosherOS;
-- `/etc/anaconda/conf.d/90-kosheros.conf` — a drop-in loaded after the
-  Fedora profile (`set_from_files`), pointing `custom_stylesheet` at ours
-  and hiding every hub spoke the kickstart already answers (keyboard,
-  language, time zone, network, source, software). The disk question
-  answers itself when it can: a `%pre` script in `os-image/iso-config.toml`
-  picks the disk when the machine has exactly one internal drive that is not
-  the installer stick, so the hub arrives complete and the install is a
-  Begin Installation button; with two or more candidate disks it writes
-  nothing and Anaconda asks, so a second drive is never wiped unseen. The first real
-  install found the stock hub "non-linear and quite complex"; this is the
-  fix that stays inside Anaconda;
-- `/usr/share/anaconda/pixmaps/kosheros/` — the stylesheet (navy sidebar
-  and top bar, the mark at the top of the sidebar) and the logo, fitted
-  from `branding/logo.png`. Fedora's own stylesheet path is overwritten
-  with the same file as a belt-and-braces.
+A unit test builds the archive, reads it back with the system cpio, and
+rehearses the injection on a stand-in ISO. The branded installer has not
+yet been seen booted; that needs `just iso` and `just boot-iso`, which
+need sudo.
 
-The cpio is written by the script itself (newc format, root-owned), so the
-dev shell needs only Pillow and xorriso. `kosherd/tests/test_installer_branding.py`
-builds the archive, reads it back with the system cpio, and rehearses the
-xorriso injection on a stand-in ISO. **Not yet seen on a booted installer**:
-that needs `just iso` and `just boot-iso`, which need sudo.
+## Still to make
 
-| surface | mechanism | needs artwork? |
-|---|---|---|
-| ISO installer | ✅ `product.img` on the ISO: `.buildstamp`, a conf.d drop-in, our stylesheet and logo | wordmark for the top bar, eventually |
-
-## Asset checklist (create once, SVG-first)
-
-- KosherOS logomark (symbol) — light + dark variants
-- Wordmark ("KosherOS") and lockup with "powered by Fedora" line
-- Plymouth splash animation (can start as static logo on dark background)
-- Default wallpaper (light/dark)
-- App icon for the admin app (hicolor + symbolic)
-
-## Notes
-
-- Keep `ID=fedora` and `VERSION_ID` in os-release — tooling (dnf repos,
-  bootc, scripts) keys off `ID`; only NAME/PRETTY_NAME/VARIANT carry brand.
-- dconf branding lives in `/etc/dconf/db/local.d/` + locks; ship in
-  os-image/files once assets exist.
+- a wordmark for the installer's top bar;
+- icons for the Store and Setup;
+- a dark variant of the wallpaper.

@@ -53,7 +53,7 @@ sweep *ARGS:
     python3 scripts/list-sweep.py {{ARGS}}
 
 # The docs site as GitHub Pages publishes it (https://aareman.github.io/KosherOS/):
-# the readme as the front page, docs/*.md, and a Releases page from GitHub.
+# the landing page, docs/*.md, and a Releases page from GitHub.
 docs:
     python3 scripts/build-docs.py --build
     @echo "built into site/ — open site/index.html"

@@ -1649,6 +1649,37 @@ def test_checking_says_which_version_you_would_get():
     assert win.update_state == "0.1.0-pre.055 available"
 
 
+def test_checking_after_an_older_update_was_staged_offers_the_newer_download():
+    # Given an older image is ready to boot, the page initially offers restart.
+    win = FakeWindow(FakeClient(
+        deployment={
+            "booted": {"version": "0.1.0-pre.054"},
+            "rollback": None,
+            "staged": {"version": "0.1.0-pre.055"},
+            "rollback_queued": False,
+        },
+        check={
+            "ok": True,
+            "available": True,
+            "version": "0.1.0-pre.056",
+            "channel": "edge",
+        },
+    ))
+    win.policy = {"revision": 1, "users": [], "guardian": {"enabled": False},
+                  "guest": {"enabled": False}}
+    page = computer.UpdatesPage(win)
+    drain()
+    assert page.restart_button.get_visible() and not page.apply_button.get_visible()
+
+    # When the check finds a newer image, that image can be downloaded directly.
+    page._check(None)
+    drain()
+
+    # Then restart is no longer the only offered action.
+    assert page.apply_button.get_visible() and not page.restart_button.get_visible()
+    assert page.apply_button.get_label() == "Download Update"
+
+
 def test_checking_when_current_says_so_with_the_version_you_have():
     win = FakeWindow(FakeClient())
     win.policy = {"revision": 1, "users": [], "guardian": {"enabled": False},

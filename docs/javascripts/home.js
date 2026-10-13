@@ -152,6 +152,7 @@
     };
 
     var choose = function (chip, animate) {
+      card.setAttribute("aria-labelledby", chip.id);
       chips.forEach(function (other) {
         other.setAttribute("aria-selected", String(other === chip));
         other.tabIndex = other === chip ? 0 : -1;

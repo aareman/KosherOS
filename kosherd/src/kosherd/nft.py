@@ -135,13 +135,21 @@ def _extras(user) -> tuple[int, ...]:
 
 
 def render(policy: Policy, *, dns_uid: int, mitm_uid: int | None = None,
-           search_uid: int | None = None,
+           search_uid: int | None = None, build_gid: int | None = None,
            doh_block4: tuple[str, ...] = DEFAULT_DOH_BLOCK4) -> str:
     """Return a complete `nft -f`-loadable ruleset for this policy.
 
     dns_uid: UID dnsmasq runs as — exempt from the port-53 redirect so its
     upstream queries to the family resolver get out.
+    build_gid: the Nix build users' group (nixbld). A fixed-output build
+    (fetchurl, fetchFromGitHub) runs as one of them with the network, on
+    behalf of whichever account asked and outside that account's filter.
+    They get the registries and the system domains, and nothing else.
     """
+    # Before the system-uid accept: nixbld is below UID_MIN too.
+    nix_build = (
+        f"        meta skgid {build_gid} jump nix_build\n"
+        if build_gid is not None else "")
     vmap_entries = ", ".join(
         f"{u.uid} : jump {MODE_CHAINS[u.mode]}"
         for u in sorted(policy.effective_users(), key=lambda u: u.uid)
@@ -244,7 +252,7 @@ table {TABLE} {{
         # INITIATE anything with this: their first SYN/datagram is dispatched
         # below and rejected before any conntrack entry goes ESTABLISHED.
         ct state established,related accept
-        meta skuid < {UID_MIN} accept
+{nix_build}        meta skuid < {UID_MIN} accept
         meta skuid @captive accept
         # LAN basics every mode keeps: DHCP, mDNS, printing.
         jump local_services
@@ -284,6 +292,16 @@ table {TABLE} {{
         jump evasion_block
         ip daddr @wl4 tcp dport {{ 80, 443 }} accept
         ip6 daddr @wl6 tcp dport {{ 80, 443 }} accept
+        ip daddr @sys4 tcp dport {{ 80, 443 }} accept
+        ip6 daddr @sys6 tcp dport {{ 80, 443 }} accept
+        reject
+    }}
+
+    chain nix_build {{
+        # A Nix build fetching its source: the registries and the system
+        # domains, which every account can reach anyway, and no page. (The
+        # daemon's own downloads from the binary cache run as root.)
+        jump evasion_block
         ip daddr @sys4 tcp dport {{ 80, 443 }} accept
         ip6 daddr @sys6 tcp dport {{ 80, 443 }} accept
         reject

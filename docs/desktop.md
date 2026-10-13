@@ -66,9 +66,12 @@ off.
 
 Under niri the helper does one thing: copies the shipped Noctalia
 configuration into the user's home if there is none yet, then never
-touches it again. The seed carries the two settings that matter, the
-polkit agent on, without which a password prompt has nowhere to appear,
-and the KosherOS wallpaper.
+touches it again. The seed carries the settings that matter: the polkit
+agent on, without which a password prompt has nowhere to appear; the
+KosherOS wallpaper; and a light theme whose colours Noctalia takes from
+that wallpaper, so the advanced desktop looks like this machine. The
+bundled palettes stay a click away in the shell's settings, and a choice
+made there wins over the seed.
 
 ### The image
 

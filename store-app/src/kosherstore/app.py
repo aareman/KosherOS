@@ -162,7 +162,7 @@ def app_icon(app: dict, size: int = ICON_SIZE) -> Gtk.Widget:
 class AppCard(Gtk.Box):
     """One app: icon, name, what it is, and the button that acts on it."""
 
-    def __init__(self, app: dict, store: "Window"):
+    def __init__(self, app: dict, store: "Window", detailed: bool = False):
         # A fixed height as well as a fixed width: a summary that wraps to
         # two lines on a narrow card and one on a wide one changed the row
         # height, which changed whether the list needed a scrollbar, which
@@ -176,12 +176,17 @@ class AppCard(Gtk.Box):
         self.add_css_class("app-card")
 
         top = Gtk.Box(spacing=12)
-        top.append(app_icon(app))
+        top.append(app_icon(app, size=80 if detailed else ICON_SIZE))
         names = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, valign=Gtk.Align.CENTER,
                         hexpand=True)
         title = Gtk.Label(label=app.get("name", self.ref), xalign=0, ellipsize=3,
                           max_width_chars=18)
         title.add_css_class("heading")
+        title.set_tooltip_text(app.get("name", self.ref))
+        if detailed:
+            title.set_ellipsize(Pango.EllipsizeMode.NONE)
+            title.set_wrap(True)
+            title.add_css_class("title-2")
         # How it is installed, beside the name: a Flatpak from Flathub or a
         # Nix package into this account's own profile. Two different things
         # (one is system-wide and sandboxed, the other is yours and on your
@@ -200,6 +205,11 @@ class AppCard(Gtk.Box):
                              valign=Gtk.Align.START)
         subtitle.add_css_class("dim-label")
         subtitle.add_css_class("caption")
+        subtitle.set_tooltip_text(app.get("summary") or self.ref)
+        if detailed:
+            subtitle.set_lines(-1)
+            subtitle.set_ellipsize(Pango.EllipsizeMode.NONE)
+            subtitle.set_max_width_chars(60)
         names.append(subtitle)
         top.append(names)
 
@@ -320,6 +330,8 @@ class Window(Adw.ApplicationWindow):
         self.shelf = "all"
         # How many cards the current shelf is showing (see PAGE_SIZE).
         self.page = PAGE_SIZE
+        self.detail_page = None
+        self.details_cache = {}
         self._load_css()
 
         self.toasts = Adw.ToastOverlay()
@@ -329,16 +341,20 @@ class Window(Adw.ApplicationWindow):
         # something by name is what people do in a store.
         self.search = Gtk.SearchEntry(placeholder_text="Search apps",
                                       width_request=320)
+        # Let GTK forward typing from the window while preserving shortcuts
+        # and normal keyboard navigation in the focused widget.
+        self.search.set_key_capture_widget(self)
+        self.search.connect("search-started", lambda entry: entry.grab_focus())
         self.search.connect("search-changed", lambda _e: self._on_search())
         self.back = Gtk.Button(icon_name="go-previous-symbolic",
                                tooltip_text="All categories", visible=False)
         self.back.set_cursor_from_name("pointer")
-        self.back.connect("clicked", lambda _b: self.go_home())
+        self.back.connect("clicked", lambda _b: self.go_back())
         header = Adw.HeaderBar(title_widget=self.search)
         header.pack_start(self.back)
         # One click for the lot, shown only on the Updates shelf.
         self.update_all = Gtk.Button(label="Update all", visible=False,
-                                     tooltip_text="Update every app that has an update")
+                                     tooltip_text="Install all available app updates")
         self.update_all.add_css_class("suggested-action")
         self.update_all.set_cursor_from_name("pointer")
         self.update_all.connect("clicked", lambda _b: self._update_all())
@@ -347,11 +363,14 @@ class Window(Adw.ApplicationWindow):
         # flatpak already knows about, and nothing else on the machine
         # fetches that, so the check is a thing a person can press.
         self.check_button = Gtk.Button(label="Check for updates", visible=False,
-                                       tooltip_text="Ask Flathub whether the installed "
-                                                    "apps have newer builds")
+                                       tooltip_text="Check for new versions of installed apps")
         self.check_button.set_cursor_from_name("pointer")
         self.check_button.connect("clicked", lambda _b: self._check_updates())
         header.pack_end(self.check_button)
+        self.refresh_button = Gtk.Button(icon_name="view-refresh-symbolic",
+                                          tooltip_text="Refresh app list")
+        self.refresh_button.connect("clicked", lambda _b: self.reload())
+        header.pack_end(self.refresh_button)
 
         # Home: the categories themselves, which is what a store opens on.
         self.tiles = Gtk.FlowBox(selection_mode=Gtk.SelectionMode.NONE,
@@ -367,6 +386,12 @@ class Window(Adw.ApplicationWindow):
         self.home_subtitle = Gtk.Label(xalign=0, wrap=True)
         self.home_subtitle.add_css_class("dim-label")
         home_box.append(self.home_subtitle)
+        shortcuts = Gtk.Box(spacing=8)
+        for key, label in (("installed", "Installed apps"), ("updates", "Updates")):
+            button = Gtk.Button(label=label)
+            button.connect("clicked", lambda _b, shelf=key: self.show_shelf(shelf))
+            shortcuts.append(button)
+        home_box.append(shortcuts)
         home_box.append(self.tiles)
         home_clamp = Adw.Clamp(maximum_size=980)
         home_clamp.set_child(home_box)
@@ -391,10 +416,13 @@ class Window(Adw.ApplicationWindow):
         # scrollbar, and the scrollbar left room for only one column. The
         # count now follows the window's width and nothing else.
         self.grid = Gtk.FlowBox(selection_mode=Gtk.SelectionMode.NONE,
+                                activate_on_single_click=True,
                                 homogeneous=True, column_spacing=12, row_spacing=12,
                                 min_children_per_line=2, max_children_per_line=2,
                                 margin_start=14, margin_end=14, margin_top=12,
                                 margin_bottom=18, valign=Gtk.Align.START)
+        self.grid.connect("child-activated", lambda _grid, child:
+                          self.show_details(child.get_child().app))
         # The rest of a long shelf, a page at a time, under the grid.
         self.more = Gtk.Button(halign=Gtk.Align.CENTER, margin_bottom=18, visible=False)
         self.more.add_css_class("pill")
@@ -419,6 +447,10 @@ class Window(Adw.ApplicationWindow):
         self.stack = Gtk.Stack(transition_type=Gtk.StackTransitionType.CROSSFADE)
         self.stack.add_named(home_scroller, "home")
         self.stack.add_named(browse, "browse")
+        self.load_status = Adw.StatusPage(title="Loading apps…",
+                                         child=Gtk.Spinner(spinning=True))
+        self.stack.add_named(self.load_status, "loading")
+        self.stack.set_visible_child_name("loading")
 
         view = Adw.ToolbarView()
         view.add_top_bar(header)
@@ -451,6 +483,12 @@ class Window(Adw.ApplicationWindow):
     def reload(self) -> None:
         import os
 
+        self.refresh_button.set_sensitive(False)
+        if self.stack.get_visible_child_name() == "loading":
+            self.load_status.set_title("Loading apps…")
+            self.load_status.set_description("")
+            self.load_status.set_child(Gtk.Spinner(spinning=True))
+
         def load():
             access, ready = "approved", True
             try:
@@ -479,6 +517,9 @@ class Window(Adw.ApplicationWindow):
             return catalog, installed, details, policy, updates, access, ready
 
         def on_done(result):
+            self.refresh_button.set_sensitive(True)
+            if self.stack.get_visible_child_name() == "loading":
+                self.stack.set_visible_child_name("home")
             (self.catalog, self.installed, self.installed_apps, policy, self.updates,
              self.access, self.ready) = result
             if policy:
@@ -489,8 +530,21 @@ class Window(Adw.ApplicationWindow):
             self._render_home()
             self._render_sidebar()
             self._render()
+            self._sync_detail_action()
 
-        _run_async(load, on_done, lambda e: self.toast(_error_text(e)))
+        def on_error(e):
+            self.refresh_button.set_sensitive(True)
+            if self.stack.get_visible_child_name() != "loading":
+                self.toast("Could not refresh apps: " + _error_text(e))
+                return
+            self.load_status.set_title("Could not load apps")
+            self.load_status.set_description(_error_text(e))
+            retry = Gtk.Button(label="Try again", halign=Gtk.Align.CENTER)
+            retry.add_css_class("suggested-action")
+            retry.connect("clicked", lambda _b: self.reload())
+            self.load_status.set_child(retry)
+
+        _run_async(load, on_done, on_error)
 
     def state_of(self, ref: str) -> str:
         if ref in self.working:
@@ -521,6 +575,7 @@ class Window(Adw.ApplicationWindow):
         """The shelves that come and go: Installing, Updates, Installed."""
         self._render_home()
         self._render_sidebar()
+        self._sync_detail_action()
         if self.shelf == "installing":
             self._render()
 
@@ -547,7 +602,7 @@ class Window(Adw.ApplicationWindow):
             ref = detail.get("ref")
             if not ref:
                 continue
-            entry = dict(catalog.get(ref) or {"ref": ref})
+            entry = {**detail, **catalog.get(ref, {})}
             entry["name"] = entry.get("name") or detail.get("name") or self._readable(ref)
             if detail.get("icon_name") and not entry.get("icon_name"):
                 entry["icon_name"] = detail["icon_name"]
@@ -577,7 +632,7 @@ class Window(Adw.ApplicationWindow):
         """'Version 2.1 is available' / 'A newer build is available'."""
         info = self.updates.get(ref) or {}
         return (f"Version {info['version']} is available" if info.get("version")
-                else "A newer build is available")
+                else "A new version is available")
 
     def shelf_counts(self) -> dict[str, int]:
         counts: dict[str, int] = {"all": len(self.catalog),
@@ -603,10 +658,49 @@ class Window(Adw.ApplicationWindow):
     # -- home ---------------------------------------------------------------------
 
     def go_home(self) -> None:
+        self._close_details()
         self.search.set_text("")
         self.shelf = "all"
         self.stack.set_visible_child_name("home")
         self.back.set_visible(False)
+        self._render()
+
+    def show_details(self, app: dict) -> None:
+        from .details import DetailsPage
+
+        self._close_details()
+        self.detail_page = DetailsPage(app, self)
+        self.stack.add_named(self.detail_page, "details")
+        self.stack.set_visible_child_name("details")
+        self.back.set_visible(True)
+        self.back.set_tooltip_text("Back to apps")
+        self.check_button.set_visible(False)
+        self.update_all.set_visible(False)
+        self.back.grab_focus()
+
+    def _close_details(self) -> None:
+        if self.detail_page is not None:
+            self.detail_page.dispose_page()
+            self.stack.remove(self.detail_page)
+            self.detail_page = None
+        self.back.set_tooltip_text("All categories")
+
+    def go_back(self) -> None:
+        if self.detail_page is None:
+            self.go_home()
+            return
+        ref = self.detail_page.app["ref"]
+        self._close_details()
+        self.stack.set_visible_child_name("browse")
+        self.check_button.set_visible(self.shelf == "updates")
+        self.update_all.set_visible(self.shelf == "updates" and bool(self.shown_apps()))
+        card = self.cards.get(ref)
+        if card is not None:
+            card.get_parent().grab_focus()
+
+    def _sync_detail_action(self) -> None:
+        if self.detail_page is not None:
+            self.detail_page.sync_action()
 
     def _render_home(self) -> None:
         while (child := self.tiles.get_first_child()) is not None:
@@ -634,18 +728,16 @@ class Window(Adw.ApplicationWindow):
         """What the home page says under its heading: how many apps, and
         where they come from — an administrator's list, or the store."""
         if self.access == "store":
-            words = (f"{total} apps from the store, minus what is not for this "
-                     "account. Pick a category, or search."
-                     if total else "The store is on its way.")
+            words = (f"{total} {'app' if total == 1 else 'apps'} available for your account. "
+                     "Browse a category or search by name."
+                     if total else "No apps available yet.")
             if not self.ready:
-                words += (" The rest of the store is still being downloaded; "
-                          "the approved apps are here already.")
+                words += (" The app list is still downloading. Approved apps are available now.")
             return words
         if total:
-            return (f"{total} apps an administrator has approved for this computer. "
-                    "Pick a category, or search.")
-        return ("An administrator chooses which apps this computer may install, "
-                "in KosherOS Admin.")
+            return (f"{total} approved {'app' if total == 1 else 'apps'}. "
+                    "Browse a category or search by name.")
+        return ("Ask an administrator to approve apps in KosherOS Admin.")
 
     def _on_tile(self, _box, child) -> None:
         self.show_shelf(getattr(child, "key", "all"))
@@ -701,6 +793,7 @@ class Window(Adw.ApplicationWindow):
     # -- searching and browsing ------------------------------------------------------
 
     def show_shelf(self, key: str) -> None:
+        self._close_details()
         self.shelf = key
         self.page = PAGE_SIZE
         self.stack.set_visible_child_name("browse")
@@ -712,6 +805,7 @@ class Window(Adw.ApplicationWindow):
         text = self.search.get_text().strip()
         self.page = PAGE_SIZE
         if text and self.stack.get_visible_child_name() != "browse":
+            self._close_details()
             # Searching takes you into the shelves, across everything.
             self.shelf = "all"
             self.stack.set_visible_child_name("browse")
@@ -754,33 +848,32 @@ class Window(Adw.ApplicationWindow):
         if not shown:
             self.results.set_visible_child_name("empty")
             self.more.set_visible(False)
-            if not self.catalog and self.access == "store":
-                self.empty.set_title("The store is on its way")
+            if self.search.get_text().strip():
+                self.empty.set_title("No matching apps")
+                self.empty.set_description("Try another search or choose a different category.")
+            elif self.shelf == "updates":
+                self.empty.set_title("No updates listed")
+                self.empty.set_description("Choose “Check for updates” to look for new versions.")
+            elif self.shelf == "installed":
+                self.empty.set_title("No apps installed")
+                self.empty.set_description("Apps you install appear here. Administrators can remove them.")
+            elif self.shelf == "installing":
+                self.empty.set_title("No app changes in progress")
+                self.empty.set_description("Installations, updates and removals appear here.")
+            elif not self.catalog and self.access == "store" and not self.ready:
+                self.empty.set_title("Downloading the app list")
                 self.empty.set_description(
                     "This computer is still downloading the list of apps. "
                     "Try again in a few minutes.")
+            elif not self.catalog and self.access == "store":
+                self.empty.set_title("No apps available")
+                self.empty.set_description("Ask an administrator to review your app access settings.")
             elif not self.catalog:
                 self.empty.set_title("No apps are approved yet")
                 self.empty.set_description(
-                    "An administrator chooses which apps this computer may install, "
-                    "in KosherOS Admin.")
-            elif self.search.get_text().strip():
-                self.empty.set_title("Nothing matches that")
-                self.empty.set_description("Try a different word, or another category.")
-            elif self.shelf == "updates":
-                self.empty.set_title("Everything is up to date")
-                self.empty.set_description("Installed apps are updated from here when a "
-                                           "newer build is available.")
-            elif self.shelf == "installed":
-                self.empty.set_title("Nothing is installed yet")
-                self.empty.set_description("Apps you install from here appear in this "
-                                           "list, and can be removed from it.")
-            elif self.shelf == "installing":
-                self.empty.set_title("Nothing is being installed")
-                self.empty.set_description("An app appears here while it is being "
-                                           "installed, updated or removed.")
+                    "Ask an administrator to approve apps in KosherOS Admin.")
             else:
-                self.empty.set_title("Nothing in this category")
+                self.empty.set_title("No apps in this category")
                 self.empty.set_description("Try another category.")
             return
         self.results.set_visible_child_name("grid")
@@ -789,6 +882,9 @@ class Window(Adw.ApplicationWindow):
             self.cards[card.ref] = card
             child = Gtk.FlowBoxChild()
             child.set_child(card)
+            child.set_cursor_from_name("pointer")
+            child.update_property([Gtk.AccessibleProperty.LABEL],
+                                  [f"View details for {app.get('name', app['ref'])}"])
             self.grid.append(child)
         left = len(shown) - self.page
         self.more.set_visible(left > 0)
@@ -813,7 +909,7 @@ class Window(Adw.ApplicationWindow):
             self._render()
             self.toast(f"{len(found)} app can be updated" if len(found) == 1
                        else f"{len(found)} apps can be updated" if found
-                       else "Every app is up to date")
+                       else "No app updates found")
 
         def failed(e):
             self.check_button.set_sensitive(True)
@@ -846,6 +942,7 @@ class Window(Adw.ApplicationWindow):
         card = self.cards.get(ref)
         if card is not None:
             card.set_state("working", percent, status)
+        self._sync_detail_action()
         if fresh:
             # Something this window did not start — the admin app, or an
             # update — is now in hand. It belongs on the Installing shelf.

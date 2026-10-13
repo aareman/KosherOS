@@ -532,6 +532,14 @@ class DemoClient:
     def list_installed_details(self): return list(self.installed)
     def set_user_apps(self, uid, refs): self._user(uid)["apps"] = list(refs)
     def install_app(self, ref):
+        self._install_app(ref)
+
+    def install_app_for(self, uid: int, ref: str) -> None:
+        """Simulate an administrator installing for the selected account."""
+        account = self._user(uid)
+        self._install_app(ref, installed_by=account["username"], installed_by_uid=uid)
+
+    def _install_app(self, ref, installed_by="you", installed_by_uid=None):
         """Pretend to install: progress over a second, then finished."""
         from gi.repository import GLib
 
@@ -545,8 +553,11 @@ class DemoClient:
                 GLib.timeout_add(250, tick, i + 1)
             else:
                 name = next((a["name"] for a in self.catalog if a["ref"] == ref), ref)
-                self.installed.append({"ref": ref, "name": name, "installed_by": "you",
-                                       "approved": True})
+                entry = {"ref": ref, "name": name, "installed_by": installed_by,
+                         "approved": True}
+                if installed_by_uid is not None:
+                    entry["installed_by_uid"] = installed_by_uid
+                self.installed.append(entry)
                 if self._on_finished:
                     self._on_finished(ref, True, "")
             return False

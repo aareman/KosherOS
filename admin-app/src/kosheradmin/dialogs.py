@@ -31,7 +31,8 @@ class WhitelistDialog(Adw.Dialog):
         save.connect("clicked", lambda _b: (on_save(self.domains), self.close()))
         header.pack_end(save)
 
-        self.entry = Gtk.Entry(placeholder_text="example.com  (includes subdomains)",
+        self.entry = Gtk.Entry(placeholder_text="example.com",
+                               tooltip_text="Enter a domain. Subdomains are included.",
                                hexpand=True)
         self.entry.connect("activate", lambda _e: self._add())
         add_btn = Gtk.Button(icon_name="list-add-symbolic", tooltip_text="Add domain")
@@ -132,9 +133,8 @@ class RulesDialog(Adw.Dialog):
         add_box.append(block_btn)
 
         hint = Gtk.Label(
-            label="Checked from top to bottom; the first rule that matches wins. "
-                  "Anything not matched is allowed — end with a “block *” rule to "
-                  "allow only what is listed above it.",
+            label=("Rules are checked from top to bottom. The first match applies. Other pages "
+                "use the normal filter settings. Add “block *” last to block all other pages."),
             wrap=True, xalign=0, margin_start=14, margin_end=14, margin_bottom=8)
         hint.add_css_class("dim-label")
         hint.add_css_class("caption")
@@ -175,7 +175,7 @@ class RulesDialog(Adw.Dialog):
         clear(self.list_box)
         if not self.rules:
             row = Adw.ActionRow(title="No rules yet",
-                                subtitle="Every page is allowed (behind the DNS filter)")
+                                subtitle="No custom rules. The account’s filter settings apply.")
             row.set_sensitive(False)
             self.list_box.append(row)
             return
@@ -246,8 +246,7 @@ class ListEditDialog(Adw.Dialog):
 
         self.removed_group = Adw.PreferencesGroup(
             title="Removed here",
-            description="Entries that ship with KosherOS but are switched "
-                        "off on this computer.")
+            description="Built-in entries disabled on this computer.")
         minus = Gtk.Button(icon_name="list-add-symbolic",
                            valign=Gtk.Align.CENTER)
         minus.connect("clicked", lambda _b: self._remove_dialog())
@@ -311,7 +310,7 @@ class ListEditDialog(Adw.Dialog):
         self.summary.set_title(" · ".join(parts))
 
         _fill(self.added_list, added,
-              "Nothing added. The shipped list covers the common cases.",
+              "No custom entries. The built-in list is still active.",
               self._drop_added)
         _fill(self.removed_list, self.remove,
               "Nothing removed.", self._restore_removed)
@@ -346,7 +345,7 @@ class ListEditDialog(Adw.Dialog):
             group.add(replacement)
         elif self.name == "content-terms.json":
             level = Adw.ComboRow(
-                title="How bad is it",
+                title="Content level",
                 model=Gtk.StringList.new([label for _k, label, _w in labels.CONTENT_LEVELS]))
             level.set_subtitle("No single word blocks a page on its own.")
             group.add(level)
@@ -389,8 +388,7 @@ class ListEditDialog(Adw.Dialog):
     def _remove_dialog(self) -> None:
         dialog = Adw.AlertDialog(
             heading=f"Switch off a shipped {self.noun}",
-            body="Type it exactly as it appears. It stays in the shipped "
-                 "list; this computer simply stops using it.")
+            body="Enter the exact text to disable this entry on this computer.")
         entry = Gtk.Entry(placeholder_text=self.noun)
         dialog.set_extra_child(entry)
         dialog.add_response("cancel", "Cancel")
@@ -444,12 +442,9 @@ class SavePresetDialog(Adw.Dialog):
 
         page = Adw.PreferencesPage()
         group = Adw.PreferencesGroup(
-            description="Everything on this account — filter mode, blocked "
-                        "content, pictures, language, YouTube, app installs — "
-                        "becomes a group. Put other accounts in it and they get "
-                        "these settings; change the group later and they all "
-                        "change. Saving an existing group's name updates that "
-                        "group for everyone in it.")
+            description=("Save this account’s settings as a group to apply them to other accounts. "
+                "Using an existing group name replaces its settings for everyone in that "
+                "group."))
         self.name = Adw.EntryRow(title="Group name")
         self.description = Adw.EntryRow(title="Description (optional)")
         group.add(self.name)
@@ -491,14 +486,14 @@ class RequestsDialog(Adw.Dialog):
     """
 
     def __init__(self, win, requests: list[dict]):
-        super().__init__(title="Waiting for you", content_width=680,
+        super().__init__(title="Access requests", content_width=680,
                          content_height=560)
         self.win = win
         self.requests = list(requests)
         header = Adw.HeaderBar()
         self.group = Adw.PreferencesGroup(
-            description="Pages someone on this computer has asked for. "
-                        "Nothing has changed until you allow one.")
+            description=("Review requests to open blocked pages. Pages stay blocked until you approve "
+                "them."))
         page = Adw.PreferencesPage()
         page.add(self.group)
         page.set_vexpand(True)
@@ -515,7 +510,7 @@ class RequestsDialog(Adw.Dialog):
             self.group.remove(row)
         self.rows = []
         if not self.requests:
-            row = Adw.ActionRow(title="Nothing is waiting",
+            row = Adw.ActionRow(title="No pending requests",
                                 subtitle="Every request has been answered.")
             self.group.add(row)
             self.rows.append(row)
@@ -580,7 +575,7 @@ class RequestRow(Adw.PreferencesRow):
 
         def refuse():
             win.call(lambda: win.client.dismiss_request(request["id"]),
-                     done_msg=None, on_done=lambda: done("Request turned down"))
+                     done_msg=None, on_done=lambda: done("Request declined"))
 
         buttons = Gtk.Box(spacing=6, margin_top=6)
         if request.get("mode") == "whitelist":
@@ -592,13 +587,13 @@ class RequestRow(Adw.PreferencesRow):
             allow.connect("clicked", lambda _b: grant(True))
             buttons.append(allow)
         else:
-            page = small_button("Just this page", "suggested-action")
+            page = small_button("Allow this page", "suggested-action")
             page.connect("clicked", lambda _b: grant(False))
-            site = small_button(f"All of {host}")
+            site = small_button(f"Allow {host}")
             site.connect("clicked", lambda _b: grant(True))
             buttons.append(page)
             buttons.append(site)
-        no = small_button("No", "flat")
+        no = small_button("Decline", "flat")
         no.connect("clicked", lambda _b: refuse())
         buttons.append(no)
         body.append(buttons)
@@ -640,8 +635,7 @@ class ApproveChannelDialog(Adw.AlertDialog):
     def __init__(self, win, approved: list[str], on_pick):
         super().__init__(
             heading="Approve a channel",
-            body="Search for it by name, or paste its handle (@example), "
-                 "its ID (UC…) or the address of its page.")
+            body="Search by channel name, or paste a channel link, @handle or ID.")
         self.win = win
         self.approved = set(approved)
         self.on_pick = on_pick
@@ -777,7 +771,7 @@ class HealthDialog(Adw.Dialog):
     """Everything the filter status has to say, in full sentences."""
 
     def __init__(self, win, rows: list[tuple[str, str, bool]]):
-        super().__init__(title="Is the filter working?", content_width=560,
+        super().__init__(title="Filter status", content_width=560,
                          content_height=480)
         header = Adw.HeaderBar()
         group = Adw.PreferencesGroup()
@@ -802,8 +796,8 @@ def guardian_dialog(win) -> Adw.AlertDialog:
     enabled = win.policy["guardian"]["enabled"]
     dialog = Adw.AlertDialog(
         heading="Guardian password",
-        body="A second password (e.g. the other spouse's) required for any "
-             "filter change.")
+        body=("An additional password required to reduce filtering restrictions. It is "
+            "requested once per session."))
     box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
     old = Gtk.PasswordEntry(show_peek_icon=True)
     new = Gtk.PasswordEntry(show_peek_icon=True)
@@ -815,9 +809,9 @@ def guardian_dialog(win) -> Adw.AlertDialog:
     dialog.set_extra_child(box)
     dialog.add_response("cancel", "Cancel")
     if enabled:
-        dialog.add_response("disable", "Disable Guardian")
+        dialog.add_response("disable", "Disable guardian password")
         dialog.set_response_appearance("disable", Adw.ResponseAppearance.DESTRUCTIVE)
-    dialog.add_response("ok", "Set Password")
+    dialog.add_response("ok", "Set password")
     dialog.set_response_appearance("ok", Adw.ResponseAppearance.SUGGESTED)
     dialog.set_default_response("ok")
     dialog.set_close_response("cancel")
@@ -853,7 +847,7 @@ def unmanaged_users(policy: dict) -> list[str]:
 
 def add_person_dialog(win, adopt_mode: bool) -> Adw.AlertDialog | None:
     """Create an account, or bring an existing one under management."""
-    title = "Adopt Existing User" if adopt_mode else "Create User Account"
+    title = "Manage existing account" if adopt_mode else "Create account"
     dialog = Adw.AlertDialog(heading=title)
     box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
     group = Adw.PreferencesGroup()
@@ -918,7 +912,7 @@ def add_person_dialog(win, adopt_mode: bool) -> Adw.AlertDialog | None:
     box.append(group)
     dialog.set_extra_child(box)
     dialog.add_response("cancel", "Cancel")
-    dialog.add_response("ok", title.split()[0])
+    dialog.add_response("ok", "Manage" if adopt_mode else "Create")
     dialog.set_response_appearance("ok", Adw.ResponseAppearance.SUGGESTED)
     dialog.set_default_response("ok")
     dialog.set_close_response("cancel")
@@ -933,7 +927,7 @@ def add_person_dialog(win, adopt_mode: bool) -> Adw.AlertDialog | None:
         if adopt_mode:
             username = candidates[name_row.get_selected()]
             win.call(lambda: win.client.adopt_user(username, m),
-                     done_msg=f"Adopted {username}")
+                     done_msg=f"Now managing {username}")
         else:
             username = name.get_text().strip()
             win.call(
@@ -974,8 +968,8 @@ def suggest_username(full_name: str) -> str:
 def confirm_remove_user(win, user: dict) -> None:
     dialog = Adw.AlertDialog(
         heading=f"Remove {user['username']}?",
-        body="Their account and everything in their home folder is "
-             "deleted. This cannot be undone.")
+        body=("This permanently deletes the account and all files in its home folder. This "
+            "cannot be undone."))
     dialog.add_response("cancel", "Cancel")
     dialog.add_response("remove", "Remove")
     dialog.set_response_appearance("remove", Adw.ResponseAppearance.DESTRUCTIVE)
@@ -1004,10 +998,10 @@ def allow_menu(win, uid: int, username: str, url: str, on_done=None) -> Gtk.Menu
             done_msg=f"Allowed {'all of ' if whole else ''}{host} for {username}",
             on_done=on_done))
 
-    page = Gtk.Button(label="Just this page")
+    page = Gtk.Button(label="Allow this page")
     page.add_css_class("flat")
     page.connect("clicked", lambda _b: grant(False))
-    site = Gtk.Button(label=f"All of {host}")
+    site = Gtk.Button(label=f"Allow {host}")
     site.add_css_class("flat")
     site.connect("clicked", lambda _b: grant(True))
     box.append(page)

@@ -41,9 +41,16 @@ CSS = b"""
 }
 .chip.diff { background-color: alpha(@accent_bg_color, 0.18); color: @accent_color; }
 .chip.dim { opacity: 0.6; }
-/* What is being blocked reads blue; what is left open reads amber, so a
-   parent can see at a glance which is which without reading the words. */
-.chip.blocking { background-color: alpha(@accent_bg_color, 0.18); color: @accent_color; }
+/* Blocking controls use red; ordinary switches keep the system accent. */
+.blocking switch:checked, switch.blocking:checked,
+.blocking check:checked {
+  background-color: @error_bg_color;
+  color: @error_fg_color;
+}
+.blocking switch:checked slider, switch.blocking:checked slider {
+  background-color: @error_fg_color;
+}
+.chip.blocking { background-color: alpha(@error_bg_color, 0.16); color: @error_color; }
 .chip.open { background-color: alpha(@warning_bg_color, 0.28); color: @warning_color; }
 .line-open { color: @warning_color; }
 .mode-badge {

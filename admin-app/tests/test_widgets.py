@@ -352,7 +352,7 @@ def test_the_mode_is_a_badge_on_the_persons_page():
     assert open_badge.has_css_class("open")
 
 
-def test_what_is_blocked_reads_blue_and_what_is_open_reads_amber():
+def test_what_is_blocked_reads_red_and_what_is_open_reads_amber():
     page, _w, _u = _detail(mode="filtered", media_level="none",
                            youtube={"restrict": "none"})
     chips = [w for w in _walk(page) if w.has_css_class("chip")]
@@ -400,7 +400,7 @@ def test_the_requests_dialog_shows_why_and_answers_inline():
     assert "“for school”" in row.get_subtitle()
     buttons = [w for w in _buttons(row)]
     labels_ = [b.get_label() for b in buttons]
-    assert labels_ == ["Just this page", "All of youtube.com", "No"]
+    assert labels_ == ["Allow this page", "Allow youtube.com", "Decline"]
     buttons[1].emit("clicked")
     drain()
     assert granted == {"id": "a" * 32, "whole_site": True}
@@ -423,7 +423,7 @@ def test_a_whitelist_request_offers_only_the_whole_site():
     request = {"id": "b" * 32, "uid": 1001, "username": "shmuli", "mode": "whitelist",
                "url": "https://chinuch.org/x", "asked": 0}
     row = dialogs.request_row(win, request)
-    assert [b.get_label() for b in _buttons(row)] == ["Allow chinuch.org", "No"]
+    assert [b.get_label() for b in _buttons(row)] == ["Allow chinuch.org", "Decline"]
 
 
 def test_every_reportable_problem_produces_a_row():
@@ -553,7 +553,7 @@ def test_protection_is_one_page_with_the_health_the_ads_and_the_guardian():
     for _n, list_title, _d, _u in labels.EDITABLE_LISTS:  # the word lists, inline
         assert list_title in titles
     guardian = _row_named(page, "Guardian password")
-    assert guardian.get_subtitle().startswith("On.")
+    assert guardian.get_subtitle().startswith("Enabled.")
 
 
 def test_switching_ad_blocking_off_goes_through_the_guardian():
@@ -589,7 +589,7 @@ def test_a_supervised_account_can_be_let_back_in_after_a_forgotten_password():
     page = detail.UserDetailPage(win, user)
     drain()
     page.stack.set_visible_child_name("account")
-    row = _row_named(page, "Reset the password")
+    row = _row_named(page, "Reset password")
     assert row.get_sensitive()
     dialog = page._confirm_reset_password(user)
     dialog.emit("response", "yes")
@@ -605,7 +605,7 @@ def test_an_administrators_password_is_not_reset_from_here():
     page = detail.UserDetailPage(win, user)
     drain()
     page.stack.set_visible_child_name("account")
-    row = _row_named(page, "Reset the password")
+    row = _row_named(page, "Reset password")
     assert not row.get_sensitive()
     assert "Settings" in row.get_subtitle()
 
@@ -624,11 +624,11 @@ def test_the_guest_is_set_up_by_kind_of_internet_not_preset():
     win.policy = {"revision": 1, "users": [], "guardian": {"enabled": False},
                   "guest": {"enabled": True, "mode": "whitelist", "whitelist": []}}
     page = family.GuestPage(win)
-    combo = _row_named(page, "Start the guest off with")
+    combo = _row_named(page, "Guest filter mode")
     options = [combo.get_model().get_string(i) for i in range(combo.get_model().get_n_items())]
     assert options == [labels.MODE_LABELS[m] for m in ("none", "whitelist", "dnsfilter",
                                                         "filtered", "unfiltered")]
-    assert options[combo.get_selected()] == "Whitelist only"
+    assert options[combo.get_selected()] == "Approved sites only"
     combo.set_selected(options.index("Filtered internet"))
     drain()
     assert sent == {"enabled": True, "mode": "filtered"}
@@ -649,7 +649,7 @@ def test_an_enabled_guest_opens_the_same_page_as_anyone_without_an_apps_tab():
     assert names == ["overview", "filtering", "media", "youtube", "time", "account"]
     titles = {r.get_title() for r in _rows(page)}
     assert "Guest account is on" in titles
-    assert "Administrator" not in titles and "Remove This Account…" not in titles
+    assert "Administrator" not in titles and "Remove account…" not in titles
     # Every filter setting is there to change.
     for title in ("Filter mode", "Pictures and video", "Bad language", "Restricted Mode",
                   "Page rules"):
@@ -746,8 +746,8 @@ def test_every_kind_of_event_renders():
     titles = [r.get_title() for r in _rows(page.feed)]
     assert titles == ["Blocked roblox.com/games",
                       "Hid pictures on shop.example/dress",
-                      "Refused a video on tube.example/v",
-                      "Would not search for “bad words”",
+                      "Blocked video on tube.example/v",
+                      "Blocked search: “bad words”",
                       "yosef: filter mode → DNS filter"]
     change = _rows(page.feed)[-1]
     assert change.get_subtitle().startswith("avi, ")
@@ -813,8 +813,8 @@ def test_every_setting_made_the_move():
     titles = {r.get_title() for r in _rows(page)}
     for title in ("Group", "Filter mode", "Approved sites", "Page rules",
                   "Pictures and video", "Bad language", "Restricted Mode",
-                  "Can install apps", "Which apps", "Allow Wi-Fi sign-in",
-                  "Administrator", "Layout", "Remove This Account…"):
+                  "Can install apps", "Available apps", "Allow Wi-Fi sign-in",
+                  "Administrator", "Layout", "Remove account…"):
         assert title in titles, f"{title} was lost in the move"
 
 
@@ -908,12 +908,12 @@ def _apps_tab(**kw):
 
 def test_the_apps_tab_offers_the_approved_list_or_the_whole_store():
     page, _w, _u = _apps_tab()
-    combo = _row_named(page, "Which apps")
+    combo = _row_named(page, "Available apps")
     model = combo.get_model()
     assert [model.get_string(i) for i in range(model.get_n_items())] == [
-        "Approved apps only", "The whole store, minus what is blocked"]
+        "Approved apps only", "All available apps"]
     assert combo.get_selected() == 0, "an account starts on the approved list"
-    assert any("strict choice" in t for t in _texts(page))
+    assert any("Only apps approved" in t for t in _texts(page))
 
 
 def test_opening_the_store_goes_through_the_guardian_and_says_what_it_means():
@@ -930,11 +930,11 @@ def test_opening_the_store_goes_through_the_guardian_and_says_what_it_means():
     page = detail.UserDetailPage(win, user)
     page.stack.set_visible_child_name("apps")
     drain()
-    combo = _row_named(page, "Which apps")
+    combo = _row_named(page, "Available apps")
     combo.set_selected(1)
     drain()
     assert ("set_user_app_access", 1001, "store") in win.client.calls
-    assert any("nudity" in t and "approves them by name" in t for t in _texts(page))
+    assert any("adult content" in t and "individual approval" in t for t in _texts(page))
 
 
 def test_every_kind_of_app_has_a_switch_and_blocking_one_is_saved():
@@ -1014,8 +1014,8 @@ def test_an_installed_app_says_why_this_account_cannot_run_it():
     assert "not approved" in texts
     switches = {r.get_title(): [c for c in _suffixes(r) if isinstance(c, Gtk.Switch)][0]
                 for r in _rows(page.apps_list)}
-    assert not switches["Firefox"].get_active() and switches["Firefox"].get_sensitive()
-    assert not switches["Chess"].get_active() and not switches["Chess"].get_sensitive()
+    assert switches["Firefox"].get_active() and switches["Firefox"].get_sensitive()
+    assert switches["Chess"].get_active() and not switches["Chess"].get_sensitive()
 
 
 def _suffixes(row, found=None):
@@ -1033,11 +1033,11 @@ def test_the_apps_chip_names_the_list_and_the_blocks():
     assert labels.apps_line(a_user(can_install_apps=True)) == (
         "Approved apps only, can install", True)
     assert labels.apps_line(a_user(app_access="store", can_install_apps=True)) == (
-        "The whole store, can install", False)
+        "All available apps, can install", False)
     assert labels.apps_line(a_user(app_access="store", blocked_app_kinds=["games", "internet"],
                                    can_install_apps=True)) == (
-        "The whole store, 2 kinds blocked, can install", True)
-    assert labels.apps_line({"uid": 1, "admin": True}) == ("The whole store, can install", False)
+        "All available apps, 2 kinds blocked, can install", True)
+    assert labels.apps_line({"uid": 1, "admin": True}) == ("All available apps, can install", False)
 
 
 def test_drift_names_app_changes_in_words():
@@ -1046,7 +1046,7 @@ def test_drift_names_app_changes_in_words():
         {"field": "blocked_app_kinds", "added": ["games"], "removed": ["music"]},
         {"field": "blocked_apps", "added": ["a", "b"], "removed": []},
     ])
-    assert lines == ["The whole store", "Games apps also blocked", "Music apps not blocked",
+    assert lines == ["All available apps", "Games apps also blocked", "Music apps not blocked",
                      "2 more apps blocked"]
 
 
@@ -1071,7 +1071,7 @@ def test_the_overview_shows_what_was_blocked_today_with_allow():
     menus = _menu_buttons(page.blocked_group)
     assert len(menus) == 1
     page_btn = next(b for b in _buttons(menus[0].get_popover())
-                    if b.get_label() == "Just this page")
+                    if b.get_label() == "Allow this page")
     page_btn.emit("clicked")
     drain()
     assert allowed == {"uid": 1001, "url": "https://roblox.com/games", "whole": False}
@@ -1193,8 +1193,8 @@ def test_a_greyed_out_row_says_why():
     page, _w, _u = _detail(mode="unfiltered")
     for title in ("Pictures and video", "Bad language"):
         row = _row_named(page, title)
-        assert "enforces nothing" in row.get_subtitle(), title
-    assert "Whitelist only" in _row_named(page, "Approved sites").get_subtitle()
+        assert "Content filtering is off" in row.get_subtitle(), title
+    assert "Approved sites only" in _row_named(page, "Approved sites").get_subtitle()
 
 
 # -- the youtube tab saves as you go --------------------------------------------
@@ -1501,7 +1501,7 @@ def test_the_detail_page_offers_the_familys_groups_and_no_group():
                for i in range(combo.get_model().get_n_items())]
     assert labels_ == ["Mine", "Kids", "No group"], "the family's groups, nothing shipped"
     assert labels_[combo.get_selected()] == "Mine"
-    assert "Delete This Group…" in {r.get_title() for r in _rows(page)}
+    assert "Delete group…" in {r.get_title() for r in _rows(page)}
     assert "In the Mine group" in _texts(page)
 
 
@@ -1627,7 +1627,7 @@ def test_update_now_shows_a_bar_that_follows_the_daemon_and_says_when_to_restart
     assert page.progress.get_text() == "Updating…"
     win.client.on_update_finished(True, "")
     assert not page.progress.get_visible() and page.apply_button.get_sensitive()
-    assert "Restart the computer" in page.status_row.get_subtitle()
+    assert "Restart to apply" in page.status_row.get_subtitle()
     assert any("Update ready" in t for t in win.toasts)
 
 
@@ -1897,6 +1897,48 @@ def test_the_demo_client_answers_everything_the_real_client_does():
     demo = {n for n, _ in inspect.getmembers(DemoClient, inspect.isfunction)
             if not n.startswith("_")}
     assert real <= demo, real - demo
+
+
+def test_demo_installs_preserve_each_target_and_emit_progress(monkeypatch):
+    from collections import deque
+
+    from gi.repository import GLib
+    from kosherd.demo import DemoClient
+
+    # Run the simulated timers without waiting, interleaving the installs.
+    pending = deque()
+    monkeypatch.setattr(GLib, "timeout_add",
+                        lambda _ms, callback, *args: pending.append((callback, args)))
+    client = DemoClient()
+    progress, finished = [], []
+    client.connect_app_signals(lambda *args: progress.append(args),
+                               lambda *args: finished.append(args))
+    targets = client.policy["users"][:2]
+    refs = ["nixpkgs#demo-one", "nixpkgs#demo-two", "org.example.Demo"]
+    client.catalog = [{"ref": ref, "name": f"Demo {i}"} for i, ref in enumerate(refs)]
+    for account, ref in zip(targets, refs):
+        client.install_app_for(account["uid"], ref)
+    client.install_app(refs[-1])
+    assert not set(refs) & set(client.list_installed())
+
+    while pending:
+        callback, args = pending.popleft()
+        callback(*args)
+
+    installed = {entry["ref"]: entry for entry in client.list_installed_details()}
+    for account, ref in zip(targets, refs):
+        assert installed[ref]["installed_by"] == account["username"]
+        assert installed[ref]["installed_by_uid"] == account["uid"]
+    assert installed[refs[-1]]["installed_by"] == "you"
+    for i, ref in enumerate(refs):
+        assert installed[ref]["name"] == f"Demo {i}"
+        assert [percent for app_ref, percent, _status in progress if app_ref == ref] == \
+            [20, 60, 90, 100]
+        assert finished.count((ref, True, "")) == 1
+
+    with pytest.raises(ValueError, match="not managed"):
+        client.install_app_for(-1, "org.example.Unknown")
+    assert not pending
 
 
 def test_the_demo_family_drives_every_screen():
@@ -2281,17 +2323,17 @@ def test_a_whitelist_account_is_not_asked_which_kinds_of_site_to_block():
     page, _w, _u = _detail(mode="whitelist")
     drain()
     titles = {r.get_title() for r in _rows(page)}
-    assert "Blocked kinds of sites" not in {g.get_title() for g in _groups(page)}
+    assert "Blocked site categories" not in {g.get_title() for g in _groups(page)}
     assert "Approved sites" in {g.get_title() for g in _groups(page)}
     assert "Torah study" in titles and "Email and files" in titles
-    assert "This family's own list" in titles
+    assert "Custom sites" in titles
 
 
 def test_a_filtered_account_still_gets_the_category_grid():
     page, _w, _u = _detail(mode="filtered")
     drain()
     groups = {g.get_title() for g in _groups(page)}
-    assert "Blocked kinds of sites" in groups
+    assert "Blocked site categories" in groups
     assert "Approved sites" not in groups
 
 
@@ -2365,7 +2407,7 @@ def test_the_time_tab_has_the_limit_the_presets_and_the_calendar():
     combo = _row_named(page, "Daily limit")
     options = [combo.get_model().get_string(i) for i in range(combo.get_model().get_n_items())]
     assert options == ["No daily limit", "30 minutes a day", "1 hour a day", "2 hours a day",
-                       "3 hours a day", "A different amount…"]
+                       "3 hours a day", "Custom limit…"]
     assert options[combo.get_selected()] == "No daily limit", "nothing is set until you set it"
     assert not _row_named(page, "Minutes a day").get_visible()
     labels_ = [b.get_label() for b in _buttons(page) if b.get_label()]
@@ -2461,7 +2503,7 @@ def test_an_administrator_cannot_be_limited_and_the_tab_says_so():
     page, _s, _u = _time_page(admin=True)
     titles = {r.get_title() for r in _rows(page)}
     assert "Daily limit" not in titles and "Administrator" in titles
-    assert any("never limited" in (r.get_subtitle() or "") for r in _rows(page)
+    assert any("Time limits do not apply" in (r.get_subtitle() or "") for r in _rows(page)
                if isinstance(r, Adw.ActionRow))
     assert not hasattr(page, "schedule_grid")
 
@@ -2498,8 +2540,8 @@ def test_the_calendar_draws_allowed_and_blocked_hours_in_two_colours():
     allowed = pixel(x, schedule.HEADER + 10 * schedule.CELL_HEIGHT + 8)   # 10:00
     blocked = pixel(x, schedule.HEADER + 23 * schedule.CELL_HEIGHT + 8)   # 23:00
     assert allowed != blocked
-    # BGRA: the allowed (amber) cell is redder than blue; the blocked one bluer.
-    assert allowed[2] > allowed[0] and blocked[0] > blocked[2]
+    # BGRA: the allowed (amber) cell is redder than blue; the blocked cell is red.
+    assert allowed[2] > allowed[0] and blocked[2] > blocked[0] and blocked[2] > blocked[1]
 
 
 def test_dragging_paints_a_rectangle_and_saves_once():
@@ -2581,7 +2623,7 @@ def test_a_filtered_account_gets_the_video_calls_switch_and_the_extra_ports_row(
     row = _row_named(page, "Video calls")
     assert row.get_active(), "on by default: school calls must work unconfigured"
     # The sentence says what "on" costs, in words a parent can read.
-    assert "cannot read" in row.get_subtitle()
+    assert "cannot be filtered" in row.get_subtitle()
     _row_named(page, "Extra ports (advanced)")
 
 
@@ -2599,6 +2641,40 @@ def test_turning_video_calls_off_calls_the_daemon_with_the_ports_kept():
 
 def test_a_whitelist_account_is_told_there_is_nothing_to_set():
     _win, page = _detail_for(a_user(mode="whitelist"))
-    _row_named(page, "Not in this mode")
+    _row_named(page, "Unavailable in this mode")
     with pytest.raises(AssertionError):
         _row_named(page, "Video calls")
+
+
+def test_installed_app_switch_on_blocks_and_off_unblocks():
+    class Recording(FakeClient):
+        def set_user_blocked_apps(self, uid, refs, pw=""):
+            self.calls.append(("set_user_blocked_apps", uid, list(refs)))
+
+    client = Recording()
+    win = FakeWindow(client)
+    user = a_user()
+    win.policy = {"users": [user], "guardian": {"enabled": False}}
+    page = detail.UserDetailPage(win, user)
+    entry = {"ref": "org.gnome.Chess", "name": "Chess", "approved": True,
+             "categories": ["Game"], "kind": "games", "rating": {}}
+    row = page._app_row(user, entry)
+    switch = next(w for w in _suffixes(row) if isinstance(w, Gtk.Switch))
+    assert not switch.get_active()
+    assert switch.has_css_class("blocking")
+    switch.set_active(True)
+    drain()
+    assert client.calls[-1] == ("set_user_blocked_apps", user["uid"], [entry["ref"]])
+    switch.set_active(False)
+    drain()
+    assert client.calls[-1] == ("set_user_blocked_apps", user["uid"], [])
+
+
+def test_blocking_style_is_limited_to_blocking_controls():
+    page, _win, _user = _detail()
+    drain()
+    assert all(row.has_css_class("blocking") for row in page.kind_rows.values())
+    assert all(row.has_css_class("blocking") for row in page.kind_switches.values())
+    assert all(check.has_css_class("blocking") for check in page.checks.values())
+    assert not _row_named(page, "Video calls").has_css_class("blocking")
+    assert not _row_named(page, "Can install apps").has_css_class("blocking")

@@ -18,6 +18,24 @@ RUN mkdir -p /out && ( git clone --depth 1 --branch "${ARCMENU_REF}" \
     && grep -q '"50"' /out/usr/share/gnome-shell/extensions/arcmenu@arcmenu.com/metadata.json \
     || { echo "WARNING: ArcMenu did not build"; rm -rf /out/usr; touch /out/FAILED; } )
 
+# Aura Glass's shell styling and patched Blur My Shell, built separately so
+# an optional ArcMenu failure cannot discard these assets. Fail closed on a
+# source/patch mismatch rather than shipping half of the desktop appearance.
+FROM quay.io/fedora/fedora:44 as glass-build
+ARG AURA_GLASS_REF=ac8253097b88bac1c9dea58dff67fcee8217d847
+ARG BLUR_MY_SHELL_REF=425761d5504941899cfb8cda24202d829024c622
+RUN dnf -y install git-core make gnome-shell glib2-devel gettext unzip python3 && dnf clean all
+RUN git init /tmp/aura-glass \
+    && git -C /tmp/aura-glass remote add origin https://github.com/DevWebeloper/aura-glass \
+    && git -C /tmp/aura-glass fetch --depth 1 origin "$AURA_GLASS_REF" \
+    && git -C /tmp/aura-glass checkout --detach FETCH_HEAD \
+    && git init /tmp/blur-my-shell \
+    && git -C /tmp/blur-my-shell remote add origin https://github.com/aunetx/blur-my-shell \
+    && git -C /tmp/blur-my-shell fetch --depth 1 origin "$BLUR_MY_SHELL_REF" \
+    && git -C /tmp/blur-my-shell checkout --detach FETCH_HEAD
+COPY os-image/desktop/ /build-glass/
+RUN bash /build-glass/build-glass.sh /tmp/aura-glass /tmp/blur-my-shell /out
+
 FROM quay.io/fedora/fedora-bootc:44
 
 # --- Packages ---------------------------------------------------------------
@@ -53,6 +71,7 @@ RUN dnf -y install dnsmasq nftables python3-gobject python3-jsonschema python3-p
         # separate niri session with the Noctalia shell, plus the portal
         # backend Flatpak apps need outside GNOME.
         gnome-shell-extension-dash-to-panel gnome-shell-extension-appindicator \
+        gnome-shell-extension-user-theme \
         niri noctalia xdg-desktop-portal-gtk \
         # Hebrew, properly: the Culmus family (David, Frank Ruehl, Hadasim,
         # Miriam, Nachlieli, Taamey Frank with te'amim), Noto Sans/Serif
@@ -124,6 +143,8 @@ RUN if [ -e /tmp/gnome-ext/FAILED ]; then \
         cp -a /tmp/gnome-ext/usr/. /usr/ \
         && glib-compile-schemas /usr/share/glib-2.0/schemas; \
     fi; rm -rf /tmp/gnome-ext
+
+COPY --from=glass-build /out/usr/ /usr/
 
 # --- Developer tooling: Nix, devenv, devbox (issue #34) -----------------------
 # Fedora packages Nix, daemon and all, so it comes in like everything else
@@ -378,6 +399,13 @@ RUN true \
     # and none can be installed), so lockdown costs the family nothing.
     && printf 'kargs = ["lockdown=integrity", "intel_iommu=on", "mem_sleep_default=s2idle"]\n' \
          > /usr/lib/bootc/kargs.d/20-kosheros-security.toml \
+    # A new account has never seen Dash to Panel's version, so upstream
+    # announces an "update" at its first login. Seed the installed version
+    # at build time instead of hard-coding a value that goes stale.
+    && python3 -c 'import json; from pathlib import Path; \
+        metadata = Path("/usr/share/gnome-shell/extensions/dash-to-panel@jderose9.github.com/metadata.json"); \
+        version = int(json.loads(metadata.read_text())["version"]); \
+        Path("/etc/dconf/db/local.d/21-kosheros-panel-version").write_text("[org/gnome/shell/extensions/dash-to-panel]\nextension-version=%d\n" % version)' \
     && dconf update
 
 

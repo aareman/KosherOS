@@ -73,6 +73,33 @@ that wallpaper, so the advanced desktop looks like this machine. The
 bundled palettes stay a click away in the shell's settings, and a choice
 made there wins over the seed.
 
+### The appearance
+
+The classic taskbar uses a translucent navy background, rounded controls,
+blue running-app indicators, and a cream Apps button. Small margins keep it
+clear of the screen edges. These are editable defaults, not locked settings.
+
+Both GNOME layouts include an Aura Glass **shell preset**: its Quick Settings,
+menus, notifications, and dialog styles over GNOME's base shell theme, tinted
+to match KosherOS. The image builds Blur My Shell with Aura's patches from
+pinned commits; it never runs a theme installer or downloads shell code at
+login. Static wallpaper blur keeps the cost down. App-window blur is off,
+and the notification background stays nearly opaque for readability.
+GTK app themes, icons, fonts, the wallpaper, and the niri session retain their
+existing defaults. This integrates Aura's shell styling, not its full personal
+desktop installer, settings GUI, or update service.
+
+The installed Dash to Panel version is seeded into the machine's dconf defaults
+at image build, preventing the misleading update notice on an account's first
+login. Genuine later updates may still display their notice.
+
+The Store's Fonts category includes Nerd Fonts and standard font families.
+Nix installs them per account; the desktop helper copies their font files into
+that account's font directory so native and Flatpak apps can use them. It
+refreshes the font cache after installation, upgrade, or removal and preserves
+fonts the person added or changed themselves. Already-running apps may need
+reopening to refresh their font lists.
+
 ### The image
 
 - Fedora packages: Dash to Panel, AppIndicator, niri, Noctalia, and the

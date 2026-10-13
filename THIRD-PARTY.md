@@ -80,6 +80,16 @@ licence — but obligations that travel with the binaries still apply.
 Marked "see upstream" or "GPL-family" where the exact version has not yet
 been read at the source. Those are the remaining gaps in this audit.
 
+## GNOME glass appearance
+
+- [Aura Glass](https://github.com/DevWebeloper/aura-glass), MIT, commit
+  `ac8253097b88bac1c9dea58dff67fcee8217d847`: shell CSS and Blur My Shell
+  patches. Its license ships beside the generated KosherOS-Aura shell theme.
+- [Blur My Shell](https://github.com/aunetx/blur-my-shell), GPL-3.0, commit
+  `425761d5504941899cfb8cda24202d829024c622`: built with Aura's overview,
+  subwindow, and notification patches. The extension retains its license;
+  patch sources and exact revisions ship in `/usr/share/doc/kosher-glass`.
+
 ## Trademarks
 
 "Fedora" is a trademark of Red Hat. KosherOS is a remix, not a Fedora

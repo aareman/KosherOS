@@ -1,0 +1,33 @@
+/* KosherOS: navy glass against the cloud wallpaper, with readable surfaces
+ * even if blur is disabled. All sizes are GNOME logical pixels. */
+#panel.dashtopanelMainPanel {
+    border-radius: 16px;
+    color: #f6f8fc;
+}
+#panel.dashtopanelMainPanel .panel-button {
+    border-radius: 10px;
+}
+.popup-menu-content,
+.background-menu .popup-menu-content,
+.modal-dialog,
+.end-session-dialog,
+.switcher-list,
+.workspace-switcher-container,
+.workspace-switcher,
+.resize-popup,
+.app-folder-dialog {
+    background-color: rgba(11, 26, 51, 0.88);
+    color: #f6f8fc;
+}
+.popup-menu-content.quick-settings,
+.quick-settings {
+    background-color: rgba(11, 26, 51, 0.88);
+    color: #f6f8fc;
+}
+.notification-banner {
+    background-color: rgba(11, 26, 51, 0.96);
+    color: #f6f8fc;
+}
+/* Match Blur My Shell's static blur corners. */
+.popup-menu-content { border-radius: 26px; }
+.datemenu-popover, .quick-toggle-menu, .quick-settings { border-radius: 33px; }

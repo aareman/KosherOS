@@ -143,6 +143,9 @@ ACTIONS = {
     "ListStoreApps": ACTION_USE_STORE,
     "ListInstalled": ACTION_USE_STORE,
     "InstallApp": ACTION_USE_STORE,
+    # An administrator installing for an account: an admin's action, not
+    # the store's, which is open to the account alone.
+    "InstallAppFor": ACTION_INSTALL_APPS,
     "ListInstalledDetails": ACTION_READ_CONFIG,
     # Updating an installed, approved app is for everyone the store is for:
     # it widens nothing, and the newer build is the safer one to be on.
@@ -222,7 +225,7 @@ CHANGES = frozenset({
     "DismissRequest", "AllowUrl", "EditList", "SetMediaLevel",
     "SetLanguageFilter", "SetYouTube", "SetUserAdmin", "SetLayout",
     "SetCoverStyle", "SetAdBlock", "SetTimeLimits", "SetNetworkAccess", "SetGuestConfig", "CreateUser",
-    "AdoptUser", "RemoveUser", "ResetPassword", "SetUserApps", "RemoveApp", "ApproveApp",
+    "AdoptUser", "RemoveUser", "ResetPassword", "SetUserApps", "RemoveApp", "InstallAppFor", "ApproveApp",
     "UnapproveApp", "SetUserCanInstall", "SetUserAppAccess",
     "SetUserBlockedAppKinds", "SetUserBlockedApps", "SetCaptiveMode",
     "SetGuardianPassword", "DisableGuardian", "Enrol", "Unenrol",

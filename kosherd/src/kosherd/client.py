@@ -281,6 +281,11 @@ class DaemonClient:
         """Start an install; watch AppProgress/AppFinished for the outcome."""
         self._call("Apps", "InstallApp", "(s)", ref)
 
+    def install_app_for(self, uid: int, ref: str) -> None:
+        """An administrator installs an app for an account (a nixpkgs app
+        goes into that account's own profile). Same signals as install_app."""
+        self._call("Apps", "InstallAppFor", "(is)", uid, ref)
+
     def remove_app(self, ref: str) -> None:
         self._call("Apps", "RemoveApp", "(s)", ref)
 

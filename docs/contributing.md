@@ -127,17 +127,10 @@ never appears in the middle of a long build.
 
 ## Making a change
 
-**Add a test for what you changed.** Put it in the unit layer if you
-possibly can, because that is the layer that runs on every change. Reach
-for the VM suites only when the behaviour involves the kernel, a system
-service or real traffic. UI work gets a widget test that builds the real
-screen on the suite's own virtual display.
-
-**Keep the decision separate from the plumbing.** Where logic was trapped
-behind D-Bus or a typelib, it was moved into a pure function and the caller
-became a thin wrapper. That is why the security-critical parts can be
-asserted exhaustively in milliseconds, and new code should follow the same
-shape.
+**Add a test for what you changed**, and keep the decision separate from
+the plumbing so the test can be a unit test. [Testing](testing.md#writing-a-new-test)
+says where a new test belongs and why the security-critical parts are pure
+functions.
 
 **A failed operation undoes what it already did.** A daemon call that
 fails part-way must leave the machine as it found it. The person on the
@@ -184,12 +177,11 @@ while the product is at 0.x. The major never moves on its own. And it is
 what the release notes are generated from, so write it for the person
 running KosherOS, not for whoever wrote the code.
 
-KosherOS is intended to be released under the GNU Affero General Public
-License v3.0 or later. Sign off your commits with `git commit -s` to say
-you have the right to contribute the work under that licence, as the
+Sign off your commits with `git commit -s` to say you have the right to
+contribute the work under the project's licence, as the
 [Developer Certificate of Origin](https://developercertificate.org/)
-describes. There is no contributor licence agreement and there will not be
-one.
+describes. [Licensing](licensing.md) says what the licence is and why there
+is no contributor licence agreement.
 
 ## Pull requests
 
@@ -203,11 +195,9 @@ every app, and runs shellcheck over every script. It does not build the OS
 image: that is built once, from the merge, so several open pull requests
 do not each cost an eleven-minute build for an image nobody will run.
 
-After a merge, CI tags the commit with its version, builds and signs the
-image if anything that reaches the image changed, publishes it on the
-`edge` channel, writes the release, and rebuilds this site. A merge whose
-tests fail gets no version and its changes appear in the next release's
-notes. [Updates and channels](deployment.md) has the detail.
+After a merge, CI gives the commit its version, publishes the image on the
+`edge` channel, writes the release and rebuilds this site;
+[updates and channels](deployment.md#versions) has the detail.
 
 ## Writing docs
 

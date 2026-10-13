@@ -84,55 +84,37 @@ What an account gets by its kind of internet, before any group:
 | No filtering | open | shown | left alone | open | can install approved apps |
 | The first administrator | adult, gambling, dating and filter bypasses blocked | shown | left alone | open | can install approved apps |
 
-**Approved-site lists.** A Whitelist only account can switch on ready-made
-lists rather than typing domains: **Torah study** (Sefaria, YUTorah,
-TorahAnytime, the Daf Yomi sites, Chabad.org, HebrewBooks and more) and
-**Email and files** (Gmail, Outlook, OneDrive, Drive, Dropbox, Proton,
-iCloud). Both can be on at once, each brings the hosts those sites load
-from, and the family's own list is merged with them.
-
+An approved-sites account can switch on the ready-made **Torah study** and
+**Email and files** lists instead of typing domains; see
+[content filtering](content-filtering.md#ready-made-approved-site-lists).
 The guest account takes any of these by the kind of internet it gets, and
-is wiped at sign‑out. See [content filtering](content-filtering.md) and
-[media filtering](media-filtering.md) for what each layer does.
+is wiped at sign‑out.
 
 ## Time limits
 
-| | On a user account | Notes |
-|---|---|---|
-| A daily limit ("2 hours a day") | supported | Counts active, signed‑in time; idle time is free. Kept across a restart; starts again at midnight. One‑click 30 min / 1 h / 2 h / 3 h / no limit, or any number of minutes. |
-| Allowed hours, painted on a weekly calendar | supported | Presets: Always, After school, Not late at night, Weekdays only. Sign‑in outside the hours is refused at the login screen (`pam_time`). |
-| Warnings before the time is up | supported | Desktop notifications at 15 and 5 minutes and when it ends; then the screen locks and the session is ended a minute later. |
-| What the person sees | supported | My Filter shows their limit, what is left today and today's allowed hours. |
-| Administrator accounts | never limited | A parent must always be able to sign in and change a setting. |
-| The guest account | supported | Limited like any other account. |
-
-Both settings are off until a parent sets them. See
-[time limits](time-limits.md).
+A daily limit of active time and allowed hours on a weekly calendar, per
+user account, with warnings before the time is up. Administrators are
+never limited; the guest account is limited like any other. Both settings
+are off until a parent sets them. See [time limits](time-limits.md).
 
 ## Hardware
 
-See the [minimum and recommended system requirements](install.md#system-requirements)
-before planning a test installation. These are provisional early-testing guidelines,
-not certified minimums. The current image supports Intel/AMD x86_64 PCs, not Apple Silicon or other ARM computers.
-
 | | |
 |---|---|
-| Architecture | x86_64. |
+| Architecture | x86_64 (Intel or AMD). Apple Silicon and other ARM computers are not supported. |
 | Firmware | UEFI and legacy BIOS; Secure Boot works out of the box through Fedora's signed shim. |
-| Picture checking | About 50 ms per picture on a current laptop CPU, 200–300 ms on four cores, near the limit on two: the filter hides pictures instead of checking them when the machine cannot keep up, and says so. See [media filtering](media-filtering.md). |
+| Memory and disk | see the provisional [system requirements](install.md#system-requirements) in the installation guide. |
+| Picture checking | About 50 ms per picture on a current laptop CPU, 200–300 ms on four cores, near the limit on two: the filter hides pictures instead of checking them when the machine cannot keep up, and says so. See [pictures and video](media-filtering.md#running-on-the-familys-own-computer). |
 | The advanced (niri) desktop | needs a real GPU; it does not run in a VM without one. |
 
 ## Updates
 
 | Channel | Who | How it moves |
 |---|---|---|
-| `edge` | the maintainer's own machine | every push to the repository |
+| `edge` | the maintainer's own machine, and testers | every merge that changes the image |
 | `stable` | everyone else | a person promotes a version that has run well on edge |
 
-A machine installed from a release ISO follows its channel, and a parent
-applies updates from the admin app. If an update boots without the filter
-enforcing, the machine goes back to the previous version on its own. The Updates page in KosherOS Admin shows
-both channels and moves the computer between them: the download happens
-straight away and the new version is used from the next restart, with
-accounts, settings and files untouched. Changing it asks for the guardian
-password when one is set. See [updates and channels](deployment.md).
+A parent applies updates from the admin app, which can also move the
+machine between channels and go back to the previous version. If an update
+boots without the filter enforcing, the machine goes back on its own. See
+[updates and channels](deployment.md).

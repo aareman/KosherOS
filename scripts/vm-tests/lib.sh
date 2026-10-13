@@ -83,8 +83,15 @@ assert_that() {
     if "$@"; then ok "$desc"; else bad "$desc"; fi
 }
 
-# Run a command as a test user.
-as() { local u="$1"; shift; runuser -u "$u" -- "$@"; }
+# Run a command as a test user, with that user's HOME and USER: runuser
+# alone keeps root's, and a login shell then set up /root's Nix profile
+# on the PATH and could not find what was installed for the account.
+as() {
+    local u="$1" home
+    shift
+    home=$(getent passwd "$u" | cut -d: -f6)
+    runuser -u "$u" -- env HOME="$home" USER="$u" LOGNAME="$u" "$@"
+}
 
 # Run a command as a test user INSIDE a logind session. The polkit rule
 # for the org.kosherlinux.* actions answers only a local, active session

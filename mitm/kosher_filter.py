@@ -18,6 +18,7 @@ edits take effect without a restart.
 from __future__ import annotations
 
 import base64
+import hashlib
 import ipaddress
 import json
 import logging
@@ -77,6 +78,17 @@ log = logging.getLogger("kosher-filter")
 # site's own origin keeps the scheme, and the proxy answers the request
 # itself — nothing is ever forwarded to the site.
 REQUEST_PATH = "/__kosheros__/request"
+# The page filter (kosher_page.js, beside this file): what the proxy
+# cannot see, the page shows it. Served on every host, cacheable for a
+# day, injected into every page the proxy filters; the words it matches
+# with and the judgement it asks for come back from the same two lists
+# and the same scorer, on the page's own origin, never forwarded.
+SCRIPT_PATH = "/__kosheros__/filter.js"
+WORDS_PATH = "/__kosheros__/words.json"
+JUDGE_PATH = "/__kosheros__/judge"
+PAGE_SCRIPT = Path(__file__).with_name("kosher_page.js")
+# What a page may send to be judged at once; the script batches to this.
+MAX_JUDGED_BYTES = 200_000
 
 BLOCK_STYLE = """
  body { font-family: system-ui, sans-serif; background:#0b1a33; color:#e8eefc;
@@ -893,6 +905,8 @@ class KosherFilter:
                 flow.request.path.split("?", 1)[0] == REQUEST_PATH:
             self._handle_request_form(flow, uid)
             return
+        if self._serve_page_filter(flow, uid):
+            return
 
         query = _search_query(flow)
         if query is not None:
@@ -1191,6 +1205,9 @@ class KosherFilter:
             text = content_mod.visible_text(cleaned[:MAX_SCORED_BYTES])
 
         if level == "none" and not immodest_blocked:
+            # Nothing to judge the page by; the language filter alone,
+            # and the page keeps it for what it adds later.
+            self._inject_page_script(flow, language_filter, judge=False)
             return
         # An explicit ALLOW rule is the administrator overriding the
         # machine's judgement for this page; the content scorer must honour
@@ -1200,6 +1217,7 @@ class KosherFilter:
         action, pattern = decide(self.policy.rules_for(uid),
                                  flow.request.pretty_url)
         if action != BLOCK and pattern is not None:
+            self._inject_page_script(flow, language_filter, judge=False)
             return
         tolerance = self._content_tolerance(
             uid, flow.request.pretty_host or "", stripped)
@@ -1212,6 +1230,149 @@ class KosherFilter:
             self._block(flow, flow.request.pretty_url,
                         f" because the page reads as {verdict.level}",
                         why=f"content:{verdict.level}")
+            return
+        # The page passed as it arrived; what it renders afterwards is
+        # judged by the same scorer, from inside the page.
+        self._inject_page_script(flow, language_filter, judge=True)
+
+    # ---- the page filter: what the page shows after it arrived ----------------
+    #
+    # A chat message, a feed item, a search result fetched as JSON and
+    # drawn by script never passes through the proxy as text. A script of
+    # ours in the page sees it: the same word list, as the same patterns,
+    # over every text node the page adds; and the words the page adds,
+    # sent back here to be judged by the same scorer with the same
+    # tolerance. Three reserved addresses on every host, answered here.
+
+    _page_script_cache: tuple[bytes, str] | None = None
+    _words_cache: tuple[bytes, str] | None = None
+
+    def _page_script(self) -> tuple[bytes, str]:
+        if self._page_script_cache is None:
+            body = PAGE_SCRIPT.read_bytes()
+            self._page_script_cache = (body, '"' + hashlib.sha256(body).hexdigest()[:32] + '"')
+        return self._page_script_cache
+
+    def _words_payload(self) -> tuple[bytes, str]:
+        """The word list as the page needs it: the per-script patterns
+        with their one group, and each word's own pattern and replacement
+        (language.py builds both; the page names a hit the same way)."""
+        if self._words_cache is None:
+            wl = self.wordlist
+            patterns = [{"presence": p.pattern if p is not None else None,
+                         "pattern": pat.pattern}
+                        for p, pat in getattr(wl, "_patterns", [])]
+            words = [[w, language_mod.word_pattern(w), wl.replacements[w]]
+                     for w in getattr(wl, "_order", [])]
+            body = json.dumps({"patterns": patterns, "words": words},
+                              ensure_ascii=False).encode()
+            self._words_cache = (body, '"' + hashlib.sha256(body).hexdigest()[:32] + '"')
+        return self._words_cache
+
+    @staticmethod
+    def _cached(flow: http.HTTPFlow, body: bytes, etag: str, content_type: str) -> None:
+        if flow.request.headers.get("if-none-match") == etag:
+            flow.response = http.Response.make(304, b"", {"ETag": etag, "Cache-Control": "public, max-age=86400"})
+            return
+        flow.response = http.Response.make(
+            200, body, {"Content-Type": content_type, "ETag": etag,
+                        "Cache-Control": "public, max-age=86400",
+                        "X-Content-Type-Options": "nosniff"})
+
+    def _serve_page_filter(self, flow: http.HTTPFlow, uid) -> bool:
+        """Answer the page filter's three addresses. True when answered."""
+        path = flow.request.path.split("?", 1)[0]
+        if path == SCRIPT_PATH and flow.request.method == "GET":
+            body, etag = self._page_script()
+            self._cached(flow, body, etag, "application/javascript; charset=utf-8")
+            return True
+        if path == WORDS_PATH and flow.request.method == "GET":
+            body, etag = self._words_payload()
+            self._cached(flow, body, etag, "application/json; charset=utf-8")
+            return True
+        if path == JUDGE_PATH and flow.request.method == "POST":
+            self._judge_rendered(flow, uid)
+            return True
+        return False
+
+    def _judge_rendered(self, flow: http.HTTPFlow, uid) -> None:
+        """Judge what a page rendered after it arrived, by the rules that
+        judged the page: a listed word in block mode, or the content
+        scorer with this account's tolerance. The answer carries the
+        block page when there is one, for the script to show."""
+        from urllib.parse import urlsplit
+
+        try:
+            body = json.loads(flow.request.get_text(strict=False) or "{}")
+        except ValueError:
+            body = {}
+        url = str(body.get("url") or "")[:2048]
+        host = urlsplit(url).hostname or flow.request.pretty_host or ""
+        verdict_level, because, why = "", "", ""
+        word = str(body.get("language") or "")[:64]
+        if word and self.policy.language_filter_for(uid) == "block" \
+                and self.wordlist.contains_any(word):
+            because, why = " because of the language on it", "language"
+        text = str(body.get("text") or "")[:MAX_JUDGED_BYTES]
+        if not because and text:
+            action, pattern = decide(self.policy.rules_for(uid), url)
+            if action != BLOCK and pattern is not None:
+                text = ""   # an allow rule is the administrator's word
+        if not because and text:
+            tolerance = self._content_tolerance(uid, host, False)
+            verdict = self.scorer.score(text)
+            verdict_level = verdict.level
+            if verdict.at_least(tolerance):
+                because = f" because the page reads as {verdict.level}"
+                why = f"content:{verdict.level}"
+                log.info("blocked uid=%s %s (rendered content: %s, %d points, %s)",
+                         uid, url, verdict.level, verdict.points, ", ".join(verdict.hits))
+        if because:
+            self._note(activity_mod.BLOCK, flow, url=url, why=why)
+            page = BLOCK_PAGE.format(style=BLOCK_STYLE, url=_escape(url),
+                                     because=_escape(because), why=_escape(why),
+                                     request_path=REQUEST_PATH)
+            answer = {"blocked": True, "why": why, "page": page}
+        else:
+            answer = {"blocked": False, "level": verdict_level}
+        flow.response = http.Response.make(
+            200, json.dumps(answer).encode(),
+            {"Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store"})
+
+    def _inject_page_script(self, flow: http.HTTPFlow, language_filter: str,
+                            judge: bool) -> None:
+        """Put the page filter into an HTML page that is being let through.
+
+        Only where it has something to do: a language setting other than
+        off, or a page whose rendered content is to be judged. A page
+        that names a script nonce in its Content-Security-Policy gets
+        the nonce on the tag, so the policy lets it run; 'self' covers
+        it otherwise, since the address is the page's own origin.
+        """
+        if language_filter == "off" and not judge:
+            return
+        content_type = (flow.response.headers.get("content-type") or "").lower()
+        if "text/html" not in content_type:
+            return
+        body = flow.response.get_text(strict=False) or ""
+        if not body or SCRIPT_PATH in body:
+            return
+        attrs = (f'src="{SCRIPT_PATH}" data-kosheros-language="{language_filter}" '
+                 f'data-kosheros-judge="{"1" if judge else "0"}" defer')
+        csp = flow.response.headers.get("content-security-policy") or ""
+        nonce = re.search(r"'nonce-([A-Za-z0-9+/=_-]+)'", csp)
+        if nonce:
+            attrs += f' nonce="{nonce.group(1)}"'
+        tag = f"<script {attrs}></script>"
+        for marker in ("</head>", "</body>", "</html>"):
+            at = body.lower().rfind(marker)
+            if at != -1:
+                body = body[:at] + tag + body[at:]
+                break
+        else:
+            body = body + tag
+        flow.response.text = body
+        flow.response.headers["x-kosheros-page"] = "filter-script"
 
     MAX_REMEMBERED_PAGES = 64
 

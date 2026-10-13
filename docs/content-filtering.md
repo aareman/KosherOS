@@ -110,6 +110,24 @@ Blocking those works against the family that installed the filter.
 The same scorer judges search results, and the block page's reason names
 the verdict so a parent can see why.
 
+### What the page shows after it arrived
+
+A chat message, a feed item, a search result fetched as JSON and drawn by
+script never passes through the proxy as text. So every page the proxy
+lets through carries a small script of the proxy's own, served on a
+reserved address on the page's own origin (`/__kosheros__/filter.js`,
+cached for a day) and answered by the proxy, never forwarded. In the page
+it does two things. The language filter: the same word list, as the same
+patterns, over every text node the page adds or changes, replaced in
+place, or in block mode the proxy's block page. And the content scorer:
+the words the page adds are gathered and sent back to be judged with the
+same tolerance that judged the page itself, so a page that renders what
+the filter would have blocked is blocked a moment later. What a person
+types is theirs and is left alone; code on the page is not prose and is
+skipped. A page whose Content-Security-Policy names a script nonce gets
+the nonce on the tag; one that forbids every script, its own included,
+keeps the proxy's judgement of the HTML and nothing more.
+
 ## Bad language
 
 Words on the bad-language list are replaced on the page with a milder word,

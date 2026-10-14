@@ -47,6 +47,14 @@ class _Client:
         self.calls.append("update_all")
         return len(self.updates)
 
+    def list_unused_apps(self):
+        self.calls.append("unused")
+        return list(getattr(self, "unused", []))
+
+    def remove_unused_apps(self):
+        self.calls.append("clean")
+        return {"count": len(self.unused), "size": sum(u["size"] for u in self.unused)}
+
 
 @pytest.fixture
 def client(monkeypatch):
@@ -123,3 +131,22 @@ def test_the_command_line_reaches_the_store_command(client, capsys):
     assert client.calls[-1] == "check_updates"
     assert cli.main(["store", "installed"]) == 0
     assert "3 installed" in capsys.readouterr().out
+
+
+def test_clean_lists_the_leftovers_and_queues_their_removal(client, capsys):
+    client.unused = [
+        {"ref": "runtime/org.gnome.Platform/x86_64/45", "name": "org.gnome.Platform", "size": 900 * 1024 ** 2},
+        {"ref": "runtime/org.freedesktop.Platform.GL.default/x86_64/23.08", "name": "GL", "size": 300 * 1024 ** 2},
+    ]
+    assert cli.cmd_store(_args("clean")) == 0
+    out = capsys.readouterr().out
+    assert "org.gnome.Platform/x86_64/45" in out and "900 MB" in out
+    assert "removing 2 leftover runtimes (1.2 GB)" in out
+    assert client.calls == ["unused", "clean"]
+
+
+def test_clean_with_nothing_to_remove_touches_nothing(client, capsys):
+    client.unused = []
+    assert cli.cmd_store(_args("clean")) == 0
+    assert "nothing to clean up" in capsys.readouterr().out
+    assert client.calls == ["unused"]

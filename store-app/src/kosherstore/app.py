@@ -29,7 +29,7 @@ gi.require_version("Pango", "1.0")
 from gi.repository import Adw, Gdk, Gio, GLib, Gtk, Pango  # noqa: E402
 
 from kosherd import appkinds  # noqa: E402
-from kosherd.client import DaemonClient  # noqa: E402
+from kosherd.client import CLEANUP_REF, DaemonClient  # noqa: E402
 
 APP_ID = "org.kosherlinux.Store"
 
@@ -359,6 +359,12 @@ class Window(Adw.ApplicationWindow):
         self.update_all.set_cursor_from_name("pointer")
         self.update_all.connect("clicked", lambda _b: self._update_all())
         header.pack_end(self.update_all)
+        # Leftover runtimes: what removed apps left behind. Shown on the
+        # Installed shelf when there is something to free (#115).
+        self.cleanup_button = Gtk.Button(label="Free up space", visible=False)
+        self.cleanup_button.set_cursor_from_name("pointer")
+        self.cleanup_button.connect("clicked", lambda _b: self._free_space())
+        header.pack_end(self.cleanup_button)
         # Asking the remote what is new. The shelf can only show an update
         # flatpak already knows about, and nothing else on the machine
         # fetches that, so the check is a thing a person can press.
@@ -514,14 +520,19 @@ class Window(Adw.ApplicationWindow):
                 updates = {u["ref"]: u for u in self.client.list_app_updates()}
             except Exception:  # noqa: BLE001 - a store with no update news still opens
                 pass
-            return catalog, installed, details, policy, updates, access, ready
+            unused = []
+            try:
+                unused = self.client.list_unused_apps()
+            except Exception:  # noqa: BLE001 - an older daemon has no cleanup
+                pass
+            return catalog, installed, details, policy, updates, access, ready, unused
 
         def on_done(result):
             self.refresh_button.set_sensitive(True)
             if self.stack.get_visible_child_name() == "loading":
                 self.stack.set_visible_child_name("home")
             (self.catalog, self.installed, self.installed_apps, policy, self.updates,
-             self.access, self.ready) = result
+             self.access, self.ready, self.unused) = result
             if policy:
                 me = next((u for u in policy["users"] if u["uid"] == os.getuid()), None)
                 if me is not None:
@@ -676,6 +687,7 @@ class Window(Adw.ApplicationWindow):
         self.back.set_tooltip_text("Back to apps")
         self.check_button.set_visible(False)
         self.update_all.set_visible(False)
+        self.cleanup_button.set_visible(False)
         self.back.grab_focus()
 
     def _close_details(self) -> None:
@@ -694,6 +706,7 @@ class Window(Adw.ApplicationWindow):
         self.stack.set_visible_child_name("browse")
         self.check_button.set_visible(self.shelf == "updates")
         self.update_all.set_visible(self.shelf == "updates" and bool(self.shown_apps()))
+        self._sync_cleanup_button(True)
         card = self.cards.get(ref)
         if card is not None:
             card.get_parent().grab_focus()
@@ -845,6 +858,7 @@ class Window(Adw.ApplicationWindow):
         browsing = self.stack.get_visible_child_name() == "browse"
         self.update_all.set_visible(self.shelf == "updates" and bool(shown) and browsing)
         self.check_button.set_visible(self.shelf == "updates" and browsing)
+        self._sync_cleanup_button(browsing)
         if not shown:
             self.results.set_visible_child_name("empty")
             self.more.set_visible(False)
@@ -918,6 +932,32 @@ class Window(Adw.ApplicationWindow):
 
         _run_async(self.client.check_app_updates, done, failed)
 
+    def _sync_cleanup_button(self, browsing: bool) -> None:
+        """"Free up 1.2 GB" on the Installed shelf, when removed apps have
+        left runtimes behind; nothing otherwise."""
+        unused = getattr(self, "unused", None) or []
+        show = self.shelf == "installed" and browsing and bool(unused)
+        self.cleanup_button.set_visible(show)
+        if show:
+            total = sum(item.get("size", 0) for item in unused)
+            self.cleanup_button.set_label(f"Free up {_size_words(total)}")
+            count = len(unused)
+            self.cleanup_button.set_tooltip_text(
+                f"Remove {count} runtime{'s' if count != 1 else ''} that no installed app needs")
+
+    def _free_space(self) -> None:
+        self.cleanup_button.set_sensitive(False)
+
+        def on_done(summary):
+            self.toast(f"Freeing {_size_words(summary.get('size', 0))}…"
+                       if summary.get("count") else "Nothing to remove")
+
+        def on_error(e):
+            self.cleanup_button.set_sensitive(True)
+            self.toast(_error_text(e))
+
+        _run_async(self.client.remove_unused_apps, on_done, on_error)
+
     def _update_all(self) -> None:
         for ref in list(self.updates):
             self.work_started(ref)
@@ -937,6 +977,8 @@ class Window(Adw.ApplicationWindow):
     # -- progress ------------------------------------------------------------------
 
     def _on_progress(self, ref: str, percent: int, status: str) -> None:
+        if ref == CLEANUP_REF:
+            return  # not an app: no card, no Installing shelf
         fresh = ref not in self.working
         self.working[ref] = (percent, status)
         card = self.cards.get(ref)
@@ -949,6 +991,11 @@ class Window(Adw.ApplicationWindow):
             self._refresh_counts()
 
     def _on_finished(self, ref: str, ok: bool, error: str) -> None:
+        if ref == CLEANUP_REF:
+            self.cleanup_button.set_sensitive(True)
+            self.toast("Leftover runtimes removed" if ok else (error or "Could not free space"))
+            self.reload()
+            return
         self.working.pop(ref, None)
         card = self.cards.get(ref)
         name = card.app.get("name", ref) if card else ref
@@ -964,6 +1011,13 @@ class Window(Adw.ApplicationWindow):
                 card.set_state(self.state_of(ref))
             self._refresh_counts()
             self.toast(error or f"{name} failed")
+
+
+def _size_words(size: int) -> str:
+    """'412 MB' or '1.2 GB', for the Free up button."""
+    if size >= 1024 ** 3:
+        return f"{size / 1024 ** 3:.1f} GB"
+    return f"{max(1, round(size / 1024 ** 2))} MB"
 
 
 class App(Adw.Application):

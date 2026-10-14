@@ -23,6 +23,10 @@ import argparse
 import sys
 from typing import Callable
 
+# The ref the daemon reports the leftover-runtime cleanup under (client.py
+# and apps.py say the same; Gio stays deferred here, as in cli.py).
+CLEANUP_REF = "kosheros.cleanup"
+
 PROG = "kosher"
 
 
@@ -218,6 +222,29 @@ def cmd_remove(args, client, wait=_wait_for) -> int:
     return 0 if wait(client, refs) else 1
 
 
+def _size_words(size: int) -> str:
+    if size >= 1024 ** 3:
+        return f"{size / 1024 ** 3:.1f} GB"
+    return f"{max(1, round(size / 1024 ** 2))} MB"
+
+
+def cmd_clean(args, client, wait=_wait_for) -> int:
+    """Remove the runtimes no installed app needs any more (#115): what
+    `flatpak uninstall --unused` would do, which KosherOS reserves for
+    the daemon."""
+    leftovers = client.list_unused_apps()
+    if not leftovers:
+        print("nothing to clean up: every installed runtime is in use")
+        return 0
+    for item in leftovers:
+        print(f"  {item['ref']:<56} {_size_words(item.get('size', 0)):>8}")
+    total = sum(item.get("size", 0) for item in leftovers)
+    print(f"removing {len(leftovers)} leftover runtime{'s' if len(leftovers) != 1 else ''}"
+          f" ({_size_words(total)})")
+    client.remove_unused_apps()
+    return 0 if wait(client, [CLEANUP_REF]) else 1
+
+
 def cmd_update(args, client, wait=_wait_for) -> int:
     found = client.check_app_updates()
     if not found:
@@ -258,6 +285,7 @@ def cmd_upgrade(args, client, wait=_wait_for) -> int:
 COMMANDS: dict[str, Callable] = {
     "search": cmd_search, "install": cmd_install, "remove": cmd_remove,
     "list": cmd_list, "update": cmd_update, "upgrade": cmd_upgrade, "info": cmd_info,
+    "clean": cmd_clean,
 }
 
 
@@ -276,6 +304,7 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("apps", nargs="*")
     s = sub.add_parser("info", help="what the Store knows about an app")
     s.add_argument("app")
+    sub.add_parser("clean", help="remove leftover runtimes no app needs (an administrator's action)")
     return p
 
 

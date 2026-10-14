@@ -696,6 +696,29 @@ def available_refs() -> set[str]:
     }
 
 
+# -- leftovers (#115) ---------------------------------------------------------
+#
+# A removed app leaves its runtime behind when no other app needs it, and
+# every Flatpak action on KosherOS belongs to the daemon (polkit refuses
+# `flatpak uninstall --unused` to everyone), so nobody could clear them.
+# The daemon does it: after each removal, and on request from the Store
+# or `kosher clean`. The cleanup is a queue job like an install, so the
+# Store sees its progress; it needs a ref to be reported under.
+CLEANUP_REF = "kosheros.cleanup"
+
+
+def unused_refs(installation=None) -> list[dict]:
+    """Runtimes and extensions no installed app needs any more, with what
+    they take: what `flatpak uninstall --unused` would remove."""
+    if installation is None:
+        installation = Flatpak.Installation.new_system(None)
+    out = []
+    for r in installation.list_unused_refs(None, None):
+        out.append({"ref": r.format_ref(), "name": r.get_name(),
+                    "size": r.get_installed_size()})
+    return out
+
+
 class AppManager:
     """Queues flatpak jobs and reports progress.
 
@@ -742,6 +765,10 @@ class AppManager:
             self._enqueue(ref, self._nix_work(nixapps.remove, uid))
         else:
             self._enqueue(ref, self._do_remove)
+
+    def remove_unused(self) -> None:
+        """Queue the removal of every leftover runtime (unused_refs)."""
+        self._enqueue(CLEANUP_REF, self._do_remove_unused)
 
     def update(self, ref: str, *, uid: int | None = None) -> None:
         """Bring one installed app up to the remote's build. Queued like an
@@ -839,3 +866,23 @@ class AppManager:
         transaction.add_uninstall(installed_ref_string(ref))
         self._on_progress(ref, 0, "Removing…")
         transaction.run(None)
+        # And what this app alone was keeping on the disk.
+        self._uninstall_unused(ref, "Removing what it alone needed…")
+
+    def _do_remove_unused(self, ref: str) -> None:
+        if not self._uninstall_unused(ref, "Removing leftover runtimes…"):
+            self._on_progress(ref, 100, "Nothing to remove")
+
+    def _uninstall_unused(self, ref: str, status: str) -> bool:
+        """One transaction for every leftover runtime; False when there is
+        none. Reported under `ref`: the app whose removal left them, or
+        the cleanup itself."""
+        leftovers = unused_refs()
+        if not leftovers:
+            return False
+        transaction = self._transaction(ref)
+        for leftover in leftovers:
+            transaction.add_uninstall(leftover["ref"])
+        self._on_progress(ref, 0, status)
+        transaction.run(None)
+        return True

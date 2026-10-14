@@ -15,6 +15,12 @@
 # throwaway VM and unacceptable on a machine with a second drive; for repeat
 # VM rehearsals use os-image/iso-config-unattended.toml (just iso-unattended).
 #
+# autopart stops the root partition at 70 GiB (Anaconda's cap) and leaves
+# the rest of a larger disk unallocated. The installed system grows the
+# root into that space on its first boot: bootc's growpart unit, which the
+# image lets run on real hardware as well as in a VM (see
+# files/usr/lib/systemd/system/bootc-generic-growpart.service.d, #113).
+#
 # Language, keyboard and time zone are answered here; the spokes for them
 # (and for network, source and software, which an offline bootc install
 # never needs) are hidden by the product.img drop-in scripts/brand-iso.py

@@ -1,0 +1,38 @@
+{
+    "default": [
+        {
+            "type": "reject"
+        }
+    ],
+    "transports": {
+        "docker": {
+            "ghcr.io/aareman/kosher-linux": [
+                {
+                    "type": "sigstoreSigned",
+                    "keyPath": "/etc/pki/containers/kosheros-images.pub",
+                    "signedIdentity": {
+                        "type": "matchRepository"
+                    }
+                }
+            ],
+            "docker.io": [{"type": "insecureAcceptAnything"}],
+            "ghcr.io": [{"type": "insecureAcceptAnything"}],
+            "quay.io": [{"type": "insecureAcceptAnything"}],
+            "gcr.io": [{"type": "insecureAcceptAnything"}],
+            "mcr.microsoft.com": [{"type": "insecureAcceptAnything"}],
+            "public.ecr.aws": [{"type": "insecureAcceptAnything"}],
+            "registry.fedoraproject.org": [{"type": "insecureAcceptAnything"}],
+            "registry.access.redhat.com": [{"type": "insecureAcceptAnything"}],
+            "registry.redhat.io": [{"type": "insecureAcceptAnything"}],
+            "registry.gitlab.com": [{"type": "insecureAcceptAnything"}],
+            "10.0.2.2:5077": [{"type": "insecureAcceptAnything"}]
+        },
+        "containers-storage": {"": [{"type": "insecureAcceptAnything"}]},
+        "dir": {"": [{"type": "insecureAcceptAnything"}]},
+        "oci": {"": [{"type": "insecureAcceptAnything"}]},
+        "oci-archive": {"": [{"type": "insecureAcceptAnything"}]},
+        "docker-archive": {"": [{"type": "insecureAcceptAnything"}]},
+        "docker-daemon": {"": [{"type": "insecureAcceptAnything"}]},
+        "tarball": {"": [{"type": "insecureAcceptAnything"}]}
+    }
+}

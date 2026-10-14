@@ -208,9 +208,23 @@ jobs:
           retry podman push "$IMAGE:${SHA::12}"
           retry podman push "$IMAGE:edge"
 
-      - name: Sign (cosign keyless)
+      - name: "Sign (cosign: the KosherOS key, and keyless)"
         uses: sigstore/cosign-installer@v3
-      - run: |
+      - env:
+          COSIGN_PRIVATE_KEY: ${{ secrets.COSIGN_PRIVATE_KEY }}
+          COSIGN_PASSWORD: ${{ secrets.COSIGN_PASSWORD }}
+        run: |
+          # Two signatures on every image. The KosherOS key's is the one
+          # every installed machine checks: /etc/containers/policy.json
+          # accepts an image from this repository only with it, and bootc
+          # verifies it on every update (#70). The keyless one records the
+          # build in the public transparency log and is what the stable
+          # promotion verifies. A missing key is a failed build, never an
+          # unsigned image: an unsigned edge is one no machine can take.
+          if [ -z "$COSIGN_PRIVATE_KEY" ]; then
+            echo "COSIGN_PRIVATE_KEY is not set; the image cannot be signed for the machines" >&2
+            exit 1
+          fi
           # cosign reads Docker's credential store, not podman's auth.json,
           # so it needs its own login to push signatures to ghcr. Retried
           # like the push: a signature is pushed to the same registry.
@@ -224,6 +238,11 @@ jobs:
             return 1
           }
           cosign login ghcr.io -u "$GITHUB_ACTOR" -p "${{ secrets.GITHUB_TOKEN }}"
+          # --new-bundle-format=false: cosign 3 stores its signatures as OCI
+          # referrers by default, and podman, skopeo and bootc read the
+          # older "<digest>.sig" tag. The key's signature must be there.
+          retry cosign sign --yes --key env://COSIGN_PRIVATE_KEY --new-bundle-format=false "$IMAGE:${SHA::12}"
+          retry cosign sign --yes --key env://COSIGN_PRIVATE_KEY --new-bundle-format=false "$IMAGE:edge"
           retry cosign sign --yes "$IMAGE:${SHA::12}"
           retry cosign sign --yes "$IMAGE:edge"
 
@@ -276,6 +295,8 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           GITHUB_TOKEN: ${{ github.token }}
+          COSIGN_PRIVATE_KEY: ${{ secrets.COSIGN_PRIVATE_KEY }}
+          COSIGN_PASSWORD: ${{ secrets.COSIGN_PASSWORD }}
         run: |
           sudo apt-get update && sudo apt-get install -y skopeo
           skopeo login ghcr.io -u "$GITHUB_ACTOR" -p "$GITHUB_TOKEN"

@@ -151,3 +151,76 @@ def test_no_changes_means_up_to_date_and_a_strange_answer_keeps_its_words():
     assert odd["available"] is False and odd["version"] is None
     assert odd["raw"] == "error: registry unreachable"
     assert updates._channel("ghcr.io/x/y@sha256:abc") is None
+
+
+# -- #112: newest is judged against what is running ---------------------------
+
+DEPLOYMENT = {
+    "booted": {"image": "ghcr.io/aareman/kosher-linux:edge", "version": "0.12.0", "digest": "sha256:aaa"},
+    "rollback": {"image": "ghcr.io/aareman/kosher-linux:edge", "version": "0.13.0", "digest": "sha256:bbb"},
+    "staged": None,
+}
+QUIET = updates.parse_check("No changes in: ghcr.io/aareman/kosher-linux:edge\n")
+
+
+def test_after_a_rollback_the_version_you_left_is_still_the_newest_and_said_to_be_on_disk():
+    info = updates.reconcile(QUIET, DEPLOYMENT, {"digest": "sha256:bbb", "version": "0.13.0"})
+    assert info["available"] is True
+    assert info["version"] == "0.13.0" and info["on_disk"] == "rollback"
+    assert info["booted_version"] == "0.12.0"
+
+
+def test_a_downloaded_update_waiting_for_a_restart_is_said_so():
+    deployment = dict(DEPLOYMENT, staged={"image": "ghcr.io/aareman/kosher-linux:edge",
+                                           "version": "0.13.1", "digest": "sha256:ccc"})
+    info = updates.reconcile(QUIET, deployment, {"digest": "sha256:ccc", "version": "0.13.1"})
+    assert info["available"] is True and info["on_disk"] == "staged"
+
+
+def test_the_running_version_being_the_registrys_is_up_to_date_whatever_bootc_said():
+    loud = updates.parse_check("Update available for: ghcr.io/aareman/kosher-linux:edge\n"
+                               "  Version: 0.12.0\n  Digest: sha256:aaa\n")
+    info = updates.reconcile(loud, DEPLOYMENT, {"digest": "sha256:aaa", "version": "0.12.0"})
+    assert info["available"] is False and info["on_disk"] is None
+
+
+def test_without_the_registry_bootcs_own_answer_stands():
+    loud = updates.parse_check("Update available for: ghcr.io/aareman/kosher-linux:edge\n"
+                               "  Version: 0.13.1\n  Digest: sha256:ccc\n")
+    info = updates.reconcile(loud, DEPLOYMENT, None)
+    assert info["available"] is True and info["version"] == "0.13.1" and info["on_disk"] is None
+    quiet = updates.reconcile(QUIET, DEPLOYMENT, None)
+    assert quiet["available"] is False and quiet["booted_version"] == "0.12.0"
+
+
+def test_the_registry_is_asked_with_skopeo_and_an_unreachable_one_is_none():
+    calls = []
+
+    class Res:
+        returncode = 0
+        stdout = "sha256:bbb 0.13.0\n"
+
+    def run(argv, **kw):
+        calls.append(argv)
+        return Res()
+
+    assert updates.inspect_registry("ghcr.io/aareman/kosher-linux:edge", run=run) == {
+        "digest": "sha256:bbb", "version": "0.13.0"}
+    assert calls[0][:3] == ["skopeo", "inspect", "--no-tags"]
+    assert calls[0][-1] == "docker://ghcr.io/aareman/kosher-linux:edge"
+
+    def down(argv, **kw):
+        raise OSError("no skopeo")
+
+    assert updates.inspect_registry("ghcr.io/aareman/kosher-linux:edge", run=down) is None
+    assert updates.inspect_registry("", run=run) is None
+
+
+def test_kosherctl_says_where_an_already_downloaded_newest_version_sits():
+    from kosherd.cli import check_sentence
+
+    assert "restart to use it" in check_sentence({"available": True, "version": "0.13.1", "on_disk": "staged"})
+    left = check_sentence({"available": True, "version": "0.13.0", "channel": "edge", "on_disk": "rollback"})
+    assert "went back from" in left and "0.13.0" in left
+    assert check_sentence({"available": True, "version": "0.13.1", "channel": "edge"}) == \
+        "update available: 0.13.1 on the edge channel"

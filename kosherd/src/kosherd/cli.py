@@ -961,6 +961,11 @@ def check_sentence(info: dict) -> str:
     """One line from a CheckUpdate answer."""
     if info.get("available"):
         where = f" on the {info['channel']} channel" if info.get("channel") else ""
+        if info.get("on_disk") == "staged":
+            return f"update downloaded: {info.get('version') or 'a new version'}; restart to use it"
+        if info.get("on_disk") == "rollback":
+            return (f"newest{where}: {info.get('version') or 'a newer version'}, already on this "
+                    f"computer as the version you went back from (rollback returns to it)")
         return (f"update available: {info['version']}{where}" if info.get("version")
                 else f"update available{where}")
     if info.get("available") is False:

@@ -2678,3 +2678,18 @@ def test_blocking_style_is_limited_to_blocking_controls():
     assert all(check.has_css_class("blocking") for check in page.checks.values())
     assert not _row_named(page, "Video calls").has_css_class("blocking")
     assert not _row_named(page, "Can install apps").has_css_class("blocking")
+
+
+def test_the_updates_row_says_when_the_newest_version_is_already_on_the_computer():
+    from kosheradmin import computer
+
+    sentence, short = computer.check_words(
+        {"available": True, "version": "0.13.0", "channel": "edge", "on_disk": "rollback"}, "0.12.0")
+    assert sentence.startswith("Version 0.13.0 is the newest on the edge channel")
+    assert "went back from" in sentence and "0.13.0" in short
+    sentence, short = computer.check_words(
+        {"available": True, "version": "0.13.1", "channel": "edge", "on_disk": "staged"}, "0.12.0")
+    assert sentence == "Version 0.13.1 is downloaded. Restart to start using it."
+    assert short == "Update ready"
+    sentence, _ = computer.check_words({"available": True, "version": "0.13.1", "channel": "edge"}, "0.12.0")
+    assert sentence == "Version 0.13.1 is available — you are on 0.12.0 (edge channel)."

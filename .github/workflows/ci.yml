@@ -238,11 +238,17 @@ jobs:
             return 1
           }
           cosign login ghcr.io -u "$GITHUB_ACTOR" -p "${{ secrets.GITHUB_TOKEN }}"
-          # --new-bundle-format=false: cosign 3 stores its signatures as OCI
-          # referrers by default, and podman, skopeo and bootc read the
-          # older "<digest>.sig" tag. The key's signature must be there.
-          retry cosign sign --yes --key env://COSIGN_PRIVATE_KEY --new-bundle-format=false "$IMAGE:${SHA::12}"
-          retry cosign sign --yes --key env://COSIGN_PRIVATE_KEY --new-bundle-format=false "$IMAGE:edge"
+          # podman, skopeo and bootc read the "<digest>.sig" tag. cosign 2
+          # writes that; cosign 3 writes OCI referrers unless told
+          # --new-bundle-format=false, a flag cosign 2 does not know. So
+          # the flag goes in only where it exists (#118). cosign 3 keeps it
+          # out of --help, so the version decides.
+          major=$(cosign version --json 2>/dev/null | python3 -c 'import json, sys; print(json.load(sys.stdin)["gitVersion"].lstrip("v").split(".")[0])')
+          legacy=""
+          [ "${major:-0}" -ge 3 ] && legacy=--new-bundle-format=false
+          echo "cosign major version ${major:-unknown}${legacy:+, signing with $legacy}"
+          retry cosign sign --yes --key env://COSIGN_PRIVATE_KEY $legacy "$IMAGE:${SHA::12}"
+          retry cosign sign --yes --key env://COSIGN_PRIVATE_KEY $legacy "$IMAGE:edge"
           retry cosign sign --yes "$IMAGE:${SHA::12}"
           retry cosign sign --yes "$IMAGE:edge"
 

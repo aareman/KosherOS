@@ -2181,6 +2181,13 @@ class Daemon:
         res = self._bootc("upgrade", "--check")
         info = updates.parse_check(res.stdout or res.stderr)
         info["ok"] = res.returncode == 0
+        # bootc says "no changes" for an image it already holds, which after
+        # a rollback is the newest one (#112): judge against what is
+        # running, and say where an already-downloaded newest version sits.
+        deployment = self._deployment()
+        image = ((deployment.get("staged") or {}).get("image")
+                 or (deployment.get("booted") or {}).get("image"))
+        info = updates.reconcile(info, deployment, updates.inspect_registry(image))
         return GLib.Variant("(s)", (json.dumps(info),))
 
     def impl_ApplyUpdate(self):
@@ -2353,9 +2360,10 @@ class Daemon:
             # bootc verifies the image policy only for a deployment whose
             # reference says so; "containerPolicy" is that (updates.py).
             verified = isinstance(image, dict) and image.get("signature") == "containerPolicy"
+            digest = outer.get("imageDigest") if isinstance(outer, dict) else None
             return {"image": ref, "version": version, "timestamp": stamp,
                     "channel": updates._channel(ref) if ref else None,
-                    "verified": verified}
+                    "verified": verified, "digest": digest}
 
         try:
             doc = json.loads(res.stdout)["status"]

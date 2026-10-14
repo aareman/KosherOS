@@ -209,6 +209,67 @@ def describe_channels(image: str | None, staged: str | None = None) -> dict:
             "default": DEFAULT_CHANNEL, "channels": out}
 
 
+# -- what is newest, judged against what is running (#112) ------------------
+#
+# `bootc upgrade --check` answers "No changes" for any image whose contents
+# the machine already holds, and after a rollback the version the family
+# went back from is exactly that: still on the disk, as the deployment to
+# go forward to, and the newest on the channel. The Updates page then said
+# the running version was the newest, while a black-screen 0.13.0 sat in
+# the registry. So the registry is asked for the channel's current digest,
+# "newer" means newer than the BOOTED deployment, and the answer also says
+# where a newest-already-downloaded version sits: staged (restart to use
+# it) or rollback (the one you went back from).
+
+INSPECT_TIMEOUT = 60
+
+
+def inspect_registry(image: str, run=subprocess.run) -> dict | None:
+    """The registry's current digest and version for `image`, from skopeo
+    (which reads the manifest and its labels; nothing is pulled). None when
+    the registry cannot be asked, and bootc's own answer stands."""
+    if not image:
+        return None
+    try:
+        res = run(["skopeo", "inspect", "--no-tags", "--format",
+                   '{{.Digest}} {{index .Labels "org.opencontainers.image.version"}}',
+                   f"docker://{image}"], capture_output=True, text=True, timeout=INSPECT_TIMEOUT)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if res.returncode != 0:
+        return None
+    parts = (res.stdout or "").split()
+    if not parts or not parts[0].startswith("sha256:"):
+        return None
+    return {"digest": parts[0], "version": parts[1] if len(parts) > 1 else None}
+
+
+def reconcile(info: dict, deployment: dict, registry: dict | None) -> dict:
+    """bootc's answer (parse_check), corrected by the deployments' digests
+    and the registry's: `available` is "newer than what is running",
+    `on_disk` is "staged" or "rollback" when that newest version is already
+    on the computer, `booted_version` is what is running."""
+    booted = deployment.get("booted") or {}
+    out = dict(info)
+    out["booted_version"] = booted.get("version")
+    out["on_disk"] = None
+    newest = registry or {}
+    digest = newest.get("digest") or info.get("digest")
+    if not digest:
+        return out
+    out["digest"] = digest
+    if newest.get("version"):
+        out["version"] = newest["version"]
+    if booted.get("digest") and booted["digest"] == digest:
+        out["available"] = False
+        return out
+    out["available"] = True
+    for place in ("staged", "rollback"):
+        if (deployment.get(place) or {}).get("digest") == digest:
+            out["on_disk"] = place
+    return out
+
+
 # -- image trust (#70) -------------------------------------------------------
 #
 # /etc/containers/policy.json holds an image from KosherOS's own repository

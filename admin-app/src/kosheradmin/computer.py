@@ -543,8 +543,11 @@ class UpdatesPage(_Page):
             self.win.update_state = short
             self.status_row.set_subtitle(sentence)
             if info.get("available"):
-                self.apply_button.set_visible(True)
-                self.restart_button.set_visible(False)
+                # Already on the disk: staged wants a restart, and the one
+                # you went back from is reached from Go back, not from here.
+                on_disk = info.get("on_disk")
+                self.apply_button.set_visible(not on_disk)
+                self.restart_button.set_visible(on_disk == "staged")
             self.win.sidebar.refresh() if hasattr(self.win, "sidebar") else None
 
         run_async(self.win.client.check_update, on_done,
@@ -637,6 +640,15 @@ def check_words(info: dict, running: str | None) -> tuple[str, str]:
     version = info.get("version")
     channel = info.get("channel")
     if info.get("available"):
+        where = f" on the {channel} channel" if channel else ""
+        if version and info.get("on_disk") == "staged":
+            return (f"Version {version} is downloaded. Restart to start using it.",
+                    "Update ready")
+        if version and info.get("on_disk") == "rollback":
+            return (f"Version {version} is the newest{where}, and it is already on this "
+                    f"computer: it is the one you went back from. Going back again "
+                    f"returns to it; the next version will download here.",
+                    f"{version} is the one you left")
         if version:
             sentence = f"Version {version} is available"
             if running:

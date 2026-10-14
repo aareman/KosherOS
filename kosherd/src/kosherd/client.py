@@ -12,6 +12,11 @@ from gi.repository import Gio, GLib
 from . import BUS_NAME, OBJECT_PATH
 
 
+# The ref the daemon reports the leftover-runtime cleanup under (apps.py
+# says the same; this module stays free of Flatpak).
+CLEANUP_REF = "kosheros.cleanup"
+
+
 class DaemonClient:
     def __init__(self) -> None:
         self._conn = Gio.bus_get_sync(Gio.BusType.SYSTEM, None)
@@ -318,6 +323,15 @@ class DaemonClient:
     def update_all_apps(self) -> int:
         """Queue an update for every app that has one. Returns how many."""
         return self._call("Apps", "UpdateAllApps")[0]
+
+    def list_unused_apps(self) -> list[dict]:
+        """Leftover runtimes no installed app needs: ref, name, size."""
+        return json.loads(self._call("Apps", "ListUnusedApps")[0])
+
+    def remove_unused_apps(self) -> dict:
+        """Queue their removal; watch AppProgress/AppFinished for the ref
+        CLEANUP_REF. Returns {"count", "size"} of what was there."""
+        return json.loads(self._call("Apps", "RemoveUnusedApps")[0])
 
     def connect_app_signals(self, on_progress, on_finished) -> int:
         """Subscribe to install progress. Returns a subscription id."""

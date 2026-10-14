@@ -501,6 +501,17 @@ def cmd_store(args) -> int:
                   f"  {app['ref']:<42} {(app.get('name') or ''):<26} {version}")
         print(f"{len(found)} with an update; 'kosherctl store update --all' takes them")
         return 0
+    if args.action == "clean":
+        leftovers = c.list_unused_apps()
+        if not leftovers:
+            print("nothing to clean up: every installed runtime is in use")
+            return 0
+        for item in leftovers:
+            print(f"  {item['ref']:<56} {_size_words(item.get('size', 0)):>8}")
+        summary = c.remove_unused_apps()
+        print(f"removing {summary['count']} leftover runtime{'s' if summary['count'] != 1 else ''}"
+              f" ({_size_words(summary['size'])}); the Store shows the progress")
+        return 0
     if args.action == "update":
         if args.all:
             count = c.update_all_apps()
@@ -1225,7 +1236,7 @@ def main(argv: list[str] | None = None) -> int:
     s.set_defaults(func=cmd_apps)
 
     s = sub.add_parser("store", help="what is installed from the Store, and updates")
-    s.add_argument("action", choices=["installed", "updates", "update"])
+    s.add_argument("action", choices=["installed", "updates", "update", "clean"])
     s.add_argument("apps", nargs="*", default=[], help="apps to update (update)")
     s.add_argument("--check", action="store_true",
                    help="ask the store for news before listing updates")

@@ -295,6 +295,12 @@ INTROSPECTION_XML = """
     <method name="UpdateAllApps">
       <arg direction="out" type="i" name="queued"/>
     </method>
+    <method name="ListUnusedApps">
+      <arg direction="out" type="s" name="leftovers_json"/>
+    </method>
+    <method name="RemoveUnusedApps">
+      <arg direction="out" type="s" name="summary_json"/>
+    </method>
     <signal name="AppProgress">
       <arg type="s" name="ref"/>
       <arg type="i" name="percent"/>
@@ -2102,6 +2108,22 @@ class Daemon:
             except apps.AppError as e:
                 log.warning("could not queue %s: %s", entry["ref"], e)
         return GLib.Variant("(i)", (queued,))
+
+    def impl_ListUnusedApps(self):
+        """Runtimes no installed app needs any more, and what they take:
+        what the Store offers to free (#115)."""
+        return GLib.Variant("(s)", (json.dumps(apps.unused_refs()),))
+
+    def impl_RemoveUnusedApps(self):
+        """Remove them, as a queued job the Store watches under
+        apps.CLEANUP_REF. Answers what was there to remove: a count and
+        the bytes, so the caller can say "freeing 1.2 GB" or "nothing to
+        remove" at once."""
+        leftovers = apps.unused_refs()
+        if leftovers:
+            self.app_manager.remove_unused()
+        summary = {"count": len(leftovers), "size": sum(r["size"] for r in leftovers)}
+        return GLib.Variant("(s)", (json.dumps(summary),))
 
     def impl_RemoveApp(self, ref: str, *, _uid: int):
         if apps.nixapps.is_nix(ref):

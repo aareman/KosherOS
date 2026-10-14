@@ -154,6 +154,10 @@ ACTIONS = {
     "UpdateApp": ACTION_USE_STORE,
     "UpdateAllApps": ACTION_USE_STORE,
     "RemoveApp": ACTION_INSTALL_APPS,
+    # Leftover runtimes: anyone the store is for may see what they take;
+    # removing is an administrator's action like removing an app.
+    "ListUnusedApps": ACTION_USE_STORE,
+    "RemoveUnusedApps": ACTION_INSTALL_APPS,
     "SetUserApps": ACTION_INSTALL_APPS,
     "SetUserCanInstall": ACTION_INSTALL_APPS,
     # Opening an account to the whole store, or lifting a block, widens
@@ -225,7 +229,8 @@ CHANGES = frozenset({
     "DismissRequest", "AllowUrl", "EditList", "SetMediaLevel",
     "SetLanguageFilter", "SetYouTube", "SetUserAdmin", "SetLayout",
     "SetCoverStyle", "SetAdBlock", "SetTimeLimits", "SetNetworkAccess", "SetGuestConfig", "CreateUser",
-    "AdoptUser", "RemoveUser", "ResetPassword", "SetUserApps", "RemoveApp", "InstallAppFor", "ApproveApp",
+    "AdoptUser", "RemoveUser", "ResetPassword", "SetUserApps", "RemoveApp", "RemoveUnusedApps",
+    "InstallAppFor", "ApproveApp",
     "UnapproveApp", "SetUserCanInstall", "SetUserAppAccess",
     "SetUserBlockedAppKinds", "SetUserBlockedApps", "SetCaptiveMode",
     "SetGuardianPassword", "DisableGuardian", "Enrol", "Unenrol",

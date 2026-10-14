@@ -51,6 +51,13 @@ class _Client:
     def update_app(self, ref):
         self.calls.append(("update", ref))
 
+    def list_unused_apps(self):
+        return list(getattr(self, "unused", []))
+
+    def remove_unused_apps(self):
+        self.calls.append("clean")
+        return {"count": len(self.unused), "size": sum(u["size"] for u in self.unused)}
+
 
 def _wait_ok(client, refs, out=None):
     client.calls.append(("wait", tuple(refs)))
@@ -193,3 +200,24 @@ def test_a_daemon_refusal_is_one_plain_line(monkeypatch, capsys):
     monkeypatch.setattr(storecli, "_client", lambda: Refusing())
     assert storecli.main(["search", "chess"]) == 1
     assert capsys.readouterr().err.strip() == "not authorized for org.kosherlinux.use-store"
+
+
+# -- clean (#115) -------------------------------------------------------------
+
+def test_clean_removes_leftover_runtimes_and_watches(capsys):
+    c = _Client()
+    c.unused = [{"ref": "runtime/org.gnome.Platform/x86_64/46", "name": "org.gnome.Platform",
+                 "size": int(1.2 * 1024 ** 3)}]
+    assert storecli.cmd_clean(_args(), c, wait=_wait_ok) == 0
+    out = capsys.readouterr().out
+    assert "org.gnome.Platform/x86_64/46" in out and "1.2 GB" in out
+    assert "removing 1 leftover runtime (1.2 GB)" in out
+    assert c.calls == ["clean", ("wait", (storecli.CLEANUP_REF,))]
+
+
+def test_clean_with_nothing_to_remove_says_so_and_asks_nothing(capsys):
+    c = _Client()
+    c.unused = []
+    assert storecli.cmd_clean(_args(), c, wait=_wait_ok) == 0
+    assert "nothing to clean up" in capsys.readouterr().out
+    assert c.calls == []

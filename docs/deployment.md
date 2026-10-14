@@ -51,7 +51,9 @@ called.
 | `stable` | everyone else | a person promotes a version that has run well on edge |
 
 `edge` is published by CI: every merge becomes `:edge`, alongside the
-commit's own tag and the version's tag, signed with cosign. `stable` is
+commit's own tag and the version's tag, signed twice with cosign: with the
+KosherOS key, which is the signature every machine checks, and keyless,
+which records the build in the public transparency log. `stable` is
 never built by a push. The "Promote to stable" workflow, run by hand with a
 version tag, verifies the signature on that version's image came from this
 repository's CI, copies the same image to `:stable` and `:latest` without
@@ -146,18 +148,22 @@ layers in the Containerfile for this reason.
 before a single machine is fielded. Losing it is the one unrecoverable
 failure in this design.
 
+**The machine verifies.** `/etc/containers/policy.json` on every machine
+accepts an image from KosherOS's own repository only with the KosherOS
+key's signature, refuses an unknown registry, and takes the public
+registries a developer pulls from as they are, because rootless podman
+reads the same policy. bootc checks that policy for a deployment marked
+to enforce it; the installer leaves a machine unmarked, and the first
+update kosherd runs marks it, so that update and every one after it is
+verified. Keyless signatures are not what the machine checks: podman and
+bootc can verify a keyless identity only by email, and a build's identity
+is a workflow address.
+
 ## What is still to do
 
 In the order it blocks a family installing KosherOS.
 
-1. **Signature verification on the machine.** CI signs every image; the
-   fielded machine verifies nothing yet and will boot whatever sits at the
-   ref. This is the tamper-resistance story of the whole product. It needs
-   a containers policy and registry configuration in the image, verifying
-   against a key the project controls and can rotate, rather than keyless
-   identity alone, so that renaming the repository cannot silently break
-   updates on every fielded machine.
-2. **List updates without enrolment.** Today the only path to fresh lists
+1. **List updates without enrolment.** Today the only path to fresh lists
    is a family enrolling in a portal. A shipped product has to refresh the
    category database and word lists on every machine out of the box,
    because requiring a non-technical parent to enrol somewhere before
@@ -166,18 +172,18 @@ In the order it blocks a family installing KosherOS.
    service, an unauthenticated download of the signed bundle with the
    public key pinned into the image, and the per-family portal for
    enrolment and policy. Same code, two deployments.
-3. **The list build belongs in CI, not the image build.** The image build
+2. **The list build belongs in CI, not the image build.** The image build
    fetches the category lists and falls back to a seed list with a warning
    if the fetch fails, so one bad upstream day could ship an image with the
    seed list. A nightly job should build the database, publish it as a
    release asset, and publish the signed manifest; the image then carries
    the last good snapshot and machines pull newer on their own.
-4. **Updates in the background.** Today a parent checks for and applies
+3. **Updates in the background.** Today a parent checks for and applies
    updates from the Updates page. Fetching them in the background, and
    whether a fetched update should wait for the next natural restart
    rather than interrupt anyone, is
    [issue #19](https://github.com/aareman/KosherOS/issues/19).
-5. **Downloads.** A download page with the ISO, its SHA-256, its signature
+4. **Downloads.** A download page with the ISO, its SHA-256, its signature
    and instructions for checking them.
 
 ## Costs

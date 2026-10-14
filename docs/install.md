@@ -87,6 +87,8 @@ If the computer has more than one eligible disk, open **Installation Destination
 
 After you confirm the destination and start installation, keep the computer plugged in and wait for completion. On restart, remove the USB when prompted or once installation has finished, so the computer boots from its internal disk.
 
+KosherOS uses the whole of the disk it was installed on. The installer itself sets aside 70 GB; the first start after installation extends that to the rest of the disk, so a larger drive is not left half empty.
+
 ## 6. Set up your family and test
 
 The first start runs the KosherOS setup wizard. Follow it to create the administrator account and review the optional guardian password and device-security steps. Connect to your network when requested.

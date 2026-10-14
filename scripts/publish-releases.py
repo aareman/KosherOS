@@ -111,6 +111,19 @@ def image_exists(image: str, tag: str) -> bool:
     return sh("skopeo", "inspect", "--raw", f"docker://{image}:{tag}").returncode == 0
 
 
+def legacy_signature_flags() -> list[str]:
+    """podman, skopeo and bootc read the "<digest>.sig" tag. cosign 2 writes
+    that; cosign 3 writes OCI referrers unless told --new-bundle-format=false,
+    a flag cosign 2 does not know (#118). cosign 3 keeps the flag out of its
+    --help, so the version decides."""
+    probe = sh("cosign", "version", "--json")
+    try:
+        major = int(json.loads(probe.stdout or "{}")["gitVersion"].lstrip("v").split(".")[0])
+    except (ValueError, KeyError, TypeError):
+        major = 0
+    return ["--new-bundle-format=false"] if major >= 3 else []
+
+
 def tag_image(image: str, source: str, tag: str) -> None:
     """Give the image CI pushed under its sha the version's tag, and sign
     it. A server-side copy: nothing is pulled."""
@@ -124,7 +137,7 @@ def tag_image(image: str, source: str, tag: str) -> None:
     if not os.environ.get("COSIGN_PRIVATE_KEY"):
         raise SystemExit(f"{tag}: COSIGN_PRIVATE_KEY is not set; the image cannot be signed for the machines")
     signed = sh("cosign", "sign", "--yes", "--key", "env://COSIGN_PRIVATE_KEY",
-                "--new-bundle-format=false", f"{image}:{tag}")
+                *legacy_signature_flags(), f"{image}:{tag}")
     if signed.returncode != 0:
         raise SystemExit(f"{tag}: could not sign the image with the KosherOS key: {signed.stderr.strip()}")
     signed = sh("cosign", "sign", "--yes", f"{image}:{tag}")

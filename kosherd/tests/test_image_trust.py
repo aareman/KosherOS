@@ -95,13 +95,15 @@ def test_an_unreadable_policy_requires_nothing(tmp_path):
 def test_ci_signs_every_published_image_with_the_kosheros_key():
     ci = (ROOT / ".github/workflows/ci.yml").read_text()
     publish = (ROOT / "scripts/publish-releases.py").read_text()
-    assert ("cosign sign --yes --key env://COSIGN_PRIVATE_KEY --new-bundle-format=false"
-            " \"$IMAGE:edge\"") in ci
+    assert 'cosign sign --yes --key env://COSIGN_PRIVATE_KEY $legacy "$IMAGE:edge"' in ci
+    # cosign 3 needs --new-bundle-format=false for the tag the machines read;
+    # cosign 2 does not know the flag, and CI's cosign has been both.
+    assert '[ "${major:-0}" -ge 3 ] && legacy=--new-bundle-format=false' in ci
     assert 'secrets.COSIGN_PRIVATE_KEY' in ci and 'secrets.COSIGN_PASSWORD' in ci
     # No key, no image: an unsigned edge is one no machine can take.
     assert 'COSIGN_PRIVATE_KEY is not set' in ci
     assert '"--key", "env://COSIGN_PRIVATE_KEY"' in publish
-    assert '"--new-bundle-format=false"' in publish
+    assert "*legacy_signature_flags()" in publish
     assert "COSIGN_PRIVATE_KEY is not set" in publish
 
 

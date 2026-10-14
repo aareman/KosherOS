@@ -209,6 +209,64 @@ def describe_channels(image: str | None, staged: str | None = None) -> dict:
             "default": DEFAULT_CHANNEL, "channels": out}
 
 
+# -- image trust (#70) -------------------------------------------------------
+#
+# /etc/containers/policy.json holds an image from KosherOS's own repository
+# to the KosherOS key's signature. bootc checks that policy only for a
+# deployment that says so: the installer records the image as unverified
+# (every machine installed from the ISO starts that way, and so does one
+# bootc installed for a VM), and `bootc upgrade` keeps whatever the
+# deployment says. `bootc switch --enforce-container-sigpolicy` onto the
+# very same image is what turns it on — the same pull and the same
+# restart as an update, so it is done as the machine's first update after
+# the policy arrives, and every update after it is verified.
+
+POLICY_PATH = "/etc/containers/policy.json"
+
+
+def policy_requires_signature(image: str, policy_path: str = POLICY_PATH) -> bool:
+    """Does the image policy demand a signature for this image?
+
+    The most specific `docker` scope wins, as containers-policy.json(5)
+    has it: the repository, then each parent namespace, then the registry
+    (with its port), then the transport's "" entry, then the global
+    default. A policy that cannot be read requires nothing: bootc would
+    refuse the pull on its own, with its own words.
+    """
+    try:
+        with open(policy_path, encoding="utf-8") as f:
+            policy = json.load(f)
+    except (OSError, ValueError):
+        return False
+    docker = (policy.get("transports") or {}).get("docker") or {}
+    repo = repo_of(image)
+    parts = repo.split("/")
+    scopes = ["/".join(parts[:i]) for i in range(len(parts), 0, -1)] + [""]
+    rules = next((docker[s] for s in scopes if s in docker), None)
+    if rules is None:
+        rules = policy.get("default") or []
+    return any(isinstance(r, dict) and r.get("type") in ("sigstoreSigned", "signedBy")
+               for r in rules)
+
+
+def upgrade_argv(booted_image: str | None, verified: bool,
+                 policy_path: str = POLICY_PATH) -> tuple[str, ...]:
+    """The command for "update this machine": `bootc upgrade`, or, once,
+    the switch that turns verification on (see above)."""
+    if booted_image and not verified and policy_requires_signature(booted_image, policy_path):
+        return ("bootc", "switch", "--enforce-container-sigpolicy", booted_image)
+    return ("bootc", "upgrade")
+
+
+def switch_argv(target: str, policy_path: str = POLICY_PATH) -> tuple[str, ...]:
+    """The command for moving onto `target`: verified where the policy
+    holds the target to a signature, plain where it does not (a developer's
+    own build on a local registry)."""
+    if policy_requires_signature(target, policy_path):
+        return ("bootc", "switch", "--enforce-container-sigpolicy", target)
+    return ("bootc", "switch", target)
+
+
 def run_upgrade(on_progress: Progress, on_finished: Finished,
                 argv: tuple[str, ...] = ("bootc", "upgrade")) -> threading.Thread:
     """Start the upgrade in a thread and return it.
@@ -236,7 +294,7 @@ def run_switch(image: str, on_progress: Progress,
     """Move this machine onto another image reference — the same pull, the
     same progress and the same "takes effect at the next restart" as an
     update, because that is exactly what it is."""
-    return run_upgrade(on_progress, on_finished, argv=("bootc", "switch", image))
+    return run_upgrade(on_progress, on_finished, argv=switch_argv(image))
 
 
 def _run(argv: list[str], on_progress: Progress, with_progress: bool) -> tuple[bool, str]:

@@ -438,9 +438,23 @@ RUN passwd -l root \
     && systemctl is-enabled greenboot-set-rollback-trigger.service \
     && rm -f /etc/flatpak/remotes.d/*.flatpakrepo
 
-# Only images signed for our registry may be switched/updated to.
-# TODO(stage 2): replace with sigstoreSigned policy for the real registry:
-#   /etc/containers/policy.json + /etc/containers/registries.d/kosher.yaml
+# Image trust (#70). /etc/containers/policy.json (files/etc/containers)
+# accepts an image from KosherOS's own repository only with the KosherOS
+# key's signature, which CI puts on every image it publishes; bootc
+# verifies it on every update once a machine's deployment is marked to
+# enforce the policy (kosherd does that with its first update, see
+# updates.py). The public registries developers pull from are accepted
+# as they are: rootless podman reads the same policy, and a devcontainer
+# image from Docker Hub or Microsoft's registry carries no key we hold.
+# Everything else, an unknown registry or a transport not listed, is
+# refused. The key must be there, the policy must parse, and the default
+# must be the refusal, or this is a machine that takes any image.
+RUN python3 -c 'import json; p = json.load(open("/etc/containers/policy.json")); \
+        assert p["default"] == [{"type": "reject"}], p["default"]; \
+        k = p["transports"]["docker"]["ghcr.io/aareman/kosher-linux"][0]; \
+        assert k["type"] == "sigstoreSigned" and k["keyPath"] == "/etc/pki/containers/kosheros-images.pub", k' \
+    && test -s /etc/pki/containers/kosheros-images.pub \
+    && grep -q 'ghcr.io/aareman/kosher-linux' /etc/containers/registries.d/kosheros.yaml
 
 
 # --- kosherd + apps (last layers: change most often) --------------------------

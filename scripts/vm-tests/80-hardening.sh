@@ -226,12 +226,39 @@ skip "[F9] UI wording; not machine-checkable"
 # -- F10: image trust ------------------------------------------------------------------
 
 section "[F10] Pulled images are verified"
-image_only "[F10] the image policy accepts nothing unsigned" \
-    && check "[F10] the image policy accepts nothing unsigned" 1 \
-        grep -q insecureAcceptAnything /etc/containers/policy.json
-image_only "[F10] the image policy requires a sigstore signature" \
-    && check_contains "[F10] the image policy requires a sigstore signature" "sigstoreSigned" \
-        cat /etc/containers/policy.json
+# The policy is per registry (#70): KosherOS's own repository needs the
+# KosherOS key's signature, the public registries developers pull from
+# are taken as they are (rootless podman reads the same policy), and an
+# unknown registry is refused. So "insecureAcceptAnything" legitimately
+# stays in the file; what matters is the default and the KosherOS entry.
+policy_default() {
+    python3 -c 'import json; print(json.load(open("/etc/containers/policy.json"))["default"][0]["type"])'
+}
+policy_kosheros() {
+    python3 -c 'import json; k = json.load(open("/etc/containers/policy.json"))["transports"]["docker"]["ghcr.io/aareman/kosher-linux"][0]; print(k["type"], k.get("keyPath", ""))'
+}
+booted_signature() {
+    bootc status --format json | python3 -c 'import json, sys; i = json.load(sys.stdin)["status"]["booted"]["image"]["image"]; print(i["image"], i.get("signature"))'
+}
+check_contains "[F10] an image from an unknown registry is refused" "reject" policy_default
+check_contains "[F10] a KosherOS image needs the KosherOS key's signature" \
+    "sigstoreSigned /etc/pki/containers/kosheros-images.pub" policy_kosheros
+check "[F10] the KosherOS public key is on the machine" 0 test -s /etc/pki/containers/kosheros-images.pub
+check "[F10] the signatures are looked for where cosign puts them" 0 \
+    grep -q 'use-sigstore-attachments: true' /etc/containers/registries.d/kosheros.yaml
+# A developer's rootless pull from a public registry still works: the
+# whole point of the per-registry policy.
+check "[F10] a rootless pull from Docker Hub is still allowed" 0 \
+    as wlkid podman pull -q docker.io/library/hello-world
+# bootc verifies only when the deployment says so. A machine installed
+# from the ISO starts unverified; kosherd's first update switches it with
+# --enforce-container-sigpolicy. A machine running its own build (a test
+# VM on localhost/...) is held to nothing by the policy: nothing to see.
+case "$(booted_signature)" in
+    ghcr.io/aareman/kosher-linux*)
+        check_contains "[F10] bootc enforces the policy on this deployment" "containerPolicy" booted_signature ;;
+    *) skip "[F10] bootc enforcement: this machine does not run a KosherOS release image" ;;
+esac
 
 # -- F11: rollback ---------------------------------------------------------------------
 

@@ -2196,8 +2196,15 @@ class Daemon:
         from . import updates
 
         self._refuse_if_updating()
+        # A deployment installed without signature verification (the
+        # installer's doing) is switched onto its own image with the
+        # policy enforced: this update and every later one is verified.
+        booted = self._deployment().get("booted") or {}
+        argv = updates.upgrade_argv(booted.get("image"), bool(booted.get("verified")))
+        if argv[1] == "switch":
+            log.info("first verified update: %s", " ".join(argv))
         self._update_thread = updates.run_upgrade(self._on_update_progress,
-                                                  self._on_update_finished)
+                                                  self._on_update_finished, argv=argv)
         return None
 
     def impl_ListChannels(self):
@@ -2343,8 +2350,12 @@ class Daemon:
             # when the tree cannot be read (it was Fedora's date on older
             # builds, and ours from 0.1.0-pre.058 on).
             version = _deployment_version(entry) or label
+            # bootc verifies the image policy only for a deployment whose
+            # reference says so; "containerPolicy" is that (updates.py).
+            verified = isinstance(image, dict) and image.get("signature") == "containerPolicy"
             return {"image": ref, "version": version, "timestamp": stamp,
-                    "channel": updates._channel(ref) if ref else None}
+                    "channel": updates._channel(ref) if ref else None,
+                    "verified": verified}
 
         try:
             doc = json.loads(res.stdout)["status"]

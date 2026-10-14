@@ -40,6 +40,7 @@ from __future__ import annotations
 import argparse
 import importlib.util
 import json
+import os
 import re
 import subprocess
 import sys
@@ -116,6 +117,16 @@ def tag_image(image: str, source: str, tag: str) -> None:
     copied = sh("skopeo", "copy", "--all", f"docker://{image}:{source}", f"docker://{image}:{tag}")
     if copied.returncode != 0:
         raise SystemExit(f"{tag}: could not tag the image: {copied.stderr.strip()}")
+    # The KosherOS key's signature is what every installed machine checks
+    # (policy.json, #70); the keyless one records the build publicly. The
+    # version tag names the same digest CI already signed, and cosign
+    # keys its signature by digest, so these are belt and braces.
+    if not os.environ.get("COSIGN_PRIVATE_KEY"):
+        raise SystemExit(f"{tag}: COSIGN_PRIVATE_KEY is not set; the image cannot be signed for the machines")
+    signed = sh("cosign", "sign", "--yes", "--key", "env://COSIGN_PRIVATE_KEY",
+                "--new-bundle-format=false", f"{image}:{tag}")
+    if signed.returncode != 0:
+        raise SystemExit(f"{tag}: could not sign the image with the KosherOS key: {signed.stderr.strip()}")
     signed = sh("cosign", "sign", "--yes", f"{image}:{tag}")
     if signed.returncode != 0:
         raise SystemExit(f"{tag}: could not sign the image: {signed.stderr.strip()}")

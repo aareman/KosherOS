@@ -73,6 +73,19 @@ that wallpaper, so the advanced desktop looks like this machine. The
 bundled palettes stay a click away in the shell's settings, and a choice
 made there wins over the seed.
 
+### The welcome
+
+GNOME's "Welcome to GNOME" dialog, with its tour, is off: gnome-tour is
+not in the image and the Shell's last-shown-version key is preset and
+locked. In its place a KosherOS welcome opens the first time an account
+signs in to GNOME, from an autostart entry, and leaves a stamp in the
+account's config folder so it does not come back; "Welcome" in the Apps
+menu opens it again. It asks kosherd the same question My Filter does, so
+an administrator is told what the computer is, where KosherOS Admin, the
+Store, Look and My Filter are, and what to do first, and a managed user is
+told that their account is filtered, where their apps are, how to ask for
+a blocked page, and how much time they have each day.
+
 ### The appearance
 
 The classic taskbar uses a translucent navy background, rounded controls,

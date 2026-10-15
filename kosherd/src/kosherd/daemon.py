@@ -160,6 +160,13 @@ INTROSPECTION_XML = """
     <method name="GetTimeUsage">
       <arg direction="out" type="s" name="usage_json"/>
     </method>
+    <method name="SetBootMenuPassword">
+      <arg direction="in" type="s" name="password"/>
+      <arg direction="in" type="s" name="guardian_password"/>
+    </method>
+    <method name="BootMenuProtected">
+      <arg direction="out" type="b" name="protected"/>
+    </method>
     <method name="SetNetworkAccess">
       <arg direction="in" type="i" name="uid"/>
       <arg direction="in" type="b" name="video_calls"/>
@@ -1395,6 +1402,24 @@ class Daemon:
         user.time = settings
         self._save_and_apply()
         return None
+
+    def impl_SetBootMenuPassword(self, password: str, _guardian_pw: str):
+        """Password-protect the boot menu on a machine installed before the
+        wizard did it by default (#129), or change the password. Guardian-
+        gated: the menu is the way round every other protection."""
+        if len(password or "") < 6:
+            raise PolicyError("the boot menu password needs at least 6 characters")
+        self._set_grub_password(password)
+        return None
+
+    def impl_BootMenuProtected(self):
+        """Is a boot-menu password set on this machine? Read from user.cfg,
+        which GRUB reads at every start."""
+        try:
+            text = GRUB_USER_CFG.read_text()
+        except OSError:
+            text = ""
+        return GLib.Variant("(b)", ("GRUB2_PASSWORD=grub.pbkdf2." in text,))
 
     def impl_SetNetworkAccess(self, uid: int, video_calls: bool, extra_ports_json: str,
                               _guardian_pw: str):

@@ -351,6 +351,13 @@ class DemoClient:
     def _time_state(self, u):
         return timelimits.status(u.get("time"), self.used_today.get(u["uid"], 0))
 
+    def set_boot_menu_password(self, password, pw=""):
+        self._boot_menu = True
+        self._change(None, "SetBootMenuPassword", [])
+
+    def boot_menu_protected(self):
+        return getattr(self, "_boot_menu", True)
+
     def set_network_access(self, uid, video_calls, extra_ports, pw=""):
         u = self._user(uid)
         u["video_calls"] = bool(video_calls)

@@ -715,6 +715,17 @@ class DemoClient:
 
     def rollback(self): self._change(None, "Rollback", [])
 
+    def list_unused_apps(self): return []
+
+    def remove_unused_apps(self): return {"count": 0, "size": 0}
+
+    def try_image(self, what, pw=""):
+        """Pretend to try a build: the same pull as an update."""
+        self._change(None, "TryImage", [what])
+        self._pretend_pull()
+
+    def return_to_kept(self): self._change(None, "ReturnToKept", [])
+
     # -- portal ------------------------------------------------------------------------
 
     def enrol(self, url, code, pw=""): return "demo-device"

@@ -259,12 +259,20 @@ CONTENT_LEVEL_WORDS = {"nsfw": "explicit", "suggestive": "suggestive",
                        "immodest": "immodest"}
 
 
-def why_text(why: str) -> str:
+def why_text(why: str, source: str = "") -> str:
     """'category:video,social' -> 'Video and streaming, Social networks'.
 
     The reason the filter gives for a block, in the family's words, for the
-    activity feed and beside a request.
+    activity feed and beside a request. A block the page's own script
+    reported, for what the page showed after it loaded, says so.
     """
+    text = _why_text(why)
+    if text and source == "page":
+        return text + " (shown after it loaded)"
+    return text
+
+
+def _why_text(why: str) -> str:
     if not why:
         return ""
     kind, _, rest = why.partition(":")

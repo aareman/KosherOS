@@ -301,7 +301,7 @@ class UserDetailPage(Adw.NavigationPage):
     def _blocked_row(self, user: dict, event: dict) -> Adw.ActionRow:
         kind = event["kind"]
         url = event.get("url", "")
-        why = labels.why_text(event.get("why", ""))
+        why = labels.why_text(event.get("why", ""), event.get("source", ""))
         times = event.get("times", 1)
         again = f" · {times} times" if times > 1 else ""
         clock = Gtk.Label(label=time.strftime("%H:%M", time.localtime(event["t"])))

@@ -33,6 +33,7 @@ import time
 
 try:
     from kosherd import categories as categories_mod
+    from kosherd.ai_proxy import AIFilter
     from kosherd import content as content_mod
     from kosherd import elementfilter as elementfilter_mod
     from kosherd import imageedit as imageedit_mod
@@ -55,6 +56,7 @@ except ImportError:  # pragma: no cover - only when interpreters differ
 
     sys.path.extend(sorted(glob.glob("/usr/lib/python3.*/site-packages")))
     from kosherd import categories as categories_mod
+    from kosherd.ai_proxy import AIFilter
     from kosherd import content as content_mod
     from kosherd import elementfilter as elementfilter_mod
     from kosherd import imageedit as imageedit_mod
@@ -1956,4 +1958,6 @@ def _escape(text: str) -> str:
                 .replace(">", "&gt;").replace('"', "&quot;"))[:300]
 
 
-addons = [KosherFilter()]
+# The AI addon runs after the main one and borrows its policy and detectors.
+_filter = KosherFilter()
+addons = [_filter, AIFilter(_filter)]

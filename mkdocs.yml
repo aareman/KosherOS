@@ -50,6 +50,7 @@ nav:
   - How it is built:
       - Architecture: architecture.md
       - Content filtering: content-filtering.md
+      - AI answers: ai-filtering.md
       - Pictures and video: media-filtering.md
       - Search: search.md
       - Time limits: time-limits.md

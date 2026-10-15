@@ -162,6 +162,12 @@ def is_bare_address(host: str | None) -> bool:
     return True
 
 
+# The Nix build users' entry in the rules file is keyed "builder", not by a
+# uid: the firewall sends their web to their own listener (#123), and the
+# proxy judges it as this one identity.
+BUILDER_UID = -2
+
+
 def _fail_closed_entry() -> dict:
     try:
         blocked = list(categories_mod.DEFAULT_BLOCKED)
@@ -263,7 +269,7 @@ class PolicyCache:
         by_port: dict[int, int] = {}
         for uid_text, raw in doc.items():
             try:
-                uid = int(uid_text)
+                uid = BUILDER_UID if uid_text == "builder" else int(uid_text)
                 # Older files were {uid: [rules]}; current ones carry
                 # categories too.
                 entry = raw if isinstance(raw, dict) else {"rules": raw}

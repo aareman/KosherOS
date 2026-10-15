@@ -183,8 +183,11 @@ def test_the_devenv_launcher_is_valid_sh():
 # -- the firewall: build users ---------------------------------------------------
 
 def _policy(*modes):
+    # Developer accounts (#123): only those may use the daemon at all, and
+    # these tests are about what the daemon list does with their modes.
     return Policy(revision=1, users=[
-        UserPolicy(uid=1000 + i, username=f"u{i}", mode=m) for i, m in enumerate(modes)])
+        UserPolicy(uid=1000 + i, username=f"u{i}", mode=m, developer_tools=True)
+        for i, m in enumerate(modes)])
 
 
 def _chain(out: str, name: str) -> list[str]:
@@ -199,17 +202,13 @@ def test_build_users_are_dispatched_before_the_system_uid_accept():
     assert rules.index("meta skgid 999 jump nix_build") < rules.index(f"meta skuid < {nft.UID_MIN} accept")
 
 
-def test_build_users_reach_the_system_domains_and_nothing_else():
+def test_build_users_reach_nothing_but_their_proxy_listener():
+    # Their 80/443 is redirected into the builders' listener (#123); the
+    # chain itself grants no set — not the system one, not an account's.
     out = nft.render(_policy("filtered"), dns_uid=989, mitm_uid=988, build_gid=999)
     rules = _chain(out, "nix_build")
-    assert rules == [
-        "jump evasion_block",
-        "ip daddr @sys4 tcp dport { 80, 443 } accept",
-        "ip6 daddr @sys6 tcp dport { 80, 443 } accept",
-        "reject",
-    ]
-    # Not the account's own list: a build is nobody's in particular.
-    assert "@wl4" not in "\n".join(rules)
+    assert rules == ["jump evasion_block", "reject"]
+    assert f"meta skgid 999 tcp dport {{ 80, 443 }} redirect to :{nft.BUILDER_PORT}" in out
 
 
 def test_without_nix_there_is_no_build_rule():

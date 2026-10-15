@@ -105,6 +105,9 @@ ACTIONS = {
     # Beyond the web: video calls (UDP the filter cannot read) and extra
     # ports. Opening either widens what the account reaches.
     "SetNetworkAccess": ACTION_MANAGE_FILTER,
+    # Developer tools: the Nix daemon and the registries, directly. On
+    # widens what the account reaches, so dual-controlled like a filter.
+    "SetDeveloperTools": ACTION_MANAGE_FILTER,
     "ApproveRequest": ACTION_MANAGE_FILTER,
     "DismissRequest": ACTION_MANAGE_USERS,
     "ListRequests": ACTION_READ_CONFIG,
@@ -199,7 +202,7 @@ GUARDIAN_GATED = frozenset({
     "SetMediaLevel",
     "SetLanguageFilter", "SetYouTube",
     "SetGuestConfig", "DisableGuardian", "Enrol", "Unenrol",
-    "SetAdBlock", "SetTimeLimits", "SetChannel", "SetNetworkAccess",
+    "SetAdBlock", "SetTimeLimits", "SetChannel", "SetNetworkAccess", "SetDeveloperTools",
     "SetUserAppAccess", "SetUserBlockedAppKinds", "SetUserBlockedApps",
 })
 
@@ -228,7 +231,7 @@ CHANGES = frozenset({
     "ApplyProfile", "SaveProfile", "DeleteProfile", "ApproveRequest",
     "DismissRequest", "AllowUrl", "EditList", "SetMediaLevel",
     "SetLanguageFilter", "SetYouTube", "SetUserAdmin", "SetLayout",
-    "SetCoverStyle", "SetAdBlock", "SetTimeLimits", "SetNetworkAccess", "SetGuestConfig", "CreateUser",
+    "SetCoverStyle", "SetAdBlock", "SetTimeLimits", "SetNetworkAccess", "SetDeveloperTools", "SetGuestConfig", "CreateUser",
     "AdoptUser", "RemoveUser", "ResetPassword", "SetUserApps", "RemoveApp", "RemoveUnusedApps",
     "InstallAppFor", "ApproveApp",
     "UnapproveApp", "SetUserCanInstall", "SetUserAppAccess",
@@ -250,7 +253,7 @@ PER_USER = frozenset({
     "SetBlockedCategories",
     "ApplyProfile", "SaveProfile", "AllowUrl", "SetMediaLevel",
     "SetLanguageFilter", "SetYouTube", "SetUserAdmin", "SetLayout",
-    "SetCoverStyle", "SetTimeLimits", "SetNetworkAccess", "RemoveUser", "ResetPassword", "SetUserApps",
+    "SetCoverStyle", "SetTimeLimits", "SetNetworkAccess", "SetDeveloperTools", "RemoveUser", "ResetPassword", "SetUserApps",
     "SetUserCanInstall", "SetUserAppAccess", "SetUserBlockedAppKinds",
     "SetUserBlockedApps", "SetCaptiveMode",
 })

@@ -62,6 +62,27 @@ The package registries developer tools fetch from are reachable from every
 account, and the image points each tool at the filter's certificate;
 [what works](supported.md#developer-tools) has the table.
 
+### Developer tools
+
+Nix, devbox and devenv are on every KosherOS machine, but an account may use
+them itself only when an administrator switches **Developer tools** on for it
+(the account's Apps tab; guardian-gated). Off — the default — the Store is the
+only way to install: kosherd runs catalogue installs as root into the account's
+own profile, and the Nix daemon refuses the account directly. On, the account
+can build anything from nixpkgs from a terminal and reaches the package
+registries (npm, PyPI, crates.io, GitHub and the rest) through its own filter
+mode. Those registries are no longer in the set every account reaches: a
+whitelist-only account without the switch sees exactly its list.
+
+A build's own downloads — `fetchurl`, `fetchFromGitHub` — run as the Nix build
+users, which belong to no account. Their web goes through the proxy on a
+listener of their own, judged like the strictest account: the default
+categories, bare addresses and encrypted-DNS tricks refused, no picture scoring
+(a build fetches tarballs, not pages). Everything else of theirs is refused,
+including loopback, so a build can never be a relay for the account that
+started it. The daemon's own fetches from the binary cache run as root, from
+caches only root can name.
+
 ## The category database
 
 The image imports the University of Toulouse blacklists at build time:

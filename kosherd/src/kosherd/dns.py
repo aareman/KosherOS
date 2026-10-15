@@ -82,11 +82,16 @@ def render(policy: Policy) -> str:
     # (whitelists.py): a parent picks "Torah study" rather than typing the
     # thirty hosts those sites load from.
     from . import whitelists
+    from .policy import DEVELOPER_REGISTRIES
 
+    # A whitelist-only account with developer tools on (#123) reaches the
+    # package registries through its own list — they are no longer in the
+    # system set every account gets.
     user_domains = sorted(
         {d.removeprefix("*.")
          for u in policy.effective_users() if u.mode == "whitelist"
-         for d in whitelists.effective(u)}
+         for d in [*whitelists.effective(u),
+                   *(DEVELOPER_REGISTRIES if getattr(u, "developer_tools", False) else ())]}
     )
     system_domains = sorted({d.removeprefix("*.") for d in policy.effective_system_whitelist()})
 

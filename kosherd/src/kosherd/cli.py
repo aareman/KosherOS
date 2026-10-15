@@ -170,6 +170,14 @@ def cmd_set_mode(args) -> int:
     return 0
 
 
+def cmd_developer_tools(args) -> int:
+    """kosherctl developer-tools UID on|off"""
+    on = args.state == "on"
+    _client().set_developer_tools(args.uid, on, _guardian_pw(args))
+    print(f"uid {args.uid}: developer tools {'on' if on else 'off'}")
+    return 0
+
+
 def cmd_network(args) -> int:
     """kosherctl network UID [--video-calls on|off] [--extra-ports 22,2222|none]"""
     c = _client()
@@ -1089,6 +1097,13 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("-g", "--grep", default="", help="show only lines matching this pattern")
     s.set_defaults(func=cmd_log)
     sub.add_parser("get-policy", help="dump the full policy JSON").set_defaults(func=cmd_get_policy)
+
+    s = sub.add_parser("developer-tools",
+                       help="may an account use nix, devbox and devenv itself (and the registries)")
+    s.add_argument("uid", type=int)
+    s.add_argument("state", choices=["on", "off"])
+    s.add_argument("--guardian-password")
+    s.set_defaults(func=cmd_developer_tools)
 
     s = sub.add_parser("network",
                        help="what an account may reach beyond the web: video calls, extra ports")

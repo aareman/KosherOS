@@ -176,6 +176,11 @@ class DaemonClient:
         """Ads and trackers blocked at the resolvers, for every account."""
         self._call("Profiles", "SetAdBlock", "(bs)", enabled, guardian_password)
 
+    def set_developer_tools(self, uid: int, enabled: bool, guardian_password: str = "") -> None:
+        """May the account use the Nix daemon and the package registries
+        itself (nix, devbox, devenv from a shell)?"""
+        self._call("Profiles", "SetDeveloperTools", "(ibs)", uid, bool(enabled), guardian_password)
+
     def set_network_access(self, uid: int, video_calls: bool, extra_ports: list[int],
                            guardian_password: str = "") -> None:
         """Beyond the web: whether UDP to high ports (video calls) is allowed,

@@ -351,6 +351,16 @@ class DemoClient:
     def _time_state(self, u):
         return timelimits.status(u.get("time"), self.used_today.get(u["uid"], 0))
 
+    def list_unused_apps(self):
+        return []
+
+    def remove_unused_apps(self):
+        return {"count": 0, "size": 0}
+
+    def set_developer_tools(self, uid, enabled, pw=""):
+        self._user(uid)["developer_tools"] = bool(enabled)
+        self._change(uid, "SetDeveloperTools", [uid, bool(enabled)])
+
     def set_network_access(self, uid, video_calls, extra_ports, pw=""):
         u = self._user(uid)
         u["video_calls"] = bool(video_calls)

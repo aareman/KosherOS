@@ -16,6 +16,17 @@ from kosherd.apply import ApplyError, apply_policy, write_mitm_rules
 from kosherd.policy import Policy, UserPolicy
 
 
+@pytest.fixture(autouse=True)
+def _no_nix_on_this_machine(monkeypatch):
+    """These tests describe a machine without Nix. Where Nix is installed the
+    proxy runs regardless of modes (the build users fetch through it, #123)
+    and the rules file carries the builders' entry — test_developer_tools.py
+    covers that; here the build group is absent."""
+    from kosherd import nixdaemon
+    monkeypatch.setattr(nixdaemon, "build_gid", lambda: None)
+
+
+
 class FakeRun:
     """Records subprocess calls; fails the ones named in `fail`."""
 

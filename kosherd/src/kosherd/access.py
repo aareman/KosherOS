@@ -24,6 +24,11 @@ ACTION_USE_STORE = "org.kosherlinux.use-store"
 # says nothing about how you are filtered (today: the desktop layout, which
 # the sign-in helper applies).
 ACTION_READ_OWN = "org.kosherlinux.read-own-settings"
+# Granted to every active local user: changing a setting about YOURSELF
+# that is a preference, not a protection (today: your own desktop layout,
+# from the Look app). The filter is per-uid at the network layer whatever
+# draws the windows, so nothing here loosens it.
+ACTION_SET_OWN = "org.kosherlinux.set-own-desktop"
 ACTION_MANAGE_USERS = "org.kosherlinux.manage-users"
 ACTION_MANAGE_FILTER = "org.kosherlinux.manage-filter"
 ACTION_INSTALL_APPS = "org.kosherlinux.install-apps"
@@ -79,6 +84,8 @@ ACTIONS = {
     # per-uid at the network layer whatever draws the windows.
     "SetLayout": ACTION_MANAGE_USERS,
     "GetMyLayout": ACTION_READ_OWN,
+    # The same choice, made by the person for themselves in the Look app.
+    "SetMyLayout": ACTION_SET_OWN,
     # Your own filter settings, read-only, no password: what applies to
     # THIS account and nothing about any other. A filtered account should
     # not be a mystery to the person using it — someone who can see the
@@ -212,7 +219,7 @@ SETUP_READS = frozenset({"IsComplete", "AdminExists"})
 
 # Methods that need to know which uid called them (session management).
 UID_AWARE = frozenset({"Unlock", "Lock", "Status", "VerifyGuardian", "InstallApp",
-                       "ListStoreApps", "GetMyLayout", "GetMySettings",
+                       "ListStoreApps", "GetMyLayout", "SetMyLayout", "GetMySettings",
                        # A nixpkgs app is in one account's profile: what is
                        # installed, and whose copy to update or remove,
                        # depends on who is asking.

@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Look
+Comment=Choose your desktop and how it looks
+Exec=kosher-look
+Icon=preferences-desktop-appearance
+Terminal=false
+Categories=Settings;DesktopSettings;
+Keywords=desktop;taskbar;appearance;theme;layout;tiling;look;

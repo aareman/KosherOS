@@ -61,7 +61,8 @@ are never limited. [Time limits](docs/time-limits.md)
 **A store, search and a window onto the rules.** The Store offers approved apps from
 Flathub, or the whole store with kinds of app and individual apps blocked under a content
 rating ceiling. The Store also checks for and installs app updates. Local SearXNG search uses the
-same policy as web traffic, and **My Filter** lets each person read their own settings.
+same policy as web traffic, **My Filter** lets each person read their own settings, and
+**Look** lets them choose their own desktop.
 A guest account can have its own kind of internet and is wiped at sign-out.
 [Search](docs/search.md) · [Developer tools](docs/supported.md#developer-tools)
 
@@ -195,6 +196,7 @@ prompt never appears in the middle of a long build. Once a VM is up, a root shel
 | `store-app/` | KosherOS Store: install approved apps (GTK4, open to every account) |
 | `myfilter-app/` | My Filter: a read-only view of your own account's rules (GTK4, open to every account) |
 | `welcome-app/` | Welcome: what this computer is and where things are, once per account (GTK4) |
+| `look-app/` | Look: choose your own desktop and tune the taskbar (GTK4, open to every account) |
 | `setup-app/` | KosherOS Setup: the first-boot wizard (GTK4) |
 | `search-app/` | the filtered search front end in front of SearXNG |
 | `mitm/` | the mitmproxy addon that does the page, picture and video filtering |

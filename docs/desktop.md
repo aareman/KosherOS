@@ -3,9 +3,11 @@
 KosherOS is for people who know Windows, a Mac or a Chromebook, and for the
 relative who knows none of them. It is also for the one person in the
 family who wants a tiling window manager. One per-account setting, the
-**layout**, serves all of them. A parent picks it in the admin app, on the
-Account tab under Desktop, or with `kosherctl layout`, and it takes effect
-at that account's next sign-in.
+**layout**, serves all of them. The person picks it for themselves in the
+**Look** app, where the classic taskbar's look is tuned as well; a parent
+can also set it in the admin app, on the Account tab under Desktop, or
+with `kosherctl layout`. Classic and tiling switch in place; the advanced
+desktop is a different session and takes effect at the next sign-in.
 
 | Layout | What it is | Who it is for |
 |---|---|---|
@@ -15,9 +17,33 @@ at that account's next sign-in.
 
 Filtering is identical under all three. It is per account at the network
 layer, so which program draws the windows cannot weaken it, and that is
-why changing the layout is an admin action with no guardian password. The
-layout is not part of a group, because a protection level does not imply
-a window manager, and the guest account always gets the classic desktop.
+why the layout is a preference the person chooses for themselves, with no
+admin and no guardian password. The layout is not part of a group, because
+a protection level does not imply a window manager, and the guest account
+always gets the classic desktop.
+
+## The Look app
+
+Open to every account. It shows the three desktops with the current one
+marked, and choosing another asks kosherd to record it for this account
+(`SetMyLayout`, which takes the account from the D-Bus connection, so
+nobody chooses for anybody else) and, for classic and tiling, applies it
+to the running session at once through the sign-in helper. Advanced is a
+separate session, so the app says it is ready at the next sign-in and
+offers to sign out.
+
+Under Classic, the app also has the taskbar: how see-through it is,
+whether the wallpaper is blurred behind it, and its size, with a button
+back to the KosherOS look. These go straight into the extensions' own
+settings for the account, and the sign-in helper leaves them alone (it
+writes its plan when the layout changes, not at every sign-in), so they
+stick. Wallpaper, dark mode and text size stay in GNOME Settings, which
+the app points to.
+
+GNOME Settings has no way to add a panel, which is why these controls are
+an app of their own rather than a section of its Appearance page. The
+Look app is also the first piece of what may one day be a KosherOS
+settings app in place of GNOME's.
 
 ## Why not write our own desktop
 
@@ -40,8 +66,10 @@ full-screen big-tiles launcher for approved-sites-only accounts.
 ### The setting
 
 The layout lives on each account's policy as an optional value defaulting
-to `classic`, so existing policies are unchanged on disk. Setting it is a
-manage-users action with no guardian gate and no ruleset render. It also
+to `classic`, so existing policies are unchanged on disk. Setting it for
+an account is a manage-users action with no guardian gate and no ruleset
+render; setting one's own is a separate action every active local user
+holds with no prompt, and the daemon takes the account from the bus. It also
 tells accountsservice which session the login screen should preselect for
 that account, so the person is never asked to find the gear menu. An
 account can read its own layout through a polkit action any active local

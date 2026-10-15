@@ -209,6 +209,10 @@ class DaemonClient:
         """The calling user's own desktop layout (any active local user)."""
         return self._call("Profiles", "GetMyLayout")[0]
 
+    def set_my_layout(self, layout: str) -> None:
+        """Choose the calling user's own desktop (any active local user)."""
+        self._call("Profiles", "SetMyLayout", "(s)", layout)
+
     def apply_profile(self, uid: int, profile: str,
                       guardian_password: str = "") -> None:
         self._call("Profiles", "ApplyProfile", "(iss)", uid, profile,

@@ -64,17 +64,20 @@ def _gvariant_list(items: list[str]) -> str:
 # are complete, not diffs: whatever the previous layout wrote is overridden.
 PLANS: dict[str, list[tuple[str, str, str]]] = {
     # A taskbar along the bottom with a start button, minimise buttons on
-    # windows, one workspace so nothing can get lost on another, no hot
-    # corner to trigger by accident. What a Windows, Mac or ChromeOS user
-    # already knows.
+    # windows, no hot corner to trigger by accident. What a Windows, Mac or
+    # ChromeOS user already knows. Workspaces stay GNOME's own: dynamic, a
+    # new one appearing as the last is used. An earlier plan pinned a single
+    # fixed workspace, and because this list is rewritten at every sign-in
+    # a person who turned dynamic workspaces back on lost them at the next
+    # login (#132); writing "true" here puts those accounts right.
     "classic": [
         ("org.gnome.shell", "enabled-extensions",
          _gvariant_list([EXT_DASH_TO_PANEL, EXT_ARCMENU, EXT_APPINDICATOR, EXT_BLUR, EXT_USER_THEME])),
         ("org.gnome.desktop.wm.preferences", "button-layout",
          "'appmenu:minimize,maximize,close'"),
         ("org.gnome.desktop.interface", "enable-hot-corners", "false"),
-        ("org.gnome.mutter", "dynamic-workspaces", "false"),
-        ("org.gnome.desktop.wm.preferences", "num-workspaces", "1"),
+        ("org.gnome.mutter", "dynamic-workspaces", "true"),
+        ("org.gnome.desktop.wm.preferences", "num-workspaces", "4"),
         ("org.gnome.mutter", "edge-tiling", "true"),
     ],
     # GNOME as GNOME ships it, plus PaperWM's scrolling tiling. PaperWM
@@ -86,8 +89,6 @@ PLANS: dict[str, list[tuple[str, str, str]]] = {
         ("org.gnome.desktop.wm.preferences", "button-layout", "'appmenu:close'"),
         ("org.gnome.desktop.interface", "enable-hot-corners", "false"),
         ("org.gnome.mutter", "dynamic-workspaces", "true"),
-        # GNOME's own default; only read when workspaces are not dynamic,
-        # but written so that classic's single workspace is undone.
         ("org.gnome.desktop.wm.preferences", "num-workspaces", "4"),
         ("org.gnome.mutter", "edge-tiling", "false"),
     ],

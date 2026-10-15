@@ -1,7 +1,7 @@
 /* KosherOS: navy glass against the cloud wallpaper, with readable surfaces
  * even if blur is disabled. All sizes are GNOME logical pixels. */
 #panel.dashtopanelMainPanel {
-    border-radius: 16px;
+    border-radius: 0;
     color: #f6f8fc;
 }
 #panel.dashtopanelMainPanel .panel-button {

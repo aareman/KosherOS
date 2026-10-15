@@ -467,6 +467,7 @@ COPY store-app/ /tmp/store-app/
 COPY setup-app/ /tmp/setup-app/
 COPY myfilter-app/ /tmp/myfilter-app/
 COPY welcome-app/ /tmp/welcome-app/
+COPY look-app/ /tmp/look-app/
 COPY policy/schema/policy.schema.json /usr/share/kosher/policy.schema.json
 COPY mitm/ /usr/share/kosher/mitm/
 
@@ -481,9 +482,9 @@ RUN SEARXNG_SETTINGS_PATH=/usr/share/kosher/searxng/settings.yml \
     && rm /tmp/check-searxng-settings.py
 RUN python3 -m pip install --prefix=/usr --no-deps \
         /tmp/kosherd/ /tmp/admin-app/ /tmp/store-app/ /tmp/setup-app/ \
-        /tmp/search-app/ /tmp/myfilter-app/ /tmp/welcome-app/ \
+        /tmp/search-app/ /tmp/myfilter-app/ /tmp/welcome-app/ /tmp/look-app/ \
     && rm -rf /tmp/kosherd /tmp/admin-app /tmp/store-app /tmp/setup-app \
-        /tmp/search-app /tmp/myfilter-app /tmp/welcome-app \
+        /tmp/search-app /tmp/myfilter-app /tmp/welcome-app /tmp/look-app \
     && chmod 755 /usr/bin/kosher-setup-session \
     && systemctl enable kosher-firstboot.service \
     # Every graphical sign-in applies that account's desktop layout.

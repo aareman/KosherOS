@@ -152,6 +152,9 @@ INTROSPECTION_XML = """
     <method name="GetMyLayout">
       <arg direction="out" type="s" name="layout"/>
     </method>
+    <method name="SetMyLayout">
+      <arg direction="in" type="s" name="layout"/>
+    </method>
     <method name="SetTimeLimits">
       <arg direction="in" type="i" name="uid"/>
       <arg direction="in" type="s" name="settings_json"/>
@@ -1462,6 +1465,16 @@ class Daemon:
         user = self.policy.user(_uid)
         layout = user.layout if user is not None else DEFAULT_LAYOUT
         return GLib.Variant("(s)", (layout,))
+
+    def impl_SetMyLayout(self, layout: str, _uid: int):
+        """The caller chooses their own desktop, from the Look app.
+
+        The same preference an admin sets with SetLayout, open to any active
+        local user for their own account: which shell draws the windows
+        says nothing about how they are filtered. The uid comes from the
+        bus, never from an argument, so nobody picks for anybody else.
+        """
+        return self.impl_SetLayout(_uid, layout)
 
     def impl_GetMySettings(self, _uid: int):
         """What applies to the CALLER's own account, read-only.

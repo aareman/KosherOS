@@ -40,7 +40,8 @@ def test_every_method_has_an_action():
 
 READS = ["GetPolicy", "Status", "IsEnabled", "ListCatalog", "ListInstalled",
          "ListInstalledDetails", "SearchApps", "CheckUpdate", "Lock",
-         "VerifyGuardian", "PortalStatus", "SyncNow", "GetMyLayout", "GetTimeUsage"]
+         "VerifyGuardian", "PortalStatus", "SyncNow", "GetMyLayout", "GetTimeUsage",
+         "SetMyLayout"]
 CHANGES = ["SetFilterMode", "SetWhitelist", "SetUrlRules", "CreateUser",
            "AdoptUser", "RemoveUser", "RemoveApp", "InstallAppFor", "ApproveApp",
            "UnapproveApp", "SetUserApps", "SetUserCanInstall", "SetUserAppAccess",
@@ -97,6 +98,18 @@ def test_reading_your_own_layout_is_open_to_ordinary_users():
     assert "GetMyLayout" in access.UID_AWARE
     assert access.ACTION_READ_OWN not in (access.ACTION_READ_CONFIG,
                                           access.ACTION_MANAGE_FILTER)
+
+
+def test_choosing_your_own_layout_is_open_to_ordinary_users():
+    # The Look app: a preference about yourself, no admin and no guardian.
+    # It must know WHO asked, so nobody chooses for anybody else, and it
+    # must be its own action, never a filter one.
+    assert ACTIONS["SetMyLayout"] == access.ACTION_SET_OWN
+    assert "SetMyLayout" in access.UID_AWARE
+    assert "SetMyLayout" not in GUARDIAN_GATED
+    assert access.ACTION_SET_OWN not in (access.ACTION_READ_CONFIG,
+                                         access.ACTION_MANAGE_FILTER,
+                                         access.ACTION_MANAGE_USERS)
 
 
 def test_choosing_a_layout_is_an_admin_action_without_the_guardian():

@@ -11,6 +11,7 @@ flowchart LR
         Admin[KosherOS Admin]
         Store[KosherOS Store]
         MyFilter[My Filter]
+        Look[Look]
         Setup[First-boot wizard]
     end
     subgraph daemon [kosherd, the only privileged surface]
@@ -28,6 +29,7 @@ flowchart LR
     Admin -->|unlock once, then every call| DBus
     Store --> DBus
     MyFilter -->|read own settings| DBus
+    Look -->|choose own desktop| DBus
     Setup --> DBus
     DBus --> Policy
     Policy -->|rendered on every change| NFT & DNS & Proxy & Search & MCT

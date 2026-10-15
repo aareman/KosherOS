@@ -36,6 +36,12 @@ check_contains "policy validates against the shipped schema" "revision" \
     kosherctl get-policy
 
 section "DNS plane"
+# A running systemd-resolved would be asked first by glibc (nsswitch's
+# "resolve [!UNAVAIL=return]") and, given an upstream, would resolve for
+# every program as a system uid — around the family resolver. Masked is
+# the only state that is safe.
+check_contains "systemd-resolved is masked" "masked" \
+    systemctl show -p LoadState --value systemd-resolved.service
 check "names resolve through the local resolver" 0 dig +time=5 +short example.com
 grep -q kosher-redirect-probe /etc/hosts \
     || echo "203.0.113.77 kosher-redirect-probe.internal" >> /etc/hosts

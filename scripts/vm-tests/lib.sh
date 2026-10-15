@@ -41,8 +41,13 @@ check_contains() {
 wait_for_dns() {
     local i
     for i in $(seq 1 30); do
-        if dig +time=2 +tries=1 +short example.com >/dev/null 2>&1; then
-            return 0
+        # getent where dig is absent (the Fedora 44 cloud base ships none):
+        # without a fallback this returned at once and every check raced
+        # the restarting resolver.
+        if command -v dig >/dev/null 2>&1; then
+            dig +time=2 +tries=1 +short example.com >/dev/null 2>&1 && return 0
+        else
+            getent hosts example.com >/dev/null 2>&1 && return 0
         fi
         sleep 1
     done

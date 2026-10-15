@@ -487,6 +487,10 @@ def change_sentence(event: dict, users_by_uid: dict | None = None) -> tuple[str,
         what = "A system update was downloaded"
     elif method == "Rollback":
         what = "The computer was put back to its previous version"
+    elif method == "TryImage":
+        what = f"A test build was put on this computer ({arg(0)})"
+    elif method == "ReturnToKept":
+        what = "The computer went back to the version kept before testing"
     else:
         what = method or "A setting changed"
     detail = f"{actor}, {when_text(event.get('t', 0))}"

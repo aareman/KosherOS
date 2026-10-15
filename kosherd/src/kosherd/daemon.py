@@ -332,6 +332,11 @@ INTROSPECTION_XML = """
       <arg direction="out" type="s" name="status_json"/>
     </method>
     <method name="Rollback"/>
+    <method name="TryImage">
+      <arg direction="in" type="s" name="what"/>
+      <arg direction="in" type="s" name="guardian_password"/>
+    </method>
+    <method name="ReturnToKept"/>
     <method name="Reboot"/>
     <signal name="UpdateProgress">
       <arg type="i" name="percent"/>
@@ -441,7 +446,8 @@ UID_AWARE = access.UID_AWARE
 # A YouTube channel search waits on YouTube instead, which is as good a
 # reason: the main loop must not stop for the network.
 IN_BACKGROUND = frozenset({"CheckUpdate", "DeploymentStatus", "ListChannels",
-                           "SetChannel", "Rollback", "SearchYouTubeChannels"})
+                           "SetChannel", "Rollback", "TryImage", "ReturnToKept",
+                           "SearchYouTubeChannels"})
 
 # Seconds to wait on each short bootc command before saying so. A check
 # goes to the registry, so it gets longer than reading local status. A pull
@@ -2354,14 +2360,11 @@ class Daemon:
         somebody needs this screen is when the machine is already unwell.
         """
         status: dict = {"booted": None, "rollback": None,
-                        "rollback_queued": False, "staged": None}
+                        "rollback_queued": False, "staged": None, "kept": None}
         try:
-            res = self._bootc("status", "--json")
+            doc = self._bootc_status()
         except PolicyError as e:
             status["error"] = str(e)
-            return status
-        if res.returncode != 0:
-            status["error"] = (res.stderr or res.stdout).strip()
             return status
 
         def describe(entry) -> dict | None:
@@ -2385,19 +2388,134 @@ class Daemon:
             digest = outer.get("imageDigest") if isinstance(outer, dict) else None
             return {"image": ref, "version": version, "timestamp": stamp,
                     "channel": updates._channel(ref) if ref else None,
-                    "verified": verified, "digest": digest}
-
-        try:
-            doc = json.loads(res.stdout)["status"]
-        except (ValueError, KeyError, TypeError) as e:
-            status["error"] = f"could not read bootc status: {e}"
-            return status
+                    "verified": verified, "digest": digest,
+                    "pinned": bool(entry.get("pinned"))}
 
         status["booted"] = describe(doc.get("booted"))
         status["rollback"] = describe(doc.get("rollback"))
         status["staged"] = describe(doc.get("staged"))
         status["rollback_queued"] = bool(doc.get("rollbackQueued", False))
+        # The deployment kept while a build is tried (TryImage): pinned, so
+        # ostree never drops it, wherever bootc lists it.
+        others = doc.get("otherDeployments") if isinstance(doc.get("otherDeployments"), list) else []
+        status["kept"] = next((describe(e) for e in [doc.get("booted"), doc.get("rollback"), *others]
+                               if isinstance(e, dict) and e.get("pinned")), None)
         return status
+
+    def _bootc_status(self) -> dict:
+        """`bootc status --json`'s `status` document, or a PolicyError that
+        says in words why there is none."""
+        res = self._bootc("status", "--json")
+        if res.returncode != 0:
+            raise PolicyError((res.stderr or res.stdout).strip())
+        try:
+            doc = json.loads(res.stdout)["status"]
+        except (ValueError, KeyError, TypeError) as e:
+            raise PolicyError(f"could not read bootc status: {e}") from e
+        if not isinstance(doc, dict):
+            raise PolicyError("could not read bootc status: no status object")
+        return doc
+
+    # ---- trying a build (#90) ---------------------------------------------
+
+    def _ostree_admin(self, *args: str) -> None:
+        """One `ostree admin` command (pin, undeploy); its failure is the
+        caller's error, in ostree's words."""
+        argv = ["ostree", "admin", *args]
+        try:
+            res = subprocess.run(argv, capture_output=True, text=True, timeout=120)
+        except (OSError, subprocess.SubprocessError) as e:
+            raise PolicyError(f"{' '.join(argv)} failed: {e}") from e
+        if res.returncode != 0:
+            raise PolicyError(f"{' '.join(argv)} failed: {(res.stderr or res.stdout).strip()}")
+
+    def _ostree_index_of(self) -> dict[str, int]:
+        """Each deployment's index as `ostree admin pin` and `undeploy`
+        count them, by the `checksum.serial` key bootc's status also
+        carries."""
+        from . import updates
+
+        try:
+            res = subprocess.run(["ostree", "admin", "status"], capture_output=True,
+                                 text=True, timeout=60)
+        except (OSError, subprocess.SubprocessError) as e:
+            raise PolicyError(f"ostree admin status failed: {e}") from e
+        if res.returncode != 0:
+            raise PolicyError(f"ostree admin status failed: {(res.stderr or res.stdout).strip()}")
+        return {d["key"]: d["index"] for d in updates.parse_ostree_status(res.stdout)}
+
+    def _undeploy(self, keys: list[str]) -> None:
+        """Remove deployments by key, highest index first, since each
+        removal renumbers the ones after it."""
+        if not keys:
+            return
+        index_of = self._ostree_index_of()
+        indices = sorted((index_of[k] for k in keys if k in index_of), reverse=True)
+        for index in indices:
+            self._ostree_admin("undeploy", str(index))
+
+    def impl_TryImage(self, what: str, _guardian_pw: str = ""):
+        """Run a build that is not on any channel — a pull request's, a
+        version's — while keeping the deployment this machine came from.
+
+        The first try pins the booted deployment, so ostree keeps it
+        however many builds follow; every try removes the test builds no
+        longer booted; then the same pull and staged restart as an update,
+        on the same signals (see updates.trial_plan). Guardian-gated like a
+        channel switch: it puts the computer on a build nobody has tested.
+        """
+        from . import updates
+
+        self._refuse_if_updating()
+        deps = updates.deployments(self._bootc_status())
+        booted = next((d for d in deps if d["place"] == "booted"), {})
+        try:
+            target = updates.trial_target(booted.get("image") or "", what)
+            plan = updates.trial_plan(deps, target)
+        except ValueError as e:
+            raise PolicyError(str(e)) from e
+        if plan["pin"]:
+            index = self._ostree_index_of().get(plan["pin"])
+            if index is None:
+                raise PolicyError("ostree does not list the booted deployment, "
+                                  "so it cannot be kept")
+            self._ostree_admin("pin", str(index))
+            log.info("kept the booted deployment (%s) while builds are tried",
+                     booted.get("image"))
+        self._undeploy(plan["undeploy"])
+        log.info("trying %s: %s", target, " ".join(plan["argv"]))
+        self._update_thread = updates.run_upgrade(
+            self._on_update_progress, self._on_update_finished, argv=plan["argv"])
+        return None
+
+    def impl_ReturnToKept(self):
+        """Back to the deployment kept by TryImage, with no download: the
+        test builds in between are removed so the kept one is next in
+        line, `bootc rollback` queues it (and discards a staged build),
+        and the pin comes off. Not guardian-gated, for the reasons
+        Rollback is not: the image is one this machine already ran."""
+        from . import updates
+
+        try:
+            plan = updates.return_plan(updates.deployments(self._bootc_status()))
+        except ValueError as e:
+            raise PolicyError(str(e)) from e
+        self._undeploy(plan["undeploy"])
+        if plan["rollback"]:
+            after = updates.deployments(self._bootc_status())
+            rollback = next((d for d in after if d["place"] == "rollback"), None)
+            if rollback is None or rollback.get("key") != plan["kept"].get("key"):
+                raise PolicyError("the kept version is not the one a restart would "
+                                  "go back to; 'kosherctl system status' shows what is "
+                                  "on the disk")
+            res = self._bootc("rollback")
+            if res.returncode != 0:
+                raise PolicyError(f"bootc rollback failed: {res.stderr.strip()}")
+        index = self._ostree_index_of().get(plan["unpin"])
+        if index is not None:
+            self._ostree_admin("pin", "--unpin", str(index))
+        log.info("back to the kept deployment %s", plan["kept"].get("image"))
+        return None
 
     def impl_Rollback(self):
         """Go back to the deployment this machine booted before.

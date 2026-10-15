@@ -247,7 +247,9 @@ def _xorriso_runner(xorriso: str = "xorriso"):
         prefix = ["nix", "shell", "nixpkgs#xorriso", "-c", "xorriso"]
     else:
         raise SystemExit("xorriso is not installed: re-enter `devenv shell`, "
-                         "which now provides it, and run `just brand-iso`")
+                         "which now provides it, and run "
+                         "`python3 scripts/brand-iso.py build/bootiso/install.iso` "
+                         "(the ISO itself is already built)")
 
     def run(args, **kwargs):
         return subprocess.run(prefix + args, check=True, **kwargs)

@@ -153,7 +153,7 @@ cmd_up() {
     echo -n "booting"
     for _ in $(seq 60); do
         if ssh -F "$ssh_config" -o ConnectTimeout=2 kosher-fedora true 2>/dev/null; then
-            echo; echo "up — connect with: just fedora-ssh"
+            echo; echo "up — connect with: just fedora-vm ssh"
             return
         fi
         echo -n "."; sleep 2

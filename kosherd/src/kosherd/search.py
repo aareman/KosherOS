@@ -173,6 +173,11 @@ class ResultFilter:
             self._scanner = pagescan.PageScanner(scorer=self.scorer)
         return self._scanner
 
+    def prepare(self) -> None:
+        """Load shared filtering data before the HTTP service accepts searches."""
+        for name in ("blocklist", "bundle", "wordlist", "scorer", "sites", "scanner"):
+            getattr(self, name)
+
     def query_reason(self, uid: int | None, query: str) -> str | None:
         """Why this SEARCH must not run at all, or None to let it run.
 

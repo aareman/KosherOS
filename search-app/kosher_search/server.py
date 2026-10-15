@@ -18,6 +18,11 @@ nobody can fetch unfiltered results by going around us.
 from __future__ import annotations
 
 import argparse
+from collections import OrderedDict
+from concurrent.futures import Future
+from copy import deepcopy
+import threading
+import time
 import html
 import json
 import logging
@@ -35,7 +40,10 @@ from . import BACKEND, LISTEN_PORT
 
 log = logging.getLogger("kosher-search")
 
-BACKEND_TIMEOUT = 10
+BACKEND_TIMEOUT = 4
+CACHE_SECONDS = 60
+CACHE_ENTRIES = 32
+MAX_BACKEND_BYTES = 2 * 1024 * 1024
 RESULTS_PER_PAGE = 20
 # SearXNG's own categories, in the order they are offered.
 TABS = (("general", "Web"), ("images", "Images"), ("news", "News"),
@@ -165,8 +173,47 @@ class Backend:
     def __init__(self, base: str = BACKEND, timeout: int = BACKEND_TIMEOUT):
         self.base = base.rstrip("/")
         self.timeout = timeout
+        self._lock = threading.Lock()
+        self._cache = OrderedDict()
+        self._pending = {}
 
     def search(self, query: str, category: str, page: int) -> dict:
+        # Only raw, strict-safe-search responses are shared. Query permission
+        # and per-account filtering still run on EVERY request, including hits.
+        key = (query, category, max(1, page))
+        with self._lock:
+            cached = self._cache.get(key)
+            if cached is not None:
+                expires, payload = cached
+                if expires > time.monotonic():
+                    self._cache.move_to_end(key)
+                    return deepcopy(payload)
+                del self._cache[key]
+            pending = self._pending.get(key)
+            owner = pending is None
+            if owner:
+                pending = self._pending[key] = Future()
+        if not owner:
+            # Share one upstream request when tabs ask for the same search.
+            return deepcopy(pending.result(timeout=self.timeout + 1))
+        try:
+            payload = self._fetch(*key)
+            # Empty/failed engine responses should be retried, not remembered.
+            if payload.get("results"):
+                with self._lock:
+                    self._cache[key] = (time.monotonic() + CACHE_SECONDS, payload)
+                    while len(self._cache) > CACHE_ENTRIES:
+                        self._cache.popitem(last=False)
+            pending.set_result(payload)
+            return deepcopy(payload)
+        except BaseException as error:
+            pending.set_exception(error)
+            raise
+        finally:
+            with self._lock:
+                self._pending.pop(key, None)
+
+    def _fetch(self, query: str, category: str, page: int) -> dict:
         params = urllib.parse.urlencode({
             "q": query,
             "format": "json",
@@ -186,7 +233,13 @@ class Backend:
             "X-Real-IP": "127.0.0.1",
         })
         with urllib.request.urlopen(request, timeout=self.timeout) as response:
-            return json.loads(response.read())
+            raw = response.read(MAX_BACKEND_BYTES + 1)
+        if len(raw) > MAX_BACKEND_BYTES:
+            raise ValueError("Search response is too large")
+        payload = json.loads(raw)
+        if not isinstance(payload, dict) or not isinstance(payload.get("results", []), list):
+            raise ValueError("Invalid search response")
+        return payload
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -259,14 +312,15 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self._chunk(PAGE_HEAD.format(title=esc(title), style=STYLE,
                                      query=esc(query), category=esc(category),
-                                     tabs=self._tabs(query, category)))
+                                     tabs=self._tabs(query, category))
+                    + '<p class="search-pending" role="status">Searching…</p>')
         try:
             text = body()
         except Exception:  # noqa: BLE001 - the page is half sent; finish it
             log.exception("could not build the results")
             text = ('<div class="note"><strong>Something went wrong.</strong>'
                     "<p>Please try again.</p></div>")
-        self._chunk(text + PAGE_TAIL)
+        self._chunk('<style>.search-pending { display:none }</style>' + text + PAGE_TAIL)
         self.wfile.write(b"0\r\n\r\n")
         self.wfile.flush()
 
@@ -350,7 +404,9 @@ class Handler(BaseHTTPRequestHandler):
 
         def body() -> str:
             try:
+                started = time.monotonic()
                 payload = self.backend.search(query, category, page)
+                answered = time.monotonic()
             except (urllib.error.URLError, OSError, ValueError, TimeoutError):
                 log.warning("the search backend did not answer", exc_info=True)
                 return ('<div class="note"><strong>Search is unavailable.'
@@ -358,7 +414,12 @@ class Handler(BaseHTTPRequestHandler):
                         "not answering. It may still be starting up.</p></div>")
             results = payload.get("results", [])
             kept = self.result_filter.filter_results(uid, results)
-            return self._results(uid, query, category, page, results, kept)
+            filtered = time.monotonic()
+            rendered = self._results(uid, query, category, page, results, kept)
+            log.info("search timing: backend=%.3fs filter=%.3fs render=%.3fs results=%d",
+                     answered - started, filtered - answered,
+                     time.monotonic() - filtered, len(kept))
+            return rendered
 
         return self._page_in_two(body, query=query, category=category,
                                  title=f"{query} — KosherOS Search")
@@ -507,6 +568,9 @@ class Server(ThreadingHTTPServer):
 def serve(port: int = LISTEN_PORT, backend: str = BACKEND) -> None:
     Handler.backend = Backend(backend)
     Handler.result_filter = search_mod.ResultFilter()
+    # Compile the language matchers and open category data at service startup,
+    # rather than making the first person searching pay that cost.
+    Handler.result_filter.prepare()
     Handler.uids = UidLookup()
     Handler.port = port
     # Loopback only. The firewall keeps other machines out too, but a

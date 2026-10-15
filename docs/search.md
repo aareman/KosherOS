@@ -30,7 +30,7 @@ is per account, so that identity is the whole point.
 A results page is sent in two pieces. The head and the search bar go out
 the moment the query arrives, so the browser draws them at once, and the
 results follow in the same response when the engine has answered and the
-filter has read what it needed to.
+filter has checked them. A “Searching…” status appears during that wait.
 
 SearXNG sits behind it and does the one job that needs a large dependency:
 scraping a dozen search engines that keep changing. It is reached only
@@ -41,6 +41,37 @@ The firewall refuses any human account's connection to SearXNG's own port.
 Loopback is otherwise open, which is what lets a person reach the search
 page, and the engine's raw results carry exactly the snippets the filter
 exists to withhold.
+
+## Response time
+
+The front end prepares its shared filtering data at service startup. Compiling
+the language matchers and opening the category database no longer delays the
+first person's search.
+
+Successful, nonempty engine responses stay in memory for 60 seconds, with at
+most 32 entries and a 2 MiB limit per response. The key includes the exact
+query, tab, and page. Simultaneous identical searches share one upstream
+request. Empty responses and errors are retried; nothing is written to disk.
+This caches raw strict-safe-search results, never rendered pages or account
+permissions. Every request still checks query permission and filters results
+against the current account policy and page-scan verdicts. Browser responses
+remain `Cache-Control: no-store`.
+
+SearXNG gives upstream engines 2 seconds by default and caps its overall
+search wait at 2.5 seconds. It returns the engines that answered within the
+budget, so an unusually slow engine may contribute no results. The front end
+allows 4 seconds for the local request. A fresh search still depends on outside
+engines and their rate limits; this is not a local web index.
+
+The search journal records backend, filtering, and rendering durations without
+query text. Use `journalctl -u kosher-search` to distinguish a slow engine from
+slow local processing.
+
+An isolated Fedora image test with the real backend and account filtering on
+2026-10-15 returned repeated Web, Images, and News searches in 22–35 ms.
+Fresh searches in the same small sample took 0.65–2.54 seconds. Preparing the
+filter took 1.6 seconds at startup. These are development measurements, not a
+latency guarantee for other connections or engines.
 
 ## What gets filtered
 

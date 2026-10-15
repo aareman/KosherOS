@@ -62,8 +62,10 @@ preferences:
     - method
 
 outgoing:
-  request_timeout: 4.0
-  max_request_timeout: 8.0
+  # Return the engines that answered promptly; one slow scraper must not
+  # hold every result. The front end allows another 1.5s for local overhead.
+  request_timeout: 2.0
+  max_request_timeout: 2.5
   pool_connections: 16
   pool_maxsize: 8
 

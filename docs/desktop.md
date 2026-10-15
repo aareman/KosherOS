@@ -76,8 +76,9 @@ made there wins over the seed.
 ### The appearance
 
 The classic taskbar uses a translucent navy background, rounded controls,
-blue running-app indicators, and a cream Apps button. Small margins keep it
-clear of the screen edges. These are editable defaults, not locked settings.
+blue running-app indicators, and a cream Apps button. It sits flush with the
+bottom and sides of the screen. These are editable defaults, not locked
+settings.
 
 Both GNOME layouts include an Aura Glass **shell preset**: its Quick Settings,
 menus, notifications, and dialog styles over GNOME's base shell theme, tinted

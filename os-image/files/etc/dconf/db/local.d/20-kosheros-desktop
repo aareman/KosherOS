@@ -29,11 +29,13 @@ show-apps-icon-side-padding=10
 # way the Windows taskbar does; previews on hover so a group is legible.
 group-apps=true
 show-window-previews=true
-# A compact floating taskbar, with a solid enough tint to remain legible
-# without blur. The shell theme provides its 16px outer corners.
+# A compact taskbar flush with the bottom and sides of the screen, the way
+# a Windows taskbar sits, with a solid enough tint to remain legible
+# without blur. It once floated on a margin with rounded outer corners;
+# the gap under it read as a mistake on a real laptop, so no margin.
 panel-size=48
-panel-top-bottom-margins=6
-panel-side-margins=10
+panel-top-bottom-margins=0
+panel-side-margins=0
 panel-side-padding=6
 appicon-margin=4
 appicon-padding=6

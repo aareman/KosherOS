@@ -224,6 +224,20 @@ def render(policy: Policy, *, dns_uid: int, mitm_uid: int | None = None,
         f'        oif "lo" tcp dport {SEARCH_BACKEND_PORT} '
         f"meta skuid >= {UID_MIN} reject\n"
         if search_uid is not None else "")
+    # The plain resolver on 5354 answers unfiltered accounts and nobody else
+    # (#127). Loopback is never redirected and nothing guarded that port, so
+    # a dns-filtered account could ask it directly and get unfiltered
+    # answers. Matched by loopback ADDRESS, not interface: an unfiltered
+    # account's own queries arrive here redirected, with 127.0.0.1 as their
+    # destination but the original route's interface (see below).
+    open_dns_guard = "".join(
+        f"        meta skuid {owner_match(uid)} ip daddr 127.0.0.0/8 {proto} dport {OPEN_DNS_PORT} accept\n"
+        for uid in unfiltered for proto in ("udp", "tcp")
+    ) + "".join(
+        f"        ip daddr 127.0.0.0/8 {proto} dport {OPEN_DNS_PORT} meta skuid >= {UID_MIN} reject\n"
+        f"        ip6 daddr ::1 {proto} dport {OPEN_DNS_PORT} meta skuid >= {UID_MIN} reject\n"
+        for proto in ("udp", "tcp")
+    )
 
     return f"""#!/usr/sbin/nft -f
 # Rendered by kosherd from policy revision {policy.revision}. DO NOT EDIT.
@@ -257,7 +271,7 @@ table {TABLE} {{
 
     chain output {{
         type filter hook output priority filter; policy accept;
-{backend_guard}        oif "lo" accept
+{backend_guard}{open_dns_guard}        oif "lo" accept
         # A packet the nat rules just redirected (DNS to the resolver, web to
         # the proxy) already has a loopback DESTINATION here, but this hook
         # still sees the interface of its original route — so `oif "lo"`

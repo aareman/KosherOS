@@ -422,7 +422,13 @@ RUN passwd -l root \
     && systemctl mask systemd-resolved.service debug-shell.service \
     && systemctl enable sshd.service \
     && systemctl enable kosherd.service kosher-firewall.service kosher-dns.service \
-    && systemctl enable bootc-fetch-apply-updates.timer \
+    # Updates are applied by a parent from the admin app (kosherd's path,
+    # which turns signature enforcement on with the first switch), never on
+    # their own: the stock timer would pull the first update before that
+    # switch, unverified (#125), and the docs have said "not on their own"
+    # all along.
+    && systemctl disable bootc-fetch-apply-updates.timer \
+    && ! systemctl is-enabled --quiet bootc-fetch-apply-updates.timer \
     # Nix: the store on /var, and the daemon on its socket.
     && systemctl enable nix.mount nix-daemon.socket \
     && systemctl is-enabled nix.mount nix-daemon.socket \

@@ -1,5 +1,7 @@
-/* KosherOS: navy glass against the cloud wallpaper, with readable surfaces
- * even if blur is disabled. All sizes are GNOME logical pixels. */
+/* KosherOS: navy glass against the cloud wallpaper. The tints are thin
+ * enough that the blur behind menus and dialogs is plainly visible, and
+ * strong enough that white text reads even if blur is off. All sizes are
+ * GNOME logical pixels. */
 #panel.dashtopanelMainPanel {
     border-radius: 0;
     color: #f6f8fc;
@@ -16,12 +18,12 @@
 .workspace-switcher,
 .resize-popup,
 .app-folder-dialog {
-    background-color: rgba(11, 26, 51, 0.88);
+    background-color: rgba(11, 26, 51, 0.70);
     color: #f6f8fc;
 }
 .popup-menu-content.quick-settings,
 .quick-settings {
-    background-color: rgba(11, 26, 51, 0.88);
+    background-color: rgba(11, 26, 51, 0.70);
     color: #f6f8fc;
 }
 .notification-banner {

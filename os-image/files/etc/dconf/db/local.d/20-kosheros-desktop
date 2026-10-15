@@ -30,9 +30,12 @@ show-apps-icon-side-padding=10
 group-apps=true
 show-window-previews=true
 # A compact taskbar flush with the bottom and sides of the screen, the way
-# a Windows taskbar sits, with a solid enough tint to remain legible
-# without blur. It once floated on a margin with rounded outer corners;
-# the gap under it read as a mistake on a real laptop, so no margin.
+# a Windows taskbar sits. It once floated on a margin with rounded outer
+# corners; the gap under it read as a mistake on a real laptop, so no margin.
+# The tint is navy at a little over half strength: enough for white text
+# to read, thin enough that the blurred wallpaper plainly shows through —
+# at the earlier 0.88 the glass could not be seen at all. The Look app
+# lets each person move this.
 panel-size=48
 panel-top-bottom-margins=0
 panel-side-margins=0
@@ -46,7 +49,7 @@ status-icon-padding=6
 trans-use-custom-bg=true
 trans-bg-color='#0b1a33'
 trans-use-custom-opacity=true
-trans-panel-opacity=0.88
+trans-panel-opacity=0.55
 trans-use-dynamic-opacity=false
 trans-use-border=true
 trans-border-width=1

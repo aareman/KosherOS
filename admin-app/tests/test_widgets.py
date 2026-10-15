@@ -814,7 +814,7 @@ def test_every_setting_made_the_move():
     for title in ("Group", "Filter mode", "Approved sites", "Page rules",
                   "Pictures and video", "Bad language", "Restricted Mode",
                   "Can install apps", "Available apps", "Allow Wi-Fi sign-in",
-                  "Administrator", "Layout", "Remove account…"):
+                  "Administrator", "Remove account…"):
         assert title in titles, f"{title} was lost in the move"
 
 

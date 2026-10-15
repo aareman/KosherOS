@@ -4,9 +4,9 @@ KosherOS is for people who know Windows, a Mac or a Chromebook, and for the
 relative who knows none of them. It is also for the one person in the
 family who wants a tiling window manager. One per-account setting, the
 **layout**, serves all of them. The person picks it for themselves in the
-**Look** app, where the classic taskbar's look is tuned as well; a parent
-can also set it in the admin app, on the Account tab under Desktop, or
-with `kosherctl layout`. Classic and tiling switch in place; the advanced
+**Look** app, where the classic taskbar's look is tuned as well; it is not
+a row in the admin app, though `kosherctl layout` can still set it for an
+account from a terminal. Classic and tiling switch in place; the advanced
 desktop is a different session and takes effect at the next sign-in.
 
 | Layout | What it is | Who it is for |

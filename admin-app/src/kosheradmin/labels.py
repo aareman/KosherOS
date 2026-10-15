@@ -153,23 +153,13 @@ def channel_result_subtitle(channel: dict) -> str:
     parts = [p for p in (channel.get("handle"), channel.get("subscribers")) if p]
     return " · ".join(parts) or channel["id"]
 
-# How the desktop looks, in the order a parent would consider them. Not a
-# protection — the filter does not care which shell draws the windows — so
-# no guardian password, and it says so plainly.
+# The desktops, for the activity feed's line about a layout change. The
+# choice itself is the person's, in the Look app, not a row in here.
 LAYOUT_LABELS = {
     "classic": "Classic desktop",
     "tiling": "Tiling desktop",
     "advanced": "Advanced (niri)",
 }
-LAYOUT_HINTS = {
-    "classic": "A familiar desktop with a taskbar, start menu and movable windows.",
-    "tiling": ("Arranges windows in a scrolling row with keyboard controls. Uses the same "
-        "settings and accessibility tools as the classic desktop."),
-    "advanced": ("A separate niri session with the Noctalia shell, selected at sign-in and "
-        "configured through text files. GNOME Settings is unavailable, and "
-        "accessibility support is limited."),
-}
-LAYOUT_ORDER = ("classic", "tiling", "advanced")
 
 NO_GROUP = "No group"
 

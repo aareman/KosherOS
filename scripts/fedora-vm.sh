@@ -10,14 +10,45 @@
 set -euo pipefail
 
 FEDORA_RELEASE="${FEDORA_RELEASE:-44}"
-IMAGE_NAME="Fedora-Cloud-Base-Generic-${FEDORA_RELEASE}-1.1.x86_64.qcow2"
-MIRRORS=(
-    "https://download.fedoraproject.org/pub/fedora/linux/releases/${FEDORA_RELEASE}/Cloud/x86_64/images/${IMAGE_NAME}"
-    "https://archives.fedoraproject.org/pub/archive/fedora/linux/releases/${FEDORA_RELEASE}/Cloud/x86_64/images/${IMAGE_NAME}"
+MIRROR_DIRS=(
+    "https://download.fedoraproject.org/pub/fedora/linux/releases/${FEDORA_RELEASE}/Cloud/x86_64/images"
+    "https://archives.fedoraproject.org/pub/archive/fedora/linux/releases/${FEDORA_RELEASE}/Cloud/x86_64/images"
 )
 
 repo="$(cd "$(dirname "$0")/.." && pwd)"
 vm_dir="$repo/build/vm"
+
+# The build number in the file name (44-1.7) changes with every respin and
+# cannot be known ahead of time: a hard-coded 1.1 met two 404s and no VM.
+# Prefer an image already here for this release, then ask the mirror for
+# the newest; FEDORA_IMAGE pins a file name for an offline or exact run.
+discover_image() {
+    local dir name
+    if [ -n "${FEDORA_IMAGE:-}" ]; then
+        echo "$FEDORA_IMAGE"
+        return
+    fi
+    name=$(find "$vm_dir" -maxdepth 1 -name "Fedora-Cloud-Base-Generic-${FEDORA_RELEASE}-*.x86_64.qcow2" 2>/dev/null \
+        | sort -V | tail -1)
+    if [ -n "$name" ]; then
+        basename "$name"
+        return
+    fi
+    for dir in "${MIRROR_DIRS[@]}"; do
+        name=$(curl -fsL --max-time 30 "$dir/" 2>/dev/null \
+            | grep -oE "Fedora-Cloud-Base-Generic-${FEDORA_RELEASE}-[0-9.]+\.x86_64\.qcow2" | sort -uV | tail -1)
+        if [ -n "$name" ]; then
+            echo "$name"
+            return
+        fi
+    done
+    echo "Fedora-Cloud-Base-Generic-${FEDORA_RELEASE}-1.1.x86_64.qcow2"  # so the error names a file
+}
+IMAGE_NAME="$(discover_image)"
+MIRRORS=(
+    "${MIRROR_DIRS[0]}/${IMAGE_NAME}"
+    "${MIRROR_DIRS[1]}/${IMAGE_NAME}"
+)
 base_img="$vm_dir/$IMAGE_NAME"
 disk="$vm_dir/disk.qcow2"
 seed="$vm_dir/seed.iso"

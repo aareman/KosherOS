@@ -8,7 +8,8 @@ set -euo pipefail
 repo="$(cd "$(dirname "$0")/.." && pwd)"
 
 echo "== installing packages"
-dnf -y install dnsmasq nftables python3-gobject python3-jsonschema python3-pip malcontent malcontent-tools flatpak checkpolicy policycoreutils policycoreutils-python-utils accountsservice
+# bind-utils: the VM suites use dig, and the Fedora 44 cloud base no longer ships it.
+dnf -y install dnsmasq nftables python3-gobject python3-jsonschema python3-pip malcontent malcontent-tools flatpak checkpolicy policycoreutils policycoreutils-python-utils accountsservice bind-utils
 
 echo "== SELinux module (dnsmasq needs netfilter netlink for nftset)"
 tmpdir="$(mktemp -d)"
@@ -69,7 +70,12 @@ EOF
 fi
 
 echo "== replacing systemd-resolved with kosher-dns"
-systemctl disable --now systemd-resolved.service || true
+# Masked, not disabled: on the Fedora 44 cloud base something enables
+# resolved again, nsswitch asks it FIRST ([!UNAVAIL=return]), it has no
+# upstream (NetworkManager runs with dns=none), and every program then
+# fails by name while the family resolver answers raw queries fine. The
+# image masks it at build time; the dev VM must match.
+systemctl mask --now systemd-resolved.service || true
 rm -f /etc/resolv.conf
 install -m 0644 "$repo/os-image/files/etc/resolv.conf" /etc/resolv.conf
 

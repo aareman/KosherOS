@@ -242,12 +242,16 @@ policy_kosheros() {
 booted_signature() {
     bootc status --format json | python3 -c 'import json, sys; i = json.load(sys.stdin)["status"]["booted"]["image"]["image"]; print(i["image"], i.get("signature"))'
 }
-check_contains "[F10] an image from an unknown registry is refused" "reject" policy_default
-check_contains "[F10] a KosherOS image needs the KosherOS key's signature" \
-    "sigstoreSigned /etc/pki/containers/kosheros-images.pub" policy_kosheros
-check "[F10] the KosherOS public key is on the machine" 0 test -s /etc/pki/containers/kosheros-images.pub
-check "[F10] the signatures are looked for where cosign puts them" 0 \
-    grep -q 'use-sigstore-attachments: true' /etc/containers/registries.d/kosheros.yaml
+# The policy, the key and registries.d ship in the image; the stage-1 VM
+# installs the stack and nothing of that, so these say so rather than fail.
+if image_only "[F10] the image-trust policy (stage-1 VM has none)"; then
+    check_contains "[F10] an image from an unknown registry is refused" "reject" policy_default
+    check_contains "[F10] a KosherOS image needs the KosherOS key's signature" \
+        "sigstoreSigned /etc/pki/containers/kosheros-images.pub" policy_kosheros
+    check "[F10] the KosherOS public key is on the machine" 0 test -s /etc/pki/containers/kosheros-images.pub
+    check "[F10] the signatures are looked for where cosign puts them" 0 \
+        grep -q 'use-sigstore-attachments: true' /etc/containers/registries.d/kosheros.yaml
+fi
 # A developer's rootless pull from a public registry still works: the
 # whole point of the per-registry policy.
 check "[F10] a rootless pull from Docker Hub is still allowed" 0 \

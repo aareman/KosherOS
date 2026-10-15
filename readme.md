@@ -194,6 +194,7 @@ prompt never appears in the middle of a long build. Once a VM is up, a root shel
 | `admin-app/` | KosherOS Admin: the family board, the activity feed, a page per person (GTK4, libadwaita) |
 | `store-app/` | KosherOS Store: install approved apps (GTK4, open to every account) |
 | `myfilter-app/` | My Filter: a read-only view of your own account's rules (GTK4, open to every account) |
+| `welcome-app/` | Welcome: what this computer is and where things are, once per account (GTK4) |
 | `setup-app/` | KosherOS Setup: the first-boot wizard (GTK4) |
 | `search-app/` | the filtered search front end in front of SearXNG |
 | `mitm/` | the mitmproxy addon that does the page, picture and video filtering |

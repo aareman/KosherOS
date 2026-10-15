@@ -7,3 +7,5 @@
 /org/gnome/shell/allow-extension-installation
 # No donation appeals on a family computer (see 20-kosheros-desktop).
 /org/gnome/settings-daemon/plugins/housekeeping/donation-reminder-enabled
+# GNOME's own welcome dialog stays off; KosherOS has its own (see 20-kosheros-desktop).
+/org/gnome/shell/welcome-dialog-last-shown-version

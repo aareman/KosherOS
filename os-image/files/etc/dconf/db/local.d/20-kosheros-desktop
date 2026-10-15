@@ -15,6 +15,12 @@ enabled-extensions=['dash-to-panel@jderose9.github.com', 'arcmenu@arcmenu.com', 
 # not something a family computer needs, and a broken one takes the whole
 # desktop down with it. Locked: the same answer for every account.
 allow-extension-installation=false
+# GNOME's "Welcome to GNOME" dialog explains GNOME and offers a tour of
+# it. KosherOS has its own welcome (kosher-welcome, from an autostart
+# entry) that explains this computer, differently to an administrator and
+# to a managed user. The Shell shows its dialog when this is below the
+# running version; a version it will not reach, locked for every account.
+welcome-dialog-last-shown-version='99'
 
 [org/gnome/shell/extensions/dash-to-panel]
 # GNOME opens the Activities overview on an empty session; a person who

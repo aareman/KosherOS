@@ -154,8 +154,7 @@ just test-vm kosher-fedora 50  # one suite, by its number
 | `50-inspect` | TLS interception: the proxy, the CA, rules reaching it, a blocked and an allowed address, uninspected accounts untouched |
 | `60-persistence` | revisions advance, the policy stays root-only, a restarted daemon rebuilds enforcement, sessions do not survive a restart |
 | `70-categories` | the category list is loaded, blocking reaches the right layer for the right accounts, unblocking restores access |
-| `80-hardening` | the protections the red-team review asked for, asserted from a supervised account: every port through the proxy, no browsing by bare address, DoH blocked by shape, the LAN limited, the boot menu and disk protected, consoles closed, images verified. Each line carries its finding number, and a red line is information: the suite is the acceptance test as each fix lands |
-
+| `80-hardening` | the protections the red-team review asked for, asserted from a supervised account: every port through the proxy, no browsing by bare address, DoH blocked by shape, the LAN limited, the boot menu and disk protected, consoles closed, images verified. Each line carries its finding number, and a red line is information: the suite is the acceptance test as each fix lands | The `[N]` lines are the October re-audit's findings (developer tooling, the page filter, image trust), measured the same way |
 ## The boot test
 
 Every other test exercises a system that is already up. `just test-boot`

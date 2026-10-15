@@ -76,6 +76,42 @@ wait_for_proxy_as() {
     return 1
 }
 
+# One UDP DNS query, as a user, to a server:port, without dig (the image
+# ships no bind-utils). Exits 0 when an answer came back, 1 otherwise.
+dns_query_as() {
+    runuser -u "$1" -- python3 - "$2" "$3" "$4" <<'PY'
+import os, socket, sys
+server, port, name = sys.argv[1], int(sys.argv[2]), sys.argv[3]
+q = os.urandom(2) + b"\x01\x00\x00\x01\x00\x00\x00\x00\x00\x00"
+for label in name.strip(".").split("."):
+    q += bytes([len(label)]) + label.encode()
+q += b"\x00\x00\x01\x00\x01"
+s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+s.settimeout(4)
+try:
+    s.sendto(q, (server, port))
+    s.recvfrom(512)
+    sys.exit(0)
+except OSError:
+    sys.exit(1)
+PY
+}
+
+# Bring the plain resolver (port 5354) up by adopting an unfiltered
+# account, for checks about it; put the account on "none" afterwards so it
+# cannot reach anything once the check is over.
+with_unfiltered_account() {
+    id freekid >/dev/null 2>&1 || useradd -m freekid
+    kosherctl get-policy 2>/dev/null | grep -q '"freekid"' \
+        || kosherctl adopt freekid unfiltered >/dev/null 2>&1
+    kctl set-mode "$(id -u freekid)" unfiltered >/dev/null
+    wait_for_dns
+    sleep 1
+}
+without_unfiltered_account() {
+    kctl set-mode "$(id -u freekid)" none >/dev/null 2>&1 || true
+}
+
 # assert_that <description> <command...> — passes when the command succeeds.
 assert_that() {
     local desc="$1"

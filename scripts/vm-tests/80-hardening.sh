@@ -197,10 +197,12 @@ skip "[F5] needs the proxy's name-check mode; no deterministic probe against a s
 # -- F6: the LAN --------------------------------------------------------------------
 
 section "[F6] The LAN in filtered modes"
-check_contains "[F6] filtered mode limits the LAN to local services (config)" "local_services" \
-    nft list chain inet kosher mode_filtered
-check_contains "[F6] dns-filtered mode limits the LAN to local services (config)" "local_services" \
-    nft list chain inet kosher mode_dnsfilter
+# local_services moved into the output chain for everyone (#48), so a grep
+# of the mode chains for it would now fail for the wrong reason. What F6
+# asks for is a rule that REFUSES the LAN to supervised accounts beyond
+# those services, wherever it is rendered; today there is none.
+check "[F6] supervised accounts are limited to local services on the LAN (config)" 0 \
+    bash -c 'nft list table inet kosher | grep -qE "@lan4 .*(reject|drop)"'
 
 # -- F7: the boot path ----------------------------------------------------------------
 
@@ -283,11 +285,60 @@ check "[F13] the lockout survives a reboot (state under /var/lib)" 0 python3 -c 
 section "[F14] Captive window scope"
 skip "[F14] decision still open on #33"
 
+# -- N: since the September review (developer tooling, page filter, trust) --------
+# Numbered N1–N9 in the October comment on #33. Nix is only on the image,
+# so the Nix lines skip on the stage-1 dev VM and say so.
+
+section "[N] Since the September review"
+nix_here() { command -v nix >/dev/null 2>&1; }
+
+if nix_here; then
+    check "[N1] a supervised account is not a nix-daemon user" 1 \
+        as wlkid timeout 30 nix store ping
+    # A real install, because that is what the finding is about; removed
+    # again afterwards. Today it succeeds: every account with internet is
+    # an allowed user and nothing consults the Store's list.
+    check "[N3] a supervised account cannot install an unapproved nixpkgs package from a shell" 1 \
+        as wlkid timeout 600 nix profile install nixpkgs#hello
+    as wlkid timeout 120 nix profile remove hello >/dev/null 2>&1 || true
+else
+    skip "[N1] nix-daemon users (nix is only on the image VM)"
+    skip "[N3] shell install of an unapproved nixpkgs package (nix is only on the image VM)"
+fi
+check "[N1] build users cannot reach loopback services (config)" 0 \
+    bash -c 'nft list chain inet kosher output | grep -qE "skgid .*oif \"lo\" .*reject"'
+check "[N1] the builders' reach is names, not CDN edges (config)" 1 \
+    bash -c 'grep -E "sys4" /etc/kosher/dnsmasq.d/whitelist.conf | grep -qiE "cloudfront|cloudflare\.docker|googleapis"'
+# N2 is measured below, once wlkid is back in whitelist mode.
+image_only "[N6] no development registry in the image policy" \
+    && check "[N6] no development registry in the image policy" 1 \
+        grep -q "10.0.2.2" /etc/containers/policy.json
+# Any page can POST to the judge endpoint today; after the fix it needs
+# the token the injected script was given.
+judge_code=$(runuser -u wlkid -- curl -sS -o /dev/null -w '%{http_code}' --max-time 20 \
+    -X POST -H 'content-type: application/json' -d '{"url":"https://example.com/","text":"probe"}' \
+    https://example.com/__kosheros__/judge 2>/dev/null || echo 000)
+assert_that "[N7] the judge endpoint refuses a POST without the page token (got $judge_code)" \
+    test "$judge_code" = "403"
+# The plain resolver answers unfiltered accounts; a dns-filtered one must
+# not be able to ask it directly, as loopback is never redirected.
+with_unfiltered_account
+check "[N8] the plain resolver refuses a dns-filtered account" 1 \
+    dns_query_as dnskid 127.0.0.1 5354 example.com
+without_unfiltered_account
+
 # -- restore the fixture the other suites expect ------------------------------------------------
 
 section "Restoring the fixture"
 kctl rules "$wl" clear >/dev/null
 check "wlkid is back in whitelist mode" 0 \
     kosherctl set-mode "$wl" whitelist --guardian-password ""
+wait_for_dns
+sleep 2
+# The developer registries joined the system set every mode reaches on
+# 80/443 without the proxy, so "whitelist only" stopped meaning the
+# family's list. GitHub alone hosts anything.
+check "[N2] a whitelist-only account cannot reach github.com directly" 1 \
+    fetch_as wlkid https://github.com/
 
 report

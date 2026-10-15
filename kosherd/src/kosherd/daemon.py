@@ -2033,6 +2033,11 @@ class Daemon:
         account = self.policy.user(uid)
         if account is None:
             raise PolicyError(f"uid {uid} is not managed")
+        # The account's own limits hold whoever asks (#124): an install
+        # "for" an account that may not install is still an install on it.
+        if not account.can_install_apps:
+            raise PolicyError(f"{account.username} may not have apps installed; "
+                              "switch 'Can install apps' on first")
         self._install_for(account, uid, ref)
         return None
 
@@ -2053,12 +2058,16 @@ class Daemon:
             username = str(uid)
         apps.record_install(ref, uid, username)
 
-    def _nix_owner(self, ref: str, _uid: int) -> int:
+    def _nix_owner(self, ref: str, _uid: int, *, others: bool = False) -> int:
         """Whose profile a nixpkgs app is acted on in: the caller's when it
-        is there, else the account the ledger says asked for it (what an
-        administrator removing it from the Installed list gets)."""
+        is there. Only an administrator's remove (`others`) may fall back
+        to the account the ledger says asked for it — an update is open to
+        every account and must never land in another account's profile
+        (#124)."""
         if _uid > 0 and ref in apps.nixapps.installed(_uid):
             return _uid
+        if _uid > 0 and not others:
+            raise PolicyError(f"{ref} is not installed for your account")
         owner = apps._load_ledger().get(ref, {}).get("uid", -1)
         if owner is None or owner < 0:
             raise PolicyError(f"{ref} is not installed for any account")
@@ -2127,7 +2136,7 @@ class Daemon:
 
     def impl_RemoveApp(self, ref: str, *, _uid: int):
         if apps.nixapps.is_nix(ref):
-            self.app_manager.remove(ref, uid=self._nix_owner(ref, _uid))
+            self.app_manager.remove(ref, uid=self._nix_owner(ref, _uid, others=True))
         else:
             self.app_manager.remove(ref)
         apps.forget_install(ref)

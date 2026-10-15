@@ -9,7 +9,7 @@ at that account's next sign-in.
 
 | Layout | What it is | Who it is for |
 |---|---|---|
-| `classic` (default) | GNOME with a taskbar along the bottom, an **Apps** button that opens a Windows-style menu with pinned apps, an all-apps list and search, tray icons, minimise and maximise buttons, one workspace, no hot corner, and no Activities overview at sign-in | almost everyone |
+| `classic` (default) | GNOME with a taskbar along the bottom, an **Apps** button that opens a Windows-style menu with pinned apps, an all-apps list and search, tray icons, minimise and maximise buttons, GNOME's dynamic workspaces, no hot corner, and no Activities overview at sign-in | almost everyone |
 | `tiling` | GNOME as GNOME ships it, plus PaperWM's scrolling tiling; the same lock screen, GNOME Settings, portals and accessibility | keyboard-driven power users who still want a supported desktop |
 | `advanced` | a separate login-screen session: the niri compositor with the Noctalia shell (bar, launcher, notifications, lock screen, control centre, polkit agent), configured by text files the user owns | people who already run a tiling compositor and want theirs |
 

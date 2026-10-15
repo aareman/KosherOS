@@ -166,10 +166,13 @@ def test_a_layout_overrides_everything_the_other_wrote():
     assert keys["classic"] == keys["tiling"]
 
 
-def test_classic_has_one_workspace_and_minimise_buttons():
+def test_classic_keeps_dynamic_workspaces_and_has_minimise_buttons():
     plan = {(s, k): v for s, k, v in layout_mod.plan("classic")}
-    assert plan[("org.gnome.mutter", "dynamic-workspaces")] == "false"
-    assert plan[("org.gnome.desktop.wm.preferences", "num-workspaces")] == "1"
+    # Written, not merely left alone: the plan is rewritten at every
+    # sign-in, and accounts that got the old fixed single workspace are
+    # put right by it (#132).
+    assert plan[("org.gnome.mutter", "dynamic-workspaces")] == "true"
+    assert plan[("org.gnome.desktop.wm.preferences", "num-workspaces")] == "4"
     assert "minimize" in plan[("org.gnome.desktop.wm.preferences", "button-layout")]
     assert plan[("org.gnome.desktop.interface", "enable-hot-corners")] == "false"
 
@@ -237,7 +240,9 @@ def test_the_machine_wide_default_is_the_classic_layout():
     assert enabled == _enabled("classic"), \
         "the image default and the helper's classic plan must be the same desktop"
     assert cp["org/gnome/shell/extensions/dash-to-panel"]["hide-overview-on-startup"] == "true"
-    assert cp["org/gnome/mutter"]["dynamic-workspaces"] == "false"
+    # GNOME's dynamic workspaces are the default and no fixed count is set (#132).
+    assert "dynamic-workspaces" not in cp["org/gnome/mutter"]
+    assert "num-workspaces" not in cp["org/gnome/desktop/wm/preferences"]
 
 
 def test_the_start_button_is_the_bais_hamikdosh_in_the_brand_blue_and_says_apps():

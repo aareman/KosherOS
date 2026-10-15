@@ -3,9 +3,9 @@
 #
 # These are what an account gets before kosher-layout has run for it and
 # what any account with no layout of its own gets: a taskbar along the
-# bottom with a start button, minimise buttons on windows, a single
-# workspace, no hot corner. What a Windows, Mac or ChromeOS user already
-# knows. kosher-layout writes the per-account variation (the tiling layout)
+# bottom with a start button, minimise buttons on windows, no hot corner.
+# What a Windows, Mac or ChromeOS user already knows. Workspaces are left
+# as GNOME has them, dynamic (#132). kosher-layout writes the per-account variation (the tiling layout)
 # into the person's own settings at sign-in; the keys it writes are listed
 # in kosherd/layout.py and must not be locked here.
 
@@ -88,11 +88,8 @@ show-activities-button=false
 
 [org/gnome/desktop/wm/preferences]
 button-layout='appmenu:minimize,maximize,close'
-num-workspaces=1
 
 [org/gnome/mutter]
-# One fixed workspace: a window cannot vanish onto another one.
-dynamic-workspaces=false
 edge-tiling=true
 
 [org/gnome/desktop/interface]

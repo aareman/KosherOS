@@ -9,11 +9,17 @@ layout needs into their own settings database.
 
 Why not lock those settings machine-wide? dconf locks are global: one value
 for every account. The layout differs per account, and a user's own
-database is exactly the per-account layer dconf has. The cost is that a
-person can change these keys mid-session (turn the taskbar off, say); the
-price of that is a desktop they have to live with until they sign in again,
-when this puts it back. The keys the image does lock are the ones that are
-the same for everyone (see /etc/dconf/db/local.d/locks).
+database is exactly the per-account layer dconf has.
+
+A plan is written when the layout changes, not at every sign-in. The
+helper remembers which layout it last applied for this account (a stamp
+in ~/.config/kosher) and, when kosherd still says the same one, leaves the
+settings alone: what the person changed since (workspaces, a different
+extension) stays theirs. A first version rewrote the plan every time, and
+a person who turned dynamic workspaces back on lost them at the next login
+(#132). An explicit --layout always applies, which is how the Look app
+switches the running session. The keys the image does lock are the ones
+that are the same for everyone (see /etc/dconf/db/local.d/locks).
 
 The advanced layout is a separate niri session rather than GNOME, chosen
 for the account at the login screen by kosherd. Under niri this only seeds
@@ -54,6 +60,9 @@ EXT_PAPERWM = "paperwm@paperwm.github.com"
 # Where the seed for a Noctalia configuration ships, and where it goes.
 NOCTALIA_SEED = Path("/usr/share/kosher/desktop/noctalia.toml")
 NOCTALIA_CONFIG = Path(".config/noctalia/config.toml")
+# The layout this account last had applied, so the plan is written once
+# per change and the person's own settings survive their sign-ins.
+STAMP = Path(".config/kosher/layout")
 
 
 def _gvariant_list(items: list[str]) -> str:
@@ -140,6 +149,21 @@ def seed_noctalia(home: Path, seed: Path = NOCTALIA_SEED) -> bool:
     return True
 
 
+def applied_layout(home: Path) -> str | None:
+    """The layout last written for this account, or None before the first."""
+    try:
+        value = (home / STAMP).read_text().strip()
+    except OSError:
+        return None
+    return value if value in LAYOUTS else None
+
+
+def record_applied(home: Path, layout: str) -> None:
+    target = home / STAMP
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(layout + "\n")
+
+
 def fetch_layout(attempts: int = 5, delay: float = 1.0) -> str:
     """Ask kosherd; fall back to the default rather than to no desktop."""
     from .client import DaemonClient
@@ -185,11 +209,19 @@ def main(argv=None) -> int:
         for schema, key, value in steps:
             print(f"gsettings set {schema} {key} {value}")
         return 0
+    home = Path.home()
+    if args.layout is None and applied_layout(home) == layout:
+        log.info("the %s layout is already applied; the person's own settings stand", layout)
+        return 0
     failures = apply_gsettings(steps)
     for line in failures:
         log.warning("could not set %s", line)
     log.info("applied the %s layout (%d settings, %d failed)",
              layout, len(steps), len(failures))
+    # A missing schema is retried at the next sign-in rather than stamped
+    # over; the stamp says the whole plan is in place.
+    if not failures:
+        record_applied(home, layout)
     return 0
 
 

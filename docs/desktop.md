@@ -58,11 +58,12 @@ corners, workspaces. The plans are complete rather than diffs, so
 switching an account back from tiling undoes everything tiling set.
 
 Per-user writes rather than dconf locks, because locks are machine-wide and
-the layout differs per account. The cost is that a person can change these
-keys mid-session, and the price of that is a desktop they live with until
-the next sign-in, when the helper puts it back. Keys that are the same for
-everyone are locked: the login logo, and extension installation, which is
-off.
+the layout differs per account. The helper writes a plan when the layout
+changes, not at every sign-in: it keeps a note of the layout it last
+applied, and while kosherd still names the same one it leaves the settings
+alone, so what the person changed since stays theirs. Keys that are the
+same for everyone are locked: the login logo, and extension installation,
+which is off.
 
 Under niri the helper does one thing: copies the shipped Noctalia
 configuration into the user's home if there is none yet, then never

@@ -218,6 +218,59 @@ def test_under_niri_is_read_from_the_session():
     assert not layout_mod.under_niri("")
 
 
+def _signin(monkeypatch, tmp_path, says: str, failures=()):
+    """Run the helper as a sign-in would: kosherd says `says`, writes are
+    recorded instead of made."""
+    written = []
+    monkeypatch.setattr(layout_mod.Path, "home", classmethod(lambda cls: tmp_path))
+    monkeypatch.setattr(layout_mod, "fetch_layout", lambda: says)
+    monkeypatch.setattr(layout_mod, "under_niri", lambda: False)
+    monkeypatch.setattr(layout_mod, "apply_gsettings",
+                        lambda steps: (written.extend(steps), list(failures))[1])
+    return written
+
+
+def test_the_plan_is_written_at_the_first_sign_in_and_then_left_alone(monkeypatch, tmp_path):
+    # Once the classic plan is in place, what the person changes afterwards
+    # (dynamic workspaces, say) must survive their next sign-in (#132).
+    written = _signin(monkeypatch, tmp_path, "classic")
+    assert layout_mod.main([]) == 0
+    assert written, "the first sign-in applies the plan"
+    assert layout_mod.applied_layout(tmp_path) == "classic"
+    written.clear()
+    assert layout_mod.main([]) == 0
+    assert written == [], "the same layout again writes nothing"
+
+
+def test_a_changed_layout_is_applied_in_full(monkeypatch, tmp_path):
+    layout_mod.record_applied(tmp_path, "classic")
+    written = _signin(monkeypatch, tmp_path, "tiling")
+    assert layout_mod.main([]) == 0
+    assert written == layout_mod.plan("tiling")
+    assert layout_mod.applied_layout(tmp_path) == "tiling"
+
+
+def test_an_explicit_layout_always_applies(monkeypatch, tmp_path):
+    # The Look app switches the running session this way, stamp or no stamp.
+    layout_mod.record_applied(tmp_path, "classic")
+    written = _signin(monkeypatch, tmp_path, "classic")
+    assert layout_mod.main(["--layout", "classic"]) == 0
+    assert written == layout_mod.plan("classic")
+
+
+def test_a_failed_write_is_not_stamped_so_the_next_sign_in_retries(monkeypatch, tmp_path):
+    _signin(monkeypatch, tmp_path, "classic", failures=["org.gnome.mutter edge-tiling: no schema"])
+    assert layout_mod.main([]) == 0
+    assert layout_mod.applied_layout(tmp_path) is None
+
+
+def test_a_stamp_nobody_wrote_is_ignored(tmp_path):
+    (tmp_path / ".config/kosher").mkdir(parents=True)
+    (tmp_path / ".config/kosher/layout").write_text("cosmic\n")
+    assert layout_mod.applied_layout(tmp_path) is None
+    assert layout_mod.applied_layout(tmp_path / "nowhere") is None
+
+
 def test_dry_run_prints_the_plan_and_touches_nothing(capsys, monkeypatch):
     monkeypatch.setenv("XDG_CURRENT_DESKTOP", "GNOME")
     assert layout_mod.main(["--layout", "tiling", "--dry-run"]) == 0

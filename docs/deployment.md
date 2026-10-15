@@ -98,6 +98,44 @@ second drive is never wiped unseen.
 Downloadable ISOs are not published yet. See [what is still to
 do](#what-is-still-to-do).
 
+## Trying a pull request's build
+
+Pull requests are not built into images on their own; the tests run, and
+the image is built from the merge. For a change that should be seen on a
+real machine before it merges, put the `try-image` label on the pull
+request. CI builds the image from the branch, signs it with the KosherOS
+key, publishes it as `ghcr.io/aareman/kosher-linux:pr-<number>` and leaves
+a comment on the pull request saying so. Every later push to the branch
+builds it again while the label is there, replacing the earlier build.
+
+On a KosherOS machine, an admin with the update right runs it with the
+guardian password:
+
+```sh
+kosherctl system try <number>
+```
+
+The version running now is kept. The first try pins that deployment, so it
+stays on the disk however many builds are tried after it; the build then
+downloads and is used from the next restart, exactly as an update is.
+Trying the same number again after a new push fetches the new build, and
+trying another number replaces the earlier test build. The disk holds the
+kept version, the build being tried and, until the next try, the one tried
+before it, so that going back from a build that does not boot lands on
+something that did. `kosherctl system status` lists them, with the kept one
+marked. On a test build, "update" fetches that pull request's newest build;
+the channels page says the machine is on no channel, which is the truth.
+
+```sh
+kosherctl system try done
+```
+
+goes back to the kept version at the next restart, with no download, and
+stops keeping it: updates then continue on its channel as before. A tag
+works in place of a number (`kosherctl system try v0.14.0`), always within
+the machine's own image repository. The admin app offers none of this; a
+family computer has no reason to run a build nobody has tested.
+
 ## Going back
 
 The daemon knows which image is booted and which one "go back" would return

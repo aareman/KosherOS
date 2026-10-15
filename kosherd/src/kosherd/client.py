@@ -409,6 +409,16 @@ class DaemonClient:
     def rollback(self) -> None:
         self._call("System", "Rollback")
 
+    def try_image(self, what: str, guardian_password: str = "") -> None:
+        """Run a build that is on no channel — a pull request number, or a
+        tag — keeping the deployment the machine came from. Returns at
+        once and reports on the update signals, like set_channel."""
+        self._call("System", "TryImage", "(ss)", what, guardian_password)
+
+    def return_to_kept(self) -> None:
+        """Back to the deployment kept by try_image, at the next restart."""
+        self._call("System", "ReturnToKept")
+
     def reboot(self) -> None:
         """Restart the computer (after an update is staged)."""
         self._call("System", "Reboot")

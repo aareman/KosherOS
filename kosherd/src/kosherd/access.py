@@ -190,6 +190,12 @@ ACTIONS = {
     # the filter up. Gating it would mainly risk a broken machine nobody
     # present can repair. See impl_Rollback.
     "Rollback": ACTION_APPLY_UPDATES,
+    # Trying a build that is on no channel (a pull request's) while
+    # keeping the one the machine came from, and going back to it. The
+    # first is gated like a channel switch, for the same reason; the
+    # second is a rollback onto an image this machine already ran.
+    "TryImage": ACTION_APPLY_UPDATES,
+    "ReturnToKept": ACTION_APPLY_UPDATES,
     # The Restart button after an update. Same action as applying it: a
     # restart is the second half of the same job.
     "Reboot": ACTION_APPLY_UPDATES,
@@ -206,7 +212,7 @@ GUARDIAN_GATED = frozenset({
     "SetMediaLevel",
     "SetLanguageFilter", "SetYouTube",
     "SetGuestConfig", "DisableGuardian", "Enrol", "Unenrol",
-    "SetAdBlock", "SetTimeLimits", "SetChannel", "SetNetworkAccess",
+    "SetAdBlock", "SetTimeLimits", "SetChannel", "TryImage", "SetNetworkAccess",
     "SetUserAppAccess", "SetUserBlockedAppKinds", "SetUserBlockedApps",
 })
 
@@ -250,6 +256,8 @@ CHANGES = frozenset({
     # And which stream of builds it follows from now on, which is the
     # longest-lived of the three.
     "SetChannel",
+    # A test build put on the machine, and the return from it.
+    "TryImage", "ReturnToKept",
 })
 # Changes whose first argument is the account they are about.
 PER_USER = frozenset({

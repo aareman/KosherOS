@@ -166,6 +166,8 @@ def test_the_guardian_gate_covers_every_filter_weakening_method():
                 # Not a filter setting, but the same kind of decision: it
                 # puts the family computer on builds nobody has tried.
                 "SetChannel",
+                # A pull request's build, tried on purpose: the same decision.
+                "TryImage",
                 # Opening an account to the whole store, or lifting an app
                 # block, widens what it can reach.
                 "SetUserAppAccess", "SetUserBlockedAppKinds", "SetUserBlockedApps"}

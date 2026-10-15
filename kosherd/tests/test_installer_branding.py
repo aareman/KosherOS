@@ -195,7 +195,7 @@ def test_without_xorriso_or_nix_the_message_says_what_to_do(monkeypatch):
     monkeypatch.setattr(brand.shutil, "which", lambda name: None)
     with pytest.raises(SystemExit) as raised:
         brand._xorriso_runner()
-    assert "devenv shell" in str(raised.value) and "just brand-iso" in str(raised.value)
+    assert "devenv shell" in str(raised.value) and "scripts/brand-iso.py" in str(raised.value)
 
 
 def test_a_stale_shell_falls_back_to_nix(monkeypatch):

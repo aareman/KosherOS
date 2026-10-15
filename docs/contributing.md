@@ -97,7 +97,7 @@ just test tests/test_nft.py     # one file; arguments pass through to pytest
 just render                     # render the example policy and check it with nft
 just admin-demo                 # the admin app on a pretend daemon with a sample family
 just store-demo                 # the same for the Store
-just docs-serve                 # this site, with live reload
+just docs serve                 # this site, with live reload
 ```
 
 For anything that touches a running service, there is a stock Fedora VM
@@ -107,7 +107,7 @@ that takes about a minute to set up and a second to update:
 just fedora-vm        # fetch and boot the test VM (plain QEMU/KVM)
 just dev-install      # install the whole filter stack into it
 just deploy-kosherd   # push local kosherd code into the VM and restart it
-just fedora-ssh       # a shell in the VM
+just fedora-vm ssh    # a shell in the VM
 just test-vm          # the integration suites, inside the VM
 ```
 
@@ -193,7 +193,12 @@ is no contributor licence agreement.
 On a pull request, CI runs the unit suites with coverage, byte-compiles
 every app, and runs shellcheck over every script. It does not build the OS
 image: that is built once, from the merge, so several open pull requests
-do not each cost an eleven-minute build for an image nobody will run.
+do not each cost an eleven-minute build for an image nobody will run. A
+change that should be seen on a real machine first gets the `try-image`
+label, which builds the branch's image on every push and says in a comment
+how to run it on a KosherOS machine without losing the version it has;
+[trying a pull request's build](deployment.md#trying-a-pull-requests-build)
+explains what the machine does with it.
 
 After a merge, CI gives the commit its version, publishes the image on the
 `edge` channel, writes the release and rebuilds this site;
@@ -202,7 +207,7 @@ After a merge, CI gives the commit its version, publishes the image on the
 ## Writing docs
 
 The site is MkDocs with the Material theme. Pages are Markdown under
-`docs/`, the navigation is in `mkdocs.yml`, and `just docs-serve` previews
+`docs/`, the navigation is in `mkdocs.yml`, and `just docs serve` previews
 it. The Releases and Third-party pages are generated at build time; do not
 edit them by hand.
 

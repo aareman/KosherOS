@@ -1,6 +1,6 @@
 """Drive the whole first-boot wizard over a pty, like the boot test does.
 
-Run with:  just check-wizard
+Run with:  python3 scripts/wizard-check.py  (just test runs it too)
 
 This exists because the wizard failed four boots in a row on terminal
 plumbing that no unit test could see: a getty stealing the console, then

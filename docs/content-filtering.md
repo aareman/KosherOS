@@ -318,7 +318,7 @@ protected against replay the same way, because rolling a family back to
 last year's word list is an attack rather than a downgrade. The bundle is
 the same for every enrolled device, and it replaces the shipped copy. Only
 four file names are accepted. A portal that does not offer lists is treated
-as "nothing new". `just publish-lists https://portal.example` sends this
+as "nothing new". `python3 scripts/publish-lists.py https://portal.example` sends this
 repository's lists to a portal.
 
 **The category database** is too large to ride inside a signed document,

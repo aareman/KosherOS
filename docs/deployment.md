@@ -88,9 +88,12 @@ registry.
 
 The installer creates no users and asks no passwords; the first boot runs
 the setup wizard instead. If the machine has exactly one internal drive
-that is not the installer stick, the disk question answers itself and the
-install is a single Begin Installation button. With two or more candidate
-disks the installer asks, so a second drive is never wiped unseen.
+that is not the installer stick, the installer names that disk and shows
+it as the destination — but writes no partitioning, because a complete
+kickstart is one Anaconda installs without a click (#134): the person
+confirms the disk, sees what will be erased, and presses Begin
+Installation. With two or more candidate disks the installer asks, so a
+second drive is never wiped unseen.
 
 Downloadable ISOs are not published yet. See [what is still to
 do](#what-is-still-to-do).

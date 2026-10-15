@@ -85,6 +85,14 @@ def test_the_installer_is_one_question_and_a_button(img, tmp_path):
     assert hidden == {"KeyboardSpoke", "LangsupportSpoke", "DatetimeSpoke",
                       "NetworkSpoke", "SourceSpoke", "SoftwareSelectionSpoke"}
     assert "StorageSpoke" not in hidden, "the disk is the one question that must be asked"
+    # And what "Automatic" in that spoke makes: the plain ext4 root the
+    # kickstart used to write, now that it writes no partitioning (#134).
+    storage = conf["Storage"]
+    assert storage["default_scheme"] == "PLAIN"
+    assert storage["file_system_type"] == "ext4"
+    assert storage.getboolean("swap_is_recommended") is False
+    assert "/ (min 1 GiB, max 70 GiB)" in storage["default_partitioning"]
+    assert "/home" not in storage["default_partitioning"]
     # Each hidden spoke is one the kickstart or the module list has answered.
     kickstart = (ROOT / "os-image/iso-config.toml").read_text()
     for needed in ("keyboard", "lang ", "timezone"):

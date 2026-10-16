@@ -502,14 +502,19 @@ class Window(Adw.ApplicationWindow):
         self.guardian_switch.connect("notify::active", lambda s, _p: (
             self.guardian_pw.set_sensitive(s.get_active()), self._revalidate()))
 
+        # On by default (#129): editing the boot menu is the way round every
+        # other protection, and nobody should have to know that to be safe.
+        # The administrator's own password is used unless another is typed.
         self.grub_switch = Adw.SwitchRow(
             title="Boot menu password",
             subtitle="Stops the boot menu being edited to start the computer "
-                     "without filtering")
+                     "without filtering. Uses the administrator's password "
+                     "unless you type another below.",
+            active=True)
         group.add(self.grub_switch)
-        self.grub_pw = PasswordPair(group, "Boot password", "Confirm",
+        self.grub_pw = PasswordPair(group, "Boot password (optional)", "Confirm",
                                     on_change=self._revalidate)
-        self.grub_pw.set_sensitive(False)
+        self.grub_pw.set_sensitive(True)
         self.grub_switch.connect("notify::active", lambda s, _p: (
             self.grub_pw.set_sensitive(s.get_active()), self._revalidate()))
         _tab_goes_to(self.guardian_pw.confirm, lambda: self.grub_switch)
@@ -606,8 +611,13 @@ class Window(Adw.ApplicationWindow):
                 and self.admin_pw.valid()
         if page == "protect":
             return (not self.guardian_switch.get_active() or self.guardian_pw.valid()) \
-                and (not self.grub_switch.get_active() or self.grub_pw.valid())
+                and (not self.grub_switch.get_active() or self._grub_untouched()
+                     or self.grub_pw.valid())
         return True
+
+    def _grub_untouched(self) -> bool:
+        """Both boot-password fields empty: the administrator's password is used."""
+        return not self.grub_pw.text() and not self.grub_pw.confirm.get_text()
 
     def _revalidate(self) -> None:
         if hasattr(self, "next") and self.stack.get_visible_child_name():
@@ -659,10 +669,13 @@ class Window(Adw.ApplicationWindow):
                 return
             guardian = self.guardian_pw.text()
         if self.grub_switch.get_active():
-            if not self.grub_pw.valid():
+            if self._grub_untouched():
+                grub = self.admin_pw.text()       # the administrator's own
+            elif self.grub_pw.valid():
+                grub = self.grub_pw.text()
+            else:
                 self.toast("Boot passwords must match and be 6+ characters")
                 return
-            grub = self.grub_pw.text()
 
         self._busy("Finishing setup…",
                    "Applying protection settings and starting the login screen")

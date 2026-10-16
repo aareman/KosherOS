@@ -245,6 +245,14 @@ the image sets all three on the kernel command line:
 | `lockdown=integrity` | the kernel refuses the paths that would let root rewrite the running kernel. Secure Boot turns this on by itself; saying it explicitly gives a machine booted without Secure Boot the same floor |
 | `intel_iommu=on` | devices sit behind the IOMMU. Modern kernels do this where the firmware allows; older Intel parts need asking, and it costs nothing where it is already on |
 | `mem_sleep_default=s2idle` | suspend to idle rather than deep sleep, which leaves the memory image where firmware attacks can reach it |
+| `rd.shell=0` | a failed early boot never offers a dracut shell — a root prompt before the filter is up, on a computer where nobody should have root |
+| `rd.emergency=reboot` | and instead of waiting at that prompt, the computer restarts |
+
+The boot menu itself has a password: the first-boot wizard sets one by
+default, the administrator's own unless another is typed, and the text
+setup does the same. Starting the computer never asks for it; editing an
+entry or opening GRUB's command line does. A machine installed before this
+was the default sets one from **Admin → Protection → Boot menu password**.
 
 Nothing in the image loads an out-of-tree kernel module, so lockdown costs
 the family nothing.

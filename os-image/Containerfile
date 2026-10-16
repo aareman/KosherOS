@@ -402,7 +402,12 @@ RUN true \
     #
     # Nothing here loads an out-of-tree module (no proprietary drivers ship,
     # and none can be installed), so lockdown costs the family nothing.
-    && printf 'kargs = ["lockdown=integrity", "intel_iommu=on", "mem_sleep_default=s2idle"]\n' \
+    #   rd.shell=0          a failed early boot never lands in a dracut
+    #   rd.emergency=reboot shell: it restarts instead (#129). On a family
+    #                       computer nobody is there to type into one, and
+    #                       a root shell before the filter is up is exactly
+    #                       what the boot-menu password exists to prevent.
+    && printf 'kargs = ["lockdown=integrity", "intel_iommu=on", "mem_sleep_default=s2idle", "rd.shell=0", "rd.emergency=reboot"]\n' \
          > /usr/lib/bootc/kargs.d/20-kosheros-security.toml \
     # A new account has never seen Dash to Panel's version, so upstream
     # announces an "update" at its first login. Seed the installed version

@@ -918,7 +918,9 @@ def cmd_setup(args) -> int:
         password = sys.stdin.readline().rstrip("\n")
         uid = c.create_first_admin(args.username, args.full_name or args.username,
                                    password)
-        c.finish_setup(args.guardian_password or "", "")
+        # The boot menu takes the administrator's password (#129), as the
+        # wizard does by default.
+        c.finish_setup(args.guardian_password or "", password)
         print(f"created {args.username} (uid {uid}); setup complete")
         return 0
 
@@ -980,8 +982,9 @@ def cmd_setup(args) -> int:
                 break
             console.say("  At least 6 characters, and both must match.")
 
-    c.finish_setup(guardian, "")
-    console.say("\nSetup complete. Starting the login screen.\n")
+    c.finish_setup(guardian, password)
+    console.say("\nSetup complete. The boot menu takes the administrator's password.")
+    console.say("Starting the login screen.\n")
     return 0
 
 

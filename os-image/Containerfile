@@ -428,9 +428,10 @@ RUN passwd -l root \
     && systemctl enable sshd.service \
     && systemctl enable kosherd.service kosher-firewall.service kosher-dns.service \
     && systemctl enable bootc-fetch-apply-updates.timer \
-    # Nix: the store on /var, and the daemon on its socket.
-    && systemctl enable nix.mount nix-daemon.socket \
-    && systemctl is-enabled nix.mount nix-daemon.socket \
+    # Nix: the store on /var, the daemon on its socket, and the graphics
+    # drivers Nix apps look for in /run/opengl-driver.
+    && systemctl enable nix.mount nix-daemon.socket kosher-nix-opengl.service \
+    && systemctl is-enabled nix.mount nix-daemon.socket kosher-nix-opengl.service \
     # An update that boots without the filter puts itself back. greenboot's
     # own [Install] carries Also=greenboot-set-rollback-trigger.service, so
     # enabling the health check arms the rollback too — verified against

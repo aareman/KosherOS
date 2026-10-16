@@ -170,6 +170,18 @@ refuses an account on "No internet" outright, a build's downloads are held
 to the registries by the firewall, and a terminal tool installed this way
 gets a launcher in the app grid that opens a terminal running it.
 
+A Nix app that draws with OpenGL or Vulkan brings its own graphics loader,
+which looks for the drivers in `/run/opengl-driver`, as on NixOS. KosherOS
+puts Mesa there: `kosher-nix-opengl.service` fetches a pinned Mesa from
+NixOS's binary cache once, and a link in `/run` points at it. The pin is a
+NixOS stable release, because a driver loads into the app's own process
+and must not need a newer C library than the app has. The Store's apps
+come from nixpkgs-unstable, which is always newer. Without this, Alacritty,
+Ghostty, Cool Retro Term and kitty from nixpkgs cannot open a window, even
+on a machine whose own drivers work. NVIDIA's proprietary driver is not
+covered; KosherOS does not ship it. `scripts/nix-opengl-pin.sh` moves the
+pin to a new NixOS release.
+
 A third source is the developer's own signed build, for an app whose Nix
 build cannot run here. A Nix build brings its own OpenGL library, which
 finds no graphics driver on Fedora, so kitty from nixpkgs refuses to open

@@ -1,5 +1,5 @@
 """Building Look for real, on a virtual display, against fakes for the
-daemon.
+daemon and the blur settings.
 
 The window is what the tests hold: which desktop is marked, that choosing
 one reaches the daemon for THIS account and the running session when it
@@ -47,6 +47,20 @@ class FakeClient:
         self.layout = layout
 
 
+class FakeSettings:
+    """Enough of Gio.Settings for the Glass class."""
+
+    def __init__(self, blur):
+        self.values = {"blur": blur}
+
+    def get_boolean(self, k): return self.values[k]
+    def set_boolean(self, k, v): self.values[k] = v
+
+
+def _glass(panel=True, windows=True):
+    return app.Glass(parts=[FakeSettings(panel), FakeSettings(windows)])
+
+
 def _pump(seconds=0.5):
     """Let the worker thread and the idle callbacks it queues run."""
     deadline = GLib.get_monotonic_time() + int(seconds * 1e6)
@@ -55,9 +69,9 @@ def _pump(seconds=0.5):
         ctx.iteration(False)
 
 
-def _window(client=None, in_niri=False):
+def _window(client=None, glass=None, in_niri=False):
     applied = []
-    win = app.Window(None, client=client or FakeClient(),
+    win = app.Window(None, client=client or FakeClient(), glass=glass or _glass(),
                      apply=applied.append, in_niri=in_niri)
     _pump()
     return win, applied
@@ -122,11 +136,41 @@ def test_the_daemon_being_away_is_a_page_not_a_crash():
     class Away:
         def my_layout(self):
             raise RuntimeError("GDBus.Error:org.freedesktop.DBus.Error.ServiceUnknown: gone")
-    win = app.Window(None, client=Away(), apply=lambda _l: None, in_niri=False)
+    win = app.Window(None, client=Away(), glass=_glass(), apply=lambda _l: None, in_niri=False)
     _pump()
     page = win.view.get_content()
     assert isinstance(page, Adw.StatusPage)
     assert page.get_title() == app.TEXT["error_title"]
+
+
+# ---- the glass --------------------------------------------------------------
+
+def test_one_switch_blurs_the_taskbar_and_the_windows_together():
+    glass = _glass(panel=True, windows=False)
+    win, _ = _window(glass=glass)
+    assert win.glass_group.get_visible()
+    assert win.blur_row.get_active(), "on when either part is blurred"
+    win.blur_row.set_active(False)
+    assert [p.values["blur"] for p in glass.parts] == [False, False]
+    win.blur_row.set_active(True)
+    assert [p.values["blur"] for p in glass.parts] == [True, True]
+
+
+def test_opening_look_writes_nothing():
+    glass = _glass(panel=False, windows=True)
+    _window(glass=glass)
+    assert [p.values["blur"] for p in glass.parts] == [False, True]
+
+
+def test_under_niri_there_is_no_blur_switch():
+    win, _ = _window(FakeClient("advanced"), in_niri=True)
+    assert not win.glass_group.get_visible()
+
+
+def test_without_the_extension_the_switch_is_left_out():
+    win, _ = _window(glass=app.Glass(parts=[None, None]))
+    assert win.glass_group is None
+    assert win.checks["classic"].get_active()
 
 
 # ---- the image --------------------------------------------------------------

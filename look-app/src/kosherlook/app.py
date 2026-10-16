@@ -7,8 +7,11 @@ So the person picks for themselves here, and the daemon takes the account
 from the D-Bus connection rather than from an argument, so this window can
 only ever change the person in front of it.
 
-The taskbar is not tuned here: Dash to Panel has its own settings, a
-right-click on the bar away.
+Below that is one switch for the glass: the blurred wallpaper behind the
+taskbar and the windows. It writes Blur My Shell's own settings for this
+account, which the sign-in helper leaves alone, so it sticks. The rest of
+the taskbar is tuned in Dash to Panel's own settings, a right-click on
+the bar away.
 """
 
 from __future__ import annotations
@@ -22,7 +25,7 @@ import gi
 
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
-from gi.repository import Adw, GLib, Gtk  # noqa: E402
+from gi.repository import Adw, Gio, GLib, Gtk  # noqa: E402
 
 from kosherd.client import DaemonClient  # noqa: E402
 from kosherd.policy import DEFAULT_LAYOUT, LAYOUTS  # noqa: E402
@@ -53,6 +56,9 @@ TEXT = {
                      "about how the internet is filtered for you."),
     "next_sign_in": "Your new desktop is ready at your next sign-in.",
     "sign_out": "Sign out",
+    "glass": "Glass",
+    "blur": "Blur behind the taskbar and windows",
+    "blur_hint": "The wallpaper shows softly through them.",
     "rest": "Everything else",
     "rest_row": "Wallpaper, dark mode and text size",
     "rest_hint": "Settings does these well.",
@@ -105,14 +111,61 @@ def open_appearance_settings() -> None:
     subprocess.Popen(["gnome-control-center", "background"])
 
 
+# ---- the glass ---------------------------------------------------------------
+
+BLUR_SCHEMA_DIR = "/usr/share/gnome-shell/extensions/blur-my-shell@aunetx/schemas"
+BLUR_PARTS = ("panel", "applications")
+
+
+def _settings(schema_id: str, directory: str | None = None):
+    """A Gio.Settings for a schema, or None when the machine has no such
+    schema (a development box without the extension, say): the window
+    then leaves the control out rather than crashing on it."""
+    source = Gio.SettingsSchemaSource.get_default()
+    if directory is not None and os.path.isdir(directory):
+        try:
+            source = Gio.SettingsSchemaSource.new_from_directory(directory, source, False)
+        except GLib.Error:
+            return None
+    schema = source.lookup(schema_id, True) if source is not None else None
+    if schema is None:
+        return None
+    return Gio.Settings.new_full(schema, None, None)
+
+
+class Glass:
+    """Blur behind the taskbar and the windows, as one choice. Each part is
+    Blur My Shell's own `blur` key for this account."""
+
+    def __init__(self, parts=None):
+        if parts is None:
+            parts = [_settings(f"org.gnome.shell.extensions.blur-my-shell.{p}", BLUR_SCHEMA_DIR)
+                     for p in BLUR_PARTS]
+        self.parts = [p for p in parts if p is not None]
+
+    @property
+    def available(self) -> bool:
+        return bool(self.parts)
+
+    @property
+    def blurred(self) -> bool:
+        return any(p.get_boolean("blur") for p in self.parts)
+
+    @blurred.setter
+    def blurred(self, value: bool) -> None:
+        for p in self.parts:
+            p.set_boolean("blur", bool(value))
+
+
 # ---- the window ------------------------------------------------------------
 
 class Window(Adw.ApplicationWindow):
-    def __init__(self, app: Adw.Application | None, *, client=None,
+    def __init__(self, app: Adw.Application | None, *, client=None, glass=None,
                  apply=apply_now, in_niri: bool | None = None):
         super().__init__(application=app, title="Look",
                          default_width=560, default_height=700)
         self.client = client
+        self.glass = glass if glass is not None else Glass()
         self.apply = apply
         self.in_niri = under_niri() if in_niri is None else in_niri
         self.layout = DEFAULT_LAYOUT
@@ -151,6 +204,9 @@ class Window(Adw.ApplicationWindow):
     def _build(self) -> Gtk.Widget:
         page = Adw.PreferencesPage()
         page.add(self._desktop_group())
+        self.glass_group = self._glass_group()
+        if self.glass_group is not None:
+            page.add(self.glass_group)
         page.add(self._rest_group())
         self._show_for(self.layout)
         return page
@@ -207,10 +263,24 @@ class Window(Adw.ApplicationWindow):
         _run_async(work, done, failed)
 
     def _show_for(self, key: str) -> None:
-        """The sign-out banner, when the running session is not the
-        chosen one."""
+        """The glass switch while a GNOME desktop is running, and the
+        sign-out banner when the running session is not the chosen one."""
+        if self.glass_group is not None:
+            self.glass_group.set_visible(not self.in_niri)
         running_is_chosen = (key not in IN_PLACE) == self.in_niri
         self.banner.set_revealed(not running_is_chosen)
+
+    def _glass_group(self) -> Adw.PreferencesGroup | None:
+        g = self.glass
+        if not g.available:
+            return None
+        group = Adw.PreferencesGroup(title=TEXT["glass"])
+        self.blur_row = Adw.SwitchRow(title=TEXT["blur"], subtitle=TEXT["blur_hint"],
+                                      active=g.blurred)
+        self.blur_row.connect("notify::active",
+                              lambda r, _p: setattr(g, "blurred", r.get_active()))
+        group.add(self.blur_row)
+        return group
 
     def _rest_group(self) -> Adw.PreferencesGroup:
         group = Adw.PreferencesGroup(title=TEXT["rest"])

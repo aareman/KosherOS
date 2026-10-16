@@ -153,23 +153,13 @@ def channel_result_subtitle(channel: dict) -> str:
     parts = [p for p in (channel.get("handle"), channel.get("subscribers")) if p]
     return " · ".join(parts) or channel["id"]
 
-# How the desktop looks, in the order a parent would consider them. Not a
-# protection — the filter does not care which shell draws the windows — so
-# no guardian password, and it says so plainly.
+# The desktops, for the activity feed's line about a layout change. The
+# choice itself is the person's, in the Look app, not a row in here.
 LAYOUT_LABELS = {
     "classic": "Classic desktop",
     "tiling": "Tiling desktop",
     "advanced": "Advanced (niri)",
 }
-LAYOUT_HINTS = {
-    "classic": "A familiar desktop with a taskbar, start menu and movable windows.",
-    "tiling": ("Arranges windows in a scrolling row with keyboard controls. Uses the same "
-        "settings and accessibility tools as the classic desktop."),
-    "advanced": ("A separate niri session with the Noctalia shell, selected at sign-in and "
-        "configured through text files. GNOME Settings is unavailable, and "
-        "accessibility support is limited."),
-}
-LAYOUT_ORDER = ("classic", "tiling", "advanced")
 
 NO_GROUP = "No group"
 
@@ -269,12 +259,20 @@ CONTENT_LEVEL_WORDS = {"nsfw": "explicit", "suggestive": "suggestive",
                        "immodest": "immodest"}
 
 
-def why_text(why: str) -> str:
+def why_text(why: str, source: str = "") -> str:
     """'category:video,social' -> 'Video and streaming, Social networks'.
 
     The reason the filter gives for a block, in the family's words, for the
-    activity feed and beside a request.
+    activity feed and beside a request. A block the page's own script
+    reported, for what the page showed after it loaded, says so.
     """
+    text = _why_text(why)
+    if text and source == "page":
+        return text + " (shown after it loaded)"
+    return text
+
+
+def _why_text(why: str) -> str:
     if not why:
         return ""
     kind, _, rest = why.partition(":")
@@ -487,6 +485,10 @@ def change_sentence(event: dict, users_by_uid: dict | None = None) -> tuple[str,
         what = "A system update was downloaded"
     elif method == "Rollback":
         what = "The computer was put back to its previous version"
+    elif method == "TryImage":
+        what = f"A test build was put on this computer ({arg(0)})"
+    elif method == "ReturnToKept":
+        what = "The computer went back to the version kept before testing"
     else:
         what = method or "A setting changed"
     detail = f"{actor}, {when_text(event.get('t', 0))}"

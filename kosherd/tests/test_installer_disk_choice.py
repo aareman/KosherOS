@@ -1,10 +1,16 @@
-"""The installer answers the disk question itself when it can.
+"""The installer names the disk when it can, and still waits for the click.
 
 Anaconda's hub asked the person to find the disk even when the laptop has
-exactly one. A %pre script in the ISO's kickstart now picks that disk and
-writes the partitioning for it; with two or more candidate disks it writes
-nothing and Anaconda asks, so a second drive is never wiped unseen. The
-installer itself still waits for the person to press Begin Installation.
+exactly one. A %pre script in the ISO's kickstart picks that disk; with two
+or more candidate disks it writes nothing and Anaconda asks, so a second
+drive is never wiped unseen.
+
+What the script must NOT write is the partitioning. With clearpart and
+autopart beside the disk the kickstart was complete, and a complete
+kickstart is one Anaconda acts on by itself: a one-disk machine was erased
+and installed with no key pressed and no click (#134). Naming the disk
+alone leaves Installation Destination unfinished, so the hub waits, the
+person sees the disk, and Anaconda's reclaim dialog says what will go.
 """
 
 import shutil
@@ -39,8 +45,6 @@ def test_the_disk_is_chosen_in_pre_and_included(kickstart):
     assert "%include /tmp/kosher-disk.ks" in kickstart
     script = _pre_script(kickstart)
     assert "ignoredisk --only-use=$disk" in script
-    assert "clearpart --all --initlabel --disklabel=gpt --drives=$disk" in script
-    assert "autopart" in script
     # Never the stick the installer booted from, never a removable drive,
     # and only when there is exactly one.
     assert "/run/install/repo" in script
@@ -48,12 +52,17 @@ def test_the_disk_is_chosen_in_pre_and_included(kickstart):
     assert '"${#candidates[@]}" -eq 1' in script
 
 
-def test_no_disk_is_wiped_without_the_pre_script_choosing_it(kickstart):
-    # Outside the %pre block there must be no partitioning at all: that is
-    # what keeps a two-disk machine on the interactive path.
-    outside = kickstart.split("%pre", 1)[0] + kickstart.split("%end", 1)[1]
-    for word in ("clearpart", "autopart", "zerombr", "ignoredisk"):
-        assert word not in outside, word
+def test_the_kickstart_never_carries_partitioning(kickstart):
+    # Anywhere in it. With partitioning beside the chosen disk the kickstart
+    # is complete, and Anaconda installs a complete kickstart without a
+    # click (#134). The disk is named; the erasing is the person's.
+    # Commands, not words: the comments may well explain why these are absent.
+    commands = "\n".join(line for line in kickstart.splitlines()
+                         if not line.lstrip().startswith("#"))
+    for word in ("clearpart", "autopart", "zerombr"):
+        assert word not in commands, word
+    outside = commands.split("%pre", 1)[0] + commands.split("%end", 1)[1]
+    assert "ignoredisk" not in outside
 
 
 def test_the_install_still_waits_for_a_person(kickstart):
@@ -98,8 +107,7 @@ def test_the_pre_script_chooses_one_disk_and_declines_two(kickstart, tmp_path):
     run = subprocess.run(["bash", "-c", script], env=env, capture_output=True, text=True)
     assert run.returncode == 0, run.stderr
     chosen = (tmp_path / "disk.ks").read_text()
-    assert "ignoredisk --only-use=sda" in chosen
-    assert "--drives=sda" in chosen
+    assert chosen == "ignoredisk --only-use=sda\n", "the disk, and nothing that would complete the install"
 
     disk("nvme0n1", "0", 1_000_000_000)   # a second internal drive: ask
     run = subprocess.run(["bash", "-c", script], env=env, capture_output=True, text=True)

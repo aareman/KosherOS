@@ -324,6 +324,10 @@ judge_code=$(runuser -u wlkid -- curl -sS -o /dev/null -w '%{http_code}' --max-t
     https://example.com/__kosheros__/judge 2>/dev/null || echo 000)
 assert_that "[N7] the judge endpoint refuses a POST without the page token (got $judge_code)" \
     test "$judge_code" = "403"
+words_code=$(runuser -u wlkid -- curl -sS -o /dev/null -w '%{http_code}' --max-time 20 \
+    https://example.com/__kosheros__/words.json 2>/dev/null || echo 000)
+assert_that "[N7] the word list is not served without the page token (got $words_code)" \
+    test "$words_code" = "403"
 # The plain resolver answers unfiltered accounts; a dns-filtered one must
 # not be able to ask it directly, as loopback is never redirected.
 with_unfiltered_account

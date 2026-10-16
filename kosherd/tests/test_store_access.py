@@ -1,7 +1,7 @@
 """Store actions and whose account they land in (issue #33, October: N4, N5).
 
-Two assertions about today's code that are known to be wrong, pinned as
-strict expected failures so the suite stays green and the fix flips them:
+Pinned as strict expected failures by the October re-audit, flipped by the
+fix (#124):
 
 - an administrator installing "for" an account must meet that account's
   own limits (can_install_apps), and the activity log must name the
@@ -28,7 +28,6 @@ def _daemon(monkeypatch, **user):
     return daemon, installed
 
 
-@pytest.mark.xfail(strict=True, reason="N5: InstallAppFor skips can_install_apps (#33)")
 def test_installing_for_an_account_meets_that_accounts_own_limits(monkeypatch):
     daemon, installed = _daemon(monkeypatch, can_install_apps=False)
     with pytest.raises(PolicyError):
@@ -36,12 +35,10 @@ def test_installing_for_an_account_meets_that_accounts_own_limits(monkeypatch):
     assert installed == []
 
 
-@pytest.mark.xfail(strict=True, reason="N5: InstallAppFor is not PER_USER, so the log names no account (#33)")
 def test_installing_for_an_account_is_logged_against_that_account():
     assert "InstallAppFor" in access.PER_USER
 
 
-@pytest.mark.xfail(strict=True, reason="N4: _nix_owner falls back to the ledger's owner, crossing accounts (#33)")
 def test_an_update_never_acts_on_another_accounts_profile(monkeypatch):
     daemon, _ = _daemon(monkeypatch)
     monkeypatch.setattr(apps.nixapps, "installed", lambda uid: [])

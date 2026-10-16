@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import threading
 from typing import Callable
@@ -385,3 +386,163 @@ def _run(argv: list[str], on_progress: Progress, with_progress: bool) -> tuple[b
         return False, f"{what or 'bootc'} failed: {tail}".strip()
     on_progress(100, "Update ready")
     return True, ""
+
+
+# -- trying a build that is not on a channel (#90) ---------------------------
+#
+# The maintainer's laptop runs edge. To try the image CI built for a pull
+# request, the machine switches onto that build's tag, and on the next try
+# it would lose the edge it came from: bootc keeps the deployment it is
+# booted into and the new one, and drops the rest. So the first try PINS
+# the deployment that was running (`ostree admin pin`), which keeps it
+# through however many builds are tried after it; each try after the first
+# removes the test builds that are no longer booted, so the disk holds the
+# kept image, the running test build and nothing older; and "done" rolls
+# back onto the kept deployment and unpins it. Nothing here is for
+# families: the admin app does not show it, and kosherctl needs the update
+# right and the guardian password, as a channel switch does.
+
+PR_TAG = "pr-"
+TRIAL_TAG = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9._-]{0,127}$")
+
+
+def trial_target(image: str, what: str) -> str:
+    """The image reference to try, from what a person typed: `123` or
+    `pr-123` is a pull request's build, anything else is a tag on this
+    machine's own repository, and a full reference is accepted only when
+    it names that repository (as switch_target has it)."""
+    repo = repo_of(image)
+    if not repo:
+        raise ValueError("this machine does not say which image it runs, "
+                         "so there is nothing to try a build of")
+    what = (what or "").strip()
+    if not what:
+        raise ValueError("say which build: a pull request number, or a tag")
+    if what.isdigit():
+        return f"{repo}:{PR_TAG}{int(what)}"
+    if "/" in what:
+        if repo_of(what) != repo:
+            raise ValueError(f"{what} is not a build of this computer's image "
+                             f"({repo}); only those can be tried")
+        return what
+    if what.lower() in CHANNEL_NAMES:
+        raise ValueError(f"{what} is a channel: follow it with "
+                         f"'kosherctl system channel {what}'")
+    if not TRIAL_TAG.match(what):
+        raise ValueError(f"{what!r} is not a tag")
+    return f"{repo}:{what}"
+
+
+def deployments(status: dict) -> list[dict]:
+    """Every deployment in `bootc status --json`'s `status`, in one list:
+    staged, booted, rollback, then the others bootc lists, each with its
+    `place`, image reference, channel, digest, whether it is pinned, and
+    the `key` (`checksum.serial`) ostree names it by."""
+    out = []
+    for place in ("staged", "booted", "rollback"):
+        entry = status.get(place)
+        if isinstance(entry, dict):
+            out.append(_deployment(place, entry))
+    for entry in status.get("otherDeployments") or []:
+        if isinstance(entry, dict):
+            out.append(_deployment("other", entry))
+    return out
+
+
+def _deployment(place: str, entry: dict) -> dict:
+    outer = entry.get("image") if isinstance(entry.get("image"), dict) else {}
+    inner = outer.get("image") if isinstance(outer.get("image"), dict) else {}
+    ref = inner.get("image")
+    tree = entry.get("ostree") if isinstance(entry.get("ostree"), dict) else {}
+    key = None
+    if tree.get("checksum") is not None:
+        key = f"{tree.get('checksum')}.{tree.get('deploySerial', 0)}"
+    # `channel` is a real channel or nothing: a pr- or version tag is not one.
+    channel = _channel(ref) if ref else None
+    return {"place": place, "image": ref,
+            "channel": channel if channel in CHANNEL_NAMES else None,
+            "digest": outer.get("imageDigest"), "pinned": bool(entry.get("pinned")),
+            "verified": inner.get("signature") == "containerPolicy", "key": key}
+
+
+OSTREE_DEPLOYMENT = re.compile(
+    r"^(?P<mark>[* ]) (?P<stateroot>\S+) (?P<checksum>[0-9a-f]{64})\.(?P<serial>\d+)"
+    r"(?P<flags>(?: \([^)]*\))*)\s*$")
+
+
+def parse_ostree_status(text: str) -> list[dict]:
+    """`ostree admin status` -> its deployments in index order, which is
+    the index `ostree admin pin` and `undeploy` take. Each is {index, key,
+    booted, pinned, staged}; the indented lines under a deployment (its
+    version and origin) are not needed here."""
+    out = []
+    for line in (text or "").splitlines():
+        m = OSTREE_DEPLOYMENT.match(line)
+        if not m:
+            continue
+        flags = m.group("flags") or ""
+        out.append({"index": len(out),
+                    "key": f"{m.group('checksum')}.{int(m.group('serial'))}",
+                    "booted": m.group("mark") == "*",
+                    "pinned": "(pinned)" in flags,
+                    "staged": "(staged)" in flags})
+    return out
+
+
+def _stale_trials(deps: list[dict], keep_staged: bool) -> list[dict]:
+    """Test builds no longer needed: not booted, not pinned, not on a
+    channel (a channel deployment is left to ostree's own housekeeping)."""
+    return [d for d in deps
+            if d["place"] != "booted" and not d["pinned"] and not d["channel"]
+            and (d["place"] != "staged" or not keep_staged)]
+
+
+def trial_plan(deps: list[dict], target: str, policy_path: str = POLICY_PATH) -> dict:
+    """What trying `target` takes, from the deployments: `pin` (the key of
+    the booted deployment, when nothing is kept yet), `undeploy` (keys of
+    stale test builds), `argv` (the bootc command), and `kept`.
+
+    A try of the build already booted or already staged is an upgrade,
+    not a switch: `bootc switch` onto the reference in use is a no-op,
+    and `bootc upgrade` is what fetches that reference's newest digest,
+    which after a new push to the pull request is the point.
+    """
+    booted = next((d for d in deps if d["place"] == "booted"), None)
+    if booted is None or not booted.get("image"):
+        raise ValueError("this machine does not say which image it runs, "
+                         "so there is nothing to keep while trying another")
+    kept = next((d for d in deps if d["pinned"]), None)
+    pin = None
+    if kept is None:
+        if not booted.get("key"):
+            raise ValueError("bootc did not say which deployment is booted, "
+                             "so it cannot be kept")
+        pin, kept = booted["key"], booted
+    staged = next((d for d in deps if d["place"] == "staged"), None)
+    if target == booted.get("image"):
+        argv = upgrade_argv(booted["image"], bool(booted.get("verified")), policy_path)
+    elif staged is not None and target == staged.get("image"):
+        argv = ("bootc", "upgrade")
+    else:
+        argv = switch_argv(target, policy_path)
+    undeploy = [d["key"] for d in _stale_trials(deps, keep_staged=True)
+                if d["key"] and d is not kept]
+    return {"pin": pin, "undeploy": undeploy, "argv": argv, "kept": kept}
+
+
+def return_plan(deps: list[dict]) -> dict:
+    """What going back to the kept deployment takes: `kept`, `undeploy`
+    (stale test builds, so the kept one is next in line), `rollback`
+    (whether `bootc rollback` is needed, i.e. the kept one is not what is
+    booted), and `unpin` (its key: trying is over)."""
+    kept = next((d for d in deps if d["pinned"]), None)
+    if kept is None:
+        raise ValueError("nothing is kept: this computer is not trying a build")
+    booted = next((d for d in deps if d["place"] == "booted"), None)
+    back = kept is not booted
+    # A staged test build is discarded by bootc rollback itself; when the
+    # kept deployment is the booted one there is no rollback to do that,
+    # so the staged build is undeployed along with the rest.
+    undeploy = [d["key"] for d in _stale_trials(deps, keep_staged=back)
+                if d["key"] and d is not kept]
+    return {"kept": kept, "undeploy": undeploy, "rollback": back, "unpin": kept["key"]}

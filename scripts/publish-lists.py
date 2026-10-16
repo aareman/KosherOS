@@ -6,8 +6,8 @@ this it is also unusable, because nothing puts a bundle into the portal —
 and a feature that only works if somebody hand-crafts JSON is a feature
 that stays switched off.
 
-    just publish-lists https://portal.example
-    just publish-lists https://portal.example catalog-url=https://cdn/…
+    python3 scripts/publish-lists.py https://portal.example
+    python3 scripts/publish-lists.py https://portal.example catalog-url=https://cdn/…
 
 The lists come from this repository, which is the same place the image
 gets them: publishing is "send what the next image would have shipped",

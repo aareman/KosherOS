@@ -24,6 +24,11 @@ ACTION_USE_STORE = "org.kosherlinux.use-store"
 # says nothing about how you are filtered (today: the desktop layout, which
 # the sign-in helper applies).
 ACTION_READ_OWN = "org.kosherlinux.read-own-settings"
+# Granted to every active local user: changing a setting about YOURSELF
+# that is a preference, not a protection (today: your own desktop layout,
+# from the Look app). The filter is per-uid at the network layer whatever
+# draws the windows, so nothing here loosens it.
+ACTION_SET_OWN = "org.kosherlinux.set-own-desktop"
 ACTION_MANAGE_USERS = "org.kosherlinux.manage-users"
 ACTION_MANAGE_FILTER = "org.kosherlinux.manage-filter"
 ACTION_INSTALL_APPS = "org.kosherlinux.install-apps"
@@ -79,6 +84,8 @@ ACTIONS = {
     # per-uid at the network layer whatever draws the windows.
     "SetLayout": ACTION_MANAGE_USERS,
     "GetMyLayout": ACTION_READ_OWN,
+    # The same choice, made by the person for themselves in the Look app.
+    "SetMyLayout": ACTION_SET_OWN,
     # Your own filter settings, read-only, no password: what applies to
     # THIS account and nothing about any other. A filtered account should
     # not be a mystery to the person using it — someone who can see the
@@ -183,6 +190,12 @@ ACTIONS = {
     # the filter up. Gating it would mainly risk a broken machine nobody
     # present can repair. See impl_Rollback.
     "Rollback": ACTION_APPLY_UPDATES,
+    # Trying a build that is on no channel (a pull request's) while
+    # keeping the one the machine came from, and going back to it. The
+    # first is gated like a channel switch, for the same reason; the
+    # second is a rollback onto an image this machine already ran.
+    "TryImage": ACTION_APPLY_UPDATES,
+    "ReturnToKept": ACTION_APPLY_UPDATES,
     # The Restart button after an update. Same action as applying it: a
     # restart is the second half of the same job.
     "Reboot": ACTION_APPLY_UPDATES,
@@ -199,7 +212,7 @@ GUARDIAN_GATED = frozenset({
     "SetMediaLevel",
     "SetLanguageFilter", "SetYouTube",
     "SetGuestConfig", "DisableGuardian", "Enrol", "Unenrol",
-    "SetAdBlock", "SetTimeLimits", "SetChannel", "SetNetworkAccess",
+    "SetAdBlock", "SetTimeLimits", "SetChannel", "TryImage", "SetNetworkAccess",
     "SetUserAppAccess", "SetUserBlockedAppKinds", "SetUserBlockedApps",
 })
 
@@ -212,7 +225,7 @@ SETUP_READS = frozenset({"IsComplete", "AdminExists"})
 
 # Methods that need to know which uid called them (session management).
 UID_AWARE = frozenset({"Unlock", "Lock", "Status", "VerifyGuardian", "InstallApp",
-                       "ListStoreApps", "GetMyLayout", "GetMySettings",
+                       "ListStoreApps", "GetMyLayout", "SetMyLayout", "GetMySettings",
                        # A nixpkgs app is in one account's profile: what is
                        # installed, and whose copy to update or remove,
                        # depends on who is asking.
@@ -243,6 +256,8 @@ CHANGES = frozenset({
     # And which stream of builds it follows from now on, which is the
     # longest-lived of the three.
     "SetChannel",
+    # A test build put on the machine, and the return from it.
+    "TryImage", "ReturnToKept",
 })
 # Changes whose first argument is the account they are about.
 PER_USER = frozenset({
@@ -250,7 +265,7 @@ PER_USER = frozenset({
     "SetBlockedCategories",
     "ApplyProfile", "SaveProfile", "AllowUrl", "SetMediaLevel",
     "SetLanguageFilter", "SetYouTube", "SetUserAdmin", "SetLayout",
-    "SetCoverStyle", "SetTimeLimits", "SetNetworkAccess", "RemoveUser", "ResetPassword", "SetUserApps",
+    "SetCoverStyle", "SetTimeLimits", "SetNetworkAccess", "InstallAppFor", "RemoveUser", "ResetPassword", "SetUserApps",
     "SetUserCanInstall", "SetUserAppAccess", "SetUserBlockedAppKinds",
     "SetUserBlockedApps", "SetCaptiveMode",
 })

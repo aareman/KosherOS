@@ -19,10 +19,13 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import hmac
 import ipaddress
 import json
 import logging
 import re
+import secrets
+from collections import OrderedDict
 from pathlib import Path
 from urllib.parse import urlencode, urlsplit
 
@@ -86,6 +89,9 @@ REQUEST_PATH = "/__kosheros__/request"
 SCRIPT_PATH = "/__kosheros__/filter.js"
 WORDS_PATH = "/__kosheros__/words.json"
 JUDGE_PATH = "/__kosheros__/judge"
+# The token each page gets with its script, sent back on every call.
+PAGE_TOKEN_HEADER = "X-KosherOS-Page"
+JUDGE_CALLS_PER_MINUTE = 120
 PAGE_SCRIPT = Path(__file__).with_name("kosher_page.js")
 # What a page may send to be judged at once; the script batches to this.
 MAX_JUDGED_BYTES = 200_000
@@ -1270,14 +1276,67 @@ class KosherFilter:
         return self._words_cache
 
     @staticmethod
-    def _cached(flow: http.HTTPFlow, body: bytes, etag: str, content_type: str) -> None:
+    def _cached(flow: http.HTTPFlow, body: bytes, etag: str, content_type: str,
+                vary: str = "") -> None:
+        headers = {"ETag": etag, "Cache-Control": "public, max-age=86400"}
+        if vary:
+            headers["Vary"] = vary
         if flow.request.headers.get("if-none-match") == etag:
-            flow.response = http.Response.make(304, b"", {"ETag": etag, "Cache-Control": "public, max-age=86400"})
+            flow.response = http.Response.make(304, b"", headers)
             return
         flow.response = http.Response.make(
-            200, body, {"Content-Type": content_type, "ETag": etag,
-                        "Cache-Control": "public, max-age=86400",
-                        "X-Content-Type-Options": "nosniff"})
+            200, body, {"Content-Type": content_type, "X-Content-Type-Options": "nosniff",
+                        **headers})
+
+    # Every page the script goes into gets a token of its own on the tag,
+    # signed for this account and this host, and the script sends it back
+    # with each call. Without it the judge and the word list answer 403:
+    # a page cannot, by naming the reserved path, have a block written to
+    # the log under any address it likes, nor read the list; and a block
+    # the page reported is marked as such. The token is in the page, so
+    # the page's own scripts could read it (the tag drops it once the
+    # script has it); what the token settles is where a call came from.
+    _page_secret: bytes | None = None
+    _judge_calls: OrderedDict | None = None
+    MAX_JUDGE_COUNTERS = 1024
+
+    def _page_token(self, uid, host: str) -> str:
+        if self._page_secret is None:
+            self._page_secret = secrets.token_bytes(32)
+        nonce = secrets.token_urlsafe(12)
+        return f"{nonce}.{self._page_sign(uid, host, nonce)}"
+
+    def _page_sign(self, uid, host: str, nonce: str) -> str:
+        message = f"{uid}:{(host or '').lower()}:{nonce}".encode()
+        return hmac.new(self._page_secret, message, hashlib.sha256).hexdigest()[:32]
+
+    def _page_token_ok(self, flow: http.HTTPFlow, uid) -> bool:
+        token = flow.request.headers.get(PAGE_TOKEN_HEADER) or ""
+        nonce, _, signature = token.partition(".")
+        if not nonce or not signature or self._page_secret is None:
+            return False
+        return hmac.compare_digest(signature, self._page_sign(uid, flow.request.pretty_host, nonce))
+
+    def _judge_allowed(self, token: str) -> bool:
+        """At most JUDGE_CALLS_PER_MINUTE judge calls per page: the script
+        sends a batch every two seconds, so a page that asks far more is
+        not the script."""
+        if self._judge_calls is None:
+            self._judge_calls = OrderedDict()
+        now = time.monotonic()
+        started, count = self._judge_calls.pop(token, (now, 0))
+        if now - started >= 60:
+            started, count = now, 0
+        self._judge_calls[token] = (started, count + 1)
+        while len(self._judge_calls) > self.MAX_JUDGE_COUNTERS:
+            self._judge_calls.popitem(last=False)
+        return count < JUDGE_CALLS_PER_MINUTE
+
+    @staticmethod
+    def _refuse(flow: http.HTTPFlow, status: int, error: str) -> None:
+        flow.response = http.Response.make(
+            status, json.dumps({"blocked": False, "error": error}).encode(),
+            {"Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store"})
 
     def _serve_page_filter(self, flow: http.HTTPFlow, uid) -> bool:
         """Answer the page filter's three addresses. True when answered."""
@@ -1287,11 +1346,20 @@ class KosherFilter:
             self._cached(flow, body, etag, "application/javascript; charset=utf-8")
             return True
         if path == WORDS_PATH and flow.request.method == "GET":
+            if not self._page_token_ok(flow, uid):
+                self._refuse(flow, 403, "the word list is for the page filter's script")
+                return True
             body, etag = self._words_payload()
-            self._cached(flow, body, etag, "application/json; charset=utf-8")
+            self._cached(flow, body, etag, "application/json; charset=utf-8",
+                         vary=PAGE_TOKEN_HEADER)
             return True
         if path == JUDGE_PATH and flow.request.method == "POST":
-            self._judge_rendered(flow, uid)
+            if not self._page_token_ok(flow, uid):
+                self._refuse(flow, 403, "no page token")
+            elif not self._judge_allowed(flow.request.headers.get(PAGE_TOKEN_HEADER)):
+                self._refuse(flow, 429, "too many calls from one page")
+            else:
+                self._judge_rendered(flow, uid)
             return True
         return False
 
@@ -1308,6 +1376,11 @@ class KosherFilter:
             body = {}
         url = str(body.get("url") or "")[:2048]
         host = urlsplit(url).hostname or flow.request.pretty_host or ""
+        if host.lower() != (flow.request.pretty_host or "").lower():
+            # The page names itself; a block is logged under the page it
+            # came from and no other.
+            self._refuse(flow, 403, "the address is not this page's")
+            return
         verdict_level, because, why = "", "", ""
         word = str(body.get("language") or "")[:64]
         if word and self.policy.language_filter_for(uid) == "block" \
@@ -1328,7 +1401,7 @@ class KosherFilter:
                 log.info("blocked uid=%s %s (rendered content: %s, %d points, %s)",
                          uid, url, verdict.level, verdict.points, ", ".join(verdict.hits))
         if because:
-            self._note(activity_mod.BLOCK, flow, url=url, why=why)
+            self._note(activity_mod.BLOCK, flow, url=url, why=why, source="page")
             page = BLOCK_PAGE.format(style=BLOCK_STYLE, url=_escape(url),
                                      because=_escape(because), why=_escape(why),
                                      request_path=REQUEST_PATH)
@@ -1357,8 +1430,11 @@ class KosherFilter:
         body = flow.response.get_text(strict=False) or ""
         if not body or SCRIPT_PATH in body:
             return
+        uid = (getattr(flow, "metadata", None) or {}).get("kosher_uid")
+        token = self._page_token(uid, flow.request.pretty_host)
         attrs = (f'src="{SCRIPT_PATH}" data-kosheros-language="{language_filter}" '
-                 f'data-kosheros-judge="{"1" if judge else "0"}" defer')
+                 f'data-kosheros-judge="{"1" if judge else "0"}" '
+                 f'data-kosheros-token="{token}" defer')
         csp = flow.response.headers.get("content-security-policy") or ""
         nonce = re.search(r"'nonce-([A-Za-z0-9+/=_-]+)'", csp)
         if nonce:

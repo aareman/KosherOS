@@ -8,7 +8,9 @@ words the page adds back to be judged by the same scorer.
 """
 
 import json
+import re
 import shutil
+import time
 import subprocess
 import types
 from pathlib import Path
@@ -98,9 +100,14 @@ def test_the_script_is_served_on_every_host_and_cached(addon):
     assert again.response.status_code == 304
 
 
+def _token(filt, host="example.test", uid=1001):
+    """What the tag of a page on that host, for that account, carries."""
+    return {"X-KosherOS-Page": filt._page_token(uid, host)}
+
+
 def test_the_words_are_the_proxys_own_patterns(addon):
     filt = _filter(addon)
-    flow = _flow("https://x.example/__kosheros__/words.json")
+    flow = _flow("https://x.example/__kosheros__/words.json", headers=_token(filt, "x.example"))
     assert filt._serve_page_filter(flow, 1001) is True
     doc = json.loads(flow.response.content)
     assert doc["patterns"] and doc["words"]
@@ -124,7 +131,9 @@ def test_the_script_is_injected_into_a_page_that_is_let_through(addon):
     flow = _flow(html="<html><head><title>t</title></head><body><p>A plain page about socks.</p></body></html>")
     filt._filter_page(flow, 1001)
     text = flow.response.text
-    assert '<script src="/__kosheros__/filter.js" data-kosheros-language="substitute" data-kosheros-judge="1" defer></script></head>' in text
+    tag = re.search(r"<script [^>]*></script></head>", text).group(0)
+    assert 'src="/__kosheros__/filter.js" data-kosheros-language="substitute" data-kosheros-judge="1" ' in tag
+    assert ' defer>' in tag
     assert flow.response.headers["x-kosheros-page"] == "filter-script"
 
 
@@ -172,11 +181,12 @@ def test_injection_is_idempotent_and_only_for_html(addon):
 
 # -- what the page shows later is judged by the same rules ------------------------
 
-def _judge(filt, body: dict, url="https://example.test/page"):
-    flow = _flow(f"https://example.test/__kosheros__/judge", method="POST",
-                 body=json.dumps({"url": url, **body}).encode())
+def _judge(filt, body: dict, url="https://example.test/page", headers=None, status=200):
+    flow = _flow("https://example.test/__kosheros__/judge", method="POST",
+                 body=json.dumps({"url": url, **body}).encode(),
+                 headers=_token(filt) if headers is None else headers)
     assert filt._serve_page_filter(flow, 1001) is True
-    assert flow.response.status_code == 200
+    assert flow.response.status_code == status, flow.response.content
     return json.loads(flow.response.content), flow
 
 
@@ -187,6 +197,9 @@ def test_rendered_content_is_judged_with_the_accounts_tolerance(addon):
     assert verdict["blocked"] is True and verdict["why"].startswith("content:")
     assert "This page is blocked" in verdict["page"] and "example.test/page" in verdict["page"]
     assert filt.notes and filt.notes[0][1]["why"] == verdict["why"]
+    # ...and the log says the page reported it, for what it showed after
+    # it loaded, not the proxy on the way in.
+    assert filt.notes[0][1]["source"] == "page"
 
 
 def test_clean_rendered_content_passes(addon):
@@ -222,10 +235,100 @@ def test_a_listed_word_rendered_later_blocks_in_block_mode_only(addon):
 
 def test_a_judge_call_is_never_cached_and_survives_junk(addon):
     filt = _filter(addon)
-    flow = _flow("https://x.example/__kosheros__/judge", method="POST", body=b"not json")
+    flow = _flow("https://x.example/__kosheros__/judge", method="POST", body=b"not json",
+                 headers=_token(filt, "x.example"))
     assert filt._serve_page_filter(flow, 1001) is True
     assert json.loads(flow.response.content)["blocked"] is False
     assert flow.response.headers["Cache-Control"] == "no-store"
+
+
+# -- only the page's own script is answered (N7, #126) --------------------------------
+
+SPICY = {"text": "Lingerie sale: bras, panties, thongs, bralettes, corsets and "
+                 "intimate apparel. Sexy babydoll and negligee sets."}
+
+
+def test_every_page_gets_a_token_of_its_own_on_the_tag(addon):
+    filt = _filter(addon)
+    tokens = []
+    for _ in range(2):
+        flow = _flow(html="<html><head></head><body>hi</body></html>")
+        filt._inject_page_script(flow, "substitute", judge=True)
+        tokens.append(re.search(r'data-kosheros-token="([^"]+)"', flow.response.text).group(1))
+    assert tokens[0] != tokens[1]
+    for token in tokens:
+        call = _flow("https://example.test/__kosheros__/judge", method="POST",
+                     headers={"X-KosherOS-Page": token})
+        assert filt._page_token_ok(call, 1001)
+
+
+def test_the_judge_refuses_a_post_without_the_page_token(addon):
+    # Any page could POST to the reserved path and have a block written to
+    # the log under any address it liked.
+    filt = _filter(addon, media="immodest")
+    verdict, flow = _judge(filt, SPICY, headers={}, status=403)
+    assert verdict["blocked"] is False and filt.notes == []
+    assert flow.response.headers["Cache-Control"] == "no-store"
+    verdict, _ = _judge(filt, SPICY, headers={"X-KosherOS-Page": "made.up"}, status=403)
+    assert filt.notes == []
+
+
+def test_a_token_is_for_one_account_on_one_site(addon):
+    filt = _filter(addon, media="immodest")
+    other_site = _token(filt, host="other.example")
+    _judge(filt, SPICY, headers=other_site, status=403)
+    other_account = _token(filt, uid=1002)
+    _judge(filt, SPICY, headers=other_account, status=403)
+    assert filt.notes == []
+    verdict, _ = _judge(filt, SPICY)
+    assert verdict["blocked"] is True
+
+
+def test_a_page_cannot_report_a_block_under_another_sites_address(addon):
+    filt = _filter(addon, media="immodest")
+    _judge(filt, SPICY, url="https://victim.example/page", status=403)
+    assert filt.notes == []
+    # A body with no address at all is judged as the page it came from.
+    verdict, _ = _judge(filt, SPICY, url="")
+    assert verdict["blocked"] is True
+
+
+def test_the_word_list_is_only_for_the_script(addon):
+    filt = _filter(addon)
+    flow = _flow("https://x.example/__kosheros__/words.json")
+    assert filt._serve_page_filter(flow, 1001) is True
+    assert flow.response.status_code == 403
+    flow = _flow("https://x.example/__kosheros__/words.json", headers=_token(filt, "x.example"))
+    assert filt._serve_page_filter(flow, 1001) is True
+    assert flow.response.status_code == 200
+    # The browser's cache keys the answer by the token, so a request
+    # without one is not served from it either.
+    assert flow.response.headers["Vary"] == "X-KosherOS-Page"
+
+
+def test_a_page_that_asks_too_often_is_told_to_wait(addon, monkeypatch):
+    filt = _filter(addon)
+    headers = _token(filt)
+    for _ in range(addon.JUDGE_CALLS_PER_MINUTE):
+        _judge(filt, {"text": "fine"}, headers=headers)
+    verdict, _ = _judge(filt, {"text": "fine"}, headers=headers, status=429)
+    assert verdict["blocked"] is False
+    # Another page is not held up by it...
+    _judge(filt, {"text": "fine"})
+    # ...and a minute later the page may ask again.
+    later = time.monotonic() + 61
+    monkeypatch.setattr(addon.time, "monotonic", lambda: later)
+    _judge(filt, {"text": "fine"}, headers=headers)
+
+
+def test_a_proxy_restart_ends_the_tokens_it_gave_out(addon):
+    # The secret is the proxy's own and is not written anywhere; a token
+    # from before a restart is no longer anyone's. The script stops asking
+    # on the 403 and the page is judged again on its next load.
+    before = _filter(addon)
+    headers = _token(before)
+    after = _filter(addon)
+    _judge(after, {"text": "fine"}, headers=headers, status=403)
 
 
 # -- the script itself -----------------------------------------------------------------
@@ -240,8 +343,8 @@ def test_the_script_parses():
 
 def _words_file(addon, tmp_path) -> Path:
     filt = _filter(addon)
-    flow = _flow("https://x.example/__kosheros__/words.json")
-    filt._serve_page_filter(flow, 1001)
+    flow = _flow("https://x.example/__kosheros__/words.json", headers=_token(filt, "x.example"))
+    assert filt._serve_page_filter(flow, 1001) and flow.response.status_code == 200
     path = tmp_path / "words.json"
     path.write_bytes(flow.response.content)
     return path

@@ -435,6 +435,8 @@ def change_sentence(event: dict, users_by_uid: dict | None = None) -> tuple[str,
         what = "Ads and trackers " + ("blocked for everyone" if arg(0) else "no longer blocked")
     elif method == "SetDeveloperTools":
         what = f"{who}: developer tools {'on' if arg(1) else 'off'}"
+    elif method == "SetBootMenuPassword":
+        what = "Boot menu password set"
     elif method == "SetNetworkAccess":
         ports = arg(2) if isinstance(arg(2), list) else []
         what = f"{who}: video calls {'on' if arg(1) else 'off'}" + \

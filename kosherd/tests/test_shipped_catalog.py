@@ -26,12 +26,15 @@ def test_every_entry_has_what_the_store_draws():
         assert app.get("categories"), f"{app['ref']} has no categories to shelve it by"
 
 
-def test_refs_look_like_flatpak_app_ids_or_nixpkgs_packages_and_are_unique():
+def test_refs_are_flatpak_ids_nixpkgs_packages_or_known_builds_and_unique():
+    from kosherd import upstreamapps
+
     refs = [a["ref"] for a in APPS]
     assert len(refs) == len(set(refs))
     for ref in refs:
         assert (re.fullmatch(r"[A-Za-z][\w-]*(\.[A-Za-z0-9][\w-]*){2,}", ref)
-                or re.fullmatch(r"nixpkgs#[A-Za-z0-9][A-Za-z0-9_.-]*", ref)), ref
+                or re.fullmatch(r"nixpkgs#[A-Za-z0-9][A-Za-z0-9_.-]*", ref)
+                or ref[len(upstreamapps.PREFIX):] in upstreamapps.RELEASES), ref
 
 
 def test_the_ai_tools_and_editors_come_from_nixpkgs():
@@ -49,14 +52,17 @@ def test_the_ai_tools_and_editors_come_from_nixpkgs():
             assert appkinds.kind_of(app) == "develop", app["ref"]
 
 
-def test_the_terminals_come_from_nixpkgs_and_sit_with_console():
+def test_the_terminals_run_on_the_host_and_sit_with_console():
     # A terminal in a Flatpak sandbox cannot see the host's PATH, the Nix
     # profile or podman, which is the whole point of a developer's
-    # terminal; these come from nixpkgs and shelve with Console.
+    # terminal; these come from nixpkgs, or from the developer's own build
+    # where the Nix one cannot find the graphics drivers (kitty), and
+    # shelve with Console.
     terminals = {a["ref"]: a for a in APPS if "TerminalEmulator" in a.get("categories", [])}
-    for package in ("kitty", "ghostty", "foot", "alacritty", "cool-retro-term"):
-        assert f"nixpkgs#{package}" in terminals, package
-        assert appkinds.kind_of(terminals[f"nixpkgs#{package}"]) == appkinds.kind_of(terminals["org.gnome.Console"])
+    for ref in ("upstream#kitty", "nixpkgs#ghostty", "nixpkgs#foot", "nixpkgs#alacritty",
+                "nixpkgs#cool-retro-term"):
+        assert ref in terminals, ref
+        assert appkinds.kind_of(terminals[ref]) == appkinds.kind_of(terminals["org.gnome.Console"])
 
 
 def test_the_languages_from_the_issue_are_there_and_not_baked_into_the_image():

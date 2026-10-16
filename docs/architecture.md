@@ -165,10 +165,33 @@ tools and a few editors and toolchains: upstream nixpkgs. A catalog entry
 whose ref is `nixpkgs#<package>` is installed by the daemon into the asking
 account's own Nix profile, as that account. The same rule decides it, and
 because the profile is that account's alone there is no second gate to run
-it. Each card in the Store says which of the two it is. The Nix daemon
+it. Each card in the Store says which source it is from. The Nix daemon
 refuses an account on "No internet" outright, a build's downloads are held
 to the registries by the firewall, and a terminal tool installed this way
 gets a launcher in the app grid that opens a terminal running it.
+
+A Nix app that draws with OpenGL or Vulkan brings its own graphics loader,
+which looks for the drivers in `/run/opengl-driver`, as on NixOS. KosherOS
+puts Mesa there: `kosher-nix-opengl.service` fetches a pinned Mesa from
+NixOS's binary cache once, and a link in `/run` points at it. The pin is a
+NixOS stable release, because a driver loads into the app's own process
+and must not need a newer C library than the app has. The Store's apps
+come from nixpkgs-unstable, which is always newer. Without this, Alacritty,
+Ghostty, Cool Retro Term and kitty from nixpkgs cannot open a window, even
+on a machine whose own drivers work. NVIDIA's proprietary driver is not
+covered; KosherOS does not ship it. `scripts/nix-opengl-pin.sh` moves the
+pin to a new NixOS release.
+
+A third source is the developer's own signed build, for an app whose Nix
+build cannot run here. A Nix build brings its own OpenGL library, which
+finds no graphics driver on Fedora, so kitty from nixpkgs refuses to open
+even when the drivers are fine. A catalog entry whose ref is
+`upstream#kitty` is fetched from kitty's own releases as the asking
+account, checked against the developer's signing key that the image
+carries, and unpacked into that account's home with a launcher and its
+commands in `~/.local/bin`. A download whose signature does not check out
+is thrown away, and the copy already there stays. Installing it also
+removes the account's old kitty from nixpkgs.
 
 ## The policy
 
@@ -222,6 +245,14 @@ the image sets all three on the kernel command line:
 | `lockdown=integrity` | the kernel refuses the paths that would let root rewrite the running kernel. Secure Boot turns this on by itself; saying it explicitly gives a machine booted without Secure Boot the same floor |
 | `intel_iommu=on` | devices sit behind the IOMMU. Modern kernels do this where the firmware allows; older Intel parts need asking, and it costs nothing where it is already on |
 | `mem_sleep_default=s2idle` | suspend to idle rather than deep sleep, which leaves the memory image where firmware attacks can reach it |
+| `rd.shell=0` | a failed early boot never offers a dracut shell — a root prompt before the filter is up, on a computer where nobody should have root |
+| `rd.emergency=reboot` | and instead of waiting at that prompt, the computer restarts |
+
+The boot menu itself has a password: the first-boot wizard sets one by
+default, the administrator's own unless another is typed, and the text
+setup does the same. Starting the computer never asks for it; editing an
+entry or opening GRUB's command line does. A machine installed before this
+was the default sets one from **Admin → Protection → Boot menu password**.
 
 Nothing in the image loads an out-of-tree kernel module, so lockdown costs
 the family nothing.

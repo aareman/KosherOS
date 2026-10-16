@@ -37,7 +37,7 @@ from collections import deque
 from pathlib import Path
 from typing import Callable
 
-from . import appaccess, nixapps
+from . import accountapps, appaccess, nixapps
 
 try:
     import gi
@@ -567,24 +567,25 @@ def installed_details() -> list[dict]:
 
 
 def nix_installed_details(catalog: dict, ledger: dict) -> list[dict]:
-    """The nixpkgs apps kosherd installed, each in the profile of the
-    account that asked (the ledger says which), still there."""
+    """The per-account apps kosherd installed (nixpkgs packages and
+    developers' own builds), each in the home of the account that asked
+    (the ledger says which), still there."""
     from . import appkinds
 
     details = []
     present: dict[int, set[str]] = {}
     for ref, entry in ledger.items():
-        if not nixapps.is_nix(ref):
+        if not accountapps.is_account_app(ref):
             continue
         uid = entry.get("uid", -1)
         if uid not in present:
-            present[uid] = nixapps.installed(uid) if uid >= 0 else set()
+            present[uid] = accountapps.installed(uid) if uid >= 0 else set()
         if ref not in present[uid]:
             continue
         known = catalog.get(ref) or {}
         details.append({
             "ref": ref,
-            "name": known.get("name") or nixapps.package(ref),
+            "name": known.get("name") or accountapps.package(ref),
             "size": 0,
             "installed_by": entry.get("username", ""),
             "installed_by_uid": uid,
@@ -598,14 +599,14 @@ def nix_installed_details(catalog: dict, ledger: dict) -> list[dict]:
 
 def installed_refs(uid: int | None = None) -> set[str]:
     """What is installed as far as `uid` is concerned: every Flatpak (they
-    are system-wide) and the nixpkgs apps in that account's own profile."""
+    are system-wide) and the per-account apps in that account's own home."""
     installation = Flatpak.Installation.new_system(None)
     refs = {
         r.get_name() for r in installation.list_installed_refs(None)
         if r.get_kind() == Flatpak.RefKind.APP
     }
     if uid is not None and uid > 0:
-        refs |= nixapps.installed(uid)
+        refs |= accountapps.installed(uid)
     return refs
 
 
@@ -755,14 +756,14 @@ class AppManager:
         refusal = permit(ref)
         if refusal:
             raise AppError(f"{ref} is {refusal}")
-        if nixapps.is_nix(ref):
-            self._enqueue(ref, self._nix_work(nixapps.install, uid, as_root))
+        if accountapps.is_account_app(ref):
+            self._enqueue(ref, self._nix_work(accountapps.install, uid, as_root))
         else:
             self._enqueue(ref, self._do_install)
 
     def remove(self, ref: str, *, uid: int | None = None, as_root: bool = False) -> None:
-        if nixapps.is_nix(ref):
-            self._enqueue(ref, self._nix_work(nixapps.remove, uid, as_root))
+        if accountapps.is_account_app(ref):
+            self._enqueue(ref, self._nix_work(accountapps.remove, uid, as_root))
         else:
             self._enqueue(ref, self._do_remove)
 
@@ -773,21 +774,22 @@ class AppManager:
     def update(self, ref: str, *, uid: int | None = None, as_root: bool = False) -> None:
         """Bring one installed app up to the remote's build. Queued like an
         install, reported on the same signals."""
-        if nixapps.is_nix(ref):
-            self._enqueue(ref, self._nix_work(nixapps.upgrade, uid, as_root))
+        if accountapps.is_account_app(ref):
+            self._enqueue(ref, self._nix_work(accountapps.upgrade, uid, as_root))
         else:
             self._enqueue(ref, self._do_update)
 
     def _nix_work(self, action, uid: int | None, as_root: bool = False):
-        """A queue job for a nixpkgs app: the action, as the account — or as
-        root into the account's profile when it has no developer tools."""
+        """A queue job for a per-account app: the action, as the account —
+        or, for a Nix app on an account without developer tools (#123), as
+        root into that account's profile (accountapps passes it on)."""
         if uid is None or uid == 0:
-            raise AppError("a nixpkgs app is installed for an account, not for the computer")
+            raise AppError("this app is installed for an account, not for the computer")
 
         def work(ref: str) -> None:
             try:
                 action(ref, uid, self._on_progress, as_root=as_root)
-            except nixapps.NixAppError as e:
+            except accountapps.ERRORS as e:
                 raise AppError(str(e)) from e
         return work
 

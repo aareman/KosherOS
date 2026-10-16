@@ -1,10 +1,9 @@
 """Building Look for real, on a virtual display, against fakes for the
-daemon and the taskbar settings.
+daemon and the blur settings.
 
 The window is what the tests hold: which desktop is marked, that choosing
 one reaches the daemon for THIS account and the running session when it
-can, that the taskbar controls follow the choice, and that nothing here
-writes until the person moves something.
+can, and that nothing here writes until the person moves something.
 """
 
 from __future__ import annotations
@@ -48,28 +47,48 @@ class FakeClient:
         self.layout = layout
 
 
+PIPELINES = (
+    "{'pipeline_default': {'name': <'Default'>, 'effects': <[<{'type': <'native_static_gaussian_blur'>, "
+    "'id': <'d'>, 'params': <{'unscaled_radius': <20.0>, 'brightness': <0.8>}>}>]>}, "
+    "'kosher_panel': {'name': <'KosherOS taskbar'>, 'effects': <[<{'type': <'native_static_gaussian_blur'>, "
+    "'id': <'p'>, 'params': <{'unscaled_radius': <20.0>, 'brightness': <0.8>}>}>]>}, "
+    "'kosher_windows': {'name': <'KosherOS windows'>, 'effects': <[<{'type': <'native_static_gaussian_blur'>, "
+    "'id': <'w'>, 'params': <{'unscaled_radius': <20.0>, 'brightness': <0.8>}>}>, "
+    "<{'type': <'corner'>, 'id': <'c'>, 'params': <{'radius': <15>}>}>]>}}"
+)
+
+
 class FakeSettings:
-    """Enough of Gio.Settings for the Taskbar class: typed get/set/reset
-    over a dict, with the defaults the image ships."""
+    """Enough of Gio.Settings for the Glass class: typed get/set/reset over
+    a dict, with the defaults the image ships."""
 
     def __init__(self, defaults):
         self.defaults = dict(defaults)
         self.values = dict(defaults)
 
-    def get_double(self, k): return self.values[k]
     def get_boolean(self, k): return self.values[k]
+    def get_string(self, k): return self.values[k]
     def get_int(self, k): return self.values[k]
-    def set_double(self, k, v): self.values[k] = v
+    def get_value(self, k): return self.values[k]
     def set_boolean(self, k, v): self.values[k] = v
     def set_int(self, k, v): self.values[k] = v
+    def set_value(self, k, v):
+        assert v.get_type_string() == "a{sa{sv}}"
+        self.values[k] = v
     def reset(self, k): self.values[k] = self.defaults[k]
 
 
-def _taskbar():
-    panel = FakeSettings({"trans-use-custom-opacity": True, "trans-panel-opacity": 0.55,
-                          "panel-size": 48, "panel-sizes": "{}"})
-    blur = FakeSettings({"blur": True})
-    return app.Taskbar(panel=panel, blur=blur)
+def _glass(panel=True, windows=True):
+    root = FakeSettings({"pipelines": GLib.Variant.parse(None, PIPELINES, None, None)})
+    return app.Glass(root=root, parts={
+        "panel": FakeSettings({"blur": panel, "pipeline": "kosher_panel"}),
+        "applications": FakeSettings({"blur": windows, "pipeline": "kosher_windows",
+                                      "opacity": 225}),
+    })
+
+
+def _blur(glass):
+    return [p.values["blur"] for p in glass.parts.values()]
 
 
 def _pump(seconds=0.5):
@@ -80,9 +99,9 @@ def _pump(seconds=0.5):
         ctx.iteration(False)
 
 
-def _window(client=None, taskbar=None, in_niri=False):
+def _window(client=None, glass=None, in_niri=False):
     applied = []
-    win = app.Window(None, client=client or FakeClient(), taskbar=taskbar or _taskbar(),
+    win = app.Window(None, client=client or FakeClient(), glass=glass or _glass(),
                      apply=applied.append, in_niri=in_niri)
     _pump()
     return win, applied
@@ -94,11 +113,10 @@ def test_the_desktops_offered_are_exactly_the_layouts_kosherd_knows():
     assert tuple(k for k, _, _ in app.DESKTOPS) == LAYOUTS
 
 
-def test_the_current_desktop_is_marked_and_classic_shows_the_taskbar():
+def test_the_current_desktop_is_marked_and_classic_needs_no_sign_out():
     win, _ = _window(FakeClient("classic"))
     assert win.checks["classic"].get_active()
     assert not win.checks["tiling"].get_active()
-    assert win.taskbar_group.get_visible()
     assert not win.banner.get_revealed()
 
 
@@ -109,7 +127,6 @@ def test_choosing_tiling_reaches_the_daemon_and_the_running_session():
     _pump()
     assert client.chosen == ["tiling"]
     assert applied == ["tiling"], "a GNOME desktop switches in place"
-    assert not win.taskbar_group.get_visible(), "no taskbar on the tiling desktop"
     assert not win.banner.get_revealed()
 
 
@@ -123,10 +140,9 @@ def test_choosing_advanced_waits_for_the_next_sign_in():
     assert win.banner.get_revealed()
 
 
-def test_under_niri_the_gnome_desktops_wait_too_and_there_is_no_taskbar():
+def test_under_niri_the_gnome_desktops_wait_too():
     client = FakeClient("advanced")
     win, applied = _window(client, in_niri=True)
-    assert not win.taskbar_group.get_visible()
     assert not win.banner.get_revealed(), "running what was chosen: nothing to announce"
     win.checks["classic"].set_active(True)
     _pump()
@@ -150,58 +166,91 @@ def test_the_daemon_being_away_is_a_page_not_a_crash():
     class Away:
         def my_layout(self):
             raise RuntimeError("GDBus.Error:org.freedesktop.DBus.Error.ServiceUnknown: gone")
-    win = app.Window(None, client=Away(), taskbar=_taskbar(), apply=lambda _l: None, in_niri=False)
+    win = app.Window(None, client=Away(), glass=_glass(), apply=lambda _l: None, in_niri=False)
     _pump()
     page = win.view.get_content()
     assert isinstance(page, Adw.StatusPage)
     assert page.get_title() == app.TEXT["error_title"]
 
 
-# ---- the taskbar -----------------------------------------------------------
+# ---- the glass --------------------------------------------------------------
 
-def test_the_taskbar_controls_show_what_is_set_and_write_what_is_moved():
-    taskbar = _taskbar()
-    win, _ = _window(taskbar=taskbar)
-    assert win.opacity.get_value() == 45, "0.55 opaque is 45% see-through"
-    assert win.blur_row.get_active()
-    assert win.size_row.get_selected() == 1, "48px is Medium"
-    win.opacity.set_value(80)
-    assert abs(taskbar.opacity - 0.2) < 1e-9
-    assert taskbar.panel.values["trans-use-custom-opacity"] is True
+def test_one_switch_blurs_the_taskbar_and_the_windows_together():
+    glass = _glass(panel=True, windows=False)
+    win, _ = _window(glass=glass)
+    assert win.glass_group.get_visible()
+    assert win.blur_row.get_active(), "on when either part is blurred"
     win.blur_row.set_active(False)
-    assert taskbar.blurred is False
-    win.size_row.set_selected(2)
-    assert taskbar.size == 56
+    assert _blur(glass) == [False, False]
+    assert not win.strength_row.get_sensitive(), "nothing to tune with the blur off"
+    win.blur_row.set_active(True)
+    assert _blur(glass) == [True, True]
+    assert win.strength_row.get_sensitive() and win.transparency_row.get_sensitive()
 
 
-def test_back_to_the_kosheros_look_unsets_the_keys():
-    taskbar = _taskbar()
-    taskbar.panel.values["panel-sizes"] = '{"0": 64}'
-    win, _ = _window(taskbar=taskbar)
-    win.opacity.set_value(90)
-    win.size_row.set_selected(0)
-    assert taskbar.panel.values["panel-sizes"] == "{}", "the per-monitor table is cleared"
+def test_opening_look_writes_nothing():
+    glass = _glass(panel=False, windows=True)
+    _window(glass=glass)
+    assert _blur(glass) == [False, True]
+    assert glass.root.values == glass.root.defaults
+    assert glass.parts["applications"].values["opacity"] == 225
+
+
+def _radii(glass):
+    found = {}
+    for name, body in glass.root.values["pipelines"].unpack().items():
+        found[name] = [e["params"] for e in body["effects"]]
+    return found
+
+
+def test_how_much_sets_the_radius_of_the_taskbar_and_window_blur_only():
+    glass = _glass()
+    win, _ = _window(glass=glass)
+    assert win.strength.get_value() == 38, "radius 20 of 2..50"
+    win.strength.set_value(100)
+    radii = _radii(glass)
+    assert radii["kosher_panel"][0]["unscaled_radius"] == 50.0
+    assert radii["kosher_windows"][0]["unscaled_radius"] == 50.0
+    assert radii["pipeline_default"][0]["unscaled_radius"] == 20.0, "popups keep theirs"
+    # Everything else in the pipeline keeps its value and its type.
+    assert radii["kosher_windows"][0]["brightness"] == 0.8
+    corner = glass.root.values["pipelines"].lookup_value("kosher_windows", None)
+    assert "<{'radius': <15>}>" in corner.print_(False), "the corner radius stays an int"
+
+
+def test_transparency_is_the_windows_opacity_and_stays_readable():
+    glass = _glass()
+    win, _ = _window(glass=glass)
+    assert win.transparency.get_value() == 12, "225 of 255 is 12% see-through"
+    assert win.transparency.get_adjustment().get_upper() == 50
+    win.transparency.set_value(40)
+    assert glass.parts["applications"].values["opacity"] == 153
+    glass.transparency = 0.9
+    assert glass.parts["applications"].values["opacity"] == 128, "never past half"
+
+
+def test_back_to_the_kosheros_look_unsets_everything():
+    glass = _glass()
+    win, _ = _window(glass=glass)
+    win.strength.set_value(90)
+    win.transparency.set_value(45)
+    win.blur_row.set_active(False)
     win.reset_button.emit("clicked")
-    assert taskbar.panel.values == taskbar.panel.defaults
-    assert taskbar.blur.values == taskbar.blur.defaults
-    assert win.opacity.get_value() == 45
-    assert win.size_row.get_selected() == 1
+    assert glass.root.values == glass.root.defaults
+    assert all(p.values == p.defaults for p in glass.parts.values())
+    assert win.blur_row.get_active()
+    assert win.strength.get_value() == 38 and win.transparency.get_value() == 12
 
 
-def test_without_the_extensions_the_taskbar_group_is_left_out():
-    win, _ = _window(taskbar=app.Taskbar(panel=None, blur=None))
-    # On a developer's machine without Dash to Panel the window still
-    # opens; only the taskbar group is missing.
-    assert win.taskbar_group is None
+def test_under_niri_there_is_no_blur_switch():
+    win, _ = _window(FakeClient("advanced"), in_niri=True)
+    assert not win.glass_group.get_visible()
+
+
+def test_without_the_extension_the_switch_is_left_out():
+    win, _ = _window(glass=app.Glass(root=None, parts={"panel": None, "applications": None}))
+    assert win.glass_group is None
     assert win.checks["classic"].get_active()
-
-
-def test_the_opacity_is_clamped():
-    taskbar = _taskbar()
-    taskbar.opacity = 1.7
-    assert taskbar.opacity == 1.0
-    taskbar.opacity = -3
-    assert taskbar.opacity == 0.0
 
 
 # ---- the image --------------------------------------------------------------

@@ -47,7 +47,8 @@ def test_nothing_here_promises_a_green_panel():
     # filter is broken.
     doc = (ROOT / "docs/architecture.md").read_text()
     assert "Device Security" in doc
-    for karg in ("lockdown=integrity", "intel_iommu=on", "mem_sleep_default=s2idle"):
+    for karg in ("lockdown=integrity", "intel_iommu=on", "mem_sleep_default=s2idle",
+                 "rd.shell=0", "rd.emergency=reboot"):
         assert karg in doc, karg
     for theirs in ("BootGuard", "Secure Boot", "TPM", "zram"):
         assert theirs in doc, theirs

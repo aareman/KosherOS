@@ -165,6 +165,8 @@ def test_the_guardian_gate_covers_every_filter_weakening_method():
                 "SetNetworkAccess",
                 # Developer tools: the Nix daemon and the registries, directly.
                 "SetDeveloperTools",
+                # The boot menu is the way round every other protection.
+                "SetBootMenuPassword",
                 # Not a filter setting, but the same kind of decision: it
                 # puts the family computer on builds nobody has tried.
                 "SetChannel",

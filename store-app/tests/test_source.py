@@ -21,6 +21,7 @@ from test_widgets import window  # noqa: E402,F401  (the fixture: a Store on the
 def test_the_source_is_read_from_the_ref():
     assert source_of({"ref": "com.visualstudio.code"}) == "Flatpak"
     assert source_of({"ref": "nixpkgs#claude-code"}) == "Nix"
+    assert source_of({"ref": "upstream#kitty"}) == "Official build"
 
 
 def test_an_entry_may_say_its_source_outright():

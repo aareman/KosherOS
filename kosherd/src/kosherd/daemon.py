@@ -168,6 +168,13 @@ INTROSPECTION_XML = """
       <arg direction="in" type="b" name="enabled"/>
       <arg direction="in" type="s" name="guardian_password"/>
     </method>
+    <method name="SetBootMenuPassword">
+      <arg direction="in" type="s" name="password"/>
+      <arg direction="in" type="s" name="guardian_password"/>
+    </method>
+    <method name="BootMenuProtected">
+      <arg direction="out" type="b" name="protected"/>
+    </method>
     <method name="SetNetworkAccess">
       <arg direction="in" type="i" name="uid"/>
       <arg direction="in" type="b" name="video_calls"/>
@@ -1438,6 +1445,24 @@ class Daemon:
         self._save_and_apply()
         return None
 
+    def impl_SetBootMenuPassword(self, password: str, _guardian_pw: str):
+        """Password-protect the boot menu on a machine installed before the
+        wizard did it by default (#129), or change the password. Guardian-
+        gated: the menu is the way round every other protection."""
+        if len(password or "") < 6:
+            raise PolicyError("the boot menu password needs at least 6 characters")
+        self._set_grub_password(password)
+        return None
+
+    def impl_BootMenuProtected(self):
+        """Is a boot-menu password set on this machine? Read from user.cfg,
+        which GRUB reads at every start."""
+        try:
+            text = GRUB_USER_CFG.read_text()
+        except OSError:
+            text = ""
+        return GLib.Variant("(b)", ("GRUB2_PASSWORD=grub.pbkdf2." in text,))
+
     def impl_SetNetworkAccess(self, uid: int, video_calls: bool, extra_ports_json: str,
                               _guardian_pw: str):
         """What this account may reach beyond the web (see nft.py).
@@ -2123,7 +2148,7 @@ class Daemon:
         to the account the ledger says asked for it — an update is open to
         every account and must never land in another account's profile
         (#124)."""
-        if _uid > 0 and ref in apps.nixapps.installed(_uid):
+        if _uid > 0 and ref in apps.accountapps.installed(_uid):
             return _uid
         if _uid > 0 and not others:
             raise PolicyError(f"{ref} is not installed for your account")
@@ -2158,7 +2183,7 @@ class Daemon:
         """Update one installed app. Not gated on can_install_apps: an
         update widens nothing, and a newer build of an approved app is the
         safer one to be running."""
-        if apps.nixapps.is_nix(ref):
+        if apps.accountapps.is_account_app(ref):
             owner = self._nix_owner(ref, _uid)
             self.app_manager.update(ref, uid=owner, as_root=not self._developer(owner))
         else:
@@ -2195,7 +2220,7 @@ class Daemon:
         return GLib.Variant("(s)", (json.dumps(summary),))
 
     def impl_RemoveApp(self, ref: str, *, _uid: int):
-        if apps.nixapps.is_nix(ref):
+        if apps.accountapps.is_account_app(ref):
             owner = self._nix_owner(ref, _uid, others=True)
             self.app_manager.remove(ref, uid=owner, as_root=not self._developer(owner))
         else:

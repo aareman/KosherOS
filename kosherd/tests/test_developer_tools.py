@@ -166,3 +166,23 @@ def test_a_supervised_accounts_store_install_runs_as_root_into_its_profile(monke
     # a developer's own install still runs as the account
     own = nixapps._argv(1001, "profile", "install", "nixpkgs#hello")
     assert own[:3] == ["runuser", "-u", "kid"]
+
+
+def test_the_store_passes_run_as_root_to_nix_apps_only(monkeypatch):
+    # Per-account apps are Nix packages or a developer's own signed build
+    # (accountapps). Only Nix goes through the daemon that refuses an
+    # account without developer tools, so only Nix is told to run as root;
+    # a developer's build is always installed as the account.
+    from kosherd import accountapps, nixapps, upstreamapps
+
+    seen = []
+    for module, name in ((nixapps, "nix"), (upstreamapps, "upstream")):
+        for action in ("install", "upgrade", "remove"):
+            monkeypatch.setattr(module, action,
+                                lambda ref, uid, progress, *rest, _n=name, **kw:
+                                seen.append((_n, rest, kw)))
+    for action in ("install", "upgrade", "remove"):
+        getattr(accountapps, action)("nixpkgs#hello", 1001, None, as_root=True)
+        getattr(accountapps, action)("upstream#kitty", 1001, None, as_root=True)
+    assert [(rest, kw) for n, rest, kw in seen if n == "nix"] == [((), {"as_root": True})] * 3
+    assert [(rest, kw) for n, rest, kw in seen if n == "upstream"] == [((), {})] * 3

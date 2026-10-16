@@ -73,7 +73,7 @@ time on first use. `KOSHER_DEV_MODELS=1 devenv shell` brings them in, and
 | `store-app/` | KosherOS Store, open to every account |
 | `myfilter-app/` | My Filter, a read-only view of your own rules |
 | `welcome-app/` | the welcome an account sees at its first sign-in, admin or managed |
-| `look-app/` | Look, where each person picks their desktop and tunes the taskbar |
+| `look-app/` | Look, where each person picks their desktop |
 | `setup-app/` | the first-boot wizard |
 | `search-app/` | the filtered search front end in front of SearXNG |
 | `mitm/` | the mitmproxy addon that filters pages, pictures and video |

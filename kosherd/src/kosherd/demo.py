@@ -355,15 +355,16 @@ class DemoClient:
     def _time_state(self, u):
         return timelimits.status(u.get("time"), self.used_today.get(u["uid"], 0))
 
-    def list_unused_apps(self):
-        return []
-
-    def remove_unused_apps(self):
-        return {"count": 0, "size": 0}
-
     def set_developer_tools(self, uid, enabled, pw=""):
         self._user(uid)["developer_tools"] = bool(enabled)
         self._change(uid, "SetDeveloperTools", [uid, bool(enabled)])
+
+    def set_boot_menu_password(self, password, pw=""):
+        self._boot_menu = True
+        self._change(None, "SetBootMenuPassword", [])
+
+    def boot_menu_protected(self):
+        return getattr(self, "_boot_menu", True)
 
     def set_network_access(self, uid, video_calls, extra_ports, pw=""):
         u = self._user(uid)

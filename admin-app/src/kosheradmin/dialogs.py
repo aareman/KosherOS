@@ -832,6 +832,46 @@ def guardian_dialog(win) -> Adw.AlertDialog:
     return dialog
 
 
+def boot_menu_dialog(win) -> Adw.AlertDialog:
+    """Set (or change) the boot menu password (#129). The wizard sets it to
+    the administrator's password on a fresh install; this is for a machine
+    installed before that, or for choosing another."""
+    dialog = Adw.AlertDialog(
+        heading="Boot menu password",
+        body=("Asked for only when someone tries to edit the boot menu or open its "
+              "command line — the way round every other protection. Starting the "
+              "computer normally never asks."))
+    box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+    new = Gtk.PasswordEntry(show_peek_icon=True)
+    again = Gtk.PasswordEntry(show_peek_icon=True)
+    box.append(Gtk.Label(label="Password", xalign=0))
+    box.append(new)
+    box.append(Gtk.Label(label="Confirm", xalign=0))
+    box.append(again)
+    dialog.set_extra_child(box)
+    dialog.add_response("cancel", "Cancel")
+    dialog.add_response("ok", "Set password")
+    dialog.set_response_appearance("ok", Adw.ResponseAppearance.SUGGESTED)
+    dialog.set_default_response("ok")
+    dialog.set_close_response("cancel")
+    submit_on_enter(dialog, "ok", new, again)
+
+    def on_response(_d, response):
+        if response != "ok":
+            return
+        if len(new.get_text()) < 6 or new.get_text() != again.get_text():
+            win.toast("Boot passwords must match and be 6+ characters")
+            return
+        win.with_guardian(lambda pw: win.call(
+            lambda: win.client.set_boot_menu_password(new.get_text(), pw),
+            done_msg="Boot menu password set"))
+
+    dialog.connect("response", on_response)
+    dialog.present(win)
+    new.grab_focus()
+    return dialog
+
+
 def unmanaged_users(policy: dict) -> list[str]:
     import pwd
 
@@ -876,6 +916,12 @@ def add_person_dialog(win, adopt_mode: bool) -> Adw.AlertDialog | None:
                 name.set_text(suggest_username(full.get_text()))
 
         def on_name(_e):
+            if name.get_text() != name.get_text().lower():
+                # Always lowercase, as it is typed.
+                position = name.get_position()
+                name.set_text(name.get_text().lower())
+                name.set_position(position)
+                return
             state["typed"] = bool(name.get_text().strip()) and \
                 name.get_text() != suggest_username(full.get_text())
             valid = username_ok(name.get_text())
@@ -949,20 +995,11 @@ def username_ok(text: str) -> bool:
 
 
 def suggest_username(full_name: str) -> str:
-    """'Elisha Ben-David' -> 'elisha': the first name, lowercased, letters
-    and digits only. Short and memorable, which is what a login name is
-    for; the person can type something else."""
-    import re
-    import unicodedata
+    """'John Doe' -> 'jdoe', 'John' -> 'john': the same rule as the
+    first-run wizard (kosherd.usernames)."""
+    from kosherd import usernames
 
-    first = (full_name or "").strip().split()
-    if not first:
-        return ""
-    plain = unicodedata.normalize("NFKD", first[0]).encode("ascii", "ignore").decode()
-    slug = re.sub(r"[^A-Za-z0-9]", "", plain).lower()
-    if slug and not slug[0].isalpha():
-        slug = "u" + slug
-    return slug
+    return usernames.suggest(full_name)
 
 
 def confirm_remove_user(win, user: dict) -> None:

@@ -4,7 +4,7 @@ KosherOS is for people who know Windows, a Mac or a Chromebook, and for the
 relative who knows none of them. It is also for the one person in the
 family who wants a tiling window manager. One per-account setting, the
 **layout**, serves all of them. The person picks it for themselves in the
-**Look** app, where the classic taskbar's look is tuned as well; it is not
+**Look** app; it is not
 a row in the admin app, though `kosherctl layout` can still set it for an
 account from a terminal. Classic and tiling switch in place; the advanced
 desktop is a different session and takes effect at the next sign-in.
@@ -32,16 +32,14 @@ to the running session at once through the sign-in helper. Advanced is a
 separate session, so the app says it is ready at the next sign-in and
 offers to sign out.
 
-Under Classic, the app also has the taskbar: how see-through it is,
-whether the wallpaper is blurred behind it, and its size, with a button
-back to the KosherOS look. These go straight into the extensions' own
-settings for the account, and the sign-in helper leaves them alone (it
-writes its plan when the layout changes, not at every sign-in), so they
-stick. Wallpaper, dark mode and text size stay in GNOME Settings, which
+The taskbar has its own settings: right-click it and choose the taskbar's
+settings. What a person changes there is theirs, and the sign-in helper
+leaves it alone (it writes its plan when the layout changes, not at every
+sign-in). Wallpaper, dark mode and text size stay in GNOME Settings, which
 the app points to.
 
-GNOME Settings has no way to add a panel, which is why these controls are
-an app of their own rather than a section of its Appearance page. The
+GNOME Settings has no way to add a panel, which is why the desktop choice
+is an app of its own rather than a section of its Appearance page. The
 Look app is also the first piece of what may one day be a KosherOS
 settings app in place of GNOME's.
 

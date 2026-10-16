@@ -1,10 +1,9 @@
 """Building Look for real, on a virtual display, against fakes for the
-daemon and the taskbar settings.
+daemon.
 
 The window is what the tests hold: which desktop is marked, that choosing
 one reaches the daemon for THIS account and the running session when it
-can, that the taskbar controls follow the choice, and that nothing here
-writes until the person moves something.
+can, and that nothing here writes until the person moves something.
 """
 
 from __future__ import annotations
@@ -48,30 +47,6 @@ class FakeClient:
         self.layout = layout
 
 
-class FakeSettings:
-    """Enough of Gio.Settings for the Taskbar class: typed get/set/reset
-    over a dict, with the defaults the image ships."""
-
-    def __init__(self, defaults):
-        self.defaults = dict(defaults)
-        self.values = dict(defaults)
-
-    def get_double(self, k): return self.values[k]
-    def get_boolean(self, k): return self.values[k]
-    def get_int(self, k): return self.values[k]
-    def set_double(self, k, v): self.values[k] = v
-    def set_boolean(self, k, v): self.values[k] = v
-    def set_int(self, k, v): self.values[k] = v
-    def reset(self, k): self.values[k] = self.defaults[k]
-
-
-def _taskbar():
-    panel = FakeSettings({"trans-use-custom-opacity": True, "trans-panel-opacity": 0.55,
-                          "panel-size": 48, "panel-sizes": "{}"})
-    blur = FakeSettings({"blur": True})
-    return app.Taskbar(panel=panel, blur=blur)
-
-
 def _pump(seconds=0.5):
     """Let the worker thread and the idle callbacks it queues run."""
     deadline = GLib.get_monotonic_time() + int(seconds * 1e6)
@@ -80,9 +55,9 @@ def _pump(seconds=0.5):
         ctx.iteration(False)
 
 
-def _window(client=None, taskbar=None, in_niri=False):
+def _window(client=None, in_niri=False):
     applied = []
-    win = app.Window(None, client=client or FakeClient(), taskbar=taskbar or _taskbar(),
+    win = app.Window(None, client=client or FakeClient(),
                      apply=applied.append, in_niri=in_niri)
     _pump()
     return win, applied
@@ -94,11 +69,10 @@ def test_the_desktops_offered_are_exactly_the_layouts_kosherd_knows():
     assert tuple(k for k, _, _ in app.DESKTOPS) == LAYOUTS
 
 
-def test_the_current_desktop_is_marked_and_classic_shows_the_taskbar():
+def test_the_current_desktop_is_marked_and_classic_needs_no_sign_out():
     win, _ = _window(FakeClient("classic"))
     assert win.checks["classic"].get_active()
     assert not win.checks["tiling"].get_active()
-    assert win.taskbar_group.get_visible()
     assert not win.banner.get_revealed()
 
 
@@ -109,7 +83,6 @@ def test_choosing_tiling_reaches_the_daemon_and_the_running_session():
     _pump()
     assert client.chosen == ["tiling"]
     assert applied == ["tiling"], "a GNOME desktop switches in place"
-    assert not win.taskbar_group.get_visible(), "no taskbar on the tiling desktop"
     assert not win.banner.get_revealed()
 
 
@@ -123,10 +96,9 @@ def test_choosing_advanced_waits_for_the_next_sign_in():
     assert win.banner.get_revealed()
 
 
-def test_under_niri_the_gnome_desktops_wait_too_and_there_is_no_taskbar():
+def test_under_niri_the_gnome_desktops_wait_too():
     client = FakeClient("advanced")
     win, applied = _window(client, in_niri=True)
-    assert not win.taskbar_group.get_visible()
     assert not win.banner.get_revealed(), "running what was chosen: nothing to announce"
     win.checks["classic"].set_active(True)
     _pump()
@@ -150,58 +122,11 @@ def test_the_daemon_being_away_is_a_page_not_a_crash():
     class Away:
         def my_layout(self):
             raise RuntimeError("GDBus.Error:org.freedesktop.DBus.Error.ServiceUnknown: gone")
-    win = app.Window(None, client=Away(), taskbar=_taskbar(), apply=lambda _l: None, in_niri=False)
+    win = app.Window(None, client=Away(), apply=lambda _l: None, in_niri=False)
     _pump()
     page = win.view.get_content()
     assert isinstance(page, Adw.StatusPage)
     assert page.get_title() == app.TEXT["error_title"]
-
-
-# ---- the taskbar -----------------------------------------------------------
-
-def test_the_taskbar_controls_show_what_is_set_and_write_what_is_moved():
-    taskbar = _taskbar()
-    win, _ = _window(taskbar=taskbar)
-    assert win.opacity.get_value() == 45, "0.55 opaque is 45% see-through"
-    assert win.blur_row.get_active()
-    assert win.size_row.get_selected() == 1, "48px is Medium"
-    win.opacity.set_value(80)
-    assert abs(taskbar.opacity - 0.2) < 1e-9
-    assert taskbar.panel.values["trans-use-custom-opacity"] is True
-    win.blur_row.set_active(False)
-    assert taskbar.blurred is False
-    win.size_row.set_selected(2)
-    assert taskbar.size == 56
-
-
-def test_back_to_the_kosheros_look_unsets_the_keys():
-    taskbar = _taskbar()
-    taskbar.panel.values["panel-sizes"] = '{"0": 64}'
-    win, _ = _window(taskbar=taskbar)
-    win.opacity.set_value(90)
-    win.size_row.set_selected(0)
-    assert taskbar.panel.values["panel-sizes"] == "{}", "the per-monitor table is cleared"
-    win.reset_button.emit("clicked")
-    assert taskbar.panel.values == taskbar.panel.defaults
-    assert taskbar.blur.values == taskbar.blur.defaults
-    assert win.opacity.get_value() == 45
-    assert win.size_row.get_selected() == 1
-
-
-def test_without_the_extensions_the_taskbar_group_is_left_out():
-    win, _ = _window(taskbar=app.Taskbar(panel=None, blur=None))
-    # On a developer's machine without Dash to Panel the window still
-    # opens; only the taskbar group is missing.
-    assert win.taskbar_group is None
-    assert win.checks["classic"].get_active()
-
-
-def test_the_opacity_is_clamped():
-    taskbar = _taskbar()
-    taskbar.opacity = 1.7
-    assert taskbar.opacity == 1.0
-    taskbar.opacity = -3
-    assert taskbar.opacity == 0.0
 
 
 # ---- the image --------------------------------------------------------------

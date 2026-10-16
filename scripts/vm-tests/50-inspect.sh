@@ -59,7 +59,9 @@ check "mode can be set back" 0 kosherctl set-mode "$uid" whitelist --guardian-pa
 sleep 2
 # Only true when this was the last filtered account: a test VM that has
 # accumulated others keeps the proxy up for them, which is correct.
-if kosherctl status 2>/dev/null | grep -v "^  wlkid " | grep -qE "\): filtered"; then
+if command -v nix >/dev/null 2>&1; then
+    skip "the proxy stops when nobody is inspected (it runs wherever Nix is: the build users fetch through it, #123)"
+elif kosherctl status 2>/dev/null | grep -v "^  wlkid " | grep -qE "\): filtered"; then
     skip "the proxy stops when nobody is inspected (another account on this VM is filtered)"
 else
     check "the proxy stops when nobody is inspected" 1 systemctl is-active --quiet kosher-mitm

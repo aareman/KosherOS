@@ -199,6 +199,10 @@
           "maxItems": 20,
           "uniqueItems": true,
           "description": "TCP ports this account may open directly, beyond the web and mail: an advanced setting, empty by default."
+        },
+        "developer_tools": {
+          "type": "boolean",
+          "description": "May use the Nix daemon and reach the package registries directly (nix, devbox, devenv from a shell). Default false."
         }
       }
     },
@@ -512,6 +516,10 @@
           "maxItems": 20,
           "uniqueItems": true,
           "description": "TCP ports this account may open directly, beyond the web and mail: an advanced setting, empty by default."
+        },
+        "developer_tools": {
+          "type": "boolean",
+          "description": "May use the Nix daemon and reach the package registries directly (nix, devbox, devenv from a shell). Default false."
         }
       }
     },

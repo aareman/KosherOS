@@ -16,6 +16,7 @@ import pytest
 
 from kosherd import apply as apply_mod
 from kosherd import containers, nft
+from kosherd import dns
 from kosherd.policy import DEVELOPER_REGISTRIES, Policy, UserPolicy
 
 ROOT = Path(__file__).parents[2]
@@ -204,14 +205,20 @@ def test_the_tools_inside_a_container_are_pointed_at_it():
             assert var in host, var
 
 
-def test_the_image_registries_are_reachable_from_every_account():
+def test_the_image_registries_are_reachable_from_a_developer_account():
     for host in ("registry-1.docker.io", "auth.docker.io", "quay.io", "mcr.microsoft.com",
                  "*.data.mcr.microsoft.com", "ghcr.io", "*.fedoraproject.org"):
         assert host in DEVELOPER_REGISTRIES or host in ("ghcr.io", "*.fedoraproject.org"), host
     assert "hub.docker.com" not in DEVELOPER_REGISTRIES, "a site, not a registry"
-    policy = Policy(users=[UserPolicy(uid=1001, username="kid", mode="whitelist")])
-    for host in ("registry-1.docker.io", "mcr.microsoft.com", "ghcr.io"):
-        assert host in policy.effective_system_whitelist()
+    # The machine's own registry stays in the system set; the developer
+    # registries are the developer account's (#123), through its own list.
+    policy = Policy(users=[UserPolicy(uid=1001, username="dev", mode="whitelist",
+                                      developer_tools=True)])
+    assert "ghcr.io" in policy.effective_system_whitelist()
+    rendered = dns.render(policy)
+    for host in ("registry-1.docker.io", "mcr.microsoft.com"):
+        assert host not in policy.effective_system_whitelist()
+        assert f"/{host}/" in rendered
 
 
 def test_the_store_carries_the_container_tools():

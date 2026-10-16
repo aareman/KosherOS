@@ -52,6 +52,12 @@ MITM_PORT = 8080  # legacy single port; kept for tools that still name it
 # port simply carries that decision to the proxy. Deterministic, per boot
 # and across it, with nothing to race.
 MITM_PORT_BASE = 30000
+# The Nix build users' own listener (#123). A fixed-output build fetches as
+# nixbld, on behalf of an account the firewall cannot name, so its web goes
+# through the proxy as a supervised identity of its own — categories, bare
+# addresses and DoH blocked, no picture scoring — rather than to an
+# address set nobody can keep honest. Below the per-user ports, fixed.
+BUILDER_PORT = 29999
 
 
 def mitm_ports(policy: Policy) -> dict[int, int]:
@@ -145,7 +151,9 @@ def render(policy: Policy, *, dns_uid: int, mitm_uid: int | None = None,
     build_gid: the Nix build users' group (nixbld). A fixed-output build
     (fetchurl, fetchFromGitHub) runs as one of them with the network, on
     behalf of whichever account asked and outside that account's filter.
-    They get the registries and the system domains, and nothing else.
+    Their 80/443 is redirected into the builders' proxy listener
+    (BUILDER_PORT), their loopback is otherwise refused — a build must not
+    be a relay for the account that started it — and nothing else leaves.
     subids: each account's subordinate id blocks ({uid: [(start, end)]},
     containers.py). A process inside a rootless container that is not
     root there runs on the host as one of these ids, so every rule that
@@ -165,6 +173,20 @@ def render(policy: Policy, *, dns_uid: int, mitm_uid: int | None = None,
     # Before the system-uid accept: nixbld is below UID_MIN too.
     nix_build = (
         f"        meta skgid {build_gid} jump nix_build\n"
+        if build_gid is not None else "")
+    # The builders' web goes to their listener; everything else of theirs on
+    # loopback is refused, ahead of the loopback accepts below — a build
+    # that could listen on 127.0.0.1 would be an unread relay for the
+    # account that started it, and would reach the search backend and the
+    # plain resolver, which the >= UID_MIN guards do not cover.
+    build_redirect = (
+        f"        meta skgid {build_gid} tcp dport {{ 80, 443 }} redirect to :{BUILDER_PORT}\n"
+        if build_gid is not None else "")
+    build_loopback = (
+        f"        meta skgid {build_gid} ip daddr 127.0.0.0/8 tcp dport {BUILDER_PORT} accept\n"
+        f'        meta skgid {build_gid} oif "lo" reject\n'
+        f"        meta skgid {build_gid} ip daddr 127.0.0.0/8 reject\n"
+        f"        meta skgid {build_gid} ip6 daddr ::1 reject\n"
         if build_gid is not None else "")
     vmap_entries = ", ".join(
         f"{elem} : jump {MODE_CHAINS[u.mode]}"
@@ -265,13 +287,13 @@ table {TABLE} {{
         # Never redirect the resolver's or the proxy's own traffic, or they
         # would loop back into themselves.
         meta skuid {{ 0, {dns_uid}{mitm_exempt}{search_exempt} }} return
-{open_dns}        udp dport 53 redirect to :53
+{build_redirect}{open_dns}        udp dport 53 redirect to :53
         tcp dport 53 redirect to :53
 {web_redirect}    }}
 
     chain output {{
         type filter hook output priority filter; policy accept;
-{backend_guard}{open_dns_guard}        oif "lo" accept
+{build_loopback}{backend_guard}{open_dns_guard}        oif "lo" accept
         # A packet the nat rules just redirected (DNS to the resolver, web to
         # the proxy) already has a loopback DESTINATION here, but this hook
         # still sees the interface of its original route — so `oif "lo"`
@@ -330,12 +352,12 @@ table {TABLE} {{
     }}
 
     chain nix_build {{
-        # A Nix build fetching its source: the registries and the system
-        # domains, which every account can reach anyway, and no page. (The
-        # daemon's own downloads from the binary cache run as root.)
+        # A Nix build fetching its source. Its 80 and 443 were redirected to
+        # the builders' proxy listener above and accepted on loopback; what
+        # still arrives here is anything else, and a build needs nothing
+        # else. (The daemon's own downloads from the binary cache run as
+        # root, from substituters only root can name.)
         jump evasion_block
-        ip daddr @sys4 tcp dport {{ 80, 443 }} accept
-        ip6 daddr @sys6 tcp dport {{ 80, 443 }} accept
         reject
     }}
 

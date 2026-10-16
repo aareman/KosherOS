@@ -95,13 +95,23 @@ def installed(uid: int) -> set[str]:
     return set(_profile_entries(uid))
 
 
-def _argv(uid: int, *nix_args: str) -> list[str]:
-    """`nix ...` as the account, with a clean environment of its own.
+def _argv(uid: int, *nix_args: str, as_root: bool = False) -> list[str]:
+    """`nix ...` as the account, with a clean environment of its own — or,
+    for an account without developer tools (#123), as root into that
+    account's profile: the daemon refuses such an account directly, and
+    the Store is its only way to install.
 
     runuser alone would hand nix root's HOME, and the profile would land
     in /root. --impure is what lets NIXPKGS_ALLOW_UNFREE through.
     """
     pw = pwd.getpwuid(uid)
+    if as_root:
+        profile = profile_dir(uid)
+        profile.parent.mkdir(parents=True, exist_ok=True)
+        return [
+            "env", "NIXPKGS_ALLOW_UNFREE=1", f"NIX_SSL_CERT_FILE={CA_BUNDLE}",
+            "nix", *nix_args, "--profile", str(profile),
+        ]
     return [
         "runuser", "-u", pw.pw_name, "--",
         "env", "-i",
@@ -156,26 +166,26 @@ def _desktop(uid: int) -> None:
         log.warning("desktop entries for uid %d not linked: %s", uid, (res.stderr or "").strip())
 
 
-def install(ref: str, uid: int, on_progress) -> None:
+def install(ref: str, uid: int, on_progress, as_root: bool = False) -> None:
     name = package(ref)
     on_progress(ref, 0, "Looking up…")
-    _run(ref, _argv(uid, "profile", "install", "--impure", PREFIX + name), on_progress)
+    _run(ref, _argv(uid, "profile", "install", "--impure", PREFIX + name, as_root=as_root), on_progress)
     _desktop(uid)
 
 
-def remove(ref: str, uid: int, on_progress) -> None:
+def remove(ref: str, uid: int, on_progress, as_root: bool = False) -> None:
     name = package(ref)
     name = _profile_entries(uid).get(ref, name)
     on_progress(ref, 0, "Removing…")
-    _run(ref, _argv(uid, "profile", "remove", name), on_progress)
+    _run(ref, _argv(uid, "profile", "remove", name, as_root=as_root), on_progress)
     _desktop(uid)
 
 
-def upgrade(ref: str, uid: int, on_progress) -> None:
+def upgrade(ref: str, uid: int, on_progress, as_root: bool = False) -> None:
     name = package(ref)
     name = _profile_entries(uid).get(ref, name)
     on_progress(ref, 0, "Updating…")
-    _run(ref, _argv(uid, "profile", "upgrade", "--impure", name), on_progress)
+    _run(ref, _argv(uid, "profile", "upgrade", "--impure", name, as_root=as_root), on_progress)
     _desktop(uid)
 
 

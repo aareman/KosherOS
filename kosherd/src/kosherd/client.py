@@ -176,6 +176,11 @@ class DaemonClient:
         """Ads and trackers blocked at the resolvers, for every account."""
         self._call("Profiles", "SetAdBlock", "(bs)", enabled, guardian_password)
 
+    def set_developer_tools(self, uid: int, enabled: bool, guardian_password: str = "") -> None:
+        """May the account use the Nix daemon and the package registries
+        itself (nix, devbox, devenv from a shell)?"""
+        self._call("Profiles", "SetDeveloperTools", "(ibs)", uid, bool(enabled), guardian_password)
+
     def set_boot_menu_password(self, password: str, guardian_password: str = "") -> None:
         """Password-protect the boot menu (or change the password)."""
         self._call("Profiles", "SetBootMenuPassword", "(ss)", password, guardian_password)

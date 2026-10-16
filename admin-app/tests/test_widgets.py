@@ -118,6 +118,9 @@ class FakeClient:
     def set_network_access(self, uid, video_calls, extra_ports, guardian_password=""):
         self.calls.append(("set_network_access", uid, video_calls, list(extra_ports)))
 
+    def set_developer_tools(self, uid, enabled, guardian_password=""):
+        self.calls.append(("set_developer_tools", uid, enabled))
+
     def boot_menu_protected(self):
         return self._overrides.get("boot_menu", True)
 
@@ -2705,6 +2708,22 @@ def test_the_updates_row_says_when_the_newest_version_is_already_on_the_computer
     assert short == "Update ready"
     sentence, _ = computer.check_words({"available": True, "version": "0.13.1", "channel": "edge"}, "0.12.0")
     assert sentence == "Version 0.13.1 is available — you are on 0.12.0 (edge channel)."
+
+
+# -- developer tools: one switch on the Apps tab (#123) ---------------------------
+
+def test_developer_tools_are_a_switch_that_is_off_by_default():
+    win, page = _detail_for(a_user(mode="filtered"))
+    row = _row_named(page, "Developer tools")
+    assert not row.get_active()
+    assert "Store is the only way" in row.get_subtitle()
+
+
+def test_switching_developer_tools_on_calls_the_daemon():
+    win, page = _detail_for(a_user(mode="filtered"))
+    _row_named(page, "Developer tools").set_active(True)
+    drain()
+    assert ("set_developer_tools", 1001, True) in win.client.calls
 
 
 # -- the boot menu password row (#129) ------------------------------------------

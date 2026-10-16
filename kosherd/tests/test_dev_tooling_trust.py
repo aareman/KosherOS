@@ -80,12 +80,16 @@ def test_the_profile_script_is_valid_sh():
     ("nix", "cache.nixos.org"), ("nix", "channels.nixos.org"), ("nix", "codeload.github.com"),
     ("devenv", "devenv.cachix.org"), ("devbox", "search.devbox.sh"),
 ])
-def test_each_tools_registry_is_reachable_from_every_account(tool, domain):
+def test_each_tools_registry_is_reachable_from_a_developer_account(tool, domain):
+    # From a developer account, through its own list — not from every
+    # account: the registries left the system set in #123, so that
+    # "whitelist only" means the family's list again.
     assert domain in DEVELOPER_REGISTRIES, tool
-    policy = Policy(users=[UserPolicy(uid=1001, username="kid", mode="whitelist")])
-    assert domain in policy.effective_system_whitelist()
+    policy = Policy(users=[UserPolicy(uid=1001, username="dev", mode="whitelist",
+                                      developer_tools=True)])
+    assert domain not in policy.effective_system_whitelist()
     rendered = dns.render(policy)
-    assert f"/{domain}/" in rendered, f"{domain} must reach the system nft set"
+    assert f"/{domain}/" in rendered, f"{domain} must reach the developer's nft set"
 
 
 def test_registries_are_code_not_pages():

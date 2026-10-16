@@ -163,6 +163,11 @@ INTROSPECTION_XML = """
     <method name="GetTimeUsage">
       <arg direction="out" type="s" name="usage_json"/>
     </method>
+    <method name="SetDeveloperTools">
+      <arg direction="in" type="i" name="uid"/>
+      <arg direction="in" type="b" name="enabled"/>
+      <arg direction="in" type="s" name="guardian_password"/>
+    </method>
     <method name="SetBootMenuPassword">
       <arg direction="in" type="s" name="password"/>
       <arg direction="in" type="s" name="guardian_password"/>
@@ -1412,6 +1417,34 @@ class Daemon:
         self._save_and_apply()
         return None
 
+    def impl_SetDeveloperTools(self, uid: int, enabled: bool, _guardian_pw: str):
+        """May this account use the Nix daemon and reach the package
+        registries itself (#123)?
+
+        Guardian-gated like a filter change: on, the account can build
+        anything in nixpkgs and its builds fetch through the builders'
+        proxy identity rather than the account's own. Off is the default
+        and the Store still installs catalogue apps for it, as root into
+        its profile. Turning it on hands the account its own profile
+        directory, which kosherd may have been writing as root until now.
+        """
+        import pwd
+        import shutil
+
+        user = self._managed(uid)
+        user.developer_tools = bool(enabled)
+        if enabled:
+            try:
+                home = Path(pwd.getpwuid(uid).pw_dir)
+                state = home / ".local/state/nix"
+                if state.exists():
+                    for path in [state, *state.rglob("*")]:
+                        shutil.chown(path, uid, pwd.getpwuid(uid).pw_gid)
+            except (KeyError, OSError) as e:
+                log.warning("could not hand uid %d its nix profile: %s", uid, e)
+        self._save_and_apply()
+        return None
+
     def impl_SetBootMenuPassword(self, password: str, _guardian_pw: str):
         """Password-protect the boot menu on a machine installed before the
         wizard did it by default (#129), or change the password. Guardian-
@@ -2095,12 +2128,19 @@ class Daemon:
             reason = appaccess.decide(account, self._app_entry(r, approved), approved_refs)
             return None if reason is None else appaccess.REASONS[reason]
 
-        self.app_manager.install(ref, permit=permit, uid=uid)
+        self.app_manager.install(ref, permit=permit, uid=uid,
+                                 as_root=not getattr(account, "developer_tools", False))
         try:
             username = pwd.getpwuid(uid).pw_name
         except KeyError:
             username = str(uid)
         apps.record_install(ref, uid, username)
+
+    def _developer(self, uid: int) -> bool:
+        """Has this account developer tools (#123)? Decides whether a nixpkgs
+        action runs as the account or as root into its profile."""
+        account = self.policy.user(uid)
+        return bool(getattr(account, "developer_tools", False)) if account else False
 
     def _nix_owner(self, ref: str, _uid: int, *, others: bool = False) -> int:
         """Whose profile a nixpkgs app is acted on in: the caller's when it
@@ -2144,7 +2184,8 @@ class Daemon:
         update widens nothing, and a newer build of an approved app is the
         safer one to be running."""
         if apps.accountapps.is_account_app(ref):
-            self.app_manager.update(ref, uid=self._nix_owner(ref, _uid))
+            owner = self._nix_owner(ref, _uid)
+            self.app_manager.update(ref, uid=owner, as_root=not self._developer(owner))
         else:
             self.app_manager.update(ref)
         return None
@@ -2180,7 +2221,8 @@ class Daemon:
 
     def impl_RemoveApp(self, ref: str, *, _uid: int):
         if apps.accountapps.is_account_app(ref):
-            self.app_manager.remove(ref, uid=self._nix_owner(ref, _uid, others=True))
+            owner = self._nix_owner(ref, _uid, others=True)
+            self.app_manager.remove(ref, uid=owner, as_root=not self._developer(owner))
         else:
             self.app_manager.remove(ref)
         apps.forget_install(ref)

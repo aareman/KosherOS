@@ -745,7 +745,7 @@ class AppManager:
             return set(self._pending)
 
     def install(self, ref: str, *, permit: Callable[[str], str | None] | None = None,
-                uid: int | None = None) -> None:
+                uid: int | None = None, as_root: bool = False) -> None:
         """Queue an install. `permit(ref)` says why it may not happen, or
         None; without one the approved list decides (what a caller with no
         account behind it — the CLI as root — gets). `uid` is the account
@@ -757,13 +757,13 @@ class AppManager:
         if refusal:
             raise AppError(f"{ref} is {refusal}")
         if accountapps.is_account_app(ref):
-            self._enqueue(ref, self._nix_work(accountapps.install, uid))
+            self._enqueue(ref, self._nix_work(accountapps.install, uid, as_root))
         else:
             self._enqueue(ref, self._do_install)
 
-    def remove(self, ref: str, *, uid: int | None = None) -> None:
+    def remove(self, ref: str, *, uid: int | None = None, as_root: bool = False) -> None:
         if accountapps.is_account_app(ref):
-            self._enqueue(ref, self._nix_work(accountapps.remove, uid))
+            self._enqueue(ref, self._nix_work(accountapps.remove, uid, as_root))
         else:
             self._enqueue(ref, self._do_remove)
 
@@ -771,22 +771,24 @@ class AppManager:
         """Queue the removal of every leftover runtime (unused_refs)."""
         self._enqueue(CLEANUP_REF, self._do_remove_unused)
 
-    def update(self, ref: str, *, uid: int | None = None) -> None:
+    def update(self, ref: str, *, uid: int | None = None, as_root: bool = False) -> None:
         """Bring one installed app up to the remote's build. Queued like an
         install, reported on the same signals."""
         if accountapps.is_account_app(ref):
-            self._enqueue(ref, self._nix_work(accountapps.upgrade, uid))
+            self._enqueue(ref, self._nix_work(accountapps.upgrade, uid, as_root))
         else:
             self._enqueue(ref, self._do_update)
 
-    def _nix_work(self, action, uid: int | None):
-        """A queue job for a per-account app: the action, as the account."""
+    def _nix_work(self, action, uid: int | None, as_root: bool = False):
+        """A queue job for a per-account app: the action, as the account —
+        or, for a Nix app on an account without developer tools (#123), as
+        root into that account's profile (accountapps passes it on)."""
         if uid is None or uid == 0:
             raise AppError("this app is installed for an account, not for the computer")
 
         def work(ref: str) -> None:
             try:
-                action(ref, uid, self._on_progress)
+                action(ref, uid, self._on_progress, as_root=as_root)
             except accountapps.ERRORS as e:
                 raise AppError(str(e)) from e
         return work

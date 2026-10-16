@@ -307,3 +307,41 @@ def test_the_supported_page_covers_nix_devenv_and_devbox():
     page = (ROOT / "docs/supported.md").read_text()
     for word in ("nix", "devenv", "devbox", "cache.nixos.org", "No internet"):
         assert word in page, word
+
+
+# -- graphics drivers for Nix apps (#157) ---------------------------------------
+
+DRIVER_ENV = (FILES / "usr/share/kosher/nix-opengl-driver.env").read_text()
+DRIVER_SERVICE = (FILES / "usr/lib/systemd/system/kosher-nix-opengl.service").read_text()
+TMPFILES = (FILES / "usr/lib/tmpfiles.d/kosher.conf").read_text()
+
+
+def test_the_driver_is_a_pinned_mesa_from_a_nixos_stable_release():
+    # A store path, not a flake reference: the machine fetches it from the
+    # cache and never evaluates or builds Mesa.
+    pin = re.search(r"^KOSHER_OPENGL_DRIVER=(\S+)$", DRIVER_ENV, re.M).group(1)
+    assert re.fullmatch(r"/nix/store/[0-9a-z]{32}-mesa-[0-9.]+", pin), pin
+    # Stable: never newer than the nixpkgs-unstable the Store's apps come
+    # from, so its C library is never newer than theirs.
+    assert re.search(r"^# nixos-\d\d\.\d\d [0-9a-f]{40}$", DRIVER_ENV, re.M)
+
+
+def test_nix_apps_find_the_driver_where_nixos_puts_it():
+    assert re.search(r"^L\+ /run/opengl-driver - - - - /nix/var/nix/gcroots/kosher-opengl-driver$",
+                     TMPFILES, re.M)
+    unit = _unit(DRIVER_SERVICE)
+    assert unit["EnvironmentFile"] == "/usr/share/kosher/nix-opengl-driver.env"
+    assert unit["ExecStart"] == ("/usr/bin/nix build --out-link "
+                                 "/nix/var/nix/gcroots/kosher-opengl-driver ${KOSHER_OPENGL_DRIVER}")
+    # The out-link is a GC root, so a collection never takes the driver.
+    assert "/nix/var/nix/gcroots/" in unit["ExecStart"]
+
+
+def test_the_driver_service_waits_for_the_store_and_tries_again_offline():
+    unit = _unit(DRIVER_SERVICE)
+    assert unit["Requires"] == "nix.mount"
+    assert "nix.mount" in unit["After"] and "network-online.target" in unit["After"]
+    assert unit["Restart"] == "on-failure"
+    assert unit["StartLimitIntervalSec"] == "0"
+    assert re.search(r"systemctl enable [^\n]*kosher-nix-opengl\.service", CONTAINERFILE)
+    assert re.search(r"systemctl is-enabled [^\n]*kosher-nix-opengl\.service", CONTAINERFILE)

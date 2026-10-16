@@ -104,8 +104,11 @@ jobs:
     # several open at once that was an eleven-minute build per push per
     # branch for an image nobody would run — the load was judged crazy.
     # The tests, the compile check and shellcheck still run on every PR;
-    # the image is built once, from the merge. A first push or a rewritten
-    # history still builds, because the diff cannot be trusted there.
+    # the image is built once, from the merge. A pull request worth a real
+    # machine is built on request instead: the `try-image` label
+    # (try-image.yml) publishes it as :pr-<number>. A first push or a
+    # rewritten history still builds, because the diff cannot be trusted
+    # there.
     runs-on: ubuntu-latest
     outputs:
       image: ${{ steps.filter.outputs.image }}

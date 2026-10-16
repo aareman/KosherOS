@@ -820,7 +820,7 @@ def test_every_setting_made_the_move():
     for title in ("Group", "Filter mode", "Approved sites", "Page rules",
                   "Pictures and video", "Bad language", "Restricted Mode",
                   "Can install apps", "Available apps", "Allow Wi-Fi sign-in",
-                  "Administrator", "Layout", "Remove account…"):
+                  "Administrator", "Remove account…"):
         assert title in titles, f"{title} was lost in the move"
 
 
@@ -1539,6 +1539,9 @@ def test_block_reasons_read_in_the_familys_words():
     assert labels.why_text("content:nsfw") == "the page reads as explicit"
     assert labels.why_text("language") == "bad language on the page"
     assert labels.why_text("youtube:channel") == "not an approved channel"
+    # A block the page's own script reported says so, and an empty reason stays empty.
+    assert labels.why_text("content:nsfw", "page") == "the page reads as explicit (shown after it loaded)"
+    assert labels.why_text("", "page") == ""
     assert labels.why_text("") == ""
 
 

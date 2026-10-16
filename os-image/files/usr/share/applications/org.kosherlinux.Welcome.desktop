@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Welcome
+Comment=What this computer is and where things are
+Exec=kosher-welcome --again
+Icon=kosheros
+Terminal=false
+Categories=System;
+Keywords=welcome;start;help;tour;getting started;

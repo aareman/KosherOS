@@ -81,7 +81,7 @@ If Windows starts, the computer booted from its internal disk. Restart and try t
 
 The KosherOS installer uses Fedora's Anaconda installer with a simplified setup screen.
 
-**Check the installation destination before choosing “Begin Installation.”** When there is one eligible internal disk, the current installer selects it automatically; you may not get a separate disk-choice screen. Beginning installation erases that disk, including Windows and personal files.
+**Check the installation destination before choosing “Begin Installation.”** When there is one eligible internal disk, the installer shows that disk as the destination and waits: open **Installation Destination**, confirm it, and choose **Done**. If the disk already holds something, Anaconda shows what it will erase and asks you to confirm. Nothing is written until you choose Begin Installation. Beginning installation erases that disk, including Windows and personal files.
 
 If the computer has more than one eligible disk, open **Installation Destination**, identify the intended disk by its model and capacity, and review the selection. If you cannot confidently identify it, stop and ask for help. Do not select extra disks to make an error disappear.
 

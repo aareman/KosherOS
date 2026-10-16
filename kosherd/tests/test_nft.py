@@ -73,7 +73,9 @@ def test_system_uids_unrestricted():
 def test_established_accepted_before_uid_dispatch():
     out = rendered()
     chain = out.split("chain output")[1].split("chain")[0]
-    assert chain.index("ct state established,related accept") < chain.index("meta skuid")
+    # The dispatch, specifically: per-account rules that must precede the
+    # loopback accepts (the plain resolver's guard, #127) also say skuid.
+    assert chain.index("ct state established,related accept") < chain.index("meta skuid vmap")
 
 
 def test_input_chain_drops_new_inbound():

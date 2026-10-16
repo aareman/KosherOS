@@ -61,7 +61,8 @@ are never limited. [Time limits](docs/time-limits.md)
 **A store, search and a window onto the rules.** The Store offers approved apps from
 Flathub, or the whole store with kinds of app and individual apps blocked under a content
 rating ceiling. The Store also checks for and installs app updates. Local SearXNG search uses the
-same policy as web traffic, and **My Filter** lets each person read their own settings.
+same policy as web traffic, **My Filter** lets each person read their own settings, and
+**Look** lets them choose their own desktop.
 A guest account can have its own kind of internet and is wiped at sign-out.
 [Search](docs/search.md) · [Developer tools](docs/supported.md#developer-tools)
 
@@ -160,11 +161,14 @@ The daemons are ordinary Python projects. Most work needs no image at all:
 just fedora-vm       # fetch and boot a stock Fedora test VM (plain QEMU/KVM)
 just dev-install     # install the whole filter stack into it
 just deploy-kosherd  # push local kosherd code into the VM and restart it, about a second
-just fedora-ssh      # a shell in the VM
+just fedora-vm ssh   # a shell in the VM
 ```
 
 Image changes go through `just build`, and a running VM picks them up with `just vm-upgrade`, which
-pulls only the changed layers and stages an atomic reboot.
+pulls only the changed layers and stages an atomic reboot. To see a pull request on a real machine,
+give it the `try-image` label: CI publishes its image, and `kosherctl system try <number>` on a
+KosherOS machine runs it while keeping the version the machine has
+([how it works](docs/deployment.md#trying-a-pull-requests-build)).
 
 ### Everyday commands
 
@@ -172,13 +176,13 @@ pulls only the changed layers and stages an atomic reboot.
 |---|---|
 | `just test` | unit suites for kosherd, the search service, the admin app, the setup wizard and the portal |
 | `just test-cov` | the same with a coverage report |
-| `just docs`, `just docs-serve` | build the documentation site, or preview it with live reload |
+| `just docs`, `just docs serve` | build the documentation site, or preview it with live reload |
 | `just test-vm` | integration suites inside the dev VM: services, enforcement, apps, guest, inspect mode, persistence |
 | `just check-all` | live checks against the built image: the firewall stops who it should, the resolver answers as claimed, traffic is diverted into the proxy, the services run |
 | `just render` | render and syntax-check the example policy as nftables rules |
 | `just benchmark CPUS=2` | measure what the filter costs on a weak machine, inside the built image |
 | `just iso` | an installable ISO that asks which disk to use |
-| `just boot-iso`, `just boot-installed` | rehearse a real install into a blank disk, then boot it |
+| `just boot-iso`, `just boot-image build/test-install.qcow2` | rehearse a real install into a blank disk, then boot it |
 | `just test-boot` | boot the disk image and assert it reaches the setup wizard |
 | `just portal-run` | run the self-hosted portal locally |
 
@@ -194,6 +198,8 @@ prompt never appears in the middle of a long build. Once a VM is up, a root shel
 | `admin-app/` | KosherOS Admin: the family board, the activity feed, a page per person (GTK4, libadwaita) |
 | `store-app/` | KosherOS Store: install approved apps (GTK4, open to every account) |
 | `myfilter-app/` | My Filter: a read-only view of your own account's rules (GTK4, open to every account) |
+| `welcome-app/` | Welcome: what this computer is and where things are, once per account (GTK4) |
+| `look-app/` | Look: choose your own desktop and tune the taskbar (GTK4, open to every account) |
 | `setup-app/` | KosherOS Setup: the first-boot wizard (GTK4) |
 | `search-app/` | the filtered search front end in front of SearXNG |
 | `mitm/` | the mitmproxy addon that does the page, picture and video filtering |

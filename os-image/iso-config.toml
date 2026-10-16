@@ -3,22 +3,30 @@
 # No users and no passwords are baked in: the installed machine runs the
 # KosherOS first-boot wizard, which creates the administrator account.
 #
-# The disk question answers itself when it can. A %pre script looks at the
-# machine: if there is exactly one internal, non-removable disk that is not
-# the stick the installer booted from, it writes clearpart/autopart for that
-# disk, and the installer's hub arrives with every step already done — one
-# "Begin Installation" button, which is still a person's click, never
-# automatic. If there are two or more candidate disks (a laptop with a
-# second drive, a desktop), it writes nothing, Anaconda shows Installation
-# Destination, and whoever is installing picks the disk and sees what will
-# be erased. An automatic wipe of every attached disk is fine for a
-# throwaway VM and unacceptable on a machine with a second drive; for repeat
-# VM rehearsals use os-image/iso-config-unattended.toml (just iso-unattended).
+# The disk question is answered as far as it safely can be, and no further.
+# A %pre script looks at the machine: if there is exactly one internal,
+# non-removable disk that is not the stick the installer booted from, it
+# names that disk (ignoredisk --only-use), so Installation Destination shows
+# the right disk and nothing else. It deliberately writes NO partitioning.
+# A kickstart that also carried clearpart/autopart was complete, and a
+# complete kickstart is one Anaconda acts on by itself: a one-disk machine
+# was erased and installed about five minutes after power-on with no key
+# pressed and no click (#134) — on a laptop with Windows on its only disk,
+# a wipe with no confirmation. Without the partitioning the hub stops at
+# Installation Destination ("Kickstart insufficient"), the person opens it,
+# sees the chosen disk, and Anaconda's own reclaim dialog says what will be
+# erased before Begin Installation does anything. With two or more
+# candidate disks the script writes nothing and the person picks the disk.
+# For repeat VM rehearsals that may wipe everything unattended, use
+# os-image/iso-config-unattended.toml (just iso-unattended).
 #
-# autopart stops the root partition at 70 GiB (Anaconda's cap) and leaves
-# the rest of a larger disk unallocated. The installed system grows the
-# root into that space on its first boot: bootc's growpart unit, which the
-# image lets run on real hardware as well as in a VM (see
+# What "Automatic" in that spoke produces — a plain ext4 root and nothing
+# else, no swap, no separate /home — is set in the installer's product
+# configuration (scripts/brand-iso.py, [Storage]), the same shape the
+# kickstart used to write. Anaconda caps the root at 70 GiB and leaves the
+# rest of a larger disk unallocated; the installed system grows the root
+# into that space on its first boot: bootc's growpart unit, which the image
+# lets run on real hardware as well as in a VM (see
 # files/usr/lib/systemd/system/bootc-generic-growpart.service.d, #113).
 #
 # Language, keyboard and time zone are answered here; the spokes for them
@@ -63,13 +71,10 @@ done
 echo "install medium: ${media:-unknown}; candidate disks: ${candidates[*]:-none}"
 if [ "${#candidates[@]}" -eq 1 ]; then
     disk="${candidates[0]}"
-    {
-        echo "ignoredisk --only-use=$disk"
-        echo "zerombr"
-        echo "clearpart --all --initlabel --disklabel=gpt --drives=$disk"
-        echo "autopart --type=plain --fstype=ext4 --nohome --noswap"
-    } > "$out"
-    echo "one internal disk ($disk): the destination is chosen"
+    # Only the disk. No clearpart, no autopart: with those the kickstart is
+    # complete and Anaconda installs without a click (#134).
+    echo "ignoredisk --only-use=$disk" > "$out"
+    echo "one internal disk ($disk): shown as the destination; the person still confirms"
 else
     echo "not exactly one internal disk: Anaconda will ask"
 fi

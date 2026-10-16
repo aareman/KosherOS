@@ -17,10 +17,12 @@ polkit.addRule(function(action, subject) {
     if (subject.isInGroup("kosher-admin")) {
         return polkit.Result.YES;
     }
-    // Reads of one's own settings and the app store are free for every
-    // account — an explicit answer, so the prompt below never catches them.
+    // Reads of one's own settings, one's own desktop choice and the app
+    // store are free for every account — an explicit answer, so the prompt
+    // below never catches them.
     if (action.id === "org.kosherlinux.use-store" ||
-        action.id === "org.kosherlinux.read-own-settings") {
+        action.id === "org.kosherlinux.read-own-settings" ||
+        action.id === "org.kosherlinux.set-own-desktop") {
         return polkit.Result.YES;
     }
     return polkit.Result.AUTH_ADMIN_KEEP;

@@ -107,7 +107,19 @@ custom_stylesheet = {STYLESHEET}
 # One question, one button: everything the kickstart answers is hidden,
 # leaving Installation Destination.
 hidden_spokes =
-""" + "".join(f"    {spoke}\n" for spoke in HIDDEN_SPOKES)
+""" + "".join(f"    {spoke}\n" for spoke in HIDDEN_SPOKES) + """
+# What "Automatic" in Installation Destination produces: a plain ext4 root
+# and nothing else — no swap, no separate /home — the shape the kickstart
+# used to write with autopart before #134 took the partitioning out of it
+# (a complete kickstart installs without a click). The 70 GiB cap is
+# Anaconda's; the installed system grows the root on its first boot.
+[Storage]
+default_scheme = PLAIN
+file_system_type = ext4
+swap_is_recommended = False
+default_partitioning =
+    / (min 1 GiB, max 70 GiB)
+"""
 
 
 def buildstamp(version: str = VERSION, arch: str | None = None,
@@ -235,7 +247,9 @@ def _xorriso_runner(xorriso: str = "xorriso"):
         prefix = ["nix", "shell", "nixpkgs#xorriso", "-c", "xorriso"]
     else:
         raise SystemExit("xorriso is not installed: re-enter `devenv shell`, "
-                         "which now provides it, and run `just brand-iso`")
+                         "which now provides it, and run "
+                         "`python3 scripts/brand-iso.py build/bootiso/install.iso` "
+                         "(the ISO itself is already built)")
 
     def run(args, **kwargs):
         return subprocess.run(prefix + args, check=True, **kwargs)

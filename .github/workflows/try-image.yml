@@ -1,0 +1,127 @@
+name: Try a pull request's build
+
+# An OS image for a pull request, on request. Put the `try-image` label on
+# the pull request and this builds ghcr.io/…/kosher-linux:pr-<number> from
+# it, and again on every push to it while the label is there, signed with
+# the KosherOS key so an installed machine accepts it. A KosherOS laptop
+# then runs it, keeping the version it came from, with
+#
+#     kosherctl system try <number>
+#
+# and `kosherctl system try done` goes back. Pull requests do not build
+# otherwise (ci.yml, the "changes" job, says why); this is the opt-in for
+# the ones worth a real machine. It never touches :edge, :stable or a
+# version tag, and the image is not kept around: a later build of the same
+# pull request replaces it.
+
+on:
+  pull_request:
+    types: [labeled, synchronize, reopened]
+
+concurrency:
+  # A new push supersedes the build in progress for the same pull request.
+  group: try-image-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  image:
+    name: Build pr-${{ github.event.pull_request.number }}
+    # The label asks for it. The same-repository check is because a fork's
+    # pull request has no secrets and cannot write packages: its build
+    # would only fail at the push, after the eleven minutes.
+    if: >-
+      contains(github.event.pull_request.labels.*.name, 'try-image')
+      && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      pull-requests: write # the comment that says how to try it
+      id-token: write
+    env:
+      IMAGE: ghcr.io/${{ github.repository_owner }}/kosher-linux
+      TAG: pr-${{ github.event.pull_request.number }}
+      PR: ${{ github.event.pull_request.number }}
+      SHA: ${{ github.event.pull_request.head.sha }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          # The branch's own commit, not the merge commit GitHub makes for
+          # the event, so the version names a commit that exists on it.
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0 # the version is counted from the last tag
+
+      - name: Build image
+        # The number this branch would be released as, marked with the
+        # pull request and the commit, so the Updates page and `bootc
+        # status` say exactly which build this is and it is never mistaken
+        # for a release.
+        run: |
+          version="$(python3 scripts/version.py release)-pr.${PR}+g${SHA::7}"
+          echo "this build is $version"
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+          podman build --build-arg "KOSHER_VERSION=$version" \
+            -t "$IMAGE:$TAG" -f os-image/Containerfile .
+
+      - name: Push
+        # Retried like the edge push: one 502 in the middle of a layer
+        # should not cost the whole build.
+        run: |
+          retry() {
+            local n
+            for n in 1 2 3 4 5; do
+              "$@" && return 0
+              echo "attempt $n of 5 failed: $*; waiting $((n * 30))s"
+              sleep $((n * 30))
+            done
+            return 1
+          }
+          podman login ghcr.io -u "$GITHUB_ACTOR" -p "${{ secrets.GITHUB_TOKEN }}"
+          retry podman push "$IMAGE:$TAG"
+
+      - uses: sigstore/cosign-installer@v3
+      - name: Sign with the KosherOS key
+        env:
+          COSIGN_PRIVATE_KEY: ${{ secrets.COSIGN_PRIVATE_KEY }}
+          COSIGN_PASSWORD: ${{ secrets.COSIGN_PASSWORD }}
+        # The key's signature is the one every installed machine checks
+        # (#70): without it bootc refuses the image, so an unsigned build
+        # would be one nobody can try. The keyless signature the release
+        # path adds is what the stable promotion verifies; a pull request's
+        # build is never promoted, so it gets only the key.
+        run: |
+          if [ -z "$COSIGN_PRIVATE_KEY" ]; then
+            echo "COSIGN_PRIVATE_KEY is not set; the image cannot be signed for the machines" >&2
+            exit 1
+          fi
+          retry() {
+            local n
+            for n in 1 2 3 4 5; do
+              "$@" && return 0
+              echo "attempt $n of 5 failed: $*; waiting $((n * 30))s"
+              sleep $((n * 30))
+            done
+            return 1
+          }
+          cosign login ghcr.io -u "$GITHUB_ACTOR" -p "${{ secrets.GITHUB_TOKEN }}"
+          # The "<digest>.sig" tag podman, skopeo and bootc read: cosign 3
+          # needs telling, cosign 2 does not know the flag (#118).
+          major=$(cosign version --json 2>/dev/null | python3 -c 'import json, sys; print(json.load(sys.stdin)["gitVersion"].lstrip("v").split(".")[0])')
+          legacy=""
+          [ "${major:-0}" -ge 3 ] && legacy=--new-bundle-format=false
+          retry cosign sign --yes --key env://COSIGN_PRIVATE_KEY $legacy "$IMAGE:$TAG"
+
+      - name: Say how to try it
+        # One comment per pull request, rewritten on each build, so the
+        # thread does not fill with them.
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          {
+            printf 'Image for this pull request: `%s:%s`, version `%s`, built from %s.\n\n' "$IMAGE" "$TAG" "$VERSION" "${SHA::7}"
+            printf 'On a KosherOS machine, keeping the version it runs now:\n\n'
+            printf '    kosherctl system try %s\n\n' "$PR"
+            printf 'Restart when the download finishes. `kosherctl system try done` goes back to the kept version. '
+            printf 'Every push to this pull request builds the image again; the same command fetches the new one.\n'
+          } > body.md
+          gh pr comment "$PR" --edit-last --create-if-none --body-file body.md

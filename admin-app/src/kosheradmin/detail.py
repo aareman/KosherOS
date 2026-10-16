@@ -301,7 +301,7 @@ class UserDetailPage(Adw.NavigationPage):
     def _blocked_row(self, user: dict, event: dict) -> Adw.ActionRow:
         kind = event["kind"]
         url = event.get("url", "")
-        why = labels.why_text(event.get("why", ""))
+        why = labels.why_text(event.get("why", ""), event.get("source", ""))
         times = event.get("times", 1)
         again = f" · {times} times" if times > 1 else ""
         clock = Gtk.Label(label=time.strftime("%H:%M", time.localtime(event["t"])))
@@ -1342,37 +1342,15 @@ class UserDetailPage(Adw.NavigationPage):
         is_admin.connect("notify::active", on_admin)
         group.add(is_admin)
 
-        desktop = Adw.PreferencesGroup(
-            title="Desktop",
-            description="How this account's desktop looks. Takes effect the "
-                        "next time they sign in; filtering is the same "
-                        "whichever they use.")
-        layout_row = Adw.ComboRow(
-            title="Layout",
-            model=Gtk.StringList.new([labels.LAYOUT_LABELS[k] for k in labels.LAYOUT_ORDER]))
-        current = user.get("layout", "classic")
-        layout_row.set_selected(labels.LAYOUT_ORDER.index(current)
-                                if current in labels.LAYOUT_ORDER else 0)
-
-        def on_layout(combo, _p):
-            new_layout = labels.LAYOUT_ORDER[combo.get_selected()]
-            if new_layout == user.get("layout", "classic"):
-                return
-            self.win.call(
-                lambda: self.win.client.set_layout(user["uid"], new_layout),
-                done_msg=f"{user['username']} → {labels.LAYOUT_LABELS[new_layout]} "
-                         f"at their next sign-in")
-
-        layout_row.connect("notify::selected", on_layout)
-        desktop.add(layout_row)
-        hint_under(desktop, labels.LAYOUT_HINTS.get(current, ""))
-
+        # No desktop row here: which desktop a person uses is theirs to
+        # choose, in the Look app. (kosherctl layout remains for a parent
+        # at a terminal.)
         danger = Adw.PreferencesGroup()
         remove = Adw.ButtonRow(title="Remove account…")
         remove.add_css_class("destructive-action")
         remove.connect("activated", lambda *_: confirm_remove_user(self.win, user))
         danger.add(remove)
-        return [group, desktop, danger]
+        return [group, danger]
 
     def _confirm_reset_password(self, user: dict):
         return confirm(

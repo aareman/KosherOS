@@ -17,7 +17,9 @@
  *
  * Nothing leaves the machine: the reserved path is answered by the proxy
  * on this computer and never forwarded. The script keeps no state and
- * reads nothing but the page.
+ * reads nothing but the page. The tag it came on carries a token for
+ * this page; the proxy answers the word list and the judge only to a
+ * call that sends it back.
  */
 (function () {
   "use strict";
@@ -27,6 +29,8 @@
   var me = document.currentScript;
   var mode = (me && me.getAttribute("data-kosheros-language")) || "off";
   var judge = !!(me && me.getAttribute("data-kosheros-judge") === "1");
+  var token = (me && me.getAttribute("data-kosheros-token")) || "";
+  if (me) me.removeAttribute("data-kosheros-token");
   if (mode === "off" && !judge) return;
   if (window.__kosheros_page_filter) return;
   window.__kosheros_page_filter = true;
@@ -142,7 +146,9 @@
     var xhr = new XMLHttpRequest();
     xhr.open("POST", JUDGE_URL, true);
     xhr.setRequestHeader("Content-Type", "application/json");
+    xhr.setRequestHeader("X-KosherOS-Page", token);
     xhr.onload = function () {
+      if (xhr.status === 403) { judge = false; return; }   // not this page's token
       if (xhr.status !== 200) return;
       try {
         var verdict = JSON.parse(xhr.responseText);
@@ -223,6 +229,7 @@
   }
   var req = new XMLHttpRequest();
   req.open("GET", WORDS_URL, true);
+  req.setRequestHeader("X-KosherOS-Page", token);
   req.onload = function () {
     if (req.status !== 200) { lists = { patterns: [], words: [] }; start(); return; }
     try { lists = compile(JSON.parse(req.responseText)); }

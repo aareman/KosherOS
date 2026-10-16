@@ -10,11 +10,16 @@ let observerCallback = null;
 let judged = [];
 let timers = [];
 
+// The proxy answers the reserved addresses only to a call carrying the
+// page's token, so the stand-in refuses one without it, as the proxy does.
+const TOKEN = "nonce.signature-for-this-page";
+
 class FakeXHR {
-  open(method, url) { this.method = method; this.url = url; this.status = 0; }
-  setRequestHeader() {}
+  open(method, url) { this.method = method; this.url = url; this.status = 0; this.headers = {}; }
+  setRequestHeader(name, value) { this.headers[name.toLowerCase()] = value; }
   send(body) {
-    if (this.url.endsWith("words.json")) { this.status = 200; this.responseText = words; }
+    if (this.headers["x-kosheros-page"] !== TOKEN) { this.status = 403; this.responseText = "{}"; }
+    else if (this.url.endsWith("words.json")) { this.status = 200; this.responseText = words; }
     else if (this.url.endsWith("judge")) { judged.push(JSON.parse(body)); this.status = 200; this.responseText = JSON.stringify({ blocked: false }); }
     if (this.onload) this.onload();
   }
@@ -29,7 +34,11 @@ global.NodeFilter = { SHOW_TEXT: 4 };
 global.MutationObserver = class { constructor(cb) { observerCallback = cb; } observe() {} };
 global.setTimeout = (fn, ms) => { timers.push(fn); return timers.length; };
 global.document = {
-  currentScript: { getAttribute: (k) => (k === "data-kosheros-language" ? mode : k === "data-kosheros-judge" ? "1" : null) },
+  currentScript: {
+    getAttribute: (k) => (k === "data-kosheros-language" ? mode : k === "data-kosheros-judge" ? "1"
+                          : k === "data-kosheros-token" ? TOKEN : null),
+    removeAttribute() {},
+  },
   body: { nodeType: 1, nodeName: "BODY", isContentEditable: false },
   documentElement: {},
   createTreeWalker: () => { let i = -1; return { nextNode: () => (++i < 0 ? null : null) }; },

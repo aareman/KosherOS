@@ -93,6 +93,18 @@ def test_setting_a_layout_tells_the_login_screen_which_session():
     assert daemon.sessions_set == [(1001, "advanced")]
 
 
+def test_a_person_chooses_their_own_layout_and_only_their_own(monkeypatch):
+    daemon = _daemon([UserPolicy(uid=1001, username="t", mode="filtered"),
+                      UserPolicy(uid=1002, username="u", mode="filtered")])
+    daemon.impl_SetMyLayout("tiling", _uid=1001)
+    assert daemon.policy.user(1001).layout == "tiling"
+    assert daemon.policy.user(1002).layout == "classic"
+    assert daemon.sessions_set == [(1001, "tiling")]
+    assert daemon.applied == 0
+    with pytest.raises(PolicyError):
+        daemon.impl_SetMyLayout("cosmic", _uid=1001)
+
+
 def test_each_layout_maps_to_a_login_session():
     assert set(Daemon.LAYOUT_SESSIONS) == set(LAYOUTS)
     assert Daemon.LAYOUT_SESSIONS["advanced"] == "niri"
@@ -407,9 +419,20 @@ def test_the_client_speaks_both_methods():
     src = (ROOT / "kosherd/src/kosherd/client.py").read_text()
     assert '"SetLayout", "(is)"' in src
     assert '"GetMyLayout"' in src
+    assert '"SetMyLayout", "(s)"' in src
     xml = (ROOT / "kosherd/src/kosherd/daemon.py").read_text()
     assert '<method name="SetLayout">' in xml
     assert '<method name="GetMyLayout">' in xml
+    assert '<method name="SetMyLayout">' in xml
+
+
+def test_the_polkit_action_for_choosing_your_own_layout_needs_no_prompt():
+    policy = (FILES / "usr/share/polkit-1/actions/org.kosherlinux.policy").read_text()
+    block = re.search(r'<action id="org.kosherlinux.set-own-desktop">(.*?)</action>',
+                      policy, re.S)
+    assert block and "<allow_active>yes</allow_active>" in block.group(1)
+    rules = (FILES / "etc/polkit-1/rules.d/49-kosher-admin.rules").read_text()
+    assert "org.kosherlinux.set-own-desktop" in rules
 
 
 def test_the_schema_copies_agree_on_the_layout():

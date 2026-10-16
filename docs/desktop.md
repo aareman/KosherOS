@@ -125,8 +125,10 @@ Both GNOME layouts include an Aura Glass **shell preset**: its Quick Settings,
 menus, notifications, and dialog styles over GNOME's base shell theme, tinted
 to match KosherOS. The image builds Blur My Shell with Aura's patches from
 pinned commits; it never runs a theme installer or downloads shell code at
-login. Static wallpaper blur keeps the cost down. App-window blur is off,
-and the notification background stays nearly opaque for readability.
+login. Static wallpaper blur keeps the cost down. Windows are blurred as
+well: each one is slightly see-through over a blurred copy of the wallpaper,
+and goes solid when it is fullscreen. The notification background stays
+nearly opaque for readability.
 GTK app themes, icons, fonts, the wallpaper, and the niri session retain their
 existing defaults. This integrates Aura's shell styling, not its full personal
 desktop installer, settings GUI, or update service.

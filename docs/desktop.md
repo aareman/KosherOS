@@ -32,8 +32,9 @@ to the running session at once through the sign-in helper. Advanced is a
 separate session, so the app says it is ready at the next sign-in and
 offers to sign out.
 
-The app also has one switch for the blur behind the taskbar and the
-windows. The rest of the taskbar has its own settings: right-click it and
+The app also has the glass: a switch for the blur behind the taskbar and
+the windows, how much they are blurred, how see-through the windows are
+(never more than half), and a button back to the KosherOS look. The rest of the taskbar has its own settings: right-click it and
 choose the taskbar's settings. What a person changes in either place is
 theirs, and the sign-in helper leaves it alone (it writes its plan when the
 layout changes, not at every sign-in). Wallpaper, dark mode and text size stay in GNOME Settings, which

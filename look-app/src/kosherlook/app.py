@@ -7,11 +7,8 @@ So the person picks for themselves here, and the daemon takes the account
 from the D-Bus connection rather than from an argument, so this window can
 only ever change the person in front of it.
 
-The second half is the classic taskbar's look: how see-through it is,
-whether the wallpaper is blurred behind it, its size. Those are written
-into the extensions' own settings for this account, where the sign-in
-helper leaves them alone (it writes its plan when the layout changes, not
-at every sign-in), so what is chosen here sticks.
+The taskbar is not tuned here: Dash to Panel has its own settings, a
+right-click on the bar away.
 """
 
 from __future__ import annotations
@@ -25,7 +22,7 @@ import gi
 
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
-from gi.repository import Adw, Gio, GLib, Gtk  # noqa: E402
+from gi.repository import Adw, GLib, Gtk  # noqa: E402
 
 from kosherd.client import DaemonClient  # noqa: E402
 from kosherd.policy import DEFAULT_LAYOUT, LAYOUTS  # noqa: E402
@@ -50,23 +47,12 @@ DESKTOPS = (
 # different session and waits for the next sign-in.
 IN_PLACE = {"classic", "tiling"}
 
-# The classic taskbar's size, in GNOME logical pixels. Medium is the
-# image's default.
-SIZES = (("Small", 40), ("Medium", 48), ("Large", 56))
-
 TEXT = {
     "desktop": "Your desktop",
     "desktop_hint": ("Which desktop you sign in to. Changing it changes nothing "
                      "about how the internet is filtered for you."),
     "next_sign_in": "Your new desktop is ready at your next sign-in.",
     "sign_out": "Sign out",
-    "taskbar": "Taskbar",
-    "taskbar_hint": "The bar along the bottom of the Classic desktop.",
-    "see_through": "See-through",
-    "see_through_hint": "How much of the wallpaper shows through the bar.",
-    "blur": "Blur the wallpaper behind it",
-    "size": "Size",
-    "reset": "Back to the KosherOS look",
     "rest": "Everything else",
     "rest_row": "Wallpaper, dark mode and text size",
     "rest_hint": "Settings does these well.",
@@ -119,92 +105,14 @@ def open_appearance_settings() -> None:
     subprocess.Popen(["gnome-control-center", "background"])
 
 
-# ---- the taskbar's own settings ------------------------------------------
-
-D2P_SCHEMA = "org.gnome.shell.extensions.dash-to-panel"
-BLUR_SCHEMA = "org.gnome.shell.extensions.blur-my-shell.panel"
-BLUR_SCHEMA_DIR = "/usr/share/gnome-shell/extensions/blur-my-shell@aunetx/schemas"
-
-
-def _settings(schema_id: str, directory: str | None = None):
-    """A Gio.Settings for a schema, or None when the machine has no such
-    schema (a development box without the extensions, say): the window
-    then leaves that control out rather than crashing on it."""
-    source = Gio.SettingsSchemaSource.get_default()
-    if directory is not None and os.path.isdir(directory):
-        try:
-            source = Gio.SettingsSchemaSource.new_from_directory(directory, source, False)
-        except GLib.Error:
-            return None
-    schema = source.lookup(schema_id, True) if source is not None else None
-    if schema is None:
-        return None
-    return Gio.Settings.new_full(schema, None, None)
-
-
-class Taskbar:
-    """The classic taskbar's look, read and written through the extensions'
-    own settings for this account. Opacity is 0..1 as Dash to Panel keeps
-    it; the window shows it as a percentage."""
-
-    OPACITY_KEYS = ("trans-use-custom-opacity", "trans-panel-opacity")
-    SIZE_KEYS = ("panel-size", "panel-sizes")
-
-    def __init__(self, panel=None, blur=None):
-        self.panel = panel if panel is not None else _settings(D2P_SCHEMA)
-        self.blur = blur if blur is not None else _settings(BLUR_SCHEMA, BLUR_SCHEMA_DIR)
-
-    @property
-    def available(self) -> bool:
-        return self.panel is not None
-
-    @property
-    def opacity(self) -> float:
-        return float(self.panel.get_double("trans-panel-opacity"))
-
-    @opacity.setter
-    def opacity(self, value: float) -> None:
-        self.panel.set_boolean("trans-use-custom-opacity", True)
-        self.panel.set_double("trans-panel-opacity", max(0.0, min(1.0, value)))
-
-    @property
-    def blurred(self) -> bool:
-        return bool(self.blur.get_boolean("blur")) if self.blur is not None else False
-
-    @blurred.setter
-    def blurred(self, value: bool) -> None:
-        if self.blur is not None:
-            self.blur.set_boolean("blur", bool(value))
-
-    @property
-    def size(self) -> int:
-        return int(self.panel.get_int("panel-size"))
-
-    @size.setter
-    def size(self, value: int) -> None:
-        self.panel.set_int("panel-size", int(value))
-        # Newer Dash to Panel keeps a per-monitor table that wins over the
-        # single value; clearing it lets the one size apply everywhere.
-        self.panel.reset("panel-sizes")
-
-    def reset(self) -> None:
-        """Back to the image's defaults: the keys are unset, so the
-        machine-wide dconf values show through again."""
-        for key in self.OPACITY_KEYS + self.SIZE_KEYS:
-            self.panel.reset(key)
-        if self.blur is not None:
-            self.blur.reset("blur")
-
-
 # ---- the window ------------------------------------------------------------
 
 class Window(Adw.ApplicationWindow):
-    def __init__(self, app: Adw.Application | None, *, client=None, taskbar=None,
+    def __init__(self, app: Adw.Application | None, *, client=None,
                  apply=apply_now, in_niri: bool | None = None):
         super().__init__(application=app, title="Look",
                          default_width=560, default_height=700)
         self.client = client
-        self.taskbar = taskbar if taskbar is not None else Taskbar()
         self.apply = apply
         self.in_niri = under_niri() if in_niri is None else in_niri
         self.layout = DEFAULT_LAYOUT
@@ -243,9 +151,6 @@ class Window(Adw.ApplicationWindow):
     def _build(self) -> Gtk.Widget:
         page = Adw.PreferencesPage()
         page.add(self._desktop_group())
-        self.taskbar_group = self._taskbar_group()
-        if self.taskbar_group is not None:
-            page.add(self.taskbar_group)
         page.add(self._rest_group())
         self._show_for(self.layout)
         return page
@@ -302,61 +207,10 @@ class Window(Adw.ApplicationWindow):
         _run_async(work, done, failed)
 
     def _show_for(self, key: str) -> None:
-        """What follows from the chosen desktop: the taskbar controls for
-        Classic, and the sign-out banner when the running session is not
-        the chosen one."""
-        if self.taskbar_group is not None:
-            self.taskbar_group.set_visible(key == "classic" and not self.in_niri)
+        """The sign-out banner, when the running session is not the
+        chosen one."""
         running_is_chosen = (key not in IN_PLACE) == self.in_niri
         self.banner.set_revealed(not running_is_chosen)
-
-    def _taskbar_group(self) -> Adw.PreferencesGroup | None:
-        t = self.taskbar
-        if not t.available:
-            return None
-        group = Adw.PreferencesGroup(title=TEXT["taskbar"], description=TEXT["taskbar_hint"])
-
-        self.opacity = Gtk.Scale.new_with_range(Gtk.Orientation.HORIZONTAL, 0, 100, 5)
-        self.opacity.set_hexpand(True)
-        self.opacity.set_size_request(200, -1)
-        self.opacity.set_draw_value(False)
-        self.opacity.set_value(round((1.0 - t.opacity) * 100))
-        self.opacity.connect("value-changed",
-                             lambda s: setattr(t, "opacity", 1.0 - s.get_value() / 100))
-        row = Adw.ActionRow(title=TEXT["see_through"], subtitle=TEXT["see_through_hint"])
-        row.add_suffix(self.opacity)
-        group.add(row)
-
-        if t.blur is not None:
-            self.blur_row = Adw.SwitchRow(title=TEXT["blur"], active=t.blurred)
-            self.blur_row.connect("notify::active",
-                                  lambda r, _p: setattr(t, "blurred", r.get_active()))
-            group.add(self.blur_row)
-        else:
-            self.blur_row = None
-
-        self.size_row = Adw.ComboRow(title=TEXT["size"],
-                                     model=Gtk.StringList.new([name for name, _ in SIZES]))
-        self.size_row.set_selected(min(range(len(SIZES)),
-                                       key=lambda i: abs(SIZES[i][1] - t.size)))
-        self.size_row.connect("notify::selected",
-                              lambda r, _p: setattr(t, "size", SIZES[r.get_selected()][1]))
-        group.add(self.size_row)
-
-        reset = Gtk.Button(label=TEXT["reset"], halign=Gtk.Align.END, margin_top=12)
-        reset.connect("clicked", lambda _b: self._reset_taskbar())
-        self.reset_button = reset
-        group.add(reset)
-        return group
-
-    def _reset_taskbar(self) -> None:
-        t = self.taskbar
-        t.reset()
-        self.opacity.set_value(round((1.0 - t.opacity) * 100))
-        if self.blur_row is not None:
-            self.blur_row.set_active(t.blurred)
-        self.size_row.set_selected(min(range(len(SIZES)),
-                                       key=lambda i: abs(SIZES[i][1] - t.size)))
 
     def _rest_group(self) -> Adw.PreferencesGroup:
         group = Adw.PreferencesGroup(title=TEXT["rest"])

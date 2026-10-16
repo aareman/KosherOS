@@ -18,6 +18,7 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 from gi.repository import Adw, Gdk, Gio, GLib, Gtk  # noqa: E402
 
+from kosherd import usernames  # noqa: E402
 from kosherd.client import DaemonClient  # noqa: E402
 
 APP_ID = "org.kosherlinux.Setup"
@@ -464,11 +465,15 @@ class Window(Adw.ApplicationWindow):
             self.existing_note.add_prefix(Gtk.Image(icon_name="dialog-information-symbolic"))
             group.add(self.existing_note)
             self.username.set_text(existing[0])
+        # The username follows the full name until the person types in it
+        # themselves; an account already on the machine counts as chosen.
+        self._username_chosen = bool(existing)
+        self._setting_username = False
         group.add(self.full_name)
         group.add(self.username)
         self.admin_pw = PasswordPair(group, "Password", on_change=self._revalidate)
         self.full_name.connect("changed", self._suggest_username)
-        self.username.connect("changed", lambda _e: self._revalidate())
+        self.username.connect("changed", self._username_changed)
         # Enter walks the form: each field hands the keyboard to the next,
         # and the last one presses Create Account if everything is valid.
         self.full_name.connect("entry-activated", lambda _e: self.username.grab_focus())
@@ -532,13 +537,33 @@ class Window(Adw.ApplicationWindow):
 
     # -- flow --------------------------------------------------------------
 
+    def _set_username(self, text: str) -> None:
+        """Change the field without it counting as the person's own edit
+        (set_text emits "changed" more than once, once with "")."""
+        self._setting_username = True
+        try:
+            position = self.username.get_position()
+            self.username.set_text(text)
+            self.username.set_position(min(position, len(text)))
+        finally:
+            self._setting_username = False
+
+    def _username_changed(self, entry) -> None:
+        if not self._setting_username:
+            text = entry.get_text()
+            # Login names are lowercase: what is typed is lowercased as it
+            # is typed, rather than refused after.
+            if text != text.lower():
+                self._set_username(text.lower())
+            self._username_chosen = True
+        self._revalidate()
+
     def _suggest_username(self, entry) -> None:
-        if self.username.get_text():
-            return
-        first = entry.get_text().strip().lower().split(" ")[0]
-        cleaned = re.sub(r"[^a-z0-9_-]", "", first)
-        if cleaned:
-            self.username.set_text(cleaned)
+        # Follows every keystroke in the full name: "J" -> "j", "John" ->
+        # "john", "John D" -> "jd", "John Doe" -> "jdoe". It used to stop
+        # at the first letter, because it only filled an empty field.
+        if not self._username_chosen:
+            self._set_username(usernames.suggest(entry.get_text()))
 
     # Back goes to the PREVIOUS page. Not to the welcome page, which is what
     # it did, and not past the account step once the account exists.

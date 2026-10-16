@@ -150,6 +150,40 @@ def test_optional_protections_only_gate_when_switched_on():
     assert win.next.get_sensitive()
 
 
+def test_the_username_follows_the_full_name_as_it_is_typed():
+    # It used to fill only an empty field, so "J" made "j" and "John Doe"
+    # stayed "j".
+    win = window()
+    win._go("admin")
+    win.admin_pw.entry.set_text("Correct-Horse-42")
+    win.admin_pw.confirm.set_text("Correct-Horse-42")
+    typed = ""
+    for ch in "John Doe":
+        typed += ch
+        win.full_name.set_text(typed)
+    assert win.username.get_text() == "jdoe"
+    assert win.next.get_sensitive()
+    for name, expected in [("John", "john"), ("JOHN", "john"), ("Mary Ann Smith", "msmith"),
+                           ("", ""), ("Sarah Cohen", "scohen")]:
+        win.full_name.set_text(name)
+        assert win.username.get_text() == expected
+
+
+@pytest.mark.parametrize("custom", ["yossi", ""])
+def test_a_username_the_person_typed_is_left_alone(custom):
+    win = window()
+    win.full_name.set_text("John")
+    win.username.set_text(custom)
+    win.full_name.set_text("John Doe")
+    assert win.username.get_text() == custom
+
+
+def test_a_typed_username_is_lowercased():
+    win = window()
+    win.username.set_text("JDoe")
+    assert win.username.get_text() == "jdoe"
+
+
 def test_a_pre_existing_account_is_offered_not_hidden():
     # The dev disk used to bake in "abba"; an installer or kickstart may
     # do the same. The wizard must say so and offer it.
@@ -161,6 +195,8 @@ def test_a_pre_existing_account_is_offered_not_hidden():
     win = setup.Window(application=setup.App())
     assert win.username.get_text() == "abba"
     assert "abba" in win.existing_note.get_title()
+    win.full_name.set_text("John Doe")
+    assert win.username.get_text() == "abba", "the account already there is not renamed"
 
 
 # -- the hands-on UX round: button placement, tab order, loading screens ------

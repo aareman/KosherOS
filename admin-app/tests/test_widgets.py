@@ -657,10 +657,13 @@ def test_an_enabled_guest_opens_the_same_page_as_anyone_without_an_apps_tab():
 
 
 def test_a_username_is_suggested_from_the_full_name_and_checked():
-    assert dialogs.suggest_username("Elisha Ben-David") == "elisha"
-    assert dialogs.suggest_username("  Chaya   Sara ") == "chaya"
+    # The wizard's rule: first initial and last name, or the one name.
+    assert dialogs.suggest_username("John Doe") == "jdoe"
+    assert dialogs.suggest_username("John") == "john"
+    assert dialogs.suggest_username("Elisha Ben-David") == "ebendavid"
+    assert dialogs.suggest_username("  Chaya   Sara ") == "csara"
     assert dialogs.suggest_username("Élodie") == "elodie"
-    assert dialogs.suggest_username("123") == "u123"
+    assert dialogs.suggest_username("123") == ""
     assert dialogs.suggest_username("") == ""
     assert dialogs.username_ok("Elisha") and dialogs.username_ok("elisha.b")
     assert not dialogs.username_ok("eli sha") and not dialogs.username_ok("9lives")

@@ -876,6 +876,12 @@ def add_person_dialog(win, adopt_mode: bool) -> Adw.AlertDialog | None:
                 name.set_text(suggest_username(full.get_text()))
 
         def on_name(_e):
+            if name.get_text() != name.get_text().lower():
+                # Always lowercase, as it is typed.
+                position = name.get_position()
+                name.set_text(name.get_text().lower())
+                name.set_position(position)
+                return
             state["typed"] = bool(name.get_text().strip()) and \
                 name.get_text() != suggest_username(full.get_text())
             valid = username_ok(name.get_text())
@@ -949,20 +955,11 @@ def username_ok(text: str) -> bool:
 
 
 def suggest_username(full_name: str) -> str:
-    """'Elisha Ben-David' -> 'elisha': the first name, lowercased, letters
-    and digits only. Short and memorable, which is what a login name is
-    for; the person can type something else."""
-    import re
-    import unicodedata
+    """'John Doe' -> 'jdoe', 'John' -> 'john': the same rule as the
+    first-run wizard (kosherd.usernames)."""
+    from kosherd import usernames
 
-    first = (full_name or "").strip().split()
-    if not first:
-        return ""
-    plain = unicodedata.normalize("NFKD", first[0]).encode("ascii", "ignore").decode()
-    slug = re.sub(r"[^A-Za-z0-9]", "", plain).lower()
-    if slug and not slug[0].isalpha():
-        slug = "u" + slug
-    return slug
+    return usernames.suggest(full_name)
 
 
 def confirm_remove_user(win, user: dict) -> None:

@@ -15,8 +15,10 @@ so nobody can choose for anybody else. Classic and Tiling are applied to
 the running session straight away (`kosher-layout --layout`); Advanced
 is a different session and waits for the next sign-in.
 
-One switch turns the blur behind the taskbar and the windows on or off,
-written into Blur My Shell's own settings for this account. The rest of
+The glass: the blur behind the taskbar and the windows on or off, how
+much, and how see-through the windows are, with a way back to the
+KosherOS look. All of it is written into Blur My Shell's own settings
+for this account. The rest of
 the taskbar is tuned in its own settings, a right-click on the bar away.
 
 Wallpaper, dark mode and text size stay in GNOME Settings, which does

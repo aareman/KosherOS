@@ -47,18 +47,48 @@ class FakeClient:
         self.layout = layout
 
 
-class FakeSettings:
-    """Enough of Gio.Settings for the Glass class."""
+PIPELINES = (
+    "{'pipeline_default': {'name': <'Default'>, 'effects': <[<{'type': <'native_static_gaussian_blur'>, "
+    "'id': <'d'>, 'params': <{'unscaled_radius': <20.0>, 'brightness': <0.8>}>}>]>}, "
+    "'kosher_panel': {'name': <'KosherOS taskbar'>, 'effects': <[<{'type': <'native_static_gaussian_blur'>, "
+    "'id': <'p'>, 'params': <{'unscaled_radius': <20.0>, 'brightness': <0.8>}>}>]>}, "
+    "'kosher_windows': {'name': <'KosherOS windows'>, 'effects': <[<{'type': <'native_static_gaussian_blur'>, "
+    "'id': <'w'>, 'params': <{'unscaled_radius': <20.0>, 'brightness': <0.8>}>}>, "
+    "<{'type': <'corner'>, 'id': <'c'>, 'params': <{'radius': <15>}>}>]>}}"
+)
 
-    def __init__(self, blur):
-        self.values = {"blur": blur}
+
+class FakeSettings:
+    """Enough of Gio.Settings for the Glass class: typed get/set/reset over
+    a dict, with the defaults the image ships."""
+
+    def __init__(self, defaults):
+        self.defaults = dict(defaults)
+        self.values = dict(defaults)
 
     def get_boolean(self, k): return self.values[k]
+    def get_string(self, k): return self.values[k]
+    def get_int(self, k): return self.values[k]
+    def get_value(self, k): return self.values[k]
     def set_boolean(self, k, v): self.values[k] = v
+    def set_int(self, k, v): self.values[k] = v
+    def set_value(self, k, v):
+        assert v.get_type_string() == "a{sa{sv}}"
+        self.values[k] = v
+    def reset(self, k): self.values[k] = self.defaults[k]
 
 
 def _glass(panel=True, windows=True):
-    return app.Glass(parts=[FakeSettings(panel), FakeSettings(windows)])
+    root = FakeSettings({"pipelines": GLib.Variant.parse(None, PIPELINES, None, None)})
+    return app.Glass(root=root, parts={
+        "panel": FakeSettings({"blur": panel, "pipeline": "kosher_panel"}),
+        "applications": FakeSettings({"blur": windows, "pipeline": "kosher_windows",
+                                      "opacity": 225}),
+    })
+
+
+def _blur(glass):
+    return [p.values["blur"] for p in glass.parts.values()]
 
 
 def _pump(seconds=0.5):
@@ -151,15 +181,65 @@ def test_one_switch_blurs_the_taskbar_and_the_windows_together():
     assert win.glass_group.get_visible()
     assert win.blur_row.get_active(), "on when either part is blurred"
     win.blur_row.set_active(False)
-    assert [p.values["blur"] for p in glass.parts] == [False, False]
+    assert _blur(glass) == [False, False]
+    assert not win.strength_row.get_sensitive(), "nothing to tune with the blur off"
     win.blur_row.set_active(True)
-    assert [p.values["blur"] for p in glass.parts] == [True, True]
+    assert _blur(glass) == [True, True]
+    assert win.strength_row.get_sensitive() and win.transparency_row.get_sensitive()
 
 
 def test_opening_look_writes_nothing():
     glass = _glass(panel=False, windows=True)
     _window(glass=glass)
-    assert [p.values["blur"] for p in glass.parts] == [False, True]
+    assert _blur(glass) == [False, True]
+    assert glass.root.values == glass.root.defaults
+    assert glass.parts["applications"].values["opacity"] == 225
+
+
+def _radii(glass):
+    found = {}
+    for name, body in glass.root.values["pipelines"].unpack().items():
+        found[name] = [e["params"] for e in body["effects"]]
+    return found
+
+
+def test_how_much_sets_the_radius_of_the_taskbar_and_window_blur_only():
+    glass = _glass()
+    win, _ = _window(glass=glass)
+    assert win.strength.get_value() == 38, "radius 20 of 2..50"
+    win.strength.set_value(100)
+    radii = _radii(glass)
+    assert radii["kosher_panel"][0]["unscaled_radius"] == 50.0
+    assert radii["kosher_windows"][0]["unscaled_radius"] == 50.0
+    assert radii["pipeline_default"][0]["unscaled_radius"] == 20.0, "popups keep theirs"
+    # Everything else in the pipeline keeps its value and its type.
+    assert radii["kosher_windows"][0]["brightness"] == 0.8
+    corner = glass.root.values["pipelines"].lookup_value("kosher_windows", None)
+    assert "<{'radius': <15>}>" in corner.print_(False), "the corner radius stays an int"
+
+
+def test_transparency_is_the_windows_opacity_and_stays_readable():
+    glass = _glass()
+    win, _ = _window(glass=glass)
+    assert win.transparency.get_value() == 12, "225 of 255 is 12% see-through"
+    assert win.transparency.get_adjustment().get_upper() == 50
+    win.transparency.set_value(40)
+    assert glass.parts["applications"].values["opacity"] == 153
+    glass.transparency = 0.9
+    assert glass.parts["applications"].values["opacity"] == 128, "never past half"
+
+
+def test_back_to_the_kosheros_look_unsets_everything():
+    glass = _glass()
+    win, _ = _window(glass=glass)
+    win.strength.set_value(90)
+    win.transparency.set_value(45)
+    win.blur_row.set_active(False)
+    win.reset_button.emit("clicked")
+    assert glass.root.values == glass.root.defaults
+    assert all(p.values == p.defaults for p in glass.parts.values())
+    assert win.blur_row.get_active()
+    assert win.strength.get_value() == 38 and win.transparency.get_value() == 12
 
 
 def test_under_niri_there_is_no_blur_switch():
@@ -168,7 +248,7 @@ def test_under_niri_there_is_no_blur_switch():
 
 
 def test_without_the_extension_the_switch_is_left_out():
-    win, _ = _window(glass=app.Glass(parts=[None, None]))
+    win, _ = _window(glass=app.Glass(root=None, parts={"panel": None, "applications": None}))
     assert win.glass_group is None
     assert win.checks["classic"].get_active()
 

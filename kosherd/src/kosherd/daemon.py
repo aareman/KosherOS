@@ -2083,7 +2083,7 @@ class Daemon:
         to the account the ledger says asked for it — an update is open to
         every account and must never land in another account's profile
         (#124)."""
-        if _uid > 0 and ref in apps.nixapps.installed(_uid):
+        if _uid > 0 and ref in apps.accountapps.installed(_uid):
             return _uid
         if _uid > 0 and not others:
             raise PolicyError(f"{ref} is not installed for your account")
@@ -2118,7 +2118,7 @@ class Daemon:
         """Update one installed app. Not gated on can_install_apps: an
         update widens nothing, and a newer build of an approved app is the
         safer one to be running."""
-        if apps.nixapps.is_nix(ref):
+        if apps.accountapps.is_account_app(ref):
             self.app_manager.update(ref, uid=self._nix_owner(ref, _uid))
         else:
             self.app_manager.update(ref)
@@ -2154,7 +2154,7 @@ class Daemon:
         return GLib.Variant("(s)", (json.dumps(summary),))
 
     def impl_RemoveApp(self, ref: str, *, _uid: int):
-        if apps.nixapps.is_nix(ref):
+        if apps.accountapps.is_account_app(ref):
             self.app_manager.remove(ref, uid=self._nix_owner(ref, _uid, others=True))
         else:
             self.app_manager.remove(ref)

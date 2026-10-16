@@ -58,6 +58,9 @@ RUN dnf -y install dnsmasq nftables python3-gobject python3-jsonschema python3-p
         # container; kosherd gives each account its subordinate ids.
         podman podman-docker podman-compose passt \
         malcontent malcontent-tools flatpak accountsservice cage \
+        # gpgv checks a developer's own signed build before the Store
+        # unpacks it (kosherd/upstreamapps.py); dnf itself no longer needs it.
+        gnupg2 \
         ca-certificates \
         # greenboot: if a new image boots without the filter coming up, the
         # machine puts ITSELF back. A locked-down computer that fails to

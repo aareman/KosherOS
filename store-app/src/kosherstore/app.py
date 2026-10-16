@@ -88,14 +88,18 @@ def _run_async(work, on_done, on_error) -> None:
     threading.Thread(target=runner, daemon=True).start()
 
 
-SOURCE_LABELS = {"flatpak": "Flatpak", "nix": "Nix", "image": "Built in"}
+SOURCE_LABELS = {"flatpak": "Flatpak", "nix": "Nix", "upstream": "Official build",
+                 "image": "Built in"}
 
 
 def source_of(app: dict) -> str:
     """How an app is installed, as the card says it: an entry may say so
     (`source`), else the ref does — nixpkgs#… is a Nix package into the
-    account's profile, anything else a Flatpak from Flathub."""
-    key = app.get("source") or ("nix" if str(app.get("ref", "")).startswith("nixpkgs#") else "flatpak")
+    account's profile, upstream#… the developer's own build into the
+    account's home, anything else a Flatpak from Flathub."""
+    ref = str(app.get("ref", ""))
+    key = app.get("source") or ("nix" if ref.startswith("nixpkgs#")
+                                else "upstream" if ref.startswith("upstream#") else "flatpak")
     return SOURCE_LABELS.get(key, key.capitalize())
 
 

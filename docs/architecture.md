@@ -165,10 +165,21 @@ tools and a few editors and toolchains: upstream nixpkgs. A catalog entry
 whose ref is `nixpkgs#<package>` is installed by the daemon into the asking
 account's own Nix profile, as that account. The same rule decides it, and
 because the profile is that account's alone there is no second gate to run
-it. Each card in the Store says which of the two it is. The Nix daemon
+it. Each card in the Store says which source it is from. The Nix daemon
 refuses an account on "No internet" outright, a build's downloads are held
 to the registries by the firewall, and a terminal tool installed this way
 gets a launcher in the app grid that opens a terminal running it.
+
+A third source is the developer's own signed build, for an app whose Nix
+build cannot run here. A Nix build brings its own OpenGL library, which
+finds no graphics driver on Fedora, so kitty from nixpkgs refuses to open
+even when the drivers are fine. A catalog entry whose ref is
+`upstream#kitty` is fetched from kitty's own releases as the asking
+account, checked against the developer's signing key that the image
+carries, and unpacked into that account's home with a launcher and its
+commands in `~/.local/bin`. A download whose signature does not check out
+is thrown away, and the copy already there stays. Installing it also
+removes the account's old kitty from nixpkgs.
 
 ## The policy
 

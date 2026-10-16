@@ -32,14 +32,15 @@ to the running session at once through the sign-in helper. Advanced is a
 separate session, so the app says it is ready at the next sign-in and
 offers to sign out.
 
-The taskbar has its own settings: right-click it and choose the taskbar's
-settings. What a person changes there is theirs, and the sign-in helper
-leaves it alone (it writes its plan when the layout changes, not at every
-sign-in). Wallpaper, dark mode and text size stay in GNOME Settings, which
+The app also has one switch for the blur behind the taskbar and the
+windows. The rest of the taskbar has its own settings: right-click it and
+choose the taskbar's settings. What a person changes in either place is
+theirs, and the sign-in helper leaves it alone (it writes its plan when the
+layout changes, not at every sign-in). Wallpaper, dark mode and text size stay in GNOME Settings, which
 the app points to.
 
-GNOME Settings has no way to add a panel, which is why the desktop choice
-is an app of its own rather than a section of its Appearance page. The
+GNOME Settings has no way to add a panel, which is why these controls
+are an app of their own rather than a section of its Appearance page. The
 Look app is also the first piece of what may one day be a KosherOS
 settings app in place of GNOME's.
 

@@ -149,6 +149,14 @@ skipped. A page whose Content-Security-Policy names a script nonce gets
 the nonce on the tag; one that forbids every script, its own included,
 keeps the proxy's judgement of the HTML and nothing more.
 
+The tag carries a token for that one page, signed for the account and the
+site, and the script sends it back with every call. The proxy answers the
+word list and the judge only to a call that carries it, refuses a block
+reported under another site's address, and allows a page so many calls a
+minute. A block the script reported is marked in the activity log as what
+the page showed after it loaded, so a parent can tell it from a page the
+proxy refused on the way in.
+
 ## Bad language
 
 Words on the bad-language list are replaced on the page with a milder word,
@@ -339,7 +347,7 @@ protected against replay the same way, because rolling a family back to
 last year's word list is an attack rather than a downgrade. The bundle is
 the same for every enrolled device, and it replaces the shipped copy. Only
 four file names are accepted. A portal that does not offer lists is treated
-as "nothing new". `just publish-lists https://portal.example` sends this
+as "nothing new". `python3 scripts/publish-lists.py https://portal.example` sends this
 repository's lists to a portal.
 
 **The category database** is too large to ride inside a signed document,

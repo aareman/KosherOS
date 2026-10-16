@@ -723,6 +723,34 @@ def cmd_system(args) -> int:
         print(_deployment_line("go back to", st.get("rollback")))
         if st.get("rollback_queued"):
             print("  a rollback is already queued for the next restart")
+        if st.get("kept"):
+            print(_deployment_line("kept", st["kept"]))
+            print("             while builds are tried; "
+                  "'kosherctl system try done' returns to it")
+        return 0
+    if args.action == "try":
+        what = (args.value or "").strip()
+        if not what:
+            print("say which build to try: a pull request number (kosherctl "
+                  "system try 123), a tag, or 'done' to go back to the version "
+                  "kept", file=sys.stderr)
+            return 2
+        if what == "done":
+            st = c.deployment_status()
+            kept = st.get("kept")
+            if not kept:
+                print("nothing is kept: this computer is not trying a build",
+                      file=sys.stderr)
+                return 1
+            c.return_to_kept()
+            print(f"going back to {kept.get('version') or 'the kept version'} "
+                  f"({kept.get('image') or 'unknown image'}) at the next restart")
+            return 0
+        c.try_image(what, _guardian_pw(args))
+        print(f"trying {what}; the download runs in the background and the "
+              "build is used from the next restart\n"
+              "the version running now is kept: 'kosherctl system try done' "
+              "returns to it, 'kosherctl system status' shows both")
         return 0
     if args.action == "check":
         print(check_sentence(c.check_update()))
@@ -1279,12 +1307,14 @@ def main(argv: list[str] | None = None) -> int:
 
     s = sub.add_parser("system",
                        help="which system version is running, which channel "
-                            "it follows, and going back")
+                            "it follows, going back, and trying a build")
     s.add_argument("action",
-                   choices=["status", "check", "update", "rollback", "channel"])
+                   choices=["status", "check", "update", "rollback", "channel", "try"])
     s.add_argument("value", nargs="?", default="",
-                   help="with 'channel': the channel to switch to "
-                        "(omit to list them)")
+                   help="with 'channel': the channel to switch to (omit to "
+                        "list them); with 'try': a pull request number or a "
+                        "tag to run while keeping the current version, or "
+                        "'done' to return to the kept one")
     s.add_argument("--guardian-password")
     s.set_defaults(func=cmd_system)
 

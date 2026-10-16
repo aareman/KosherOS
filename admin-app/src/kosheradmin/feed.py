@@ -204,7 +204,7 @@ class ActivityPage(Gtk.Box):
         kind = event["kind"]
         name = event.get("username", "?")
         url = event.get("url", "")
-        why = labels.why_text(event.get("why", ""))
+        why = labels.why_text(event.get("why", ""), event.get("source", ""))
         times = event.get("times", 1)
         again = f" · {times} times" if times > 1 else ""
         row = Adw.ActionRow(subtitle_lines=2, use_markup=False)

@@ -85,6 +85,10 @@ account can be switched on, given its own kind of internet, and is wiped at sign
 that says, in plain language, what applies to you. A child who can see the rules is likelier
 to accept them than one who only ever meets a blocked page.
 
+**Your own desktop.** *Look* is where each person picks their desktop, classic, tiling or
+advanced, and tunes the classic taskbar. Which program draws the windows changes nothing
+about the filter, so this needs no admin.
+
 ## What the parent sees
 
 Signed in as an administrator, the admin app and the system settings never ask for a password; on any other account the admin app asks for an administrator's password once and keeps it for the sitting.

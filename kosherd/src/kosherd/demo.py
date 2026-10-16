@@ -328,7 +328,11 @@ class DemoClient:
         self.policy["adblock"]["enabled"] = enabled
         self._change(None, "SetAdBlock", [enabled])
 
-    def my_layout(self): return "classic"
+    def my_layout(self): return self._user(1002).get("layout", "classic")
+
+    def set_my_layout(self, layout):
+        """The Look app's choice for the person at the keyboard: in the demo, yosef."""
+        self.set_layout(1002, layout)
 
     def get_my_settings(self):
         """What My Filter shows the person at the keyboard: in the demo, yosef."""
@@ -724,6 +728,17 @@ class DemoClient:
                 "staged": None, "rollback_queued": False}
 
     def rollback(self): self._change(None, "Rollback", [])
+
+    def list_unused_apps(self): return []
+
+    def remove_unused_apps(self): return {"count": 0, "size": 0}
+
+    def try_image(self, what, pw=""):
+        """Pretend to try a build: the same pull as an update."""
+        self._change(None, "TryImage", [what])
+        self._pretend_pull()
+
+    def return_to_kept(self): self._change(None, "ReturnToKept", [])
 
     # -- portal ------------------------------------------------------------------------
 

@@ -42,6 +42,33 @@ def test_ci_publishes_edge_and_never_stable():
     assert "workflow_dispatch" in promote and "$IMAGE:stable" in promote
 
 
+def test_a_pull_requests_image_is_built_only_on_request_and_never_as_a_channel():
+    """Pull requests build no image unless asked (#90): the `try-image`
+    label builds the branch as :pr-<number>, signed with the key the
+    machines check, and leaves the channels and the versions alone."""
+    path = ROOT / ".github/workflows/try-image.yml"
+    text = path.read_text()
+    document = yaml.safe_load(text)
+    triggers = document.get(True) or document.get("on")
+    assert set(triggers) == {"pull_request"}, "only a pull request event, never a push"
+    job = document["jobs"]["image"]
+    condition = " ".join(job["if"].split())
+    assert "'try-image'" in condition, "the label is the request"
+    assert "head.repo.full_name == github.repository" in condition, \
+        "a fork has no secrets; its build would fail at the push"
+    assert "pr-${{ github.event.pull_request.number }}" in text
+    assert "$IMAGE:edge" not in text and "$IMAGE:stable" not in text
+    assert "scripts/version.py release" in text and "-pr.${PR}" in text
+    assert job["steps"][0]["with"]["fetch-depth"] == 0, "the version is counted from the tags"
+    assert job["steps"][0]["with"]["ref"] == "${{ github.event.pull_request.head.sha }}"
+    assert "COSIGN_PRIVATE_KEY" in text and "cosign sign --yes --key" in text, \
+        "unsigned, no machine could take it"
+    assert document["concurrency"]["cancel-in-progress"] is True
+    # And the main workflow still skips pull requests on its own.
+    ci = (ROOT / ".github/workflows/ci.yml").read_text()
+    assert "a pull request: the image is built from the merge, not here" in ci
+
+
 def test_every_version_that_passes_gets_a_release():
     """A commit whose tests pass must produce a release, image or not.
 

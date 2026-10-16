@@ -50,14 +50,11 @@ def test_every_language_setting_has_a_label(constants):
     assert set(constants["LANGUAGE_ORDER"]) == set(LANGUAGE_MODES)
 
 
-def test_every_desktop_layout_has_a_label_and_a_hint(constants):
+def test_every_desktop_layout_has_a_label_for_the_feed(constants):
+    # The admin app no longer offers the choice (that is the Look app's),
+    # but its activity feed still names the desktop a change was to.
     assert set(constants["LAYOUT_LABELS"]) == set(LAYOUTS)
-    assert set(constants["LAYOUT_HINTS"]) == set(LAYOUTS)
-    # The dropdown index selects the value, so the order tuple must be
-    # complete; and the classic layout is first because it is the answer
-    # for almost everyone.
-    assert set(constants["LAYOUT_ORDER"]) == set(LAYOUTS)
-    assert constants["LAYOUT_ORDER"][0] == "classic"
+    assert "LAYOUT_ORDER" not in constants, "no dropdown, no order tuple"
 
 
 def test_every_cover_style_has_a_label_and_a_hint(constants):

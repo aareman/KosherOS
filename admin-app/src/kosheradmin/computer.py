@@ -28,7 +28,7 @@ from gi.repository import Adw, GLib, Gtk  # noqa: E402
 from . import labels  # noqa: E402
 from .common import (banner_slot, clear, confirm, error_text, pointer_cursors,  # noqa: E501
                      run_async, tag)  # noqa: E402
-from .dialogs import ListEditDialog, guardian_dialog  # noqa: E402
+from .dialogs import ListEditDialog, boot_menu_dialog, guardian_dialog  # noqa: E402
 
 
 def health_rows(status: dict | None) -> list[tuple[str, str, bool]]:
@@ -155,6 +155,11 @@ class ProtectionPage(_Page):
         self.guardian_row.add_suffix(Gtk.Image(icon_name="go-next-symbolic"))
         self.guardian_row.connect("activated", lambda _r: guardian_dialog(win))
         locking.add(self.guardian_row)
+        self.boot_row = Adw.ActionRow(title="Boot menu password", subtitle="Checking…",
+                                      activatable=True, subtitle_lines=3)
+        self.boot_row.add_suffix(Gtk.Image(icon_name="go-next-symbolic"))
+        self.boot_row.connect("activated", lambda _r: boot_menu_dialog(win))
+        locking.add(self.boot_row)
         self.prefs.add(locking)
 
         self.refresh()
@@ -174,6 +179,16 @@ class ProtectionPage(_Page):
             self.ads_row.handler_block_by_func(self._on_ads)
             self.ads_row.set_active(wanted)
             self.ads_row.handler_unblock_by_func(self._on_ads)
+
+        def show_boot(protected: bool) -> None:
+            self.boot_row.set_subtitle(
+                "Set. Editing the boot menu asks for it; starting normally never does."
+                if protected else
+                "Not set. Anyone at the keyboard can edit the boot menu to start the "
+                "computer without filtering. Set one.")
+
+        run_async(self.win.client.boot_menu_protected, show_boot,
+                  lambda e: self.boot_row.set_subtitle(f"Could not read: {error_text(e)}"))
 
         on = self.win.policy.get("guardian", {}).get("enabled", False)
         self.guardian_row.set_subtitle(

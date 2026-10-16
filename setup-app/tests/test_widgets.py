@@ -139,15 +139,73 @@ def test_a_bad_username_keeps_the_button_off():
     assert not win.next.get_sensitive()
 
 
-def test_optional_protections_only_gate_when_switched_on():
+def test_the_boot_menu_password_is_on_by_default_and_empty_means_the_administrators():
+    # Editing the boot menu is the way round every other protection (#129);
+    # the switch is on from the start and, left alone, takes the
+    # administrator's own password — nothing to type, nothing to know.
     win = window()
     win._go("protect")
-    assert win.next.get_sensitive(), "both off: nothing to validate"
-    win.grub_switch.set_active(True)
-    assert not win.next.get_sensitive(), "on but empty"
+    assert win.grub_switch.get_active()
+    assert win.next.get_sensitive(), "on and empty: the administrator's password"
     win.grub_pw.entry.set_text("boot-pass-1")
+    assert not win.next.get_sensitive(), "a started password has to be finished"
     win.grub_pw.confirm.set_text("boot-pass-1")
     assert win.next.get_sensitive()
+    win.grub_switch.set_active(False)
+    assert win.next.get_sensitive(), "off: nothing to validate"
+
+
+def test_finishing_hands_the_daemon_the_administrators_password_for_the_boot_menu(monkeypatch):
+    win = window()
+    win._go("admin")
+    win.username.set_text("abba")
+    win.admin_pw.entry.set_text("Correct-Horse-42")
+    win.admin_pw.confirm.set_text("Correct-Horse-42")
+    win._go("protect")
+    seen = {}
+    win.client.finish_setup = lambda guardian, grub: seen.update(guardian=guardian, grub=grub)
+    monkeypatch.setattr(setup, "_run_async", lambda work, on_done, on_error: work())
+    win._finish()
+    assert seen == {"guardian": "", "grub": "Correct-Horse-42"}
+    # ...and a typed one wins over it
+    win.grub_pw.entry.set_text("boot-pass-1")
+    win.grub_pw.confirm.set_text("boot-pass-1")
+    win._finish()
+    assert seen["grub"] == "boot-pass-1"
+
+
+def test_the_username_follows_the_full_name_as_it_is_typed():
+    # It used to fill only an empty field, so "J" made "j" and "John Doe"
+    # stayed "j".
+    win = window()
+    win._go("admin")
+    win.admin_pw.entry.set_text("Correct-Horse-42")
+    win.admin_pw.confirm.set_text("Correct-Horse-42")
+    typed = ""
+    for ch in "John Doe":
+        typed += ch
+        win.full_name.set_text(typed)
+    assert win.username.get_text() == "jdoe"
+    assert win.next.get_sensitive()
+    for name, expected in [("John", "john"), ("JOHN", "john"), ("Mary Ann Smith", "msmith"),
+                           ("", ""), ("Sarah Cohen", "scohen")]:
+        win.full_name.set_text(name)
+        assert win.username.get_text() == expected
+
+
+@pytest.mark.parametrize("custom", ["yossi", ""])
+def test_a_username_the_person_typed_is_left_alone(custom):
+    win = window()
+    win.full_name.set_text("John")
+    win.username.set_text(custom)
+    win.full_name.set_text("John Doe")
+    assert win.username.get_text() == custom
+
+
+def test_a_typed_username_is_lowercased():
+    win = window()
+    win.username.set_text("JDoe")
+    assert win.username.get_text() == "jdoe"
 
 
 def test_a_pre_existing_account_is_offered_not_hidden():
@@ -161,6 +219,8 @@ def test_a_pre_existing_account_is_offered_not_hidden():
     win = setup.Window(application=setup.App())
     assert win.username.get_text() == "abba"
     assert "abba" in win.existing_note.get_title()
+    win.full_name.set_text("John Doe")
+    assert win.username.get_text() == "abba", "the account already there is not renamed"
 
 
 # -- the hands-on UX round: button placement, tab order, loading screens ------

@@ -176,6 +176,13 @@ class DaemonClient:
         """Ads and trackers blocked at the resolvers, for every account."""
         self._call("Profiles", "SetAdBlock", "(bs)", enabled, guardian_password)
 
+    def set_boot_menu_password(self, password: str, guardian_password: str = "") -> None:
+        """Password-protect the boot menu (or change the password)."""
+        self._call("Profiles", "SetBootMenuPassword", "(ss)", password, guardian_password)
+
+    def boot_menu_protected(self) -> bool:
+        return self._call("Profiles", "BootMenuProtected")[0]
+
     def set_network_access(self, uid: int, video_calls: bool, extra_ports: list[int],
                            guardian_password: str = "") -> None:
         """Beyond the web: whether UDP to high ports (video calls) is allowed,

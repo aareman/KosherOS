@@ -154,7 +154,9 @@ def cmd_info(args, client, wait=_wait_for) -> int:
     print(f"{_words(app)}  ({app['ref']})")
     if app.get("summary"):
         print(f"  {app['summary']}")
-    source = "Nix, into your own profile" if app["ref"].startswith("nixpkgs#") else "Flatpak, from Flathub"
+    source = ("Nix, into your own profile" if app["ref"].startswith("nixpkgs#")
+              else "the developer's own build, into your own home" if app["ref"].startswith("upstream#")
+              else "Flatpak, from Flathub")
     print(f"  how: {source}")
     if app.get("kind"):
         print(f"  shelf: {app['kind']}")

@@ -157,6 +157,10 @@ def test_shipped_catalog_entries_are_well_formed():
         if entry["ref"].startswith("nixpkgs#"):
             assert entry["ref"][len("nixpkgs#"):], f"{entry['ref']} names no package"
             continue
+        if entry["ref"].startswith("upstream#"):
+            from kosherd import upstreamapps
+            upstreamapps.package(entry["ref"])  # one KosherOS knows how to fetch
+            continue
         assert entry["ref"].count(".") >= 2, f"{entry['ref']} is not an app id"
 
 

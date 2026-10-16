@@ -118,6 +118,12 @@ class FakeClient:
     def set_network_access(self, uid, video_calls, extra_ports, guardian_password=""):
         self.calls.append(("set_network_access", uid, video_calls, list(extra_ports)))
 
+    def boot_menu_protected(self):
+        return self._overrides.get("boot_menu", True)
+
+    def set_boot_menu_password(self, password, guardian_password=""):
+        self.calls.append(("set_boot_menu_password", password))
+
     def connect_update_signals(self, on_progress, on_finished):
         self.on_update_progress, self.on_update_finished = on_progress, on_finished
         return 7
@@ -657,10 +663,13 @@ def test_an_enabled_guest_opens_the_same_page_as_anyone_without_an_apps_tab():
 
 
 def test_a_username_is_suggested_from_the_full_name_and_checked():
-    assert dialogs.suggest_username("Elisha Ben-David") == "elisha"
-    assert dialogs.suggest_username("  Chaya   Sara ") == "chaya"
+    # The wizard's rule: first initial and last name, or the one name.
+    assert dialogs.suggest_username("John Doe") == "jdoe"
+    assert dialogs.suggest_username("John") == "john"
+    assert dialogs.suggest_username("Elisha Ben-David") == "ebendavid"
+    assert dialogs.suggest_username("  Chaya   Sara ") == "csara"
     assert dialogs.suggest_username("Élodie") == "elodie"
-    assert dialogs.suggest_username("123") == "u123"
+    assert dialogs.suggest_username("123") == ""
     assert dialogs.suggest_username("") == ""
     assert dialogs.username_ok("Elisha") and dialogs.username_ok("elisha.b")
     assert not dialogs.username_ok("eli sha") and not dialogs.username_ok("9lives")
@@ -2696,3 +2705,16 @@ def test_the_updates_row_says_when_the_newest_version_is_already_on_the_computer
     assert short == "Update ready"
     sentence, _ = computer.check_words({"available": True, "version": "0.13.1", "channel": "edge"}, "0.12.0")
     assert sentence == "Version 0.13.1 is available — you are on 0.12.0 (edge channel)."
+
+
+# -- the boot menu password row (#129) ------------------------------------------
+
+def test_the_protection_page_says_whether_the_boot_menu_has_a_password():
+    win = FakeWindow(FakeClient(boot_menu=False))
+    page = computer.ProtectionPage(win)
+    drain()
+    assert "Not set" in _row_named(page, "Boot menu password").get_subtitle()
+    win = FakeWindow(FakeClient(boot_menu=True))
+    page = computer.ProtectionPage(win)
+    drain()
+    assert _row_named(page, "Boot menu password").get_subtitle().startswith("Set.")

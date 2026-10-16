@@ -152,6 +152,14 @@ def nix_details(ref: str) -> dict:
 def load_details(app: dict) -> dict:
     if nixapps.is_nix(app["ref"]):
         return nix_details(app["ref"])
+    if str(app["ref"]).startswith("upstream#"):
+        # Everything there is to say is in the catalog entry: asking the
+        # developer's site would only add a wait to opening the page.
+        return {"description": app.get("description") or app.get("summary") or "",
+                "developer": app.get("developer") or "",
+                "license": app.get("license") or "",
+                "homepage": web_url(app.get("homepage") or ""),
+                "screenshots": []}
     if app.get("source") == "image":
         return {"description": app.get("description") or app.get("summary") or "",
                 "screenshots": app.get("screenshots") or []}

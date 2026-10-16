@@ -112,6 +112,11 @@ ACTIONS = {
     # Beyond the web: video calls (UDP the filter cannot read) and extra
     # ports. Opening either widens what the account reaches.
     "SetNetworkAccess": ACTION_MANAGE_FILTER,
+    # The boot menu: the way round every other protection, so setting its
+    # password is dual-controlled like a filter change; reading whether one
+    # is set is a read.
+    "SetBootMenuPassword": ACTION_MANAGE_FILTER,
+    "BootMenuProtected": ACTION_READ_CONFIG,
     "ApproveRequest": ACTION_MANAGE_FILTER,
     "DismissRequest": ACTION_MANAGE_USERS,
     "ListRequests": ACTION_READ_CONFIG,
@@ -213,6 +218,7 @@ GUARDIAN_GATED = frozenset({
     "SetLanguageFilter", "SetYouTube",
     "SetGuestConfig", "DisableGuardian", "Enrol", "Unenrol",
     "SetAdBlock", "SetTimeLimits", "SetChannel", "TryImage", "SetNetworkAccess",
+    "SetBootMenuPassword",
     "SetUserAppAccess", "SetUserBlockedAppKinds", "SetUserBlockedApps",
 })
 
@@ -241,7 +247,7 @@ CHANGES = frozenset({
     "ApplyProfile", "SaveProfile", "DeleteProfile", "ApproveRequest",
     "DismissRequest", "AllowUrl", "EditList", "SetMediaLevel",
     "SetLanguageFilter", "SetYouTube", "SetUserAdmin", "SetLayout",
-    "SetCoverStyle", "SetAdBlock", "SetTimeLimits", "SetNetworkAccess", "SetGuestConfig", "CreateUser",
+    "SetCoverStyle", "SetAdBlock", "SetTimeLimits", "SetNetworkAccess", "SetBootMenuPassword", "SetGuestConfig", "CreateUser",
     "AdoptUser", "RemoveUser", "ResetPassword", "SetUserApps", "RemoveApp", "RemoveUnusedApps",
     "InstallAppFor", "ApproveApp",
     "UnapproveApp", "SetUserCanInstall", "SetUserAppAccess",
@@ -270,7 +276,7 @@ PER_USER = frozenset({
     "SetUserBlockedApps", "SetCaptiveMode",
 })
 # Changes whose arguments are secrets or too big to be worth keeping.
-NO_ARGS_LOGGED = frozenset({"SetGuardianPassword", "DisableGuardian",
+NO_ARGS_LOGGED = frozenset({"SetGuardianPassword", "DisableGuardian", "SetBootMenuPassword",
                             "Enrol", "EditList", "SetWhitelist",
                             "SetUrlRules"})
 

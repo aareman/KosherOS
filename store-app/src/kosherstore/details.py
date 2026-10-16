@@ -115,7 +115,7 @@ class DetailsPage(Gtk.ScrolledWindow):
             self.show_screenshot(0)
         else:
             note = Gtk.Label(label="No screenshots provided for this package."
-                             if source_of(self.app) == "Nix" else "No screenshots provided for this app.",
+                             if source_of(self.app) in ("Nix", "Official build") else "No screenshots provided for this app.",
                              xalign=0, wrap=True, css_classes=["dim-label"])
             gallery.append(note)
         self.content.append(gallery)
@@ -145,6 +145,10 @@ class DetailsPage(Gtk.ScrolledWindow):
         if homepage:
             self.content.append(Gtk.LinkButton(uri=homepage, label="Visit website",
                                                 halign=Gtk.Align.START))
+        if source_of(self.app) == "Official build":
+            self.content.append(Gtk.Label(
+                label="This is the developer's own build, installed for your account.",
+                xalign=0, wrap=True, css_classes=["dim-label"]))
         if source_of(self.app) == "Nix":
             self.content.append(Gtk.Label(
                 label=("Fonts are installed for your account. Reopen an app if its font list has not updated."

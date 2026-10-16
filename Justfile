@@ -496,6 +496,7 @@ _sudo:
 # The dev disk config with this machine's ssh key in it, so `just boot-image`
 # offers a root shell on 2223.
 _dev-config:
+    @mkdir -p build
     key="$(cat ~/.ssh/id_ed25519.pub 2>/dev/null || cat ~/.ssh/id_rsa.pub 2>/dev/null || cat build/vm/id_ed25519.pub)" \
         && sed "s|@SSH_KEY@|$key|" os-image/dev-config.toml > build/dev-config.toml
 

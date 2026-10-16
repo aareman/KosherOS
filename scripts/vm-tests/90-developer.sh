@@ -98,6 +98,24 @@ for _ in $(seq 1 24); do
 done
 check "and can be removed again" 1 as wlkid bash -lc 'command -v gh'
 
+section "Nix apps find the graphics drivers (#157)"
+# A Nix build's OpenGL loader looks in /run/opengl-driver, as on NixOS.
+# kosher-nix-opengl.service fetches the pinned Mesa into the store on the
+# first boot with a network; wait for it rather than racing it.
+for _ in $(seq 1 120); do
+    systemctl is-active --quiet kosher-nix-opengl.service && break
+    sleep 5
+done
+check "the driver service has run" 0 systemctl is-active --quiet kosher-nix-opengl.service
+pin=$(sed -n 's/^KOSHER_OPENGL_DRIVER=//p' /usr/share/kosher/nix-opengl-driver.env)
+check_contains "/run/opengl-driver is the pinned Mesa" "$pin" readlink -f /run/opengl-driver
+check "with Mesa's EGL vendor file where the loader looks" 0 \
+    test -f /run/opengl-driver/share/glvnd/egl_vendor.d/50_mesa.json
+# The real question: does a Nix program get a working driver? eglinfo
+# from nixpkgs, without a display, as an ordinary account.
+check_contains "a Nix program gets an EGL driver from it" "Mesa" \
+    as wlkid bash -lc 'nix shell nixpkgs#mesa-demos -c eglinfo -B -p surfaceless 2>&1'
+
 section "Containers are the account's"
 check "docker is podman's shim" 0 test -x /usr/bin/docker
 check_contains "and says so" "podman" docker --version

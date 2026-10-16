@@ -6,9 +6,10 @@ name='KosherOS-Aura'
 # Static wallpaper blur avoids continuous repaints on laptops and VMs.
 hacks-level=1
 settings-version=2
-# Keep the built-in pipelines and add one for the taskbar: blur only, no
-# corner clipping, since the bar sits flush against the screen edge.
-pipelines={'pipeline_default': {'name': <'Default'>, 'effects': <[<{'type': <'native_static_gaussian_blur'>, 'id': <'pipeline_default_blur'>, 'params': <{'unscaled_radius': <20.0>, 'brightness': <0.80000000000000004>}>}>]>}, 'pipeline_default_rounded': {'name': <'Default rounded'>, 'effects': <[<{'type': <'native_static_gaussian_blur'>, 'id': <'pipeline_default_rounded_blur'>, 'params': <{'unscaled_radius': <20.0>, 'brightness': <0.80000000000000004>}>}>, <{'type': <'corner'>, 'id': <'pipeline_default_rounded_corner'>, 'params': <{'radius': <24>}>}>]>}, 'kosher_panel': {'name': <'KosherOS taskbar'>, 'effects': <[<{'type': <'native_static_gaussian_blur'>, 'id': <'kosher_panel_blur'>, 'params': <{'unscaled_radius': <20.0>, 'brightness': <0.80000000000000004>}>}>]>}}
+# Keep the built-in pipelines and add two of our own: the taskbar's, blur
+# only with no corner clipping since the bar sits flush against the screen
+# edge, and the windows', rounded to sit inside a GNOME window's corners.
+pipelines={'pipeline_default': {'name': <'Default'>, 'effects': <[<{'type': <'native_static_gaussian_blur'>, 'id': <'pipeline_default_blur'>, 'params': <{'unscaled_radius': <20.0>, 'brightness': <0.80000000000000004>}>}>]>}, 'pipeline_default_rounded': {'name': <'Default rounded'>, 'effects': <[<{'type': <'native_static_gaussian_blur'>, 'id': <'pipeline_default_rounded_blur'>, 'params': <{'unscaled_radius': <20.0>, 'brightness': <0.80000000000000004>}>}>, <{'type': <'corner'>, 'id': <'pipeline_default_rounded_corner'>, 'params': <{'radius': <24>}>}>]>}, 'kosher_panel': {'name': <'KosherOS taskbar'>, 'effects': <[<{'type': <'native_static_gaussian_blur'>, 'id': <'kosher_panel_blur'>, 'params': <{'unscaled_radius': <20.0>, 'brightness': <0.80000000000000004>}>}>]>}, 'kosher_windows': {'name': <'KosherOS windows'>, 'effects': <[<{'type': <'native_static_gaussian_blur'>, 'id': <'kosher_windows_blur'>, 'params': <{'unscaled_radius': <20.0>, 'brightness': <0.80000000000000004>}>}>, <{'type': <'corner'>, 'id': <'kosher_windows_corner'>, 'params': <{'radius': <15>}>}>]>}}
 
 [org/gnome/shell/extensions/blur-my-shell/panel]
 blur=true
@@ -32,7 +33,18 @@ dialog-corner-radius=20
 osd-corner-radius=12
 
 [org/gnome/shell/extensions/blur-my-shell/applications]
-blur=false
+# Every window shows the blurred wallpaper through it, the one in use too,
+# so the glass is seen. 225 of 255 keeps text easy to read. Static blur is
+# the wallpaper only, never the windows behind, so it costs little. A
+# fullscreen video or game goes solid.
+blur=true
+static-blur=true
+pipeline='kosher_windows'
+enable-all=true
+opacity=225
+dynamic-opacity=false
+unblur-when-fullscreen=true
+blur-on-overview=false
 
 [org/gnome/shell/extensions/blur-my-shell/lockscreen]
 blur=false

@@ -162,6 +162,8 @@ def test_a_supervised_accounts_store_install_runs_as_root_into_its_profile(monke
     monkeypatch.setattr(pwd_mod, "getpwuid", lambda uid: PW())
     owned = []
     monkeypatch.setattr(nixapps.shutil, "chown", lambda path, u, g: owned.append((Path(path), u, g)))
+    linked = []
+    monkeypatch.setattr(nixapps.os, "lchown", lambda path, u, g: linked.append((Path(path), u, g)))
     (tmp_path / "kid").mkdir()
     argv = nixapps._argv(1001, "profile", "install", "nixpkgs#hello", as_root=True)
     assert argv[0] == "env" and "runuser" not in argv
@@ -173,10 +175,18 @@ def test_a_supervised_accounts_store_install_runs_as_root_into_its_profile(monke
     made = [tmp_path / "kid" / p for p in
             (".local", ".local/state", ".local/state/nix", ".local/state/nix/profiles")]
     assert owned == [(p, 1001, 1001) for p in made]
+    # The session finds Store apps through ~/.nix-profile/bin; nix as root
+    # makes no such link, so without it the app was not on the PATH and
+    # the desktop hid its launcher.
+    link = tmp_path / "kid/.nix-profile"
+    assert link.is_symlink()
+    assert link.readlink() == tmp_path / "kid/.local/state/nix/profiles/profile"
+    assert linked == [(link, 1001, 1001)]
     # ...and a second install changes nothing that is already there.
     owned.clear()
+    linked.clear()
     nixapps._argv(1001, "profile", "install", "nixpkgs#hello", as_root=True)
-    assert owned == []
+    assert owned == [] and linked == []
     # a developer's own install still runs as the account
     own = nixapps._argv(1001, "profile", "install", "nixpkgs#hello")
     assert own[:3] == ["runuser", "-u", "kid"]

@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import pwd
 import shutil
 import subprocess
@@ -117,6 +118,23 @@ def _make_dirs_as(path: Path, pw) -> None:
         shutil.chown(directory, pw.pw_uid, pw.pw_gid)
 
 
+def _link_profile_as(profile: Path, pw) -> None:
+    """~/.nix-profile -> the profile, owned by the account, as nix makes it
+    when it runs as the account itself.
+
+    The session's PATH finds Store apps through ~/.nix-profile/bin
+    (environment.d). `nix --profile` as root writes the profile and makes
+    no such link, so an app installed that way was not on the PATH, and
+    the desktop hid its launcher as a command it could not find. An
+    existing link or file is the account's and is left alone.
+    """
+    link = Path(pw.pw_dir) / ".nix-profile"
+    if link.exists() or link.is_symlink():
+        return
+    link.symlink_to(profile)
+    os.lchown(link, pw.pw_uid, pw.pw_gid)
+
+
 def _argv(uid: int, *nix_args: str, as_root: bool = False) -> list[str]:
     """`nix ...` as the account, with a clean environment of its own — or,
     for an account without developer tools (#123), as root into that
@@ -130,6 +148,7 @@ def _argv(uid: int, *nix_args: str, as_root: bool = False) -> list[str]:
     if as_root:
         profile = profile_dir(uid)
         _make_dirs_as(profile.parent, pw)
+        _link_profile_as(profile, pw)
         return [
             "env", "NIXPKGS_ALLOW_UNFREE=1", f"NIX_SSL_CERT_FILE={CA_BUNDLE}",
             "nix", *nix_args, "--profile", str(profile),

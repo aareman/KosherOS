@@ -302,6 +302,9 @@ vm-upgrade: build
     {{imgssh}} 'mkdir -p /etc/containers/registries.conf.d
           printf "[[registry]]\nlocation = \"10.0.2.2:5077\"\ninsecure = true\n" \
               > /etc/containers/registries.conf.d/50-kosher-dev.conf
+          # The shipped policy refuses unknown registries (#125); the dev
+          # registry is written into THIS machine, never into the image.
+          python3 -c "import json; p = \"/etc/containers/policy.json\"; d = json.load(open(p)); d.setdefault(\"transports\", {}).setdefault(\"docker\", {})[\"10.0.2.2:5077\"] = [{\"type\": \"insecureAcceptAnything\"}]; json.dump(d, open(p, \"w\"), indent=4)"
           # switch only sets the SOURCE and is a no-op when it is already
           # this ref — rerunning vm-upgrade then rebooted into the same old
           # image and looked like the update did nothing. upgrade is what

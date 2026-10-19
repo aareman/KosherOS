@@ -112,3 +112,17 @@ def test_the_image_build_checks_the_policy_it_ships():
     assert 'json.load(open("/etc/containers/policy.json"))' in containerfile
     assert "test -s /etc/pki/containers/kosheros-images.pub" in containerfile
     assert "replace with sigstoreSigned policy" not in containerfile
+
+
+def test_the_shipped_policy_names_no_development_registry():
+    # The dev VM's registry (10.0.2.2:5077) is written into that machine by
+    # `just vm-upgrade`; a production image must not accept it (#125).
+    assert "10.0.2.2" not in POLICY.read_text()
+
+
+def test_updates_are_not_applied_on_their_own():
+    # Applied by a parent through kosherd, whose first switch turns signature
+    # enforcement on; the stock timer would pull before that, unverified.
+    containerfile = (ROOT / "os-image/Containerfile").read_text()
+    assert "systemctl enable bootc-fetch-apply-updates.timer" not in containerfile
+    assert "systemctl disable bootc-fetch-apply-updates.timer" in containerfile

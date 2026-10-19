@@ -112,6 +112,9 @@ ACTIONS = {
     # Beyond the web: video calls (UDP the filter cannot read) and extra
     # ports. Opening either widens what the account reaches.
     "SetNetworkAccess": ACTION_MANAGE_FILTER,
+    # Developer tools: the Nix daemon and the registries, directly. On
+    # widens what the account reaches, so dual-controlled like a filter.
+    "SetDeveloperTools": ACTION_MANAGE_FILTER,
     # The boot menu: the way round every other protection, so setting its
     # password is dual-controlled like a filter change; reading whether one
     # is set is a read.
@@ -218,6 +221,7 @@ GUARDIAN_GATED = frozenset({
     "SetLanguageFilter", "SetYouTube",
     "SetGuestConfig", "DisableGuardian", "Enrol", "Unenrol",
     "SetAdBlock", "SetTimeLimits", "SetChannel", "TryImage", "SetNetworkAccess",
+    "SetDeveloperTools",
     "SetBootMenuPassword",
     "SetUserAppAccess", "SetUserBlockedAppKinds", "SetUserBlockedApps",
 })
@@ -247,7 +251,8 @@ CHANGES = frozenset({
     "ApplyProfile", "SaveProfile", "DeleteProfile", "ApproveRequest",
     "DismissRequest", "AllowUrl", "EditList", "SetMediaLevel",
     "SetLanguageFilter", "SetYouTube", "SetUserAdmin", "SetLayout",
-    "SetCoverStyle", "SetAdBlock", "SetTimeLimits", "SetNetworkAccess", "SetBootMenuPassword", "SetGuestConfig", "CreateUser",
+    "SetCoverStyle", "SetAdBlock", "SetTimeLimits", "SetNetworkAccess", "SetDeveloperTools",
+    "SetBootMenuPassword", "SetGuestConfig", "CreateUser",
     "AdoptUser", "RemoveUser", "ResetPassword", "SetUserApps", "RemoveApp", "RemoveUnusedApps",
     "InstallAppFor", "ApproveApp",
     "UnapproveApp", "SetUserCanInstall", "SetUserAppAccess",
@@ -271,7 +276,8 @@ PER_USER = frozenset({
     "SetBlockedCategories",
     "ApplyProfile", "SaveProfile", "AllowUrl", "SetMediaLevel",
     "SetLanguageFilter", "SetYouTube", "SetUserAdmin", "SetLayout",
-    "SetCoverStyle", "SetTimeLimits", "SetNetworkAccess", "InstallAppFor", "RemoveUser", "ResetPassword", "SetUserApps",
+    "SetCoverStyle", "SetTimeLimits", "SetNetworkAccess", "SetDeveloperTools", "InstallAppFor",
+    "RemoveUser", "ResetPassword", "SetUserApps",
     "SetUserCanInstall", "SetUserAppAccess", "SetUserBlockedAppKinds",
     "SetUserBlockedApps", "SetCaptiveMode",
 })

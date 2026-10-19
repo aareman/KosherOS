@@ -147,7 +147,7 @@ def test_remove_and_upgrade_name_the_package(home, monkeypatch):
 
 def test_the_app_manager_sends_a_nix_ref_to_the_account(monkeypatch):
     done = []
-    monkeypatch.setattr(nixapps, "install", lambda ref, uid, progress: done.append((ref, uid)))
+    monkeypatch.setattr(nixapps, "install", lambda ref, uid, progress, as_root=False: done.append((ref, uid)))
     manager = apps.AppManager(lambda *a: None, lambda *a: None)
     manager.install("nixpkgs#gh", permit=lambda r: None, uid=1001)
     manager._worker.join(5)
@@ -165,7 +165,7 @@ def test_a_nix_app_needs_an_account():
 def test_a_nix_failure_is_reported_like_any_other(monkeypatch):
     finished = []
 
-    def boom(ref, uid, progress):
+    def boom(ref, uid, progress, as_root=False):
         raise nixapps.NixAppError("hash mismatch")
     monkeypatch.setattr(nixapps, "install", boom)
     manager = apps.AppManager(lambda *a: None, lambda ref, ok, err: finished.append((ref, ok, err)))

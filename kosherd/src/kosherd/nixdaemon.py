@@ -34,11 +34,17 @@ def build_gid() -> int | None:
 
 
 def allowed_users(policy: Policy) -> list[str]:
-    """Usernames that may talk to the daemon: root, then every managed
-    account with some kind of internet, in uid order."""
+    """Usernames that may talk to the daemon: root, then the accounts an
+    administrator switched developer tools on for (#123), in uid order.
+
+    It used to be every account with internet, which let any supervised
+    account install anything from nixpkgs from a shell and run builds as
+    the build users, outside its own filter. The Store's installs still
+    reach everyone: kosherd runs them as root into the account's profile.
+    """
     names = ["root"]
-    for user in sorted(policy.effective_users(), key=lambda u: u.uid):
-        if user.mode != "none" and user.username not in names:
+    for user in sorted(policy.developer_accounts(), key=lambda u: u.uid):
+        if user.username not in names:
             names.append(user.username)
     return names
 
@@ -46,7 +52,7 @@ def allowed_users(policy: Policy) -> list[str]:
 def render(policy: Policy) -> str:
     return (
         f"# Written by kosherd from policy revision {policy.revision}. DO NOT EDIT.\n"
-        "# Included by /etc/nix/nix.conf: who may use the Nix daemon. Every\n"
-        "# managed account whose kind of internet is not \"No internet\".\n"
+        "# Included by /etc/nix/nix.conf: who may use the Nix daemon — root and\n"
+        "# the accounts with developer tools switched on (#123).\n"
         f"allowed-users = {' '.join(allowed_users(policy))}\n"
     )

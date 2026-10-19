@@ -1064,6 +1064,33 @@ class UserDetailPage(Adw.NavigationPage):
             "approval."),
     }
 
+    def _developer_group(self, user: dict) -> Adw.PreferencesGroup:
+        """One switch (#123). Off, the Store installs catalogue apps and that
+        is all; on, the account can use nix, devbox and devenv itself and
+        reach the package registries. The sentence says what "on" opens, and
+        that the account's own web filter still applies to what it fetches."""
+        group = Adw.PreferencesGroup(title="Developer tools")
+        row = Adw.SwitchRow(
+            title="Developer tools",
+            subtitle="Lets this account use Nix, devbox and devenv from a terminal "
+                     "and install anything from nixpkgs, and reach the package "
+                     "registries (npm, PyPI, crates.io, GitHub) directly. Its web "
+                     "filter still applies to everything it fetches. Off, the "
+                     "Store is the only way to install.",
+            subtitle_lines=5,
+            active=bool(user.get("developer_tools", False)))
+
+        def on_toggle(switch, _param):
+            wanted = switch.get_active()
+            if wanted == bool(user.get("developer_tools", False)):
+                return
+            self._gated(lambda pw: self.win.client.set_developer_tools(user["uid"], wanted, pw),
+                        f"{user['username']}: developer tools {'on' if wanted else 'off'}")
+
+        row.connect("notify::active", on_toggle)
+        group.add(row)
+        return group
+
     def _apps_tab(self, user: dict) -> list[Adw.PreferencesGroup]:
         """Apps on this computer, from one user's point of view.
 
@@ -1147,7 +1174,8 @@ class UserDetailPage(Adw.NavigationPage):
         self.apps_list.append(Adw.ActionRow(title="Loading…"))
         self.apps_group.add(self.apps_list)
         self._load_apps(user)
-        return [installs_group, kinds_group, self.blocked_apps_group, self.apps_group]
+        return [installs_group, self._developer_group(user), kinds_group,
+                self.blocked_apps_group, self.apps_group]
 
     # -- kinds --
 

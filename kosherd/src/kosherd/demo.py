@@ -355,6 +355,10 @@ class DemoClient:
     def _time_state(self, u):
         return timelimits.status(u.get("time"), self.used_today.get(u["uid"], 0))
 
+    def set_developer_tools(self, uid, enabled, pw=""):
+        self._user(uid)["developer_tools"] = bool(enabled)
+        self._change(uid, "SetDeveloperTools", [uid, bool(enabled)])
+
     def set_boot_menu_password(self, password, pw=""):
         self._boot_menu = True
         self._change(None, "SetBootMenuPassword", [])

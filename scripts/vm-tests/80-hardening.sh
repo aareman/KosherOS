@@ -311,8 +311,12 @@ else
 fi
 check "[N1] build users cannot reach loopback services (config)" 0 \
     bash -c 'nft list chain inet kosher output | grep -qE "skgid .*oif \"lo\" .*reject"'
-check "[N1] the builders' reach is names, not CDN edges (config)" 1 \
-    bash -c 'grep -E "sys4" /etc/kosher/dnsmasq.d/whitelist.conf | grep -qiE "cloudfront|cloudflare\.docker|googleapis"'
+# The builders used to get the whole system address set, CDN edges and
+# all; now their web goes through the proxy and the chain grants no set.
+check "[N1] the builders get no address set of their own (config)" 1 \
+    bash -c 'nft list chain inet kosher nix_build 2>/dev/null | grep -q "@sys4"'
+check "[N1] the builders' web is redirected into the proxy (config)" 0 \
+    bash -c 'nft list chain inet kosher dns_redirect | grep -qE "skgid .*tcp dport \{ 80, 443 \} redirect"'
 # N2 is measured below, once wlkid is back in whitelist mode.
 image_only "[N6] no development registry in the image policy" \
     && check "[N6] no development registry in the image policy" 1 \

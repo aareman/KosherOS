@@ -163,6 +163,8 @@ def test_the_guardian_gate_covers_every_filter_weakening_method():
                 "Enrol", "Unenrol", "SetAdBlock", "SetTimeLimits",
                 # Beyond the web: video calls and extra ports widen reach.
                 "SetNetworkAccess",
+                # Developer tools: the Nix daemon and the registries, directly.
+                "SetDeveloperTools",
                 # The boot menu is the way round every other protection.
                 "SetBootMenuPassword",
                 # Not a filter setting, but the same kind of decision: it

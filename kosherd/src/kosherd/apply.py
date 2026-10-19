@@ -88,12 +88,28 @@ def write_mitm_rules(policy: Policy) -> None:
             "language_filter": getattr(user, "language_filter", "off"),
             "youtube": user.youtube,
         }
+    listen_ports = sorted(ports.values())
+    if nixdaemon.build_gid() is not None:
+        # The Nix build users (#123): a supervised identity of their own,
+        # judged like the strictest account — the default categories, bare
+        # addresses and DoH refused — and no picture or text scoring, since
+        # what a build fetches is a tarball, not a page.
+        per_user["builder"] = {
+            "port": nft.BUILDER_PORT,
+            "rules": [],
+            "blocked_categories": list(categories_mod.DEFAULT_BLOCKED),
+            "media_level": "none",
+            "cover_style": "frost",
+            "language_filter": "off",
+            "youtube": {},
+        }
+        listen_ports.append(nft.BUILDER_PORT)
     MITM_DIR.mkdir(parents=True, exist_ok=True)
     _write_atomic(MITM_RULES_PATH, json.dumps(per_user, indent=2) + "\n", mode=0o644)
-    # The listener list, one transparent mode per user port. systemd splits
-    # the unquoted $MITM_MODES on whitespace into separate arguments.
+    # The listener list, one transparent mode per port. systemd splits the
+    # unquoted $MITM_MODES on whitespace into separate arguments.
     modes = " ".join(f"--mode transparent@127.0.0.1:{port}"
-                     for port in sorted(ports.values()))
+                     for port in sorted(listen_ports))
     # Beside the rules file (not a fixed path), so a relocated rules file in
     # a test or a future layout takes its listener list with it. Read by
     # kosher-mitm.service as EnvironmentFile.
@@ -194,7 +210,11 @@ def apply_policy(policy: Policy) -> None:
         raise ApplyError(f"nft load failed: {res.stderr}")
 
     write_mitm_rules(policy)
-    inspected = any(u.mode == "filtered" for u in policy.effective_users())
+    # The proxy runs for a filtered account — and wherever Nix is installed,
+    # because the build users' fetches go through it (#123): a stopped proxy
+    # would refuse every build, not let it through.
+    inspected = (any(u.mode == "filtered" for u in policy.effective_users())
+                 or nixdaemon.build_gid() is not None)
     if inspected:
         # Inspection needs the machine to trust the proxy's CA, or every
         # HTTPS page would warn. Generated once, on first use.

@@ -273,6 +273,12 @@ class UserPolicy:
     # web nor mail; everything not named is refused.
     video_calls: bool = True
     extra_ports: list[int] = field(default_factory=list)
+    # Developer tools (#123): may this account use the Nix daemon itself —
+    # nix, devbox, devenv from a shell — and reach the package registries
+    # directly? Off by default: the Store still installs catalogue apps for
+    # everyone through kosherd, and an account that only browses never
+    # needs a build daemon that fetches as a system user.
+    developer_tools: bool = False
     # The group this account is in (a key in Policy.custom_profiles), or
     # None. Explicit, never inferred from matching settings: an account may
     # differ from its group and still belong to it, and a change to the
@@ -319,6 +325,8 @@ class UserPolicy:
             d["video_calls"] = False
         if self.extra_ports:
             d["extra_ports"] = sorted(set(int(p) for p in self.extra_ports))
+        if self.developer_tools:
+            d["developer_tools"] = True
         return d
 
 
@@ -436,8 +444,15 @@ class Policy:
         return users
 
     def effective_system_whitelist(self) -> list[str]:
-        return list(dict.fromkeys([*BUILTIN_SYSTEM_WHITELIST, *DEVELOPER_REGISTRIES,
-                                   *self.system_whitelist]))
+        """What every account may reach on 80/443 without the proxy: the
+        machine's own needs. The developer registries are NOT here (#123):
+        they went in once for every account and made "whitelist only" mean
+        the family's list plus GitHub; a developer-flagged account reaches
+        them through its own mode (whitelists.effective adds them)."""
+        return list(dict.fromkeys([*BUILTIN_SYSTEM_WHITELIST, *self.system_whitelist]))
+
+    def developer_accounts(self) -> list["UserPolicy"]:
+        return [u for u in self.effective_users() if u.developer_tools and u.mode != "none"]
 
     def to_dict(self) -> dict:
         return {
@@ -484,6 +499,7 @@ class Policy:
                     time=dict(u.get("time", {})),
                     video_calls=bool(u.get("video_calls", True)),
                     extra_ports=[int(p) for p in u.get("extra_ports", [])],
+                    developer_tools=bool(u.get("developer_tools", False)),
                     profile=u.get("profile") or None,
                 )
                 for u in doc["users"]

@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import pwd
 import shutil
 import subprocess
@@ -95,13 +96,63 @@ def installed(uid: int) -> set[str]:
     return set(_profile_entries(uid))
 
 
-def _argv(uid: int, *nix_args: str) -> list[str]:
-    """`nix ...` as the account, with a clean environment of its own.
+def _make_dirs_as(path: Path, pw) -> None:
+    """Create `path` and any missing parents inside the account's home,
+    each owned by the account.
+
+    The Store's root install runs before an account may ever have signed
+    in, when ~/.local does not exist yet. Made by root, ~/.local was
+    root's: the account could not write ~/.local/share, so the app got no
+    launcher and the desktop's own first sign-in had nowhere to keep its
+    files. Only what nix itself writes inside the profiles directory (the
+    generation links) is root's.
+    """
+    home = Path(pw.pw_dir)
+    missing = []
+    current = path
+    while current != home and home in current.parents and not current.exists():
+        missing.append(current)
+        current = current.parent
+    for directory in reversed(missing):
+        directory.mkdir()
+        shutil.chown(directory, pw.pw_uid, pw.pw_gid)
+
+
+def _link_profile_as(profile: Path, pw) -> None:
+    """~/.nix-profile -> the profile, owned by the account, as nix makes it
+    when it runs as the account itself.
+
+    The session's PATH finds Store apps through ~/.nix-profile/bin
+    (environment.d). `nix --profile` as root writes the profile and makes
+    no such link, so an app installed that way was not on the PATH, and
+    the desktop hid its launcher as a command it could not find. An
+    existing link or file is the account's and is left alone.
+    """
+    link = Path(pw.pw_dir) / ".nix-profile"
+    if link.exists() or link.is_symlink():
+        return
+    link.symlink_to(profile)
+    os.lchown(link, pw.pw_uid, pw.pw_gid)
+
+
+def _argv(uid: int, *nix_args: str, as_root: bool = False) -> list[str]:
+    """`nix ...` as the account, with a clean environment of its own — or,
+    for an account without developer tools (#123), as root into that
+    account's profile: the daemon refuses such an account directly, and
+    the Store is its only way to install.
 
     runuser alone would hand nix root's HOME, and the profile would land
     in /root. --impure is what lets NIXPKGS_ALLOW_UNFREE through.
     """
     pw = pwd.getpwuid(uid)
+    if as_root:
+        profile = profile_dir(uid)
+        _make_dirs_as(profile.parent, pw)
+        _link_profile_as(profile, pw)
+        return [
+            "env", "NIXPKGS_ALLOW_UNFREE=1", f"NIX_SSL_CERT_FILE={CA_BUNDLE}",
+            "nix", *nix_args, "--profile", str(profile),
+        ]
     return [
         "runuser", "-u", pw.pw_name, "--",
         "env", "-i",
@@ -156,26 +207,26 @@ def _desktop(uid: int) -> None:
         log.warning("desktop entries for uid %d not linked: %s", uid, (res.stderr or "").strip())
 
 
-def install(ref: str, uid: int, on_progress) -> None:
+def install(ref: str, uid: int, on_progress, as_root: bool = False) -> None:
     name = package(ref)
     on_progress(ref, 0, "Looking up…")
-    _run(ref, _argv(uid, "profile", "install", "--impure", PREFIX + name), on_progress)
+    _run(ref, _argv(uid, "profile", "install", "--impure", PREFIX + name, as_root=as_root), on_progress)
     _desktop(uid)
 
 
-def remove(ref: str, uid: int, on_progress) -> None:
+def remove(ref: str, uid: int, on_progress, as_root: bool = False) -> None:
     name = package(ref)
     name = _profile_entries(uid).get(ref, name)
     on_progress(ref, 0, "Removing…")
-    _run(ref, _argv(uid, "profile", "remove", name), on_progress)
+    _run(ref, _argv(uid, "profile", "remove", name, as_root=as_root), on_progress)
     _desktop(uid)
 
 
-def upgrade(ref: str, uid: int, on_progress) -> None:
+def upgrade(ref: str, uid: int, on_progress, as_root: bool = False) -> None:
     name = package(ref)
     name = _profile_entries(uid).get(ref, name)
     on_progress(ref, 0, "Updating…")
-    _run(ref, _argv(uid, "profile", "upgrade", "--impure", name), on_progress)
+    _run(ref, _argv(uid, "profile", "upgrade", "--impure", name, as_root=as_root), on_progress)
     _desktop(uid)
 
 

@@ -95,6 +95,28 @@ def installed(uid: int) -> set[str]:
     return set(_profile_entries(uid))
 
 
+def _make_dirs_as(path: Path, pw) -> None:
+    """Create `path` and any missing parents inside the account's home,
+    each owned by the account.
+
+    The Store's root install runs before an account may ever have signed
+    in, when ~/.local does not exist yet. Made by root, ~/.local was
+    root's: the account could not write ~/.local/share, so the app got no
+    launcher and the desktop's own first sign-in had nowhere to keep its
+    files. Only what nix itself writes inside the profiles directory (the
+    generation links) is root's.
+    """
+    home = Path(pw.pw_dir)
+    missing = []
+    current = path
+    while current != home and home in current.parents and not current.exists():
+        missing.append(current)
+        current = current.parent
+    for directory in reversed(missing):
+        directory.mkdir()
+        shutil.chown(directory, pw.pw_uid, pw.pw_gid)
+
+
 def _argv(uid: int, *nix_args: str, as_root: bool = False) -> list[str]:
     """`nix ...` as the account, with a clean environment of its own — or,
     for an account without developer tools (#123), as root into that
@@ -107,7 +129,7 @@ def _argv(uid: int, *nix_args: str, as_root: bool = False) -> list[str]:
     pw = pwd.getpwuid(uid)
     if as_root:
         profile = profile_dir(uid)
-        profile.parent.mkdir(parents=True, exist_ok=True)
+        _make_dirs_as(profile.parent, pw)
         return [
             "env", "NIXPKGS_ALLOW_UNFREE=1", f"NIX_SSL_CERT_FILE={CA_BUNDLE}",
             "nix", *nix_args, "--profile", str(profile),

@@ -10,6 +10,7 @@ loopback refused.
 """
 
 import json
+from pathlib import Path
 
 import pytest
 
@@ -159,10 +160,23 @@ def test_a_supervised_accounts_store_install_runs_as_root_into_its_profile(monke
         pw_name, pw_dir, pw_uid, pw_gid = "kid", str(tmp_path / "kid"), 1001, 1001
 
     monkeypatch.setattr(pwd_mod, "getpwuid", lambda uid: PW())
+    owned = []
+    monkeypatch.setattr(nixapps.shutil, "chown", lambda path, u, g: owned.append((Path(path), u, g)))
+    (tmp_path / "kid").mkdir()
     argv = nixapps._argv(1001, "profile", "install", "nixpkgs#hello", as_root=True)
     assert argv[0] == "env" and "runuser" not in argv
     assert argv[-2:] == ["--profile", str(tmp_path / "kid/.local/state/nix/profiles/profile")]
     assert (tmp_path / "kid/.local/state/nix/profiles").is_dir()
+    # Every folder made on the way belongs to the account, never to root:
+    # a root ~/.local left a fresh account with no launcher and nowhere
+    # for its first sign-in to write.
+    made = [tmp_path / "kid" / p for p in
+            (".local", ".local/state", ".local/state/nix", ".local/state/nix/profiles")]
+    assert owned == [(p, 1001, 1001) for p in made]
+    # ...and a second install changes nothing that is already there.
+    owned.clear()
+    nixapps._argv(1001, "profile", "install", "nixpkgs#hello", as_root=True)
+    assert owned == []
     # a developer's own install still runs as the account
     own = nixapps._argv(1001, "profile", "install", "nixpkgs#hello")
     assert own[:3] == ["runuser", "-u", "kid"]

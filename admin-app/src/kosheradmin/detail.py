@@ -1067,17 +1067,19 @@ class UserDetailPage(Adw.NavigationPage):
     def _developer_group(self, user: dict) -> Adw.PreferencesGroup:
         """One switch (#123). Off, the Store installs catalogue apps and that
         is all; on, the account can use nix, devbox and devenv itself and
-        reach the package registries. The sentence says what "on" opens, and
+        reach the package registries and the big git hosts over SSH (#164).
+        The sentence says what "on" opens, and
         that the account's own web filter still applies to what it fetches."""
         group = Adw.PreferencesGroup(title="Developer tools")
         row = Adw.SwitchRow(
             title="Developer tools",
             subtitle="Lets this account use Nix, devbox and devenv from a terminal "
-                     "and install anything from nixpkgs, and reach the package "
-                     "registries (npm, PyPI, crates.io, GitHub) directly. Its web "
-                     "filter still applies to everything it fetches. Off, the "
+                     "and install anything from nixpkgs, reach the package "
+                     "registries (npm, PyPI, crates.io, GitHub) directly, and use "
+                     "git over SSH with GitHub, GitLab, Codeberg and Bitbucket. Its "
+                     "web filter still applies to everything it downloads. Off, the "
                      "Store is the only way to install.",
-            subtitle_lines=5,
+            subtitle_lines=6,
             active=bool(user.get("developer_tools", False)))
 
         def on_toggle(switch, _param):

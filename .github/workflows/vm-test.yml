@@ -99,9 +99,14 @@ jobs:
 
       - name: Host packages
         # bcvk runs QEMU from the host's /usr, not from the dev shell.
+        # Ubuntu 24.04 lets only programs with an AppArmor profile make
+        # user namespaces, and the dev shell's rootless podman has none
+        # ("failed to reexec: Permission denied"), so that is switched off
+        # on this throwaway runner.
         run: |
           sudo apt-get update
           sudo apt-get install -y qemu-system-x86 qemu-utils uidmap
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
 
       - uses: cachix/install-nix-action@v31
 

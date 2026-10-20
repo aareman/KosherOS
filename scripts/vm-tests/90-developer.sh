@@ -78,11 +78,15 @@ DaemonClient().install_app_for(pwd.getpwnam("wlkid").pw_uid, "nixpkgs#gh")
 print("QUEUED")
 PY
 )
+queued=0
 case "$out" in
-    *QUEUED*) ok "an administrator may install it for a filtered account" ;;
+    *QUEUED*) ok "an administrator may install it for a filtered account"; queued=1 ;;
     *) bad "the install was refused: $(printf '%s' "$out" | tail -2 | head -c 240)" ;;
 esac
+# Wait for the install only when one was queued: a refused install never
+# arrives, and waiting the full ten minutes for it only made the run slow.
 for _ in $(seq 1 120); do
+    [ "$queued" = 1 ] || break
     has_gh wlkid && break
     sleep 5
 done
@@ -104,6 +108,8 @@ section "Nix apps find the graphics drivers (#157)"
 # first boot with a network; wait for it rather than racing it.
 for _ in $(seq 1 120); do
     systemctl is-active --quiet kosher-nix-opengl.service && break
+    # A service that has already failed will not become active by waiting.
+    systemctl is-failed --quiet kosher-nix-opengl.service && break
     sleep 5
 done
 check "the driver service has run" 0 systemctl is-active --quiet kosher-nix-opengl.service

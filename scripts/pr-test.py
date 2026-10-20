@@ -40,6 +40,7 @@ import shutil
 import socket
 import subprocess
 import sys
+import tempfile
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -130,14 +131,15 @@ class Stage:
 
     def check(self, name: str, ok: bool, detail: str = "") -> bool:
         self.checks.append({"name": name, "ok": bool(ok), "detail": detail.strip()[-1500:]})
-        print(f"  {'PASS' if ok else 'FAIL'}  {name}")
+        print(f"  {'PASS' if ok else 'FAIL'}  [{self.name}] {name}", flush=True)
         if not ok and detail:
             print("        " + detail.strip()[-600:].replace("\n", "\n        "))
         return ok
 
     def as_dict(self) -> dict:
         return {"name": self.name, "status": self.status, "seconds": self.seconds,
-                "checks": self.checks, "note": self.note, "log": self.log.name}
+                "checks": self.checks, "note": self.note, "log": self.log.name,
+                "timings": getattr(self, "timings", None)}
 
 
 class StageError(Exception):
@@ -218,11 +220,14 @@ class Machine:
     """The test disk booted with a screen, ssh on a free port, and QMP."""
 
     def __init__(self, overlay: Path, outdir: Path, key: Path, gl: bool,
-                 console: str = "desktop-console.log"):
+                 console: str = "desktop-console.log", mem: int = 4096):
         self.outdir = outdir
+        outdir.mkdir(parents=True, exist_ok=True)
         self.key = key
         self.port = free_port()
-        self.qmp_path = outdir / "qmp.sock"
+        # Unix socket paths are limited to 108 bytes; the run directory is deeper.
+        self.sockdir = Path(tempfile.mkdtemp(prefix="kpt-"))
+        self.qmp_path = self.sockdir / "qmp.sock"
         self.qmp_path.unlink(missing_ok=True)
         pub = key.with_suffix(".pub").read_text().strip()
         if gl:
@@ -232,12 +237,12 @@ class Machine:
         else:
             qemu = ["qemu-system-x86_64", "-device", "virtio-vga", "-display", "none"]
         cmd = qemu + [
-            "-enable-kvm", "-cpu", "host", "-m", "4096", "-smp", "4",
+            "-enable-kvm", "-cpu", "host", "-m", str(mem), "-smp", "4",
             "-drive", f"file={overlay},if=virtio",
             "-netdev", f"user,id=n0,hostfwd=tcp:127.0.0.1:{self.port}-:22",
             "-device", "virtio-net-pci,netdev=n0",
             "-qmp", f"unix:{self.qmp_path},server=on,wait=off",
-            "-vnc", f"unix:{outdir / 'vnc.sock'}",
+            "-vnc", f"unix:{self.sockdir / 'vnc.sock'}",
             "-serial", f"file:{outdir / console}",
             # Root's key for this run, as a credential: the image's
             # tmpfiles write it to /root/.ssh/authorized_keys at boot.
@@ -314,6 +319,12 @@ class Machine:
         return path
 
     def stop(self) -> None:
+        try:
+            self._stop()
+        finally:
+            shutil.rmtree(self.sockdir, ignore_errors=True)
+
+    def _stop(self) -> None:
         if self.proc.poll() is not None:
             return
         try:
@@ -456,7 +467,8 @@ def session_of(vm: Machine, user: str) -> dict:
     return {}
 
 
-def stage_desktop(st: Stage, machine: Path, outdir: Path, key: Path, gl: bool) -> None:
+def stage_desktop(st: Stage, machine: Path, outdir: Path, key: Path, gl: bool,
+                  parts: set = frozenset({"session", "filter"})) -> None:
     vm = Machine(machine, outdir, key, gl)
     log = st.log.open("a")
 
@@ -509,173 +521,426 @@ def stage_desktop(st: Stage, machine: Path, outdir: Path, key: Path, gl: bool) -
         st.check("the session is Wayland", props.get("Type") == "wayland", str(props))
         sid = props.get("Id", "")
 
-        # The desktop settles: the shell, then the user's services.
-        time.sleep(20)
-        vm.shoot("05-desktop")
-        state = wait_for(lambda: (lambda r: r[1].strip() if r[1].strip() in ("running", "degraded") else "")(
-            vm.user_unit(USER, "is-system-running", "")), 60)
-        _, failed = vm.user_unit(USER, "list-units --failed --no-legend --plain", "")
-        st.check("the account's user services all started",
-                 state == "running" and not failed.strip(),
-                 f"state={state or 'starting'}\n{failed}")
+        if "session" in parts:
+            # The desktop settles: the shell, then the user's services.
+            time.sleep(20)
+            vm.shoot("05-desktop")
+            state = wait_for(lambda: (lambda r: r[1].strip() if r[1].strip() in ("running", "degraded") else "")(
+                vm.user_unit(USER, "is-system-running", "")), 60)
+            _, failed = vm.user_unit(USER, "list-units --failed --no-legend --plain", "")
+            st.check("the account's user services all started",
+                     state == "running" and not failed.strip(),
+                     f"state={state or 'starting'}\n{failed}")
 
-        # polkit, asked about the shell's own process, as polkit asks
-        # about anything the person starts from the desktop.
-        rc, shell_pid = sh(f"pgrep -u {USER} -x gnome-shell | head -1")
-        shell_pid = shell_pid.strip()
-        rc, out = sh(f"pkcheck --action-id org.kosherlinux.use-store --process {shell_pid}")
-        st.check("polkit lets the signed-in account use the Store", rc == 0, out)
-        rc, out = sh(f"pkcheck --action-id org.kosherlinux.manage-filter --process {shell_pid}")
-        st.check("polkit asks for an administrator before a filter change", rc == 2, f"exit {rc}: {out}")
-        # A real password prompt. A filter change from the account's own
-        # session (what the admin app does when opened on a child's
-        # account) waits on polkit, which puts the administrator's
-        # password prompt on the screen. Each prompt that appears is
-        # answered there, and counted.
-        vm.start_as_user(USER, "pr-test-prompt",
-                         f"kosherctl set-mode $(id -u {USER}) filtered --guardian-password '' > /tmp/pr-test-prompt.out 2>&1; echo $? >> /tmp/pr-test-prompt.out")
-        prompts, done = 0, ""
-        deadline = time.monotonic() + 90
-        while time.monotonic() < deadline:
-            done = sh("test -s /tmp/pr-test-prompt.out && tail -1 /tmp/pr-test-prompt.out")[1].strip()
-            if done:
-                break
-            shot = vm.shoot(f"06-password-prompt-{prompts + 1}")
-            if prompt_on_screen(shot):
-                prompts += 1
-                vm.qmp.type(ADMIN_PASSWORD + "\n")
-                time.sleep(4)
-            else:
+            # polkit, asked about the shell's own process, as polkit asks
+            # about anything the person starts from the desktop.
+            rc, shell_pid = sh(f"pgrep -u {USER} -x gnome-shell | head -1")
+            shell_pid = shell_pid.strip()
+            rc, out = sh(f"pkcheck --action-id org.kosherlinux.use-store --process {shell_pid}")
+            st.check("polkit lets the signed-in account use the Store", rc == 0, out)
+            rc, out = sh(f"pkcheck --action-id org.kosherlinux.manage-filter --process {shell_pid}")
+            st.check("polkit asks for an administrator before a filter change", rc == 2, f"exit {rc}: {out}")
+            # A real password prompt. A filter change from the account's own
+            # session (what the admin app does when opened on a child's
+            # account) waits on polkit, which puts the administrator's
+            # password prompt on the screen. Each prompt that appears is
+            # answered there, and counted.
+            vm.start_as_user(USER, "pr-test-prompt",
+                             f"kosherctl set-mode $(id -u {USER}) filtered --guardian-password '' > /tmp/pr-test-prompt.out 2>&1; echo $? >> /tmp/pr-test-prompt.out")
+            prompts, done = 0, ""
+            deadline = time.monotonic() + 90
+            while time.monotonic() < deadline:
+                done = sh("test -s /tmp/pr-test-prompt.out && tail -1 /tmp/pr-test-prompt.out")[1].strip()
+                if done:
+                    break
+                shot = vm.shoot(f"06-password-prompt-{prompts + 1}")
+                if prompt_on_screen(shot):
+                    prompts += 1
+                    vm.qmp.type(ADMIN_PASSWORD + "\n")
+                    time.sleep(4)
+                else:
+                    time.sleep(2)
+            vm.shoot("07-after-prompt")
+            _, auth = sh("journalctl -b -u polkit --no-pager | grep -i 'authenticate' | tail -5")
+            st.check("the administrator's password prompt appears on the screen", prompts > 0,
+                     "no prompt was seen in the screenshots")
+            st.check("the password typed into it is accepted and the change goes through",
+                     done == "0", f"kosherctl exit: {done or 'still waiting'}\n{auth}\n"
+                     + sh("cat /tmp/pr-test-prompt.out")[1])
+            st.check("one change asks for the password once", prompts <= 1,
+                     f"{prompts} prompts for one `kosherctl set-mode`\n{auth}")
+
+            # The apps open in the session and stay open. The account's own
+            # apps open without a password; the admin app on a child's account
+            # asks for an administrator's, which is what the rule is for.
+            for app, cmd, wants_prompt in [("Look", "kosher-look", False),
+                                           ("admin app", "kosher-admin", True),
+                                           ("My Filter", "kosher-my-filter", False),
+                                           ("Store", "kosher-store", False)]:
+                unit = f"pr-test-{cmd}"
+                vm.start_as_user(USER, unit, cmd)
+                time.sleep(12)
+                shot = vm.shoot(f"08-{cmd}")
+                prompted = prompt_on_screen(shot)
+                rc, _ = vm.user_unit(USER, "is-active --quiet", unit)
+                _, journal = sh(f"journalctl -b --no-pager _UID=$(id -u {USER}) | grep -A8 'Traceback' | tail -20")
+                st.check(f"the {app} opens and stays open", rc == 0 and "Traceback" not in journal,
+                         journal or "the window closed by itself")
+                if wants_prompt:
+                    st.check(f"the {app} asks for an administrator's password", prompted,
+                             f"no prompt in {shot.name}")
+                else:
+                    st.check(f"the {app} opens without asking for a password", not prompted,
+                             f"an administrator's password prompt is on the screen: {shot.name}")
+                if prompted:
+                    vm.qmp.key("esc")
+                    time.sleep(2)
+                vm.user_unit(USER, "stop", unit)
                 time.sleep(2)
-        vm.shoot("07-after-prompt")
-        _, auth = sh("journalctl -b -u polkit --no-pager | grep -i 'authenticate' | tail -5")
-        st.check("the administrator's password prompt appears on the screen", prompts > 0,
-                 "no prompt was seen in the screenshots")
-        st.check("the password typed into it is accepted and the change goes through",
-                 done == "0", f"kosherctl exit: {done or 'still waiting'}\n{auth}\n"
-                 + sh("cat /tmp/pr-test-prompt.out")[1])
-        st.check("one change asks for the password once", prompts <= 1,
-                 f"{prompts} prompts for one `kosherctl set-mode`\n{auth}")
 
-        # The apps open in the session and stay open. The account's own
-        # apps open without a password; the admin app on a child's account
-        # asks for an administrator's, which is what the rule is for.
-        for app, cmd, wants_prompt in [("Look", "kosher-look", False),
-                                       ("admin app", "kosher-admin", True),
-                                       ("My Filter", "kosher-my-filter", False),
-                                       ("Store", "kosher-store", False)]:
-            unit = f"pr-test-{cmd}"
-            vm.start_as_user(USER, unit, cmd)
-            time.sleep(12)
-            shot = vm.shoot(f"08-{cmd}")
-            prompted = prompt_on_screen(shot)
-            rc, _ = vm.user_unit(USER, "is-active --quiet", unit)
-            _, journal = sh(f"journalctl -b --no-pager _UID=$(id -u {USER}) | grep -A8 'Traceback' | tail -20")
-            st.check(f"the {app} opens and stays open", rc == 0 and "Traceback" not in journal,
-                     journal or "the window closed by itself")
-            if wants_prompt:
-                st.check(f"the {app} asks for an administrator's password", prompted,
-                         f"no prompt in {shot.name}")
+        if "filter" in parts:
+            # The filter as a browser meets it: many connections at once, the
+            # literal block page, then Firefox itself.
+            script = f"""
+                loaded=0; pages=0; codes=""
+                for i in $(seq 16); do
+                  ( curl -s -m 30 {BLOCKED_URL} -o /tmp/pr-block-$i.html -w '%{{http_code}}' > /tmp/pr-block-$i.code ) &
+                done; wait
+                for i in $(seq 16); do
+                  c=$(cat /tmp/pr-block-$i.code); codes="$codes $c"
+                  case "$c" in 2*|3*) loaded=$((loaded+1));; esac
+                  grep -qs 'This page is blocked' /tmp/pr-block-$i.html && pages=$((pages+1))
+                done
+                echo "loaded=$loaded pages=$pages codes:$codes"
+                getent ahostsv4 www.unibet.com | head -1
+                curl -s -m 30 -o /dev/null -w 'allowed=%{{http_code}}\\n' {ALLOWED_URL}
+                curl -sv -m 30 -o /dev/null {ALLOWED_URL} 2>&1 | grep -i issuer
+            """
+            rc, reach = sh("curl -s -m 20 -o /dev/null -w '%{http_code}' https://example.com/")
+            if reach.strip() != "200":
+                st.checks.append({"name": "the filter as a browser meets it", "ok": True,
+                                  "detail": "skipped: no internet from the VM"})
+                print("  SKIP  the filter checks: no internet from the VM")
             else:
-                st.check(f"the {app} opens without asking for a password", not prompted,
-                         f"an administrator's password prompt is on the screen: {shot.name}")
-            if prompted:
-                vm.qmp.key("esc")
-                time.sleep(2)
-            vm.user_unit(USER, "stop", unit)
-            time.sleep(2)
-
-        # The filter as a browser meets it: many connections at once, the
-        # literal block page, then Firefox itself.
-        script = f"""
-            loaded=0; pages=0; codes=""
-            for i in $(seq 16); do
-              ( curl -s -m 30 {BLOCKED_URL} -o /tmp/pr-block-$i.html -w '%{{http_code}}' > /tmp/pr-block-$i.code ) &
-            done; wait
-            for i in $(seq 16); do
-              c=$(cat /tmp/pr-block-$i.code); codes="$codes $c"
-              case "$c" in 2*|3*) loaded=$((loaded+1));; esac
-              grep -qs 'This page is blocked' /tmp/pr-block-$i.html && pages=$((pages+1))
-            done
-            echo "loaded=$loaded pages=$pages codes:$codes"
-            getent ahostsv4 www.unibet.com | head -1
-            curl -s -m 30 -o /dev/null -w 'allowed=%{{http_code}}\\n' {ALLOWED_URL}
-            curl -sv -m 30 -o /dev/null {ALLOWED_URL} 2>&1 | grep -i issuer
-        """
-        rc, reach = sh("curl -s -m 20 -o /dev/null -w '%{http_code}' https://example.com/")
-        if reach.strip() != "200":
-            st.checks.append({"name": "the filter as a browser meets it", "ok": True,
-                              "detail": "skipped: no internet from the VM"})
-            print("  SKIP  the filter checks: no internet from the VM")
-        else:
-            rc, out = vm.as_user(USER, script, timeout=180)
-            log.write(out)
-            st.check("16 requests at once to a gambling site: none of them loads it",
-                     "loaded=0 " in out, out)
-            st.check("and every one of them gets the block page", "pages=16 " in out, out)
-            st.check("an ordinary site loads, through the proxy",
-                     "allowed=200" in out and "mitmproxy" in out.lower(), out)
-            vm.start_as_user(USER, "pr-test-firefox", f"firefox --new-window {BLOCKED_URL}")
-            time.sleep(25)
-            vm.shoot("09-firefox-blocked")
-            rc, activity = sh(f"kosherctl activity --user {USER}")
-            st.check("Firefox's traffic goes through the filter",
-                     "firefox" in activity.lower() or "mozilla" in activity.lower(), activity[-1200:])
-            st.check("the filter records Firefox's visit to the gambling site",
-                     "unibet" in activity.lower(), activity[-1200:])
-            vm.user_unit(USER, "stop", "pr-test-firefox")
+                rc, out = vm.as_user(USER, script, timeout=180)
+                log.write(out)
+                st.check("16 requests at once to a gambling site: none of them loads it",
+                         "loaded=0 " in out, out)
+                st.check("and every one of them gets the block page", "pages=16 " in out, out)
+                st.check("an ordinary site loads, through the proxy",
+                         "allowed=200" in out and "mitmproxy" in out.lower(), out)
+                vm.start_as_user(USER, "pr-test-firefox", f"firefox --new-window {BLOCKED_URL}")
+                time.sleep(25)
+                vm.shoot("09-firefox-blocked")
+                rc, activity = sh(f"kosherctl activity --user {USER}")
+                st.check("Firefox's traffic goes through the filter",
+                         "firefox" in activity.lower() or "mozilla" in activity.lower(), activity[-1200:])
+                st.check("the filter records Firefox's visit to the gambling site",
+                         "unibet" in activity.lower(), activity[-1200:])
+                vm.user_unit(USER, "stop", "pr-test-firefox")
     finally:
         log.close()
         vm.stop()
 
 
-def stage_suites(st: Stage, machine: Path, outdir: Path, key: Path, tree: Path) -> None:
-    vm = Machine(machine, outdir, key, gl=False, console="suites-console.log")
+
+
+# --- the suites, several machines at once ----------------------------------------
+
+# How long each suite took on one machine (seconds, measured), so the groups
+# come out even. A suite not listed counts as a minute.
+SUITE_SECONDS = {"10-core": 15, "20-enforcement": 30, "30-apps": 55, "40-guest": 30,
+                 "50-inspect": 30, "60-persistence": 110, "70-categories": 25,
+                 "80-hardening": 50, "90-developer": 200}
+
+# Waits that only make a failing check slower, cut short in the fast run.
+# --full leaves them as they are. Each one is listed in the report.
+FAST_CAPS = {
+    "NIX_CONFIG": "connect-timeout = 5\ndownload-attempts = 1",
+}
+
+
+def groups_for(suites: list[str], n: int) -> list[list[str]]:
+    """Split the suites into n groups of about equal time, each group in the
+    suites' own order."""
+    bins: list[list[str]] = [[] for _ in range(max(1, min(n, len(suites))))]
+    load = [0] * len(bins)
+    for suite in sorted(suites, key=lambda x: -SUITE_SECONDS.get(x, 60)):
+        i = load.index(min(load))
+        bins[i].append(suite)
+        load[i] += SUITE_SECONDS.get(suite, 60)
+    return [sorted(b) for b in bins if b]
+
+
+def child_overlay(base: Path, path: Path) -> Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.unlink(missing_ok=True)
+    subprocess.run(["qemu-img", "create", "-q", "-f", "qcow2", "-b", str(base.resolve()),
+                    "-F", "qcow2", str(path)], check=True)
+    return path
+
+
+def stage_suites(st: Stage, machine: Path, workdir: Path, key: Path, tree: Path,
+                 suites: list[str], caps: dict) -> None:
+    """Some of the target's scripts/vm-tests, one after another, on a
+    machine of their own (an overlay of the set-up machine)."""
+    overlay = child_overlay(machine, workdir / "machine.qcow2")
+    vm = Machine(overlay, workdir, key, gl=False, console="console.log", mem=3072)
+    st.timings = {}
     try:
-        if not st.check("the machine boots again and answers ssh", vm.wait_ssh()):
+        if not st.check("the machine boots and answers ssh", vm.wait_ssh()):
             raise StageError("no ssh")
         tar = subprocess.run(["tar", "-C", str(tree / "scripts"), "-czf", "-", "vm-tests"],
                              capture_output=True, check=True).stdout
         subprocess.run(vm.ssh_cmd() + ["rm -rf /tmp/kosher-vm-tests && mkdir -p /tmp/kosher-vm-tests && tar -xzf - -C /tmp/kosher-vm-tests --strip-components=1"],
                        input=tar, check=True)
-        with st.log.open("a") as fh:
-            p = subprocess.Popen(vm.ssh_cmd() + ["bash /tmp/kosher-vm-tests/run.sh"],
-                                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, errors="replace")
-            assert p.stdout is not None
-            for line in p.stdout:
-                fh.write(line)
-                sys.stdout.write("    " + line)
-            rc = p.wait()
-        text = re.sub(r"\x1b\[[0-9;]*m", "", st.log.read_text())
-        current = ""
-        for line in text.splitlines():
-            m = re.match(r"^═══ (\S+) ═══", line.strip())
-            if m:
-                current = m.group(1)
-                continue
-            m = re.match(r"^\s*(PASS|FAIL|SKIP)\s+(.*)$", line)
-            if m and current:
-                st.checks.append({"name": f"{current}: {m.group(2)}",
-                                  "ok": m.group(1) != "FAIL",
+        exports = " ".join(f"{k}={shlex.quote(v)}" for k, v in caps.items())
+        for suite in suites:
+            t0 = time.monotonic()
+            with st.log.open("a") as fh:
+                p = subprocess.Popen(vm.ssh_cmd() + [f"{exports} bash /tmp/kosher-vm-tests/run.sh {suite}"],
+                                     stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+                                     errors="replace")
+                assert p.stdout is not None
+                out = []
+                for line in p.stdout:
+                    fh.write(line)
+                    out.append(line)
+                rc = p.wait()
+            st.timings[suite] = round(time.monotonic() - t0)
+            text = re.sub(r"\x1b\[[0-9;]*m", "", "".join(out))
+            before = len(st.checks)
+            for m in re.finditer(r"^\s*(PASS|FAIL|SKIP):?\s+(.*)$", text, re.M):
+                st.checks.append({"name": f"{suite}: {m.group(2)}", "ok": m.group(1) != "FAIL",
                                   "detail": "skipped" if m.group(1) == "SKIP" else ""})
-        if rc != 0 and not any(not c["ok"] for c in st.checks):
-            st.check("run.sh finished", False, f"exit {rc}")
+            bad = sum(1 for c in st.checks[before:] if not c["ok"])
+            if rc != 0 and not bad:
+                st.check(f"{suite}: run.sh finished", False, f"exit {rc}")
+                bad = 1
+            print(f"  [{st.name}] {suite}: {len(st.checks) - before - bad} passed, {bad} failed "
+                  f"in {st.timings[suite]}s", flush=True)
     finally:
         vm.stop()
+        overlay.unlink(missing_ok=True)
+
+
+# --- the set-up machine: a cached base, switched to the change's image ------------
+
+CACHE = REPO / "build" / "pr-test" / "cache"
+REGISTRY = "kosher-pr-test-registry"
+REGISTRY_PORT = 5078
+BASE_MAX_AGE_DAYS = 7
+
+
+def git(*args: str) -> str:
+    return subprocess.run(["git", "-C", str(REPO), *args], capture_output=True, text=True,
+                          check=True).stdout.strip()
+
+
+def changes_against_master(sha: str, env: dict, log: Path) -> tuple[list[str], str, str]:
+    """Paths the target changes since it left master, the Containerfile's
+    diff, and master's commit."""
+    run_logged(["git", "-C", str(REPO), "fetch", "--quiet", "origin", "master"], log, env)
+    master = git("rev-parse", "FETCH_HEAD")
+    base = git("merge-base", sha, master)
+    if base == sha:
+        return [], "", master
+    changed = git("diff", "--name-only", base, sha).splitlines()
+    cf = git("diff", "-U0", base, sha, "--", "os-image/Containerfile")
+    return changed, cf, master
+
+
+def registry_up(env: dict, log: Path) -> None:
+    """The harness's own registry, so a machine can pull the change's image
+    (10.0.2.2 is the host from inside QEMU). Its blobs persist between runs,
+    so only the layers a change made are pushed again."""
+    if subprocess.run(["podman", "container", "exists", REGISTRY]).returncode != 0:
+        run_logged(["podman", "create", "--name", REGISTRY, "-p", f"127.0.0.1:{REGISTRY_PORT}:5000",
+                    "-v", f"{REGISTRY}:/var/lib/registry", "docker.io/library/registry:2"], log, env)
+    run_logged(["podman", "start", REGISTRY], log, env)
+    for _ in range(40):
+        try:
+            with socket.create_connection(("127.0.0.1", REGISTRY_PORT), timeout=1):
+                return
+        except OSError:
+            time.sleep(0.5)
+    raise StageError("the harness registry did not start")
+
+
+def push(image: str, tag: str, env: dict, log: Path) -> str:
+    ref = f"127.0.0.1:{REGISTRY_PORT}/kosher-linux:{tag}"
+    digestfile = log.parent / f"{tag}.digest"
+    if run_logged(["podman", "push", "--tls-verify=false", "--digestfile", str(digestfile),
+                   image, ref], log, env, timeout=1800) != 0:
+        raise StageError(f"could not push {image}")
+    return digestfile.read_text().strip()
+
+
+SWITCH_SETUP = f"""set -e
+mkdir -p /etc/containers/registries.conf.d
+printf '[[registry]]\\nlocation = "10.0.2.2:{REGISTRY_PORT}"\\ninsecure = true\\n' \\
+    > /etc/containers/registries.conf.d/50-pr-test.conf
+python3 -c 'import json; p = "/etc/containers/policy.json"; d = json.load(open(p)); d.setdefault("transports", {{}}).setdefault("docker", {{}})["10.0.2.2:{REGISTRY_PORT}"] = [{{"type": "insecureAcceptAnything"}}]; json.dump(d, open(p, "w"), indent=4)'
+"""
+
+
+CLEAN_SWITCH = f"""set -e
+rm -f /etc/containers/registries.conf.d/50-pr-test.conf
+python3 -c 'import json; p = "/etc/containers/policy.json"; d = json.load(open(p)); d.get("transports", {{}}).get("docker", {{}}).pop("10.0.2.2:{REGISTRY_PORT}", None); json.dump(d, open(p, "w"), indent=4)'
+"""
+
+
+def switch_machine(st: Stage, machine: Path, workdir: Path, key: Path, tag: str,
+                   digest: str) -> None:
+    """Boot the machine, `bootc switch` it to the pushed image, reboot into
+    it and check it is running that image: the update path a family's
+    machine takes, from the set-up state the cached base holds."""
+    vm = Machine(machine, workdir, key, gl=False, console="switch-console.log")
+    try:
+        if not st.check("the set-up machine boots and answers ssh", vm.wait_ssh()):
+            raise StageError("no ssh")
+        rc, out = vm.sh(SWITCH_SETUP + f"bootc switch 10.0.2.2:{REGISTRY_PORT}/kosher-linux:{tag}",
+                        timeout=1800)
+        with st.log.open("a") as fh:
+            fh.write(out)
+        if not st.check("bootc switch stages the image", rc == 0, out[-1500:]):
+            raise StageError("switch failed")
+        vm.sh("systemctl reboot", timeout=20)
+        time.sleep(10)
+        if not st.check("it boots into it", vm.wait_ssh()):
+            raise StageError("no ssh after the switch")
+        _, status = vm.sh("bootc status --json")
+        try:
+            booted = json.loads(status)["status"]["booted"]["image"]["imageDigest"]
+        except (ValueError, KeyError, TypeError):
+            booted = ""
+        st.check("the machine runs the change's image", booted == digest,
+                 f"booted {booted or '?'}, pushed {digest}")
+        # Take the harness's registry back out: a suite checks that no
+        # development registry is trusted (N6), and the machine must look
+        # like one that was updated, not one with a test hook left in it.
+        rc, out = vm.sh(CLEAN_SWITCH)
+        st.check("the harness registry is removed from the machine's trust again", rc == 0, out)
+    finally:
+        vm.stop()
+
+
+def find_base(master: str) -> tuple[Path | None, str]:
+    """A cached set-up base for master's commit, or a recent one."""
+    bases = []
+    for meta in CACHE.glob("base-*/meta.json"):
+        try:
+            m = json.loads(meta.read_text())
+        except ValueError:
+            continue
+        if (meta.parent / "setup.qcow2").exists():
+            bases.append((m.get("created", 0), m, meta.parent))
+    bases.sort(key=lambda b: b[0], reverse=True)
+    for _created, m, d in bases:
+        if m.get("master") == master:
+            return d, f"the cached base for master {master[:9]}, switched to this change's image"
+    if bases and time.time() - bases[0][0] < BASE_MAX_AGE_DAYS * 86400:
+        m, d = bases[0][1], bases[0][2]
+        return d, (f"the cached base for master {m['master'][:9]} "
+                   f"({(time.time() - m['created']) / 3600:.0f} h old), switched to this change's "
+                   f"image; a base is remade after {BASE_MAX_AGE_DAYS} days or with --fresh-base")
+    return None, ""
+
+
+def prune_bases(keep: Path) -> None:
+    """Keep the base in use and the newest other one; each is about 10 GB."""
+    others = sorted((d for d in CACHE.glob("base-*") if d != keep),
+                    key=lambda d: d.stat().st_mtime, reverse=True)
+    for d in others[1:]:
+        shutil.rmtree(d, ignore_errors=True)
+
+
+def make_base(st: Stage, master: str, sha: str, image: str, key: Path, env: dict) -> Path:
+    """Master's image, installed and set up by the wizard, then switched to
+    itself through the registry, so later switches pull only the layers a
+    change makes. Once per master commit (or week)."""
+    base_image = image if master == sha else "localhost/kosher-linux:pr-test-base"
+    if base_image != image:
+        btree = CACHE / "base-src"
+        subprocess.run(["git", "-C", str(REPO), "worktree", "remove", "--force", str(btree)],
+                       capture_output=True)
+        run_logged(["git", "-C", str(REPO), "worktree", "add", "--detach", str(btree), master],
+                   st.log, env)
+        try:
+            stage_build(st, btree, base_image, env)
+        finally:
+            subprocess.run(["git", "-C", str(REPO), "worktree", "remove", "--force", str(btree)],
+                           capture_output=True)
+    image_id = subprocess.run(["podman", "image", "inspect", base_image, "--format", "{{.Id}}"],
+                              capture_output=True, text=True).stdout.strip()
+    # Named for master's revision: a rebuild of the same revision can get a
+    # new image id, and a disk made from either is the same machine.
+    base = CACHE / f"base-{master[:12]}"
+    base.mkdir(parents=True, exist_ok=True)
+    setup = base / "setup.qcow2"
+    # A base an interrupted run left half made carries on from where it got.
+    stamp = base / ".image-id"
+    if not ((base / "disk.qcow2").exists() and stamp.exists()):
+        for f in base.iterdir():
+            shutil.rmtree(f) if f.is_dir() else f.unlink()
+        stage_disk(st, base_image, base / "disk.qcow2", env)
+    else:
+        st.check("a bootable disk is made without root (kept from an earlier run)", True)
+    boot_log = base / "boot.log"
+    if not (setup.exists() and boot_log.exists()):
+        e = dict(env, KOSHER_IMAGE=base_image, PYTHONUNBUFFERED="1")
+        run_logged([sys.executable, str(REPO / "scripts/boot-test.py"), str(base / "disk.qcow2"),
+                    "--log", str(base / "boot-console.log"), "--keep-overlay", str(setup)],
+                   boot_log, e, timeout=1800)
+    if not re.search(r"PASS\s+setup completes", boot_log.read_text()):
+        child_overlay(base / "disk.qcow2", setup)
+        vm = Machine(setup, base, key, gl=False, console="setup-console.log")
+        try:
+            vm.wait_ssh()
+            rc, out = vm.sh(f"kosherctl setup --username {ADMIN_USER} --full-name 'Boot Test' "
+                            "--password-stdin", input=ADMIN_PASSWORD + "\n", timeout=180)
+        finally:
+            vm.stop()
+        st.check("the base is set up (over ssh: the wizard did not finish)", rc == 0, out)
+    else:
+        st.check("the base is set up by the wizard", True)
+    registry_up(env, st.log)
+    digest = push(base_image, "base", env, st.log)
+    switch_machine(st, setup, base, key, "base", digest)
+    (base / "meta.json").write_text(json.dumps(
+        {"master": master, "image_id": stamp.read_text().strip(), "created": time.time()}))
+    if base_image != image:
+        subprocess.run(["podman", "rmi", "--ignore", base_image], capture_output=True)
+    return base
 
 
 # --- the report -----------------------------------------------------------------
 
 def write_report(outdir: Path, summary: dict) -> None:
     (outdir / "summary.json").write_text(json.dumps(summary, indent=2) + "\n")
+    sel = summary.get("selection") or {}
     lines = [f"# VM test of {summary['target']} ({summary['commit'][:9]})", "",
-             f"Result: **{summary['result']}**, in {summary['seconds'] / 60:.0f} minutes.", "",
-             "| Stage | Result | Time | Checks |", "|---|---|---|---|"]
+             f"Result: **{summary['result']}**, in {summary['seconds'] / 60:.1f} minutes "
+             f"({summary.get('mode', '')} run).", ""]
+    if sel:
+        lines += ["What runs, and why:", ""]
+        lines += [f"- {r}" for r in sel.get("reasons", [])] or ["- (nothing)"]
+        lines += ["", f"Selected: fresh install {'yes' if sel.get('boot') else 'no'}; "
+                  f"desktop {', '.join(sel.get('desktop', [])) or 'no'}; "
+                  f"suites {', '.join(sel.get('suites', [])) or 'none'}.", ""]
+    if summary.get("base"):
+        lines += [f"Machine: {summary['base']}.", ""]
+    if summary.get("caps"):
+        lines += ["Waits cut short in this run: " + "; ".join(summary["caps"]) + ".", ""]
+    lines += ["| Stage | Result | Time | Checks |", "|---|---|---|---|"]
     for s in summary["stages"]:
         n = len(s["checks"])
         bad = sum(1 for c in s["checks"] if not c["ok"])
         lines.append(f"| {s['name']} | {s['status']} | {s['seconds'] / 60:.1f} min | "
                      f"{n - bad} of {n} passed |")
+    timings = {k: v for s in summary["stages"] for k, v in (s.get("timings") or {}).items()}
+    if timings:
+        lines += ["", "Suites: " + ", ".join(f"{k} {v}s" for k, v in timings.items())]
     for s in summary["stages"]:
         failed = [c for c in s["checks"] if not c["ok"]]
         if failed or s["note"]:
@@ -687,33 +952,51 @@ def write_report(outdir: Path, summary: dict) -> None:
     (outdir / "report.md").write_text("\n".join(lines))
 
 
-def cleanup(args, outdir: Path, tree: Path, image: str, disk: Path, machine: Path) -> None:
-    """Remove what this run made, and only that."""
-    if args.keep:
-        return
-    machine.unlink(missing_ok=True)
-    shutil.rmtree(disk.parent, ignore_errors=True)
-    if tree != REPO:
-        subprocess.run(["git", "-C", str(REPO), "worktree", "remove", "--force", str(tree)],
-                       capture_output=True)
-    if not args.image:
-        # The tag this run made. Layers another image shares stay.
-        subprocess.run(["podman", "rmi", "--ignore", image], capture_output=True)
-    for sock in ("qmp.sock", "vnc.sock"):
-        (outdir / sock).unlink(missing_ok=True)
+def machines_to_use(requested: int) -> int:
+    """Machines for the suites that fit beside everything else on the host.
+
+    A suite machine is given 3 GB and touches about 2.5 of it; the desktop's
+    about 3.5. 3 GB is left spare. Other VMs on the host count against what
+    is available, so a busy host gets fewer machines rather than swapping.
+    """
+    try:
+        avail = next(int(line.split()[1]) for line in open("/proc/meminfo")
+                     if line.startswith("MemAvailable")) / 1024 / 1024
+    except (OSError, StopIteration):
+        return requested
+    return max(1, min(requested, int((avail - 3 - 3.5) // 2.5)))
+
+
+class Done(Exception):
+    """Nothing more to run."""
 
 
 def main() -> int:
+    import threading
+
+    from pr_test_select import select
+
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0],
                                      formatter_class=argparse.RawDescriptionHelpFormatter,
                                      epilog=__doc__.split("\n\n", 1)[1])
     parser.add_argument("target", nargs="?", default="HEAD",
                         help="pull request number, branch, or HEAD (default)")
     parser.add_argument("--id", help="name of the run's directory under build/pr-test")
-    parser.add_argument("--only", help="comma-separated stages to run, e.g. boot,desktop")
+    parser.add_argument("--full", action="store_true",
+                        help="a fresh install of the change's own image and every check")
+    parser.add_argument("--all", action="store_true",
+                        help="every check whatever the change touches, from the set-up base")
+    parser.add_argument("--direct", action="store_true", default=bool(os.environ.get("CI")),
+                        help="no cached base: a disk from the change's own image, set up over "
+                             "ssh unless a fresh install is selected (the default in CI)")
+    parser.add_argument("--fresh-base", action="store_true",
+                        help="make a new cached base from master even if a recent one exists")
+    parser.add_argument("--vms", type=int, default=int(os.environ.get("KOSHER_PR_TEST_VMS", "3")),
+                        help="machines for the suites, besides the desktop's (default 3, "
+                             "or KOSHER_PR_TEST_VMS)")
     parser.add_argument("--image", help="test this already-built image; skips the build")
     parser.add_argument("--keep", action="store_true",
-                        help="keep the disk, the machine, the worktree and the image tag")
+                        help="keep the machine, the worktree and the image tag")
     parser.add_argument("--gl", action="store_true", default=bool(os.environ.get("KOSHER_GL")),
                         help="a virgl GPU for the desktop stage (KOSHER_GL=1); needs the host's QEMU")
     args = parser.parse_args()
@@ -723,20 +1006,15 @@ def main() -> int:
     outdir = REPO / "build" / "pr-test" / run_id
     if outdir.exists():
         for child in outdir.iterdir():
-            if child.name not in ("src", "disk", "machine.qcow2", "id_ed25519", "id_ed25519.pub"):
+            if child.name != "src":
                 shutil.rmtree(child) if child.is_dir() else child.unlink()
     outdir.mkdir(parents=True, exist_ok=True)
+    CACHE.mkdir(parents=True, exist_ok=True)
     env = sudo_trap(outdir)
-    only = set(args.only.split(",")) if args.only else set(STAGES)
-    unknown = only - set(STAGES)
-    if unknown:
-        parser.error(f"unknown stage: {', '.join(sorted(unknown))}")
-    if args.image:
-        only.discard("build")
     image = args.image or f"localhost/kosher-linux:pr-test-{run_id.lower()}"
     disk = outdir / "disk" / "disk.qcow2"
     machine = outdir / "machine.qcow2"
-    key = outdir / "id_ed25519"
+    key = CACHE / "id_ed25519"  # one key for the runs and the cached bases they boot
     if not key.exists():
         subprocess.run(["ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-C", "pr-test",
                         "-f", str(key)], check=True)
@@ -744,17 +1022,24 @@ def main() -> int:
     started = time.monotonic()
     summary = {"target": args.target, "id": run_id, "commit": "", "image": image,
                "image_id": "", "started": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-               "gl": args.gl, "stages": [], "result": "failed", "seconds": 0}
+               "gl": args.gl, "stages": [], "result": "failed", "seconds": 0,
+               "mode": "full" if args.full else ("direct" if args.direct else "fast")}
     stages: list[Stage] = []
+    lock = threading.Lock()
     tree = REPO
 
     def stage(name: str) -> Stage:
         s = Stage(name, outdir)
-        stages.append(s)
+        with lock:
+            stages.append(s)
         return s
 
+    def ok(*names: str) -> bool:
+        return all(s.status in ("passed", "skipped") for s in stages if s.name in names)
+
+    pre = stage("preflight")
+    sel = None
     try:
-        pre = stage("preflight")
         with pre:
             if not os.access("/dev/kvm", os.R_OK | os.W_OK):
                 pre.check("/dev/kvm is usable", False,
@@ -765,42 +1050,95 @@ def main() -> int:
                                 capture_output=True, text=True, cwd=REPO)
             pre.check("no recipe the harness calls needs sudo", rc.returncode == 0,
                       rc.stdout + rc.stderr)
+            if rc.returncode != 0:
+                raise StageError("a recipe would need sudo")
             tree, sha = resolve_target(args.target, outdir, env, pre.log)
             summary["commit"] = sha
             pre.check(f"the target is {sha[:9]}", True)
-            if rc.returncode != 0:
-                raise StageError("a recipe would need sudo")
+            changed, cf_diff, master = changes_against_master(sha, env, pre.log)
+            sel = select(changed, cf_diff, everything=args.all, full=args.full)
+            summary["selection"] = sel.as_dict()
+            summary["changed"] = changed
+            print("  what runs, and why:")
+            for r in sel.reasons:
+                print(f"    {r}")
+        if pre.status != "passed" or sel is None or sel.empty:
+            raise Done
+        caps = {} if args.full else FAST_CAPS
+        summary["caps"] = [f"{k}={v!r}" for k, v in caps.items()]
 
-        def go(name: str) -> bool:
-            # Everything needs the image and the disk; the desktop and the
-            # suites need a machine that is set up, by the wizard or not.
-            if pre.status != "passed" or name not in only:
-                return False
-            return all(s.status in ("passed", "skipped") for s in stages
-                       if s.name in ("build", "disk"))
-
-        if go("build"):
+        if not args.image:
             with stage("build") as st:
                 stage_build(st, tree, image, env)
-        if go("disk"):
+            if not ok("build"):
+                raise Done
+
+        if sel.boot or args.direct:
+            # The change's own image, installed: the path every run took before.
             with stage("disk") as st:
                 stage_disk(st, image, disk, env)
-        if go("boot"):
-            with stage("boot") as st:
-                stage_boot(st, image, disk, machine, outdir, env)
-        if go("desktop") or go("suites"):
-            if not machine.exists() and disk.exists():
+            if not ok("disk"):
+                raise Done
+            if sel.boot:
+                with stage("boot") as st:
+                    stage_boot(st, image, disk, machine, outdir, env)
+            if not machine.exists():
                 with stage("setup-over-ssh") as st:
                     stage_setup_over_ssh(st, disk, machine, outdir, key)
-        if go("desktop") and machine.exists():
-            with stage("desktop") as st:
-                stage_desktop(st, machine, outdir, key, args.gl)
-        if go("suites") and machine.exists():
-            with stage("suites") as st:
-                stage_suites(st, machine, outdir, key, tree)
-        inspected = subprocess.run(["podman", "image", "inspect", image, "--format", "{{.Id}}"],
-                                   capture_output=True, text=True)
-        summary["image_id"] = inspected.stdout.strip()
+            summary["base"] = "a fresh install of this change's image"
+        else:
+            base, why = (None, "") if args.fresh_base else find_base(master)
+            if base is None:
+                with stage("base") as st:
+                    base = make_base(st, master, sha, image, key, env)
+                if not ok("base"):
+                    raise Done
+                why = f"a new cached base for master {master[:9]}, set up by the boot test"
+            summary["base"] = why
+            print(f"  machine: {why}")
+            child_overlay(base / "setup.qcow2", machine)
+            meta = json.loads((base / "meta.json").read_text())
+            target_id = subprocess.run(["podman", "image", "inspect", image, "--format", "{{.Id}}"],
+                                       capture_output=True, text=True).stdout.strip()
+            if target_id != meta.get("image_id"):
+                with stage("switch") as st:
+                    registry_up(env, st.log)
+                    tag = f"pr-test-{run_id.lower()}"
+                    digest = push(image, tag, env, st.log)
+                    switch_machine(st, machine, outdir / "switch", key, tag, digest)
+                if not ok("switch"):
+                    raise Done
+            prune_bases(base)
+
+        if not machine.exists():
+            raise Done
+
+        # From here on, every machine is an overlay of the set-up one, all at once.
+        workers = []
+        if sel.desktop:
+            def desktop():
+                with stage("desktop") as st:
+                    stage_desktop(st, child_overlay(machine, outdir / "desktop.qcow2"),
+                                  outdir, key, args.gl, parts=sel.desktop)
+            workers.append(threading.Thread(target=desktop))
+        groups = groups_for(sel.ordered_suites(), machines_to_use(args.vms))
+        for i, group in enumerate(groups, 1):
+            def suites(group=group, i=i):
+                with stage(f"suites-{i}") as st:
+                    stage_suites(st, machine, outdir / f"suites-{i}", key, tree, group, caps)
+            workers.append(threading.Thread(target=suites))
+        print(f"\n  {len(workers)} machines at once: desktop "
+              f"{'+'.join(sorted(sel.desktop)) or 'no'}; suites {groups}", flush=True)
+        for w in workers:
+            w.start()
+            time.sleep(2)
+        for w in workers:
+            w.join()
+        summary["image_id"] = subprocess.run(
+            ["podman", "image", "inspect", image, "--format", "{{.Id}}"],
+            capture_output=True, text=True).stdout.strip()
+    except Done:
+        pass
     except KeyboardInterrupt:
         print("\ninterrupted")
     finally:
@@ -813,14 +1151,25 @@ def main() -> int:
         summary["stages"] = [s.as_dict() for s in stages]
         ran = [s for s in stages if s.status != "skipped"]
         summary["result"] = ("passed" if ran and all(s.status == "passed" for s in ran)
-                             and pre.status == "passed" else "failed")
+                             else "failed")
         summary["seconds"] = round(time.monotonic() - started)
         write_report(outdir, summary)
-        cleanup(args, outdir, tree, image, disk, machine)
+        if not args.keep:
+            for f in (machine, outdir / "desktop.qcow2"):
+                f.unlink(missing_ok=True)
+            shutil.rmtree(disk.parent, ignore_errors=True)
+            if tree != REPO:
+                subprocess.run(["git", "-C", str(REPO), "worktree", "remove", "--force", str(tree)],
+                               capture_output=True)
+            if not args.image:
+                subprocess.run(["podman", "rmi", "--ignore", image], capture_output=True)
+            for sock in ("qmp.sock", "vnc.sock"):
+                (outdir / sock).unlink(missing_ok=True)
 
     print("\n" + (outdir / "report.md").read_text())
     return 0 if summary["result"] == "passed" else 1
 
 
 if __name__ == "__main__":
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
     sys.exit(main())

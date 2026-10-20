@@ -18,6 +18,7 @@ flowchart LR
         DBus[D-Bus API, polkit gated]
         Policy[(policy.json)]
         Activity[(activity log)]
+        Usage[(usage totals)]
     end
     subgraph enforcement [Enforcement, per account]
         NFT[nftables: per-user rules]
@@ -34,7 +35,8 @@ flowchart LR
     DBus --> Policy
     Policy -->|rendered on every change| NFT & DNS & Proxy & Search & MCT
     Proxy & Search -->|what they blocked| Activity
-    Activity --> Admin
+    Proxy & Search -->|counts and filter time| Usage
+    Activity & Usage --> Admin
     Portal[Self-hosted portal, optional] -->|signed policy and lists| DBus
 ```
 

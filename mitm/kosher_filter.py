@@ -2038,4 +2038,77 @@ def _escape(text: str) -> str:
                 .replace(">", "&gt;").replace('"', "&quot;"))[:300]
 
 
-addons = [KosherFilter()]
+# How long a connection may sit with nothing from the client and no
+# protocol chosen before the proxy closes it (#164).
+SILENT_CLIENT_SECONDS = 10
+
+
+class SilentClientGuard:
+    """Close connections where the client never speaks.
+
+    mitmproxy picks a connection's protocol from the client's first
+    bytes, and waits for them as long as it takes. Some protocols have the
+    server speak first (SSH, FTP, SMTP, POP3, IMAP): the client waits for
+    a greeting, the proxy waits for the client, and the connection hangs
+    open with nothing to show for it. The firewall refuses the well-known
+    ports of those protocols outright (kosherd/nft.py SERVER_FIRST_TCP_PORTS),
+    so this is for the rest. A client that has said nothing after
+    SILENT_CLIENT_SECONDS is closed, and the program on the other end gets
+    an error it can show instead of a wait that never ends.
+    """
+
+    def __init__(self, seconds: float = SILENT_CLIENT_SECONDS):
+        self.seconds = seconds
+        self.timers: dict = {}
+
+    def client_connected(self, client) -> None:
+        if getattr(client, "transport_protocol", "tcp") != "tcp":
+            return
+        import asyncio
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return
+        self.timers[client.id] = loop.call_later(
+            self.seconds, self._close_if_silent, client.id)
+
+    def next_layer(self, nextlayer) -> None:
+        # Runs after mitmproxy's own next_layer addon (script addons load
+        # after the built-in ones), so a decision it made is visible here.
+        # Either a decision or any bytes at all from the client means the
+        # client spoke; whatever happens next is the normal idle timeout's.
+        if nextlayer.layer is None and not nextlayer.data_client():
+            return
+        self._forget(nextlayer.context.client.id)
+
+    def client_disconnected(self, client) -> None:
+        self._forget(client.id)
+
+    def _forget(self, client_id) -> None:
+        timer = self.timers.pop(client_id, None)
+        if timer is not None:
+            timer.cancel()
+
+    def _close_if_silent(self, client_id) -> None:
+        self.timers.pop(client_id, None)
+        handler = self._handler(client_id)
+        if handler is None:
+            return
+        log.info("closing a connection that sent nothing for %ss: %s",
+                 self.seconds, handler.client.sockname)
+        try:
+            handler.close_connection(handler.client)
+        except Exception:  # noqa: BLE001 - it may have closed meanwhile
+            log.debug("connection %s was already gone", client_id)
+
+    @staticmethod
+    def _handler(client_id):
+        try:
+            from mitmproxy import ctx
+            proxyserver = ctx.master.addons.get("proxyserver")
+            return proxyserver.connections.get(client_id)
+        except Exception:  # noqa: BLE001 - no master, no proxy server
+            return None
+
+
+addons = [KosherFilter(), SilentClientGuard()]

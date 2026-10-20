@@ -2112,3 +2112,81 @@ def test_an_address_or_nothing_is_a_bare_address(addon, host):
                                   "1.2.3.4.nip.io", "192-168-1-1.example"])
 def test_a_name_is_not(addon, host):
     assert not addon.is_bare_address(host)
+
+
+# ---- a client that never speaks (#164) ------------------------------------------
+
+class _Handler:
+    def __init__(self, client):
+        self.client = client
+        self.closed = []
+
+    def close_connection(self, connection):
+        self.closed.append(connection)
+
+
+def _guard_world(addon, monkeypatch, seconds=0.05):
+    client = types.SimpleNamespace(id="c1", transport_protocol="tcp",
+                                   sockname=("140.82.112.3", 22))
+    handler = _Handler(client)
+    proxyserver = types.SimpleNamespace(connections={"c1": handler})
+    master = types.SimpleNamespace(addons=types.SimpleNamespace(
+        get=lambda name: proxyserver if name == "proxyserver" else None))
+    monkeypatch.setattr(sys.modules["mitmproxy"], "ctx",
+                        types.SimpleNamespace(master=master), raising=False)
+    return addon.SilentClientGuard(seconds=seconds), client, handler
+
+
+def _nextlayer(client, data=b"", layer=None):
+    return types.SimpleNamespace(layer=layer, data_client=lambda: data,
+                                 context=types.SimpleNamespace(client=client))
+
+
+def test_a_client_that_never_speaks_is_closed(addon, monkeypatch):
+    # SSH in the proxy: the client waits for the banner, mitmproxy waits
+    # for the client. Without this the connection hung for good.
+    guard, client, handler = _guard_world(addon, monkeypatch)
+
+    async def run():
+        guard.client_connected(client)
+        guard.next_layer(_nextlayer(client))  # deferred: nothing sent yet
+        await asyncio.sleep(0.15)
+
+    asyncio.run(run())
+    assert handler.closed == [client]
+    assert guard.timers == {}
+
+
+def test_a_client_that_speaks_is_left_alone(addon, monkeypatch):
+    guard, client, handler = _guard_world(addon, monkeypatch)
+
+    async def run():
+        guard.client_connected(client)
+        guard.next_layer(_nextlayer(client))
+        guard.next_layer(_nextlayer(client, data=b"\x16\x03\x01"))
+        await asyncio.sleep(0.15)
+
+    asyncio.run(run())
+    assert handler.closed == []
+    assert guard.timers == {}
+
+
+def test_a_decided_layer_or_a_disconnect_stops_the_clock(addon, monkeypatch):
+    guard, client, handler = _guard_world(addon, monkeypatch)
+
+    async def run():
+        guard.client_connected(client)
+        guard.next_layer(_nextlayer(client, layer=object()))
+        other = types.SimpleNamespace(id="c2", transport_protocol="tcp")
+        guard.client_connected(other)
+        guard.client_disconnected(other)
+        await asyncio.sleep(0.15)
+
+    asyncio.run(run())
+    assert handler.closed == []
+    assert guard.timers == {}
+
+
+def test_the_guard_is_loaded_with_the_filter(addon):
+    assert any(isinstance(a, addon.SilentClientGuard) for a in addon.addons)
+    assert 5 <= addon.SILENT_CLIENT_SECONDS <= 10

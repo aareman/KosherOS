@@ -441,6 +441,98 @@ def test_the_niri_lock_screen_and_launcher_are_the_shells():
     assert "swaylock" not in text and "fuzzel" not in text and "alacritty" not in text
 
 
+# -- Hyprland and Umbriel ----------------------------------------------------------
+
+def test_hyprland_comes_from_the_copr_which_is_removed_afterwards():
+    assert "copr.fedorainfracloud.org/coprs/nett00n/hyprland/repo/fedora-44/" in CONTAINERFILE
+    assert re.search(r'install "hyprland-\$\{HYPRLAND_VERSION\}\.\*"', CONTAINERFILE)
+    assert "xdg-desktop-portal-hyprland" in CONTAINERFILE
+    # Whether or not the install worked, the repository does not stay.
+    assert re.search(r"; \\\n\s*rm -f /etc/yum.repos.d/kosher-hyprland.repo", CONTAINERFILE)
+    # Its bundled wallpapers are anime drawings; they do not ship.
+    assert "rm -f /usr/share/hypr/wall*.png" in CONTAINERFILE
+
+
+def test_umbriel_is_built_from_pinned_commits_and_checked():
+    for arg in ("UMBRIEL_REF", "UMBRIEL_PORTAL_REF"):
+        assert re.search(rf"^ARG {arg}=[0-9a-f]{{40}}$", CONTAINERFILE, re.M), arg
+    assert "FROM quay.io/fedora/fedora:44 as umbriel-build" in CONTAINERFILE
+    assert "COPY --from=umbriel-build /out/ /tmp/umbriel/" in CONTAINERFILE
+    script = (ROOT / "os-image/desktop/build-umbriel.sh").read_text()
+    assert 'test "$(git -C "$umbriel" rev-parse HEAD)" = "$umbriel_ref"' in script
+    assert 'test "$(git -C "$portal" rev-parse HEAD)" = "$portal_ref"' in script
+    assert "set -euo pipefail" in script
+
+
+def _hyprland_binds(text):
+    """The key strings of every hl.bind, with the loops spelled out."""
+    keys = re.findall(r'^hl\.bind\(([^,]+),', text, re.M)
+    out = []
+    for k in keys:
+        k = k.strip()
+        if k.startswith('"'):
+            out.append(k.strip('"'))
+        else:  # mainMod .. " + X"
+            out.append("SUPER" + "".join(re.findall(r'"([^"]*)"', k)))
+    for i in range(1, 10):
+        out += [f"SUPER + {i}", f"SUPER + CTRL + {i}"]
+    for direction, letter in (("left", "H"), ("down", "J"), ("up", "K"), ("right", "L")):
+        out += [f"SUPER + {direction}", f"SUPER + {letter}", f"SUPER + CTRL + {direction}",
+                f"SUPER + CTRL + {letter}", f"SUPER + SHIFT + {direction}"]
+    return [re.sub(r"\s+", "", k).upper() for k in out]
+
+
+def test_the_hyprland_session_starts_the_shell_and_the_session_target():
+    text = HYPRLAND_CONFIG.read_text()
+    start = re.search(r'hl\.on\("hyprland\.start", function\(\)(.*?)\nend\)', text, re.S).group(1)
+    assert 'hl.exec_cmd("noctalia")' in start
+    assert "systemctl --user import-environment WAYLAND_DISPLAY XDG_CURRENT_DESKTOP" in start
+    assert "systemctl --user start kosher-hyprland-session.target" in start
+    unit = (FILES / "usr/lib/systemd/user/kosher-hyprland-session.target").read_text()
+    assert "BindsTo=graphical-session.target" in unit
+    # What the target brings up: the helper that seeds Noctalia, and the
+    # time-limit warnings.
+    for name in ("kosher-layout.service", "kosher-time-notify.service"):
+        assert "WantedBy=graphical-session.target" in (FILES / "usr/lib/systemd/user" / name).read_text()
+
+
+def test_the_hyprland_keyboard_and_shell_binds():
+    text = HYPRLAND_CONFIG.read_text()
+    assert 'kb_layout  = "us,il"' in text
+    assert 'kb_options = "grp:alt_shift_toggle"' in text
+    assert 'ipc .. "session lock"' in text and 'ipc .. "panel-toggle launcher"' in text
+    assert 'local ipc      = "noctalia msg "' in text
+    assert '"switch:on:Lid Switch"' in text
+    assert "force_default_wallpaper  = 0" in text and "disable_hyprland_logo    = true" in text
+    binds = _hyprland_binds(text)
+    dupes = {k for k in binds if binds.count(k) > 1}
+    assert not dupes, dupes
+
+
+def test_the_umbriel_session_starts_the_shell_with_the_same_keys():
+    doc = tomllib.loads(UMBRIEL_CONFIG.read_text())  # a repeated key fails here
+    assert doc["general"]["autostart"] == ["noctalia"]
+    assert doc["events"]["lid_close"] == "noctalia msg session lock"
+    assert doc["input"]["keyboard"]["layout"] == "us,il"
+    assert doc["input"]["keyboard"]["options"] == "grp:alt_shift_toggle"
+    binds = doc["keybinds"]
+    assert binds["Mod+Space"] == "spawn:noctalia msg panel-toggle launcher"
+    assert binds["Mod+Escape"] == "spawn:noctalia msg session lock"
+    assert binds["Mod+Shift+E"] == "session-quit"
+
+
+def test_the_three_compositors_share_the_main_keys():
+    niri = NIRI_CONFIG.read_text()
+    hypr = HYPRLAND_CONFIG.read_text()
+    umbriel = tomllib.loads(UMBRIEL_CONFIG.read_text())["keybinds"]
+    assert 'Mod+T hotkey-overlay-title="Open a Terminal" { spawn "ptyxis"; }' in niri
+    assert 'hl.bind(mainMod .. " + T",             hl.dsp.exec_cmd(terminal))' in hypr
+    assert umbriel["Mod+T"]["action"] == "spawn:ptyxis"
+    assert 'Mod+Q repeat=false { close-window; }' in niri
+    assert 'hl.bind(mainMod .. " + Q",         hl.dsp.window.close())' in hypr
+    assert umbriel["Mod+Q"]["action"] == "window-close"
+
+
 def test_the_noctalia_seed_parses_and_turns_the_polkit_agent_on():
     doc = tomllib.loads(NOCTALIA_SEED.read_text())
     # Without an agent the admin app's password prompt has nowhere to

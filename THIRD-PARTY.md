@@ -72,7 +72,11 @@ licence — but obligations that travel with the binaries still apply.
 | [SearXNG](https://github.com/searxng/searxng) | AGPLv3 | run as a separate process behind the KosherOS search front end. **Any modification to SearXNG itself must be published** |
 | [PaperWM](https://github.com/paperwm/PaperWM) | GPL-family | GNOME extension, tiling layout |
 | [ArcMenu](https://gitlab.com/arcmenu/ArcMenu) | GPL-family | GNOME extension, classic layout |
-| [niri](https://github.com/YaLTeR/niri) / Noctalia | see upstream | advanced desktop session |
+| [niri](https://github.com/niri-wm/niri) | GPL-3.0-or-later | Fedora's package; one of the advanced desktop's three compositors |
+| [Noctalia](https://github.com/noctalia-dev/noctalia) | MIT (Fedora's package adds Apache-2.0, BSD-3-Clause, HPND-sell-variant and LGPL-2.1-or-later for what it bundles) | Fedora's package; the advanced desktop's shell |
+| [Hyprland](https://github.com/hyprwm/Hyprland), with xdg-desktop-portal-hyprland, hyprland-guiutils and hyprshutdown | BSD-3-Clause | from the [nett00n/hyprland](https://copr.fedorainfracloud.org/coprs/nett00n/hyprland/) COPR, Fedora 44 builds, signed by the COPR; one of the advanced desktop's compositors |
+| [Umbriel](https://github.com/noctalia-dev/umbriel) | MIT | built at image build from commit `7097aeeb80e7b50d22c995b3905ce722e4fdbfaf` (version 0.1.0; no release tag exists yet); its license ships in `/usr/share/licenses/umbriel` |
+| [xdg-desktop-portal-umbriel](https://github.com/noctalia-dev/xdg-desktop-portal-umbriel) | MIT | Umbriel's screen-capture portal, built from commit `1cc6eb18ba0d6c82dd66999646d7e554f76a85b6` |
 | [Nix](https://nixos.org/) | LGPL-2.1-or-later | Fedora's packages; the daemon and the store on every machine (issue #34) |
 | [devbox](https://github.com/jetify-com/devbox) | Apache-2.0 | the release binary, fetched at image build and pinned by SHA-256 |
 | [devenv](https://devenv.sh/) | Apache-2.0 | not bundled: `/usr/bin/devenv` installs it from nixpkgs into the account's own profile on first use |

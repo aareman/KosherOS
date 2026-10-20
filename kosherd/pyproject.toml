@@ -28,6 +28,9 @@ kosher-layout = "kosherd.layout:main"
 # Also in the person's session: turns the daemon's TimeWarning signal into
 # a desktop notification before their time runs out.
 kosher-time-notify = "kosherd.timenotify:main"
+# In the person's session too: sends their own keyd file
+# (~/.config/keyd/default.conf) to kosherd at sign-in and on every save.
+kosher-keyboard = "kosherd.keyboard:main"
 # Run by pam_exec after pam_time refuses a sign-in, so the refusal shows in
 # the activity log.
 kosher-time-refused = "kosherd.timelimits:refused_login_main"

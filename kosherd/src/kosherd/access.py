@@ -86,6 +86,11 @@ ACTIONS = {
     "GetMyLayout": ACTION_READ_OWN,
     # The same choice, made by the person for themselves in the Look app.
     "SetMyLayout": ACTION_SET_OWN,
+    # Your own key remaps (keyd), from your own file. A preference about
+    # your own keyboard: it is in force only while your session is on the
+    # screen, and kosherd refuses the one keyd action that reaches past
+    # the keyboard (command(), which keyd runs as root). See keyboard.py.
+    "SetMyKeyboard": ACTION_SET_OWN,
     # Your own filter settings, read-only, no password: what applies to
     # THIS account and nothing about any other. A filtered account should
     # not be a mystery to the person using it — someone who can see the
@@ -236,6 +241,7 @@ SETUP_READS = frozenset({"IsComplete", "AdminExists"})
 # Methods that need to know which uid called them (session management).
 UID_AWARE = frozenset({"Unlock", "Lock", "Status", "VerifyGuardian", "InstallApp",
                        "ListStoreApps", "GetMyLayout", "SetMyLayout", "GetMySettings",
+                       "SetMyKeyboard",
                        # A nixpkgs app is in one account's profile: what is
                        # installed, and whose copy to update or remove,
                        # depends on who is asking.

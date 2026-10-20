@@ -25,7 +25,7 @@ gi.require_version("Gio", "2.0")
 from gi.repository import Gio, GLib
 
 from . import (BUS_NAME, OBJECT_PATH, access, appaccess, appkinds, apps, auth,
-               policy as policy_mod, ytsearch)
+               keyboard, policy as policy_mod, ytsearch)
 from .apply import apply_policy
 from .apps import AppError
 from .guardian import Guardian, GuardianError
@@ -154,6 +154,9 @@ INTROSPECTION_XML = """
     </method>
     <method name="SetMyLayout">
       <arg direction="in" type="s" name="layout"/>
+    </method>
+    <method name="SetMyKeyboard">
+      <arg direction="in" type="s" name="config"/>
     </method>
     <method name="SetTimeLimits">
       <arg direction="in" type="i" name="uid"/>
@@ -663,6 +666,8 @@ class Daemon:
             lambda: self.policy, self._logind_sessions, timelimits.UsageStore(),
             warn=self._emit_time_warning, lock=self._lock_uid,
             terminate=self._terminate_uid)
+        # Whose keyd config is in force: the active session's (keyboard.py).
+        self.keyboards = keyboard.Keyboards()
 
     # ---- lifecycle -------------------------------------------------------
 
@@ -707,6 +712,18 @@ class Daemon:
         # it also renders the sign-in schedule, so a reboot does not leave
         # /etc/security/time.conf a minute behind the policy.
         self._time_tick()
+        # Keyboard remaps follow the session on the screen: a switch to
+        # another person or to the login screen, and a sign-out, each put
+        # the right keyd config in force (keyboard.py).
+        for path, iface, member in (
+                ("/org/freedesktop/login1/seat/seat0", "org.freedesktop.DBus.Properties",
+                 "PropertiesChanged"),
+                ("/org/freedesktop/login1", "org.freedesktop.login1.Manager", "SessionNew"),
+                ("/org/freedesktop/login1", "org.freedesktop.login1.Manager", "SessionRemoved")):
+            connection.signal_subscribe(
+                "org.freedesktop.login1", iface, member, path, None,
+                Gio.DBusSignalFlags.NONE, lambda *_a: self._refresh_keyboard(), None)
+        self._refresh_keyboard()
 
     # ---- time limits: the minute tick and logind -------------------------
 
@@ -743,6 +760,40 @@ class Daemon:
                                  active=bool(props.get("Active", True)),
                                  idle=bool(props.get("IdleHint", False))))
         return found
+
+    def _active_seat_uid(self) -> int | None:
+        """Whose session is on the screen: the uid of seat0's active
+        session if it is a person's, None for the login screen or none."""
+        if self.connection is None:
+            return None
+        try:
+            session_id, path = self.connection.call_sync(
+                "org.freedesktop.login1", "/org/freedesktop/login1/seat/seat0",
+                "org.freedesktop.DBus.Properties", "Get",
+                GLib.Variant("(ss)", ("org.freedesktop.login1.Seat", "ActiveSession")),
+                GLib.VariantType("(v)"), Gio.DBusCallFlags.NONE, 5000, None,
+            ).unpack()[0]
+            if not session_id:
+                return None
+            props = self.connection.call_sync(
+                "org.freedesktop.login1", path,
+                "org.freedesktop.DBus.Properties", "GetAll",
+                GLib.Variant("(s)", ("org.freedesktop.login1.Session",)),
+                GLib.VariantType("(a{sv})"), Gio.DBusCallFlags.NONE, 5000, None,
+            ).unpack()[0]
+        except GLib.Error as e:
+            log.warning("keyboard: could not ask logind whose session is active: %s", e.message)
+            return None
+        if props.get("Class") != "user":
+            return None
+        return int(props["User"][0])
+
+    def _refresh_keyboard(self) -> None:
+        try:
+            self.keyboards.forget_all_but({s.uid for s in self._logind_sessions()})
+            self.keyboards.refresh(self._active_seat_uid())
+        except Exception:  # noqa: BLE001 - a keymap must never take the daemon down
+            log.exception("keyboard: could not put the right config in force")
 
     def _lock_uid(self, uid: int) -> None:
         if self.connection is None:
@@ -1539,6 +1590,18 @@ class Daemon:
         bus, never from an argument, so nobody picks for anybody else.
         """
         return self.impl_SetLayout(_uid, layout)
+
+    def impl_SetMyKeyboard(self, config: str, _uid: int):
+        """The caller's own keyd file (~/.config/keyd/default.conf), sent
+        by kosher-keyboard at sign-in and on every save. "" means none.
+
+        Any active local user, for themselves only: the uid comes from the
+        bus. The text is checked before keyd sees it (keyboard.prepare:
+        no command(), which keyd would run as root), and is in force only
+        while that person's session is the one on the screen.
+        """
+        self.keyboards.set(_uid, config, self._active_seat_uid())
+        return None
 
     def impl_GetMySettings(self, _uid: int):
         """What applies to the CALLER's own account, read-only.

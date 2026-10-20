@@ -4,7 +4,8 @@ The sidebar's second section. Three pages, each a real page rather than a
 tile with two words on it:
 
   Protection — is the filter actually working, what it blocks for
-               everyone, and the guardian password that guards the answer
+               everyone, the guardian password that guards the answer,
+               and whether this computer is on a tailnet
   Apps       — which apps this computer may install at all
   Updates    — what version it runs, and the way back if one goes wrong
 
@@ -17,6 +18,7 @@ on a person's page where they would look per-person.
 
 from __future__ import annotations
 
+import time
 from pathlib import Path
 
 import gi
@@ -162,6 +164,9 @@ class ProtectionPage(_Page):
         locking.add(self.boot_row)
         self.prefs.add(locking)
 
+        self.tailscale = TailscaleGroup(win)
+        self.prefs.add(self.tailscale)
+
         self.refresh()
 
     def refresh(self) -> None:
@@ -189,6 +194,7 @@ class ProtectionPage(_Page):
 
         run_async(self.win.client.boot_menu_protected, show_boot,
                   lambda e: self.boot_row.set_subtitle(f"Could not read: {error_text(e)}"))
+        self.tailscale.refresh()
 
         on = self.win.policy.get("guardian", {}).get("enabled", False)
         self.guardian_row.set_subtitle(
@@ -212,6 +218,231 @@ class ProtectionPage(_Page):
         self.win.with_guardian(lambda pw: self.win.call(
             lambda: self.win.client.set_adblock(False, pw),
             done_msg="Ad blocking is off"))
+
+
+class TailscaleGroup(Adw.PreferencesGroup):
+    """This computer on the family's tailnet (#30).
+
+    Signing in happens in a browser: the daemon starts it and hands back an
+    address, the page shows it with Open and Copy (the administrator may
+    rather use a phone), and then checks every few seconds until the
+    sign-in is finished there. Signing in takes the guardian password;
+    signing out does not.
+    """
+
+    POLL_SECONDS = 3
+    # As long as the daemon's `tailscale up` waits (tailnet.LOGIN_WAIT).
+    POLL_FOR = 15 * 60
+
+    def __init__(self, win):
+        super().__init__(
+            title="Tailscale",
+            description=("Connects this computer to your tailnet, so the people who use "
+                         "it can reach your other machines by name. Each account's filter "
+                         "applies there as it does everywhere else."))
+        self.win = win
+        self.state: dict | None = None
+        self.login_url: str | None = None
+        self.busy: str | None = None
+        self._rows: list[Gtk.Widget] = []
+        self._poll_until = 0.0
+        self.action = Gtk.Button(valign=Gtk.Align.CENTER, visible=False)
+        self.action.connect("clicked", self._on_action)
+        self.set_header_suffix(self.action)
+        # Filled by refresh(), which the page calls on every reload.
+        self._show()
+
+    # -- reading ------------------------------------------------------------
+
+    def refresh(self) -> None:
+        if self.login_url or self.busy:
+            return  # a sign-in is in progress; the poll owns the group
+        self._show()
+        run_async(self.win.client.tailscale_status, self._loaded,
+                  lambda e: self._loaded({"error": error_text(e)}))
+
+    def _loaded(self, state: dict) -> None:
+        self.state = state
+        self._show()
+
+    # -- drawing ------------------------------------------------------------
+
+    def _add(self, title: str, subtitle: str = "", *, spinner: bool = False,
+             value: bool = False) -> Adw.ActionRow:
+        row = Adw.ActionRow(title=title, subtitle=subtitle, subtitle_lines=4,
+                            use_markup=False)
+        if value:
+            # A label and its value, with the value the line that is read.
+            row.add_css_class("property")
+            row.set_subtitle_selectable(True)
+        if spinner:
+            row.add_suffix(Gtk.Spinner(spinning=True, valign=Gtk.Align.CENTER))
+        self.add(row)
+        self._rows.append(row)
+        return row
+
+    def _button(self, label: str, style: str | None) -> None:
+        self.action.set_label(label)
+        for c in ("suggested-action", "destructive-action"):
+            self.action.remove_css_class(c)
+        if style:
+            self.action.add_css_class(style)
+        self.action.set_visible(True)
+        self.action.set_sensitive(True)
+
+    def _show(self) -> None:
+        for row in self._rows:
+            self.remove(row)
+        self._rows = []
+        self.action.set_visible(False)
+        state = self.state
+
+        if self.busy:
+            self._add(self.busy, spinner=True)
+            return
+        if self.login_url:
+            self._show_login()
+            return
+        if state is None:
+            self._add("Checking…", spinner=True)
+            return
+        if state.get("error") and "installed" not in state:
+            self._add("Could not check Tailscale", state["error"])
+            self._button("Check Again", None)
+            return
+        if not state.get("installed", True):
+            self._add("Tailscale is not installed on this computer")
+            return
+        if state.get("state") == "Unavailable":
+            self._add("Tailscale is not running",
+                      "Restarting the computer usually fixes it."
+                      + (f" ({state['error']})" if state.get("error") else ""))
+            self._button("Check Again", None)
+            return
+        if not state.get("signed_in"):
+            self._add("Not signed in",
+                      "Sign in with the Tailscale account your tailnet belongs to.")
+            self._button("Sign In…", "suggested-action")
+            return
+
+        self._add("Signed in as", state.get("user") or "—", value=True)
+        self._add("Tailnet", state.get("tailnet") or "—", value=True)
+        addresses = ", ".join(state.get("addresses") or []) or "No address yet"
+        self._add("This computer", f"{state.get('name') or '—'}\n{addresses}", value=True)
+        self._add("Connection", self._connection_text(state), value=True)
+        self._button("Sign Out", "destructive-action")
+
+    @staticmethod
+    def _connection_text(state: dict) -> str:
+        if state.get("connected"):
+            return "Connected"
+        return {
+            "Stopped": "Not connected. Tailscale is switched off on this computer.",
+            "Starting": "Connecting…",
+            "NeedsMachineAuth": ("Waiting for the tailnet's administrator to approve this "
+                                 "computer in the Tailscale admin console."),
+        }.get(state.get("state"), f"Not connected ({state.get('state')})")
+
+    def _show_login(self) -> None:
+        url = self.login_url or ""
+        row = self._add("Open the sign-in page",
+                        "Open it on this computer or on your phone, and sign in with the "
+                        f"account your tailnet belongs to.\n{url}")
+        row.set_subtitle_selectable(True)
+        copy = Gtk.Button(label="Copy", valign=Gtk.Align.CENTER)
+        copy.connect("clicked", lambda _b: self._copy(url))
+        row.add_suffix(copy)
+        open_button = Gtk.Button(label="Open", valign=Gtk.Align.CENTER)
+        open_button.add_css_class("suggested-action")
+        open_button.connect("clicked", lambda _b: self._open(url))
+        row.add_suffix(open_button)
+        self._add("Waiting for you to sign in…", spinner=True)
+        pointer_cursors(self)
+
+    def _copy(self, url: str) -> None:
+        from gi.repository import Gdk
+
+        self.get_clipboard().set_content(Gdk.ContentProvider.new_for_value(url))
+        self.win.toast("Address copied")
+
+    def _open(self, url: str) -> None:
+        try:
+            Gtk.UriLauncher.new(url).launch(self.get_root(), None, None, None)
+        except Exception as e:  # noqa: BLE001 - say so; the address is on screen to copy
+            self.win.toast(f"Could not open a browser: {error_text(e)}")
+
+    # -- acting -------------------------------------------------------------
+
+    def _on_action(self, _button) -> None:
+        state = self.state or {}
+        if state.get("error") or state.get("state") == "Unavailable":
+            self.state = None
+            self.refresh()
+        elif state.get("signed_in"):
+            confirm(self.win, "Sign out of Tailscale?",
+                    "This computer will leave the tailnet. Nobody using it can reach "
+                    "your other machines until it is signed in again.",
+                    "Sign Out", self._sign_out)
+        else:
+            self.win.with_guardian(self._sign_in)
+
+    def _sign_in(self, pw: str) -> None:
+        self.busy = "Asking Tailscale for a sign-in page…"
+        self._show()
+
+        def got(url: str) -> None:
+            self.busy = None
+            if not url:
+                self.win.toast("This computer is back on your tailnet")
+                self.refresh()
+                return
+            self.login_url = url
+            self._poll_until = time.monotonic() + self.POLL_FOR
+            self._show()
+            GLib.timeout_add_seconds(self.POLL_SECONDS, self._poll)
+
+        def failed(e) -> None:
+            self.busy = None
+            self.win.toast(error_text(e))
+            self.refresh()
+
+        run_async(lambda: self.win.client.tailscale_sign_in(pw), got, failed)
+
+    def _poll(self) -> bool:
+        if not self.login_url:
+            return False
+        if time.monotonic() > self._poll_until:
+            self.login_url = None
+            self.win.toast("The sign-in page has expired. Sign in again.")
+            self.refresh()
+            return False
+
+        def checked(state: dict) -> None:
+            if self.login_url and state.get("signed_in"):
+                self.login_url = None
+                self.state = state
+                self.win.toast("This computer is on your tailnet")
+                self._show()
+
+        run_async(self.win.client.tailscale_status, checked, lambda _e: None)
+        return True
+
+    def _sign_out(self) -> None:
+        self.busy = "Signing out…"
+        self._show()
+
+        def done(_r) -> None:
+            self.busy = None
+            self.state = None
+            self.win.toast("Signed out of Tailscale")
+            self.refresh()
+
+        def failed(e) -> None:
+            self.busy = None
+            self.win.toast(error_text(e))
+            self.refresh()
+
+        run_async(self.win.client.tailscale_sign_out, done, failed)
 
 
 class AppsPage(_Page):

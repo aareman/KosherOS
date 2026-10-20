@@ -156,8 +156,8 @@ def prepare(text: str, *, data_dir: Path = DATA_DIR) -> str:
             continue
         if _COMMAND.search(line):
             raise KeymapError(
-                f"line {number}: command() is not allowed here, because keyd "
-                "would run it for the whole computer, not for you")
+                f"line {number}: command() is not allowed, because keyd "
+                "would run it as root and not as you")
         out.append(line)
     return HEADER + "".join(f"{line}\n" for line in out)
 
@@ -356,7 +356,8 @@ def main(argv=None) -> int:  # pragma: no cover - needs a session and kosherd
         if problem:
             print(f"Not applied: {problem}", file=sys.stderr)
             return 1
-        print("Applied." if read_own(home) else "No file, so no remaps.")
+        print("Applied." if read_own(home)
+              else f"There is no ~/{USER_CONFIG}, so nothing is remapped.")
         return 0
 
     session = Gio.bus_get_sync(Gio.BusType.SESSION, None)

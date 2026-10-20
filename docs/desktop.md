@@ -45,6 +45,48 @@ are an app of their own rather than a section of its Appearance page. The
 Look app is also the first piece of what may one day be a KosherOS
 settings app in place of GNOME's.
 
+## Remapping keys
+
+KosherOS runs [keyd](https://github.com/rvaiya/keyd), which can change what
+any key does: Caps Lock as Control when held and Escape when tapped, a
+layer of arrow keys under the home row, a different letter layout. It
+works the same under all three layouts, and at the level of the keyboard
+itself, so Hebrew and the other keyboard layouts in GNOME Settings still
+apply on top of it.
+
+Each person writes their own file, `~/.config/keyd/default.conf`, in
+keyd's own format (`man keyd`, and the examples in
+`/usr/share/doc/keyd/examples`). For example:
+
+```ini
+[main]
+capslock = overload(control, esc)
+```
+
+The file applies as soon as it is saved, and again at every sign-in. If
+keyd cannot use it, a notification says which line is wrong and the keys
+stay as they were. Running `kosher-keyboard` in a terminal applies the
+file once and prints the same message.
+
+A person's file is in force only while their session is the one on the
+screen. Switching to another person or to the login screen puts that
+person's file in force, or none. Without a file, nothing is remapped.
+
+Two parts of keyd are not available. `command(...)`, which runs a program
+when a key is pressed, is refused, because keyd would run it as root and
+not as the person. And `keyd-application-mapper` (different keys in
+different apps) is not installed, because it works by talking to keyd
+directly. No account is given access to keyd or to the keyboard devices:
+an account that could read the keyboard devices could record the guardian
+password as a parent types it. kosherd checks each file and passes it to
+keyd for the person. An `[ids]` section in the file is ignored and the
+file applies to every keyboard, and an `include` may only name one of
+keyd's own files, such as `include layouts/colemak`.
+
+If a remap makes the keyboard unusable, pressing Backspace, Escape and
+Enter together stops keyd. It starts again at once with nothing remapped,
+until the file is saved again or the person signs in again.
+
 ## Why not write our own desktop
 
 A desktop is not a panel and a launcher. It is a Wayland compositor, screen

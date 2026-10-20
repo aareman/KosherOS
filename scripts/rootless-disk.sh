@@ -81,9 +81,12 @@ rm -f "$out" "$(dirname "$out")/.image-id"
 
 # 40 GiB, thin, like os-image/dev-config.toml asks of bootc-image-builder:
 # an afternoon of Flatpaks and a Nix store fill the image's own size.
-# ext4, as `just vm` makes it.
+# ext4, as `just vm` makes it. The console arguments are the ones
+# bootc-image-builder gives a qcow2: without ttyS0 the serial line stays
+# silent and boot-test.py has nothing to read.
 "$bcvk" to-disk --virtiofsd "$virtiofsd" --format qcow2 \
     --filesystem ext4 --disk-size 40G \
+    --karg console=tty0 --karg console=ttyS0 \
     "$image" "$out"
 
 podman image inspect "$image" --format json \

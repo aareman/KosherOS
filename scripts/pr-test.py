@@ -86,7 +86,7 @@ def run_logged(cmd: list[str], log: Path, env: dict, cwd: Path | None = None,
         fh.write(f"$ {shlex.join(cmd)}\n")
         fh.flush()
         proc = subprocess.Popen(cmd, cwd=cwd, env=env, stdout=subprocess.PIPE,
-                                stderr=subprocess.STDOUT, text=True, bufsize=1)
+                                stderr=subprocess.STDOUT, text=True, errors="replace", bufsize=1)
         deadline = time.monotonic() + timeout if timeout else None
         assert proc.stdout is not None
         for line in proc.stdout:
@@ -124,7 +124,9 @@ class Stage:
         elif self.status == "running":
             self.status = "failed" if any(not c["ok"] for c in self.checks) else "passed"
         print(f"  [{self.name}: {self.status} in {self.seconds:.0f}s]", flush=True)
-        return exc_type is not None and issubclass(exc_type, StageError)
+        # Any error ends this stage as failed and the run goes on to the
+        # report; only an interrupt stops everything.
+        return exc_type is not None and issubclass(exc_type, Exception)
 
     def check(self, name: str, ok: bool, detail: str = "") -> bool:
         self.checks.append({"name": name, "ok": bool(ok), "detail": detail.strip()[-1500:]})
@@ -215,7 +217,8 @@ class QMP:
 class Machine:
     """The test disk booted with a screen, ssh on a free port, and QMP."""
 
-    def __init__(self, overlay: Path, outdir: Path, key: Path, gl: bool):
+    def __init__(self, overlay: Path, outdir: Path, key: Path, gl: bool,
+                 console: str = "desktop-console.log"):
         self.outdir = outdir
         self.key = key
         self.port = free_port()
@@ -235,7 +238,7 @@ class Machine:
             "-device", "virtio-net-pci,netdev=n0",
             "-qmp", f"unix:{self.qmp_path},server=on,wait=off",
             "-vnc", f"unix:{outdir / 'vnc.sock'}",
-            "-serial", f"file:{outdir / 'desktop-console.log'}",
+            "-serial", f"file:{outdir / console}",
             # Root's key for this run, as a credential: the image's
             # tmpfiles write it to /root/.ssh/authorized_keys at boot.
             "-smbios", f"type=11,value=io.systemd.credential:ssh.authorized_keys.root={pub}",
@@ -254,7 +257,7 @@ class Machine:
         """Run a shell script as root in the machine; (status, output)."""
         try:
             p = subprocess.run(self.ssh_cmd() + [script], input=input, text=True,
-                               capture_output=True, timeout=timeout)
+                               errors="replace", capture_output=True, timeout=timeout)
             return p.returncode, (p.stdout + p.stderr)
         except subprocess.TimeoutExpired as e:
             out = (e.stdout or b"").decode() if isinstance(e.stdout, bytes) else (e.stdout or "")
@@ -368,7 +371,7 @@ def stage_disk(st: Stage, image: str, disk: Path, env: dict) -> None:
 
 
 def stage_boot(st: Stage, image: str, disk: Path, machine: Path, outdir: Path, env: dict) -> None:
-    e = dict(env, KOSHER_IMAGE=image)
+    e = dict(env, KOSHER_IMAGE=image, PYTHONUNBUFFERED="1")
     rc = run_logged([sys.executable, str(REPO / "scripts/boot-test.py"), str(disk),
                      "--log", str(outdir / "boot-console.log"),
                      "--keep-overlay", str(machine)], st.log, e, timeout=1800)
@@ -381,7 +384,54 @@ def stage_boot(st: Stage, image: str, disk: Path, machine: Path, outdir: Path, e
     if rc != 0 and not any(not c["ok"] for c in st.checks):
         st.check("boot-test.py finished", False, f"exit {rc}")
     if not machine.exists() or not re.search(r"PASS\s+setup completes", text):
-        raise StageError("setup did not complete, so the later stages have no machine")
+        machine.unlink(missing_ok=True)
+        raise StageError("the wizard did not complete setup")
+
+
+def stage_setup_over_ssh(st: Stage, disk: Path, machine: Path, outdir: Path, key: Path) -> None:
+    """Set the machine up without the wizard, so the later stages still run.
+
+    Only when the boot stage failed to get through setup. The boot stage
+    stays failed and so does the run; this is so one broken wizard does
+    not also hide what the desktop and the suites would have found. The
+    administrator is the one the wizard would have made, through the
+    non-interactive path of the same `kosherctl setup`.
+    """
+    subprocess.run(["qemu-img", "create", "-q", "-f", "qcow2", "-b", str(disk.resolve()),
+                    "-F", "qcow2", str(machine)], check=True)
+    vm = Machine(machine, outdir, key, gl=False, console="setup-console.log")
+    try:
+        if not st.check("the machine boots and answers ssh", vm.wait_ssh()):
+            raise StageError("no ssh")
+        rc, out = vm.sh(f"kosherctl setup --username {ADMIN_USER} --full-name 'Boot Test' "
+                        "--password-stdin", input=ADMIN_PASSWORD + "\n", timeout=180)
+        st.check("setup completes without the wizard (kosherctl setup --username)",
+                 rc == 0, out)
+        vm.shoot("00-setup-over-ssh")
+    finally:
+        vm.stop()
+    if rc != 0:
+        machine.unlink(missing_ok=True)
+        raise StageError("setup over ssh failed too")
+
+
+def prompt_on_screen(png: Path) -> bool:
+    """Is GNOME's password dialog up? It is a navy box in the middle of the
+    screen with white title text, which no app or login screen here has."""
+    try:
+        from PIL import Image
+        im = Image.open(png).convert("RGB")
+    except Exception:  # noqa: BLE001 - no screenshot, or no Pillow
+        return False
+    w, h = im.size
+
+    def at(x: float, y: float) -> tuple:
+        return im.getpixel((int(w * x), int(h * y)))
+
+    navy = all(r < 35 and b < 75 and b - r > 25
+               for r, _g, b in (at(0.5, 0.625), at(0.33, 0.5), at(0.67, 0.5)))
+    title = min(at(0.5, 0.3)) > 200
+    return navy and title
 
 
 def wait_for(predicate, timeout: float, step: float = 2.0):
@@ -421,6 +471,8 @@ def stage_desktop(st: Stage, machine: Path, outdir: Path, key: Path, gl: bool) -
                         "see desktop-console.log"):
             raise StageError("no ssh")
         vm.shoot("01-boot")
+        if not st.check("the machine is set up", sh("test -e /var/lib/kosher/setup-complete")[0] == 0):
+            raise StageError("setup was never finished on this machine")
 
         # The fixture: a filtered account with a password, and a login
         # screen that asks for a name rather than showing a list, so the
@@ -435,7 +487,7 @@ def stage_desktop(st: Stage, machine: Path, outdir: Path, key: Path, gl: bool) -
         st.check(f"a filtered test account ({USER}) is made", rc == 0, out)
 
         greeter = wait_for(lambda: sh(
-            "loginctl list-sessions --no-legend | awk '$3==\"gdm\"' | grep -q seat0")[0] == 0, 120)
+            "loginctl list-sessions --no-legend | grep -w greeter | grep -qw seat0")[0] == 0, 120)
         st.check("the login screen is up on seat0", greeter)
         time.sleep(8)  # the greeter's session exists before its window does
         vm.shoot("02-login-screen")
@@ -475,55 +527,78 @@ def stage_desktop(st: Stage, machine: Path, outdir: Path, key: Path, gl: bool) -
         st.check("polkit lets the signed-in account use the Store", rc == 0, out)
         rc, out = sh(f"pkcheck --action-id org.kosherlinux.manage-filter --process {shell_pid}")
         st.check("polkit asks for an administrator before a filter change", rc == 2, f"exit {rc}: {out}")
-        rc, out = sh(f"journalctl -b -u polkit --no-pager | grep 'Registered Authentication Agent for unix-session:{sid} '")
-        st.check("the desktop's password prompt is registered with polkit", rc == 0,
-                 sh("journalctl -b -u polkit --no-pager | tail -20")[1])
-
         # A real password prompt. A filter change from the account's own
         # session (what the admin app does when opened on a child's
         # account) waits on polkit, which puts the administrator's
-        # password prompt on the screen; it is typed there.
-        rc, before = sh(f"kosherctl get-policy | python3 -c \"import json,sys; p=json.load(sys.stdin); print([u.get('adblock') for u in p.get('users', [])])\"")
-        sh(f"journalctl -b -u polkit --no-pager -n0 --show-cursor | tail -1 > /run/pr-test-cursor")
+        # password prompt on the screen. Each prompt that appears is
+        # answered there, and counted.
         vm.start_as_user(USER, "pr-test-prompt",
                          f"kosherctl set-mode $(id -u {USER}) filtered --guardian-password '' > /tmp/pr-test-prompt.out 2>&1; echo $? >> /tmp/pr-test-prompt.out")
-        time.sleep(6)
-        vm.shoot("06-password-prompt")
-        vm.qmp.type(ADMIN_PASSWORD + "\n")
-        done = wait_for(lambda: sh(f"test -s /tmp/pr-test-prompt.out && tail -1 /tmp/pr-test-prompt.out")[1].strip(), 60)
+        prompts, done = 0, ""
+        deadline = time.monotonic() + 90
+        while time.monotonic() < deadline:
+            done = sh("test -s /tmp/pr-test-prompt.out && tail -1 /tmp/pr-test-prompt.out")[1].strip()
+            if done:
+                break
+            shot = vm.shoot(f"06-password-prompt-{prompts + 1}")
+            if prompt_on_screen(shot):
+                prompts += 1
+                vm.qmp.type(ADMIN_PASSWORD + "\n")
+                time.sleep(4)
+            else:
+                time.sleep(2)
         vm.shoot("07-after-prompt")
-        rc, auth = sh("journalctl -b -u polkit --no-pager | grep -i 'successfully authenticated' | tail -3")
-        st.check("the administrator's password prompt appears and is accepted",
-                 done == "0" and ADMIN_USER in auth,
-                 f"kosherctl exit: {done or 'still waiting'}\n{auth}\n"
-                 + sh(f"cat /tmp/pr-test-prompt.out; journalctl -b -u polkit --no-pager | tail -15")[1])
+        _, auth = sh("journalctl -b -u polkit --no-pager | grep -i 'authenticate' | tail -5")
+        st.check("the administrator's password prompt appears on the screen", prompts > 0,
+                 "no prompt was seen in the screenshots")
+        st.check("the password typed into it is accepted and the change goes through",
+                 done == "0", f"kosherctl exit: {done or 'still waiting'}\n{auth}\n"
+                 + sh("cat /tmp/pr-test-prompt.out")[1])
+        st.check("one change asks for the password once", prompts <= 1,
+                 f"{prompts} prompts for one `kosherctl set-mode`\n{auth}")
 
-        # The apps open in the session and stay open.
-        for app, cmd in [("Look", "kosher-look"), ("admin app", "kosher-admin"),
-                         ("My Filter", "kosher-my-filter"), ("Store", "kosher-store")]:
+        # The apps open in the session and stay open. The account's own
+        # apps open without a password; the admin app on a child's account
+        # asks for an administrator's, which is what the rule is for.
+        for app, cmd, wants_prompt in [("Look", "kosher-look", False),
+                                       ("admin app", "kosher-admin", True),
+                                       ("My Filter", "kosher-my-filter", False),
+                                       ("Store", "kosher-store", False)]:
             unit = f"pr-test-{cmd}"
             vm.start_as_user(USER, unit, cmd)
             time.sleep(12)
-            vm.shoot(f"08-{cmd}")
+            shot = vm.shoot(f"08-{cmd}")
+            prompted = prompt_on_screen(shot)
             rc, _ = vm.user_unit(USER, "is-active --quiet", unit)
             _, journal = sh(f"journalctl -b --no-pager _UID=$(id -u {USER}) | grep -A8 'Traceback' | tail -20")
-            alive = rc == 0
-            st.check(f"the {app} opens and stays open", alive and "Traceback" not in journal,
+            st.check(f"the {app} opens and stays open", rc == 0 and "Traceback" not in journal,
                      journal or "the window closed by itself")
+            if wants_prompt:
+                st.check(f"the {app} asks for an administrator's password", prompted,
+                         f"no prompt in {shot.name}")
+            else:
+                st.check(f"the {app} opens without asking for a password", not prompted,
+                         f"an administrator's password prompt is on the screen: {shot.name}")
+            if prompted:
+                vm.qmp.key("esc")
+                time.sleep(2)
             vm.user_unit(USER, "stop", unit)
+            time.sleep(2)
 
         # The filter as a browser meets it: many connections at once, the
         # literal block page, then Firefox itself.
         script = f"""
-            n=0; pages=0
+            loaded=0; pages=0; codes=""
             for i in $(seq 16); do
-              ( curl -s -m 30 {BLOCKED_URL} -o /tmp/pr-block-$i.html -w '%{{http_code}}\\n' > /tmp/pr-block-$i.code ) &
+              ( curl -s -m 30 {BLOCKED_URL} -o /tmp/pr-block-$i.html -w '%{{http_code}}' > /tmp/pr-block-$i.code ) &
             done; wait
             for i in $(seq 16); do
-              [ "$(cat /tmp/pr-block-$i.code)" = 403 ] && n=$((n+1))
-              grep -q 'This page is blocked' /tmp/pr-block-$i.html && pages=$((pages+1))
+              c=$(cat /tmp/pr-block-$i.code); codes="$codes $c"
+              case "$c" in 2*|3*) loaded=$((loaded+1));; esac
+              grep -qs 'This page is blocked' /tmp/pr-block-$i.html && pages=$((pages+1))
             done
-            echo "blocked=$n pages=$pages"
+            echo "loaded=$loaded pages=$pages codes:$codes"
+            getent ahostsv4 www.unibet.com | head -1
             curl -s -m 30 -o /dev/null -w 'allowed=%{{http_code}}\\n' {ALLOWED_URL}
             curl -sv -m 30 -o /dev/null {ALLOWED_URL} 2>&1 | grep -i issuer
         """
@@ -535,15 +610,18 @@ def stage_desktop(st: Stage, machine: Path, outdir: Path, key: Path, gl: bool) -
         else:
             rc, out = vm.as_user(USER, script, timeout=180)
             log.write(out)
-            st.check("16 requests at once to a gambling site all get the block page",
-                     "blocked=16 pages=16" in out, out)
+            st.check("16 requests at once to a gambling site: none of them loads it",
+                     "loaded=0 " in out, out)
+            st.check("and every one of them gets the block page", "pages=16 " in out, out)
             st.check("an ordinary site loads, through the proxy",
                      "allowed=200" in out and "mitmproxy" in out.lower(), out)
             vm.start_as_user(USER, "pr-test-firefox", f"firefox --new-window {BLOCKED_URL}")
             time.sleep(25)
             vm.shoot("09-firefox-blocked")
             rc, activity = sh(f"kosherctl activity --user {USER}")
-            st.check("Firefox's visit is blocked and recorded by the filter",
+            st.check("Firefox's traffic goes through the filter",
+                     "firefox" in activity.lower() or "mozilla" in activity.lower(), activity[-1200:])
+            st.check("the filter records Firefox's visit to the gambling site",
                      "unibet" in activity.lower(), activity[-1200:])
             vm.user_unit(USER, "stop", "pr-test-firefox")
     finally:
@@ -552,7 +630,7 @@ def stage_desktop(st: Stage, machine: Path, outdir: Path, key: Path, gl: bool) -
 
 
 def stage_suites(st: Stage, machine: Path, outdir: Path, key: Path, tree: Path) -> None:
-    vm = Machine(machine, outdir, key, gl=False)
+    vm = Machine(machine, outdir, key, gl=False, console="suites-console.log")
     try:
         if not st.check("the machine boots again and answers ssh", vm.wait_ssh()):
             raise StageError("no ssh")
@@ -562,7 +640,7 @@ def stage_suites(st: Stage, machine: Path, outdir: Path, key: Path, tree: Path) 
                        input=tar, check=True)
         with st.log.open("a") as fh:
             p = subprocess.Popen(vm.ssh_cmd() + ["bash /tmp/kosher-vm-tests/run.sh"],
-                                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+                                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, errors="replace")
             assert p.stdout is not None
             for line in p.stdout:
                 fh.write(line)
@@ -694,10 +772,12 @@ def main() -> int:
                 raise StageError("a recipe would need sudo")
 
         def go(name: str) -> bool:
+            # Everything needs the image and the disk; the desktop and the
+            # suites need a machine that is set up, by the wizard or not.
             if pre.status != "passed" or name not in only:
                 return False
             return all(s.status in ("passed", "skipped") for s in stages
-                       if s.name in ("build", "disk") or (name in ("desktop", "suites") and s.name == "boot"))
+                       if s.name in ("build", "disk"))
 
         if go("build"):
             with stage("build") as st:
@@ -708,6 +788,10 @@ def main() -> int:
         if go("boot"):
             with stage("boot") as st:
                 stage_boot(st, image, disk, machine, outdir, env)
+        if go("desktop") or go("suites"):
+            if not machine.exists() and disk.exists():
+                with stage("setup-over-ssh") as st:
+                    stage_setup_over_ssh(st, disk, machine, outdir, key)
         if go("desktop") and machine.exists():
             with stage("desktop") as st:
                 stage_desktop(st, machine, outdir, key, args.gl)

@@ -189,20 +189,25 @@ the keyboard:
 2. **disk**: a qcow2 from that image, made as in `just vm-rootless`.
 3. **boot**: the boot test, which answers the setup wizard and checks the
    administrator's filtering. The machine it set up is kept for the next
-   two stages.
+   two stages. When the wizard does not finish, the boot stage fails and
+   the machine is set up over ssh instead, with the non-interactive
+   `kosherctl setup --username`, so a broken wizard does not also hide
+   what the later stages would find.
 4. **desktop**: the same machine booted again with a screen. A filtered
    test account signs in at the GDM login screen, with the keys typed
    through QEMU's control socket. The session must have a seat, be active
-   and local, and run Wayland. Then polkit is asked about the session's
-   own processes: the Store is allowed and a filter change needs an
-   administrator. A real filter change from the session brings up the
-   administrator's password prompt, the password is typed into it, and
-   the change must go through. The Look app, the admin app, My Filter and
-   the Store must open and stay open, and the account's user services
-   must all start. Last, the filter is checked the way a browser meets
-   it: sixteen requests at once to a gambling site must all get the block
-   page, an ordinary site must load through the proxy, and Firefox opens
-   the gambling site on the desktop and the filter must record the visit.
+   and local, and run Wayland, and the account's user services must all
+   start. polkit is asked about the session's own processes: the Store is
+   allowed, and a filter change needs an administrator. Then a real filter
+   change is made from the session. Each password prompt it brings up is
+   found in a screenshot and answered, the change must go through, and it
+   should take one prompt. Look, My Filter and the Store must open and stay
+   open without asking for a password; the admin app on this account must
+   ask for one. Last, the filter is checked the way a browser meets it.
+   Sixteen requests at once to a gambling site must all fail to load it
+   and all get the block page, an ordinary site must load through the
+   proxy, and when Firefox opens the gambling site on the desktop the
+   filter must record the visit.
 5. **suites**: the target's own `scripts/vm-tests`, as root over ssh.
 
 The test account at the login screen is what the in-VM suites cannot be.

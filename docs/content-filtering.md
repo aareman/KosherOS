@@ -303,6 +303,26 @@ submit a plain-HTTP form from a page it considers secure. Requests are
 individual files in a spool that the two unprivileged services may write
 to but not list or read, and the daemon is the only reader.
 
+## Usage
+
+The admin app's Usage page shows how much went through the filter and how
+much it stopped, as numbers: pages and files loaded, data downloaded and
+uploaded, pages, pictures, videos and searches blocked, and how long the
+filter held each request (the average, the time half of all requests
+finished within, and the time 95 in 100 finished within). It covers today,
+this week, this month or all time, for everyone or for one person, and
+each person's overview shows today's figures. Only accounts on filtered
+internet are counted, because on the other settings the filter never sees
+the pages.
+
+Only totals are kept, never an address. The proxy adds up in memory and
+writes its totals once a minute, the search service writes a line for each
+search it refuses, and kosherd folds both into a file of daily totals. Days
+are kept for sixty days and then dropped, after they have been added to
+an all-time total, so the file stays under a megabyte however long
+the computer runs. A writer stops writing if kosherd stops collecting, and
+keeps counting in memory until it can.
+
 ## Saying when the filter is not filtering
 
 Every list loader fails open and quiet, which is right: a missing file must

@@ -78,6 +78,9 @@ class FakeClient:
     def activity_summary(self):
         return self._overrides.get("summary", {})
 
+    def usage(self):
+        return self._overrides.get("usage", {})
+
     def list_catalog(self):
         return {"apps": self._overrides.get("catalog", [])}
 
@@ -476,9 +479,9 @@ def test_the_sidebar_holds_the_people_themselves_between_the_two_fixed_groups():
                                   "asked": 0}])
     keys = [row.key for row in _rail_rows(rail)]
     assert keys == ["add", "user-1001", "user-1002", "guest",
-                    "activity", "protection", "apps", "updates"]
+                    "activity", "usage", "protection", "apps", "updates"]
     sections = [row.section for row in _rail_rows(rail)]
-    assert sections == ["Family"] * 4 + ["Administration"] * 4
+    assert sections == ["Family"] * 4 + ["Administration"] * 5
     assert rail.rows["add"].title.get_label() == "Add a person…", "words, not a bare plus"
     # A row says one thing. A person's row is the name, plus a count when
     # somebody is waiting on an answer; the preset is on their page.
@@ -2737,3 +2740,116 @@ def test_the_protection_page_says_whether_the_boot_menu_has_a_password():
     page = computer.ProtectionPage(win)
     drain()
     assert _row_named(page, "Boot menu password").get_subtitle().startswith("Set.")
+
+
+# -- usage ---------------------------------------------------------------------
+
+def _values(group) -> dict[str, str]:
+    """{row title: the number on its right} for a group on the Usage page."""
+    out = {}
+    for row in _descendants(group):
+        if isinstance(row, Adw.ActionRow) and hasattr(row, "value"):
+            out[row.get_title()] = row.value.get_label()
+    return out
+
+
+def _descendants(widget):
+    child = widget.get_first_child()
+    while child is not None:
+        yield child
+        yield from _descendants(child)
+        child = child.get_next_sibling()
+
+
+def test_usage_is_numbers_for_everyone_by_range():
+    from kosheradmin import usage
+
+    win, restore = _real_window()
+    try:
+        win.go_to("usage")
+        drain()
+        page = win.nav.get_visible_page()
+        assert isinstance(page, usage.UsagePage)
+        assert win.sidebar.rows["usage"].section == "Administration"
+        titles = [g.get_title() for g in page._groups]
+        assert titles == ["Internet", "Blocked", "Filter speed", "By person"]
+        today = _values(page._groups[0])["Pages and files loaded"]
+        assert today.replace(",", "").isdigit() and today != "0"
+        assert _values(page._groups[2])["Average"].endswith(" ms")
+
+        # All time is more than today, and says since when.
+        page.ranges.get_last_child().set_active(True)
+        drain()
+        assert win.usage_range == "all"
+        all_time = _values(page._groups[0])["Pages and files loaded"]
+        assert int(all_time.replace(",", "")) > int(today.replace(",", ""))
+        assert page._groups[-1].get_description().startswith("Counted since ")
+
+        # Each person is a row that narrows the page to them.
+        people = [r for r in _descendants(page._groups[3]) if isinstance(r, Adw.ActionRow)]
+        assert {r.get_title() for r in people} >= {"avi", "yosef", "shmuli"}
+        next(r for r in people if r.get_title() == "yosef").activate()
+        drain()
+        assert page.uid == win.usage_uid == 1002
+        assert page.who.get_label() == "yosef"
+        assert "By person" not in [g.get_title() for g in page._groups]
+
+        # Coming back keeps the range and the person.
+        win.go_to("activity")
+        win.go_to("usage")
+        drain()
+        again = win.nav.get_visible_page()
+        assert (again.range, again.uid) == ("all", 1002)
+    finally:
+        restore()
+
+
+def test_an_account_the_filter_never_sees_says_why_there_is_nothing_to_count():
+    from kosheradmin import usage
+
+    win, restore = _real_window()
+    try:
+        shmuli = next(u for u in win.policy["users"] if u["username"] == "shmuli")
+        assert shmuli["mode"] == "whitelist"
+        win.show_usage(shmuli["uid"])
+        drain()
+        page = win.nav.get_visible_page()
+        status = [w for g in page._groups for w in _descendants(g)
+                  if isinstance(w, Adw.StatusPage)]
+        assert status and status[0].get_title() == "Nothing to count"
+        assert "Approved sites only" in status[0].get_description()
+        assert usage.not_counted_why({"mode": "none"}) == "This account has no internet access."
+    finally:
+        restore()
+
+
+def test_a_persons_overview_has_todays_usage_and_a_way_to_the_rest():
+    win, restore = _real_window()
+    try:
+        win.go_to("user-1002")
+        drain()
+        page = win.nav.get_visible_page()
+        groups = [w for w in _descendants(page) if isinstance(w, Adw.PreferencesGroup)
+                  and w.get_title() == "Usage today"]
+        assert len(groups) == 1
+        labels_ = [w.get_label() for w in _descendants(groups[0])
+                   if isinstance(w, Gtk.Label) and "numeric" in w.get_css_classes()]
+        assert len(labels_) == 3 and "…" not in labels_
+        more = next(w for w in _descendants(groups[0])
+                    if isinstance(w, Gtk.Button) and w.get_label() == "See more")
+        more.emit("clicked")
+        drain()
+        assert win.destination == "usage" and win.usage_uid == 1002
+    finally:
+        restore()
+
+
+def test_usage_numbers_read_as_people_write_them():
+    from kosheradmin import usage
+
+    assert usage.count(1234567) == "1,234,567"
+    assert usage.count(None) == "0"
+    assert usage.millis(None) == "—"
+    assert usage.millis(25) == "25 ms"
+    assert usage.millis(2500) == "2.5 s"
+    assert usage.millis(usage.usage_mod.SLOWEST_MS) == "over 5 s"

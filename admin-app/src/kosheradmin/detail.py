@@ -256,12 +256,43 @@ class UserDetailPage(Adw.NavigationPage):
         self.blocked_group.add(self.blocked_loading)
         groups.append(self.blocked_group)
 
+        groups.append(self._usage_group(user))
+
         self.changes_group = Adw.PreferencesGroup(title="Changes to this account")
         self.changes_loading = Adw.ActionRow(title="Loading…")
         self.changes_group.add(self.changes_loading)
         groups.append(self.changes_group)
         self._load_activity(user)
         return groups
+
+    def _usage_group(self, user: dict) -> Adw.PreferencesGroup:
+        """Today's numbers in three rows; the Usage page has the rest."""
+        from .usage import count, counted, size
+
+        group = Adw.PreferencesGroup(title="Usage today")
+        more = small_button("See more", "flat")
+        more.connect("clicked", lambda _b: self.win.show_usage(user["uid"]))
+        group.set_header_suffix(more)
+        if not counted(user):
+            group.add(Adw.ActionRow(title="Not counted on this internet setting"))
+            return group
+        rows = {}
+        for key, title in (("requests", "Pages and files loaded"),
+                           ("bytes_in", "Downloaded"), ("blocked", "Pages blocked")):
+            row = Adw.ActionRow(title=title)
+            rows[key] = Gtk.Label(label="…", xalign=1)
+            rows[key].add_css_class("numeric")
+            row.add_suffix(rows[key])
+            group.add(row)
+
+        def on_done(data):
+            numbers = (data.get("today", {}).get("people") or {}).get(str(user["uid"])) or {}
+            rows["requests"].set_label(count(numbers.get("requests")))
+            rows["bytes_in"].set_label(size(numbers.get("bytes_in")))
+            rows["blocked"].set_label(count(numbers.get("blocked")))
+
+        run_async(self.win.client.usage, on_done, lambda e: self.win.toast(error_text(e)))
+        return group
 
     def _load_activity(self, user: dict) -> None:
         since = int(time.time()) - 7 * 86400

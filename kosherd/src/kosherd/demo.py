@@ -511,6 +511,35 @@ class DemoClient:
         return {str(u): c for u, c in activity.summary(
             [e for e in self.events if e["t"] >= today]).items()}
 
+    def usage(self):
+        """Ninety days of made-up but plausible numbers: a few hundred
+        requests an hour of browsing, a block now and then, most requests
+        through the filter in under 25 ms."""
+        from kosherd import usage
+
+        store = {"days": {}, "total": {}}
+        today = time.time()
+        # uid: (requests a day, share blocked, pictures a day)
+        people = {1000: (2600, 0.002, 4), 1001: (1900, 0.001, 2),
+                  1002: (3400, 0.006, 22), 1003: (2200, 0.004, 9)}
+        for back in range(90):
+            day = usage.day_key(today - back * 86400)
+            wobble = 0.6 + ((back * 37) % 9) / 10
+            for uid, (requests, blocked, pictures) in people.items():
+                n = int(requests * wobble)
+                entry = usage.empty()
+                entry.update(requests=n, bytes_in=n * 61_000, bytes_out=n * 1_900,
+                             blocked=int(n * blocked), pictures=int(pictures * wobble),
+                             videos=int(blocked * 300), searches=int(blocked * 1000))
+                entry["lat"] = [int(n * f) for f in
+                                (.22, .18, .2, .14, .12, .07, .04, .02, .008, .001, 0, 0, 0)]
+                entry["lat_ms"] = n * 9
+                if back < usage.KEEP_DAYS:
+                    store["days"].setdefault(day, {})[str(uid)] = entry
+                usage.merge(store["total"].setdefault(str(uid), usage.empty()), entry)
+                store["since"] = day
+        return usage.report(store)
+
     # -- apps ----------------------------------------------------------------------
 
     def list_catalog(self): return {"apps": list(self.catalog)}

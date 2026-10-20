@@ -32,7 +32,7 @@ import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from kosherd import accessreq
-from kosherd import activity
+from kosherd import activity, usage
 from kosherd import search as search_mod
 from kosherd.uidmap import UidLookup
 
@@ -395,6 +395,11 @@ class Handler(BaseHTTPRequestHandler):
                                 why=refusal)
             except Exception:  # noqa: BLE001 - the log is a convenience
                 log.debug("could not record activity", exc_info=True)
+            # Refusals are rare, so each is written at once rather than
+            # held for a minute in a process with no timer of its own.
+            tally = usage.Tally("search")
+            tally.add(uid, searches=1)
+            tally.flush()
             return self._page(
                 '<div class="note"><strong>This search is blocked.</strong>'
                 f"<p>KosherOS did not run it because {esc(refusal)}.</p>"

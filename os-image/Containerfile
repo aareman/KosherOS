@@ -184,7 +184,7 @@ COPY --from=glass-build /out/usr/ /usr/
 # installed above). Each brings its own login-screen session.
 #
 # Fedora no longer packages Hyprland, so it comes from the
-# nett00n/hyprland COPR, which builds every release for Fedora 44 and signs
+# nett00n/hyprland COPR, which builds it for Fedora 44 and signs
 # its packages; dnf checks them against the COPR's key. The repository is
 # used for this install only and then removed, so nothing on the machine
 # points at it. Hyprland's own wallpapers include anime drawings of its

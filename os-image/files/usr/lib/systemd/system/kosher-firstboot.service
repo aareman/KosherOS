@@ -35,6 +35,13 @@ ConditionPathExists=!/var/lib/kosher/setup-complete
 # wizard has run there is nothing here to keep active: the condition
 # above keeps it from running again.
 Type=oneshot
+# A serial console reports a size of 0x0, and systemd then asks the
+# terminal for its size with escape sequences and reads the answer from
+# the same line, so whatever the person had typed into the text wizard
+# went with it: the password arrived empty and setup never finished. A
+# console with a size is not asked. A real screen already has one and is
+# left alone.
+ExecStartPre=-/bin/sh -c '[ "$$(stty -F /dev/console size 2>/dev/null)" != "0 0" ] || stty -F /dev/console rows 24 cols 80'
 ExecStart=/usr/bin/kosher-setup-session
 # Generous, because a person is typing into the wizard — but NOT infinite:
 # GDM is ordered after this unit, so a wizard that wedges (no usable display,

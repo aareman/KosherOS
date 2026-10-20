@@ -208,6 +208,14 @@ ACTIONS = {
     # restart is the second half of the same job.
     "Reboot": ACTION_APPLY_UPDATES,
     "SetCaptiveMode": ACTION_MANAGE_NETWORK,
+    # Tailscale (#30). Reading whether this computer is on a tailnet is a
+    # read. Signing it in puts it on a network with other people's
+    # machines, which every account can then reach by name through its
+    # own filter, so it is guardian-gated; signing out only takes that
+    # away, and is not.
+    "TailscaleStatus": ACTION_READ_CONFIG,
+    "TailscaleSignIn": ACTION_MANAGE_NETWORK,
+    "TailscaleSignOut": ACTION_MANAGE_NETWORK,
     "IsEnabled": ACTION_READ_CONFIG,
     "SetGuardianPassword": ACTION_MANAGE_GUARDIAN,
     "DisableGuardian": ACTION_MANAGE_GUARDIAN,
@@ -224,6 +232,7 @@ GUARDIAN_GATED = frozenset({
     "SetDeveloperTools",
     "SetBootMenuPassword",
     "SetUserAppAccess", "SetUserBlockedAppKinds", "SetUserBlockedApps",
+    "TailscaleSignIn",
 })
 
 # First-boot only; closed forever once setup is stamped complete.
@@ -269,6 +278,8 @@ CHANGES = frozenset({
     "SetChannel",
     # A test build put on the machine, and the return from it.
     "TryImage", "ReturnToKept",
+    # Joining a tailnet and leaving it.
+    "TailscaleSignIn", "TailscaleSignOut",
 })
 # Changes whose first argument is the account they are about.
 PER_USER = frozenset({

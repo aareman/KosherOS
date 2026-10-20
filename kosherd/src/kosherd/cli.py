@@ -1040,6 +1040,36 @@ def cmd_captive(args) -> int:
     return 0
 
 
+def cmd_tailscale(args) -> int:
+    """kosherctl tailscale [status|sign-in|sign-out]"""
+    c = _client()
+    if args.action == "sign-in":
+        url = c.tailscale_sign_in(_guardian_pw(args))
+        print(f"Open this address to finish signing in:\n  {url}" if url
+              else "Signed in again; no sign-in page was needed.")
+        return 0
+    if args.action == "sign-out":
+        c.tailscale_sign_out()
+        print("signed out of Tailscale")
+        return 0
+    now = c.tailscale_status()
+    if args.json:
+        print(json.dumps(now, indent=2))
+    elif not now.get("installed", True):
+        print("Tailscale is not installed")
+    elif not now.get("signed_in"):
+        print(f"not signed in ({now.get('state')})"
+              + (f": {now['error']}" if now.get("error") else ""))
+        if now.get("login_url"):
+            print(f"waiting for sign-in at {now['login_url']}")
+    else:
+        print(f"signed in as {now.get('user')} on {now.get('tailnet')}, "
+              + ("connected" if now.get("connected") else f"not connected ({now.get('state')})"))
+        print(f"this computer: {now.get('name')} "
+              f"({', '.join(now.get('addresses') or []) or 'no address yet'})")
+    return 0
+
+
 def cmd_guardian(args) -> int:
     c = _client()
     if args.action == "enable" or args.action == "set-password":
@@ -1343,6 +1373,13 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("uid", type=int)
     s.add_argument("minutes", type=int, nargs="?", default=5)
     s.set_defaults(func=cmd_captive)
+
+    s = sub.add_parser("tailscale", help="this computer's Tailscale sign-in")
+    s.add_argument("action", nargs="?", default="status",
+                   choices=["status", "sign-in", "sign-out"])
+    s.add_argument("--json", action="store_true", help="status as JSON")
+    s.add_argument("--guardian-password")
+    s.set_defaults(func=cmd_tailscale)
 
     s = sub.add_parser("guardian", help="manage the guardian password")
     s.add_argument("action", choices=["enable", "set-password", "disable"])

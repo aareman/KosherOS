@@ -12,12 +12,30 @@ destination.
 from __future__ import annotations
 
 import logging
+import re
 
 from .policy import INSPECTED_MODES, SAFESEARCH_MODES, Policy
 
 WHITELIST_CONF = "/etc/kosher/dnsmasq.d/whitelist.conf"
 SAFESEARCH_CONF = "/etc/kosher/dnsmasq.d/safesearch.conf"
 CATEGORY_BLOCK_CONF = "/etc/kosher/dnsmasq.d/categories.conf"
+# The tailnet's names, forwarded to Tailscale's own resolver (render_tailnet).
+# In both resolvers, like the ad list: an unfiltered account reaches the
+# family's machines by name as much as a filtered one does.
+TAILNET_CONF = "/etc/kosher/dnsmasq.d/tailnet.conf"
+TAILNET_OPEN_CONF = "/etc/kosher/dnsmasq-open.d/tailnet.conf"
+# Where tailscaled answers for the tailnet's names (MagicDNS). Reached by
+# dnsmasq, a system user, so the per-account rules never see the query.
+TAILNET_RESOLVER = "100.100.100.100"
+
+# Never blocked at the resolver, whatever category lists them. The resolver
+# answers root as well as the accounts, so a block here would stop the
+# machine's own services, not only the person who chose it. tailscale.com
+# is in the "proxy" list, which every supervised account blocks by
+# default, and tailscaled cannot sign in or find its relays without it.
+# The proxy still blocks the site for a filtered account that blocks the
+# category, and nobody but kosherd can drive tailscaled anyway.
+RESOLVER_NEVER_BLOCKED = ("tailscale.com",)
 
 # Search engines publish hostnames that always answer with safe search on.
 # Pointing the normal hostname at them is how safe search is enforced for
@@ -186,10 +204,50 @@ def render_category_blocks(policy: Policy, bundle) -> str:
         lines.append(f"# Blocking {', '.join(sorted(rendered))} for users "
                      "the proxy does not see.")
     for domain in bundle.domains_in(rendered):
+        if _never_blocked(domain):
+            continue
         # 0.0.0.0 rather than NXDOMAIN: a browser shows a connection error
         # instead of retrying elsewhere.
         lines.append(f"address=/{domain}/0.0.0.0")
         lines.append(f"address=/{domain}/::")
+    return "\n".join(lines) + "\n"
+
+
+def _never_blocked(domain: str) -> bool:
+    return any(domain == name or domain.endswith("." + name)
+               for name in RESOLVER_NEVER_BLOCKED)
+
+
+# -- the tailnet --------------------------------------------------------------
+
+# A MagicDNS suffix is a DNS name and nothing else: it goes into a dnsmasq
+# line between slashes, so a slash, a space or a newline in it would be a
+# second directive.
+_SUFFIX = re.compile(r"^(?=.{1,253}$)([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$")
+
+
+def render_tailnet(suffix: str | None) -> str:
+    """dnsmasq lines sending the tailnet's names to tailscaled.
+
+    tailscaled is run with --accept-dns=false (tailnet.py), so it never
+    rewrites /etc/resolv.conf: dnsmasq stays the only resolver and every
+    account's queries still reach it. MagicDNS keeps answering at
+    100.100.100.100 regardless, and this forwards the one tailnet this
+    computer is signed in to there. Only that tailnet, not all of ts.net:
+    tailscaled forwards a name it does not own back to the system
+    resolver, which is this dnsmasq, and a name of someone else's tailnet
+    would go round in a loop.
+    """
+    lines = ["# Rendered by kosherd from the tailnet this computer is signed in to. "
+             "DO NOT EDIT."]
+    name = (suffix or "").strip().rstrip(".").lower()
+    if not name:
+        lines.append("# Not signed in to a tailnet.")
+    elif not _SUFFIX.match(name):
+        log.error("ignoring a tailnet name that is not a DNS name: %r", suffix)
+        lines.append("# The tailnet's name was not a DNS name; nothing is forwarded.")
+    else:
+        lines.append(f"server=/{name}/{TAILNET_RESOLVER}")
     return "\n".join(lines) + "\n"
 
 

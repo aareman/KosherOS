@@ -163,6 +163,23 @@ COPY --from=glass-build /out/usr/ /usr/
 RUN dnf -y install nix nix-daemon nix-legacy && dnf clean all \
     && getent group nixbld >/dev/null \
     && test -f /usr/lib/systemd/system/nix-daemon.socket
+# Tailscale (#30), so a family can reach its own machines over its tailnet:
+# a home server, a Forgejo, the other computer. Fedora does not package it,
+# so it comes from Tailscale's own signed repository. The repo file is
+# written out here rather than downloaded, so the signature checks it asks
+# for are in this file to read, and it is removed after the install: a
+# bootc machine never runs dnf, and the next image brings the next
+# Tailscale. Only kosherd drives it (kosherd/tailnet.py). No operator is
+# ever set, so an account can read its status but only root can change it.
+RUN printf '%s\n' '[tailscale-stable]' 'name=Tailscale stable' \
+        'baseurl=https://pkgs.tailscale.com/stable/fedora/$basearch' \
+        'enabled=1' 'type=rpm' 'gpgcheck=1' 'repo_gpgcheck=1' \
+        'gpgkey=https://pkgs.tailscale.com/stable/fedora/repo.gpg' \
+        > /etc/yum.repos.d/tailscale.repo \
+    && dnf -y install tailscale && dnf clean all \
+    && rm -f /etc/yum.repos.d/tailscale.repo \
+    && systemctl enable tailscaled.service \
+    && systemctl is-enabled tailscaled.service
 # devbox is a static Go binary released on GitHub; pinned by hash like the
 # person model. It uses the Nix above (it only installs Nix when none is
 # found) and its package search at search.devbox.sh, which is reachable

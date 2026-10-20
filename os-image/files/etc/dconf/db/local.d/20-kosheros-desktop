@@ -10,7 +10,7 @@
 # in kosherd/layout.py and must not be locked here.
 
 [org/gnome/shell]
-enabled-extensions=['dash-to-panel@jderose9.github.com', 'arcmenu@arcmenu.com', 'appindicatorsupport@rgcjonas.gmail.com', 'blur-my-shell@aunetx', 'user-theme@gnome-shell-extensions.gcampax.github.com']
+enabled-extensions=['dash-to-panel@jderose9.github.com', 'arcmenu@arcmenu.com', 'appindicatorsupport@rgcjonas.gmail.com', 'blur-my-shell@aunetx', 'user-theme@gnome-shell-extensions.gcampax.github.com', 'keyd-focus@kosherlinux.org']
 # Extensions come with the image. Shell code fetched from the internet is
 # not something a family computer needs, and a broken one takes the whole
 # desktop down with it. Locked: the same answer for every account.

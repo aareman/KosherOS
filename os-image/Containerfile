@@ -42,8 +42,13 @@ RUN bash /build-glass/build-glass.sh /tmp/aura-glass /tmp/blur-my-shell /out
 # config of whoever's session is on the screen from /run, where kosherd
 # writes it, so nothing at run time writes /etc and every boot starts from
 # the computer's own config (files/etc/keyd, which remaps nothing).
-# keyd-application-mapper is left out: it needs keyd's socket, and nobody
-# gets that socket (see keyboard.py for why).
+# keyd-application-mapper (per-app keys) goes to /usr/libexec/kosher, not
+# PATH: on its own it would call keyd's socket, which nobody has (see
+# keyboard.py). kosher-keyd-apps.service runs it with KEYD_BIN pointing at
+# kosher-keyd-bind, which goes through kosherd. Its GNOME extension is
+# replaced by KosherOS's own (files/usr/share/gnome-shell/extensions), which
+# only reports the window in front: upstream's also starts the mapper, and
+# kills it whenever GNOME turns extensions off, as it does at the lock screen.
 FROM quay.io/fedora/fedora:44 as keyd-build
 ARG KEYD_VERSION=2.6.0
 ARG KEYD_SHA256=697089681915b89d9e98caf93d870dbd4abce768af8a647d54650a6a90744e26
@@ -56,8 +61,12 @@ RUN curl -fsSL -o /tmp/keyd.tar.gz \
     && make PREFIX=/usr CONFIG_DIR=/run/keyd COMMIT="v${KEYD_VERSION}" \
     && make install PREFIX=/usr CONFIG_DIR=/run/keyd COMMIT="v${KEYD_VERSION}" \
         DESTDIR=/out FORCE_SYSTEMD=1 \
+    && install -Dm755 scripts/keyd-application-mapper \
+        /out/usr/libexec/kosher/keyd-application-mapper \
+    && grep -q "KEYD_BIN = os.environ.get('KEYD_BIN', 'keyd')" \
+        /out/usr/libexec/kosher/keyd-application-mapper \
+    && grep -q zwlr_foreign_toplevel_manager_v1 /out/usr/libexec/kosher/keyd-application-mapper \
     && rm -rf /out/run /out/usr/bin/keyd-application-mapper \
-        /out/usr/share/man/man1/keyd-application-mapper.1.gz \
         /out/usr/share/keyd/gnome-extension* \
     && install -Dm644 LICENSE /out/usr/share/licenses/keyd/LICENSE \
     && /out/usr/bin/keyd -v | grep -q "v${KEYD_VERSION}" \
@@ -171,7 +180,8 @@ RUN d=/usr/share/gnome-shell/extensions/paperwm@paperwm.github.com \
 COPY --from=keyd-build /out/usr/ /usr/
 RUN getent group keyd >/dev/null || groupadd -r keyd \
     && test -z "$(getent group keyd | cut -d: -f4)" \
-    && test -x /usr/bin/keyd && ! test -e /usr/bin/keyd-application-mapper
+    && test -x /usr/bin/keyd && ! test -e /usr/bin/keyd-application-mapper \
+    && test -x /usr/libexec/kosher/keyd-application-mapper
 # ArcMenu, from the builder stage above. Its schema lands in the shared
 # schema directory (that is how its Makefile installs system-wide), so the
 # compiled schema cache is refreshed for GNOME Shell to find it.
@@ -545,8 +555,10 @@ RUN python3 -m pip install --prefix=/usr --no-deps \
     # ...and listens for kosherd's time warnings, so "5 minutes left" is a
     # notification on the person's screen, not a line in a log.
     && systemctl --global enable kosher-time-notify.service \
-    # ...and sends the person's own keyd file to kosherd (keyboard.py).
-    && systemctl --global enable kosher-keyboard.service \
+    # ...and sends the person's own keyd files to kosherd (keyboard.py),
+    # and runs the per-app key mapper for people with an app.conf.
+    && systemctl --global enable kosher-keyboard.service kosher-keyd-apps.service \
+    && chmod 755 /usr/libexec/kosher-keyd-run \
     && systemctl enable kosher-search-secret.service kosher-searxng.service \
         kosher-search.service \
     # Portal sync is inert until the device enrols (the unit and timer

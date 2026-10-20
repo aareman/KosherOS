@@ -83,6 +83,10 @@ jobs:
             | sudo tee /etc/udev/rules.d/99-kvm4all.rules
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
+          # The trigger is applied asynchronously; one run checked before
+          # it had and found /dev/kvm still closed.
+          sudo udevadm settle --timeout=30 || true
+          ls -l /dev/kvm || echo "no /dev/kvm on this runner"
           if [ ! -e /dev/kvm ] || [ ! -w /dev/kvm ]; then
             echo "::error::This runner has no usable /dev/kvm. The VM test needs hardware virtualisation."
             exit 1

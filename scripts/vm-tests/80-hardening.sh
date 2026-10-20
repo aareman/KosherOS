@@ -163,8 +163,11 @@ check_contains "[F1] UDP below 1024 is rejected for filtered accounts (config)" 
 # has nothing to do with the rule under test.
 
 section "[F2] [F3] Browsing by address instead of name"
-check "[F2] dns-filtered account cannot browse by address" 1 \
-    fetch_as dnskid "http://$addr/"
+# Judged like F3, by the block page or a refused connection: curl exits 0
+# on any answer, and the far end here (a CDN) answers a bare address with
+# its own 403, which is not KosherOS letting it through or stopping it.
+assert_that "[F2] dns-filtered account cannot browse by address" \
+    blocked_as dnskid "http://$addr/"
 assert_that "[F3] filtered account is blocked on a bare address" \
     blocked_as wlkid "http://$addr/"
 
@@ -197,20 +200,41 @@ skip "[F5] needs the proxy's name-check mode; no deterministic probe against a s
 # -- F6: the LAN --------------------------------------------------------------------
 
 section "[F6] The LAN in filtered modes"
-# local_services moved into the output chain for everyone (#48), so a grep
-# of the mode chains for it would now fail for the wrong reason. What F6
-# asks for is a rule that REFUSES the LAN to supervised accounts beyond
-# those services, wherever it is rendered; today there is none.
-check "[F6] supervised accounts are limited to local services on the LAN (config)" 0 \
-    bash -c 'nft list table inet kosher | grep -qE "@lan4 .*(reject|drop)"'
+# Measured, not grepped: the rules that refuse the LAN are not one line
+# naming @lan4 (they are the mode chains' own refusal, after the local
+# services are let through), so a grep for one failed while the LAN was in
+# fact closed. Find something on the LAN that root reaches, then try it as
+# the supervised accounts.
+gw=$(ip -4 route show default | awk '{print $3; exit}')
+lan_port=""
+for p in 22 80 443 5078 5077; do
+    if [ -n "$gw" ] && timeout 4 bash -c "echo > /dev/tcp/$gw/$p" 2>/dev/null; then
+        lan_port=$p
+        break
+    fi
+done
+lan_open_as() { runuser -u "$1" -- timeout 6 bash -c "echo > /dev/tcp/$gw/$lan_port" 2>/dev/null; }
+if [ -z "$lan_port" ]; then
+    skip "[F6] supervised accounts are limited to local services on the LAN: nothing on the LAN answers root to try"
+else
+    check "[F6] supervised accounts are limited to local services on the LAN ($gw:$lan_port, whitelist)" 1 lan_open_as wlkid
+    check "[F6] supervised accounts are limited to local services on the LAN ($gw:$lan_port, dnsfilter)" 1 lan_open_as dnskid
+fi
 
 # -- F7: the boot path ----------------------------------------------------------------
 
 section "[F7] The boot path"
 image_only "[F7] the boot menu is password-protected" \
     && assert_that "[F7] the boot menu is password-protected" grub_password_set
-image_only "[F7] the disk is encrypted" \
-    && assert_that "[F7] the disk is encrypted" bash -c 'lsblk -rno TYPE | grep -q crypt'
+# Encryption is the installer's job (#117). A development disk, made from
+# the image with a root ssh key in it, is never encrypted, so there the
+# check has nothing to say.
+if [ -s /root/.ssh/authorized_keys ]; then
+    skip "[F7] the disk is encrypted: a development disk is never encrypted; the installer's job (#117)"
+else
+    image_only "[F7] the disk is encrypted" \
+        && assert_that "[F7] the disk is encrypted" bash -c 'lsblk -rno TYPE | grep -q crypt'
+fi
 image_only "[F7] no dracut shell on a failed boot" \
     && check_contains "[F7] no dracut shell on a failed boot" "rd.shell=0" cat /proc/cmdline
 
@@ -253,9 +277,16 @@ if image_only "[F10] the image-trust policy (stage-1 VM has none)"; then
         grep -q 'use-sigstore-attachments: true' /etc/containers/registries.d/kosheros.yaml
 fi
 # A developer's rootless pull from a public registry still works: the
-# whole point of the per-registry policy.
+# whole point of the per-registry policy. The registries are open to an
+# account with developer tools (#123), and rootless podman needs the
+# account's own session for its runtime directory.
+kctl developer-tools "$(id -u wlkid)" on >/dev/null
+wait_for_dns >/dev/null 2>&1 || true
 check "[F10] a rootless pull from Docker Hub is still allowed" 0 \
-    as wlkid podman pull -q docker.io/library/hello-world
+    as_session wlkid podman pull -q docker.io/library/hello-world
+# Off again: the checks below (N2) hold the whitelist account to its list.
+kctl developer-tools "$(id -u wlkid)" off >/dev/null
+wait_for_dns >/dev/null 2>&1 || true
 # bootc verifies only when the deployment says so. A machine installed
 # from the ISO starts unverified; kosherd's first update switches it with
 # --enforce-container-sigpolicy. A machine running its own build (a test

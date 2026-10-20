@@ -43,8 +43,14 @@ check "the ad list is rendered for the family resolver" 0 \
     grep -q '^address=/' /etc/kosher/dnsmasq.d/adblock.conf
 check "and identically for the plain resolver" 0 \
     cmp -s /etc/kosher/dnsmasq.d/adblock.conf /etc/kosher/dnsmasq-open.d/adblock.conf
-check "a known ad domain does not resolve" 1 \
-    dig +short +time=3 @127.0.0.1 doubleclick.net A
+# dig exits 0 whatever the answer, so the answer is what is judged: none,
+# or the null address the block list gives.
+ad_answer=$(dig +short +time=3 @127.0.0.1 doubleclick.net A | head -1)
+if [ -z "$ad_answer" ] || [ "$ad_answer" = "0.0.0.0" ]; then
+    ok "a known ad domain does not resolve"
+else
+    bad "a known ad domain does not resolve (got $ad_answer)"
+fi
 
 section "Captive portal"
 check "a temporary window can be opened" 0 kosherctl captive "$(id -u nokid)" 1

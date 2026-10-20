@@ -914,6 +914,60 @@ def make_base(st: Stage, master: str, sha: str, image: str, key: Path, env: dict
     return base
 
 
+
+# --- known failures ---------------------------------------------------------------
+
+def family(stage_name: str) -> str:
+    """Where a stage's checks are listed in the baseline."""
+    if stage_name.startswith("suites"):
+        return "suites"
+    return stage_name
+
+
+def load_baseline(path: Path) -> list[dict]:
+    entries = []
+    if not path.exists():
+        return entries
+    for raw in path.read_text().splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        m = re.match(r"^(\w[\w-]*):\s+(.*?)\s+#(\d+)\s*$", line)
+        if m:
+            entries.append({"family": m.group(1), "check": m.group(2), "issue": int(m.group(3))})
+    return entries
+
+
+def classify(stages: list[dict], baseline: list[dict]) -> dict:
+    """Every failure is new or known; a known one that passed is fixed.
+
+    A stage that ended on an error, with no failed check to show for it,
+    counts as a new failure: the run did not get to say."""
+    new, known, fixed = [], [], []
+    seen_pass: dict[str, list[str]] = {}
+    for s in stages:
+        fam = family(s["name"])
+        for c in s["checks"]:
+            if c["ok"] and c.get("detail") != "skipped":
+                seen_pass.setdefault(fam, []).append(c["name"])
+        failed = [c for c in s["checks"] if not c["ok"]]
+        for c in failed:
+            match = next((b for b in baseline if b["family"] == fam
+                          and c["name"].startswith(b["check"])), None)
+            item = {"where": fam, "check": c["name"], "stage": s["name"]}
+            if match:
+                known.append(dict(item, issue=match["issue"]))
+            else:
+                new.append(item)
+        if s["status"] == "failed" and s.get("note") and not failed:
+            new.append({"where": fam, "check": s["note"], "stage": s["name"]})
+    for b in baseline:
+        if any(n.startswith(b["check"]) for n in seen_pass.get(b["family"], [])) and \
+                not any(k["where"] == b["family"] and k["check"].startswith(b["check"]) for k in known):
+            fixed.append(b)
+    return {"new": new, "known": known, "fixed": fixed}
+
+
 # --- the report -----------------------------------------------------------------
 
 def write_report(outdir: Path, summary: dict) -> None:
@@ -932,6 +986,20 @@ def write_report(outdir: Path, summary: dict) -> None:
         lines += [f"Machine: {summary['base']}.", ""]
     if summary.get("caps"):
         lines += ["Waits cut short in this run: " + "; ".join(summary["caps"]) + ".", ""]
+    verdict = summary.get("failures") or {}
+    if verdict:
+        lines += [f"New failures: {len(verdict['new'])}. Known failures: {len(verdict['known'])}. "
+                  f"Known failures that now pass: {len(verdict['fixed'])}.", ""]
+        if verdict["new"]:
+            lines += ["## New failures (these fail the run)", ""]
+            lines += [f"- {f['where']}: {f['check']}" for f in verdict["new"]] + [""]
+        if verdict["fixed"]:
+            lines += ["## Known failures that now pass (remove them from "
+                      "scripts/vm-tests/known-failures.txt)", ""]
+            lines += [f"- {f['family']}: {f['check']} (#{f['issue']})" for f in verdict["fixed"]] + [""]
+        if verdict["known"]:
+            lines += ["## Known failures (master has them too; each has an issue)", ""]
+            lines += [f"- {f['where']}: {f['check']} (#{f['issue']})" for f in verdict["known"]] + [""]
     lines += ["| Stage | Result | Time | Checks |", "|---|---|---|---|"]
     for s in summary["stages"]:
         n = len(s["checks"])
@@ -941,13 +1009,6 @@ def write_report(outdir: Path, summary: dict) -> None:
     timings = {k: v for s in summary["stages"] for k, v in (s.get("timings") or {}).items()}
     if timings:
         lines += ["", "Suites: " + ", ".join(f"{k} {v}s" for k, v in timings.items())]
-    for s in summary["stages"]:
-        failed = [c for c in s["checks"] if not c["ok"]]
-        if failed or s["note"]:
-            lines += ["", f"## {s['name']}: what failed", ""]
-            if s["note"]:
-                lines.append(f"- {s['note']}")
-            lines += [f"- {c['name']}" for c in failed]
     lines += ["", f"Logs, consoles and screenshots: `{outdir}`", ""]
     (outdir / "report.md").write_text("\n".join(lines))
 
@@ -1122,6 +1183,8 @@ def main() -> int:
                                   outdir, key, args.gl, parts=sel.desktop)
             workers.append(threading.Thread(target=desktop))
         groups = groups_for(sel.ordered_suites(), machines_to_use(args.vms))
+        # The longest group starts first, so the machines finish together.
+        groups.sort(key=lambda g: -sum(SUITE_SECONDS.get(x, 60) for x in g))
         for i, group in enumerate(groups, 1):
             def suites(group=group, i=i):
                 with stage(f"suites-{i}") as st:
@@ -1150,8 +1213,13 @@ def main() -> int:
             stages.append(s)
         summary["stages"] = [s.as_dict() for s in stages]
         ran = [s for s in stages if s.status != "skipped"]
-        summary["result"] = ("passed" if ran and all(s.status == "passed" for s in ran)
-                             else "failed")
+        baseline_file = tree / "scripts/vm-tests/known-failures.txt"
+        if not baseline_file.exists():
+            baseline_file = REPO / "scripts/vm-tests/known-failures.txt"
+        verdict = classify(summary["stages"], load_baseline(baseline_file))
+        summary["failures"] = verdict
+        # Passed means nothing failed that master does not already fail on.
+        summary["result"] = "passed" if ran and not verdict["new"] else "failed"
         summary["seconds"] = round(time.monotonic() - started)
         write_report(outdir, summary)
         if not args.keep:

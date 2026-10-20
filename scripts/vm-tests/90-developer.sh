@@ -8,6 +8,11 @@ set -uo pipefail
 . "$(dirname "$0")/lib.sh"
 
 ensure_test_users
+# Developer tools are a per-account switch (#123): without it the daemon
+# refuses the account and its filter keeps it off the registries. The
+# whitelist account is the one this suite builds as, so it gets them.
+kctl developer-tools "$(id -u wlkid)" on >/dev/null
+wait_for_dns >/dev/null 2>&1 || true
 
 section "Nix is on the machine"
 if ! command -v nix >/dev/null 2>&1; then

@@ -55,6 +55,7 @@ COUNTERS = ("requests", "bytes_in", "bytes_out", "blocked", "pictures",
 # bucket is everything slower than the last bound.
 LATENCY_BOUNDS_MS = (1, 2, 5, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000)
 BUCKETS = len(LATENCY_BOUNDS_MS) + 1
+SLOWEST_MS = LATENCY_BOUNDS_MS[-1] + 1
 
 # A month on the page is thirty days; sixty leaves room for the page to
 # grow a "previous month" without a migration. 60 days x a family's
@@ -330,9 +331,9 @@ def summarise(entry: dict) -> dict:
 
 
 def _percentile(lat: list[int], fraction: float) -> int | None:
-    """The bucket bound the given share of requests finished within. For
-    the overflow bucket that is "more than the last bound", returned as
-    the bound itself; the page says "over" for it."""
+    """The bucket bound the given share of requests finished within.
+    Past the last bound the answer is SLOWEST_MS, which the page reads as
+    "more than" the last bound."""
     total = sum(lat)
     if not total:
         return None
@@ -340,8 +341,8 @@ def _percentile(lat: list[int], fraction: float) -> int | None:
     for i, value in enumerate(lat):
         seen += value
         if seen >= fraction * total:
-            return LATENCY_BOUNDS_MS[min(i, len(LATENCY_BOUNDS_MS) - 1)]
-    return LATENCY_BOUNDS_MS[-1]
+            break
+    return LATENCY_BOUNDS_MS[i] if i < len(LATENCY_BOUNDS_MS) else SLOWEST_MS
 
 
 def report(store: dict, now: float | None = None) -> dict:

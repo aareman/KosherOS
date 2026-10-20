@@ -530,7 +530,7 @@ class DemoClient:
                 entry = usage.empty()
                 entry.update(requests=n, bytes_in=n * 61_000, bytes_out=n * 1_900,
                              blocked=int(n * blocked), pictures=int(pictures * wobble),
-                             videos=int(blocked * 300), searches=int(blocked * 150))
+                             videos=int(blocked * 300), searches=int(blocked * 1000))
                 entry["lat"] = [int(n * f) for f in
                                 (.22, .18, .2, .14, .12, .07, .04, .02, .008, .001, 0, 0, 0)]
                 entry["lat_ms"] = n * 9

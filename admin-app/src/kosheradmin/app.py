@@ -2,11 +2,11 @@
 
 The window: unlocked by the admin's own sign-in, then a sidebar down the left with
 everywhere the app goes — the family, each on a full page of their own,
-then the activity feed and this computer's protection, apps and updates —
+then the activity feed, usage, and this computer's protection, apps and updates —
 and the page itself beside it. Under each page's header, the one banner that speaks only when it must: requests waiting. A problem with the filter is the amber badge on Protection and the first group on that page.
 
 The label tables the daemon's tests read live in labels.py; the sidebar in
-sidebar.py; the pages in family.py, feed.py, computer.py and detail.py;
+sidebar.py; the pages in family.py, feed.py, usage.py, computer.py and detail.py;
 the dialogs in dialogs.py.
 """
 
@@ -27,6 +27,7 @@ from .detail import UserDetailPage  # noqa: E402
 from .dialogs import RequestsDialog, add_person_dialog  # noqa: E402
 from .feed import ActivityPage  # noqa: E402
 from .sidebar import Sidebar  # noqa: E402
+from .usage import EVERYONE, UsagePage  # noqa: E402
 
 APP_ID = "org.kosherlinux.Admin"
 
@@ -51,6 +52,10 @@ class Window(Adw.ApplicationWindow):
         self.guardian_ok = False
         self.destination = "activity"
         self._landed = False
+        # The Usage page is built fresh on every visit; what it was showing
+        # is kept here so coming back does not reset it.
+        self.usage_range = "today"
+        self.usage_uid = EVERYONE
 
         self.toasts = Adw.ToastOverlay()
         self.set_content(self.toasts)
@@ -199,6 +204,9 @@ class Window(Adw.ApplicationWindow):
             return self._activity_nav_page
         if key == "guest" or key.startswith("user-"):
             return self._person_page(key)
+        if key == "usage":
+            page = self.open_computer_page = UsagePage(self)
+            return page
         page = {"protection": ProtectionPage, "apps": AppsPage,
                 "updates": UpdatesPage}[key](self)
         self.open_computer_page = page
@@ -258,6 +266,11 @@ class Window(Adw.ApplicationWindow):
         """Jump to the activity page, narrowed to one person."""
         self.go_to("activity")
         self.activity_page.show_user(uid)
+
+    def show_usage(self, uid: int) -> None:
+        """Jump to the Usage page, narrowed to one person."""
+        self.usage_uid = uid
+        self.go_to("usage")
 
     def refresh_open_detail(self) -> None:
         """After a policy reload, rebuild the detail page being viewed so it

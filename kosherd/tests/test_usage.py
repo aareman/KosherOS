@@ -155,6 +155,9 @@ def test_filter_time_reads_as_average_median_and_95th():
     assert numbers["p95_ms"] == 10
     assert numbers["avg_ms"] == round((50 + 360 + 2000) / 100, 1)
     assert usage.summarise(usage.empty())["p50_ms"] is None
+    slow = usage.empty()
+    slow["lat"][-1] = 1
+    assert usage.summarise(slow)["p95_ms"] == usage.SLOWEST_MS
 
 
 def test_the_daemon_folds_before_it_answers(tmp_path, monkeypatch):

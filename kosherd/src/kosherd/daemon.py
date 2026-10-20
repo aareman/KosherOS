@@ -42,6 +42,7 @@ log = logging.getLogger("kosherd")
 # hours because of that is a store that looks broken.
 APP_INDEX_REFRESH_SECONDS = 6 * 3600
 APP_INDEX_RETRY_SECONDS = 120
+USAGE_FOLD_SECONDS = 300
 
 INTROSPECTION_XML = """
 <node>
@@ -112,6 +113,9 @@ INTROSPECTION_XML = """
     </method>
     <method name="ActivitySummary">
       <arg direction="out" type="s" name="summary_json"/>
+    </method>
+    <method name="Usage">
+      <arg direction="out" type="s" name="usage_json"/>
     </method>
     <method name="SetMediaLevel">
       <arg direction="in" type="i" name="uid"/>
@@ -692,6 +696,9 @@ class Daemon:
         GLib.timeout_add_seconds(APP_INDEX_REFRESH_SECONDS,
                                  lambda: (self._warm_app_index(), True)[1])
         GLib.timeout_add_seconds(TICK_SECONDS, self._time_tick)
+        # The spool is capped (usage.MAX_SPOOL_BYTES); folding every few
+        # minutes keeps it far below the cap and the counts current.
+        GLib.timeout_add_seconds(USAGE_FOLD_SECONDS, self._fold_usage)
         try:
             loop.run()
         finally:
@@ -1273,6 +1280,25 @@ class Daemon:
         counts = {str(uid): entry
                   for uid, entry in activity.summary(found).items()}
         return GLib.Variant("(s)", (json.dumps(counts),))
+
+    def impl_Usage(self):
+        """Traffic, blocks and filter time per account, for today, the
+        past week, the past month and all time (usage.py). Folds what the
+        proxy and the search service have written first, so the page is
+        never more than a minute behind."""
+        from . import usage
+
+        self._fold_usage()
+        return GLib.Variant("(s)", (json.dumps(usage.report(usage.load())),))
+
+    def _fold_usage(self) -> bool:
+        from . import usage
+
+        try:
+            usage.fold()
+        except Exception:  # noqa: BLE001 - a bad fold must not stop the timer
+            log.exception("usage: could not fold the spool")
+        return True  # keep the timeout
 
     _activity_trimmed_at = 0.0
 

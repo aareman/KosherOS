@@ -141,6 +141,11 @@ class DaemonClient:
         """Today's counts, keyed by uid as a string (JSON keys)."""
         return json.loads(self._call("Profiles", "ActivitySummary")[0])
 
+    def usage(self) -> dict:
+        """Traffic, blocks and filter time by range, then by uid as a
+        string (usage.report)."""
+        return json.loads(self._call("Profiles", "Usage")[0])
+
     def set_media_level(self, uid: int, level: str,
                         guardian_password: str = "") -> None:
         self._call("Profiles", "SetMediaLevel", "(iss)", uid, level,

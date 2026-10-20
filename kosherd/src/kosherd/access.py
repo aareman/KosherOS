@@ -86,6 +86,9 @@ ACTIONS = {
     "GetMyLayout": ACTION_READ_OWN,
     # The same choice, made by the person for themselves in the Look app.
     "SetMyLayout": ACTION_SET_OWN,
+    # And which compositor their advanced desktop runs on.
+    "GetMyCompositor": ACTION_READ_OWN,
+    "SetMyCompositor": ACTION_SET_OWN,
     # Your own filter settings, read-only, no password: what applies to
     # THIS account and nothing about any other. A filtered account should
     # not be a mystery to the person using it — someone who can see the
@@ -236,6 +239,7 @@ SETUP_READS = frozenset({"IsComplete", "AdminExists"})
 # Methods that need to know which uid called them (session management).
 UID_AWARE = frozenset({"Unlock", "Lock", "Status", "VerifyGuardian", "InstallApp",
                        "ListStoreApps", "GetMyLayout", "SetMyLayout", "GetMySettings",
+                       "GetMyCompositor", "SetMyCompositor",
                        # A nixpkgs app is in one account's profile: what is
                        # installed, and whose copy to update or remove,
                        # depends on who is asking.

@@ -20,6 +20,8 @@ import pytest
 from kosherd import layout as layout_mod
 from kosherd.daemon import Daemon
 from kosherd.policy import (
+    COMPOSITORS,
+    DEFAULT_COMPOSITOR,
     DEFAULT_LAYOUT,
     LAYOUT_LABELS,
     LAYOUTS,
@@ -34,6 +36,8 @@ CONTAINERFILE = (ROOT / "os-image/Containerfile").read_text()
 DESKTOP_DCONF = FILES / "etc/dconf/db/local.d/20-kosheros-desktop"
 LOCKS = FILES / "etc/dconf/db/local.d/locks/10-kosheros-locks"
 NIRI_CONFIG = FILES / "etc/niri/config.kdl"
+HYPRLAND_CONFIG = FILES / "etc/xdg/hypr/hyprland.lua"
+UMBRIEL_CONFIG = FILES / "etc/xdg/umbriel/config.toml"
 NOCTALIA_SEED = FILES / "usr/share/kosher/desktop/noctalia.toml"
 USER_UNIT = FILES / "usr/lib/systemd/user/kosher-layout.service"
 
@@ -133,6 +137,78 @@ def test_a_failed_save_rolls_the_layout_back():
     assert daemon.sessions_set == []
 
 
+def test_the_compositor_round_trips_and_the_default_stays_out_of_the_file():
+    hypr = UserPolicy(uid=1001, username="t", mode="filtered", compositor="hyprland")
+    plain = UserPolicy(uid=1002, username="p", mode="filtered")
+    doc = Policy(revision=1, users=[hypr, plain]).to_dict()
+    assert doc["users"][0]["compositor"] == "hyprland"
+    assert "compositor" not in doc["users"][1]
+    back = Policy.from_dict(doc)
+    assert back.user(1001).compositor == "hyprland"
+    assert back.user(1002).compositor == DEFAULT_COMPOSITOR == "niri"
+    doc["users"][0]["compositor"] = "sway"
+    with pytest.raises(PolicyError):
+        Policy.from_dict(doc)
+
+
+def _daemon_with_sessions(users):
+    """A daemon whose login-screen call records the session it would set."""
+    daemon = _daemon(users)
+    daemon.sessions_named = []
+    daemon._accounts_set_session = lambda uid, layout: daemon.sessions_named.append(
+        (uid, daemon._session_for(uid, layout)))
+    return daemon
+
+
+def test_the_login_screen_is_pointed_at_the_chosen_compositor():
+    daemon = _daemon_with_sessions([UserPolicy(uid=1001, username="t", mode="filtered",
+                                               compositor="umbriel")])
+    daemon.impl_SetMyLayout("advanced", _uid=1001)
+    daemon.impl_SetMyLayout("tiling", _uid=1001)
+    assert daemon.sessions_named == [(1001, "umbriel"), (1001, "gnome")]
+
+
+def test_choosing_a_compositor_under_advanced_changes_the_session_at_once():
+    daemon = _daemon_with_sessions([UserPolicy(uid=1001, username="t", mode="filtered",
+                                               layout="advanced")])
+    daemon.impl_SetMyCompositor("hyprland", _uid=1001)
+    assert daemon.policy.user(1001).compositor == "hyprland"
+    assert daemon.sessions_named == [(1001, "hyprland")]
+    assert daemon.saved == 1 and daemon.applied == 0
+    assert daemon.impl_GetMyCompositor(_uid=1001).unpack() == ("hyprland",)
+    assert daemon.impl_GetMyCompositor(_uid=1002).unpack() == ("niri",)
+
+
+def test_a_compositor_chosen_under_gnome_waits_for_advanced():
+    daemon = _daemon_with_sessions([UserPolicy(uid=1001, username="t", mode="filtered")])
+    daemon.impl_SetMyCompositor("umbriel", _uid=1001)
+    assert daemon.sessions_named == [], "classic stays on GNOME"
+    with pytest.raises(PolicyError):
+        daemon.impl_SetMyCompositor("sway", _uid=1001)
+    with pytest.raises(PolicyError):
+        daemon.impl_SetMyCompositor("niri", _uid=4242)
+
+
+def test_a_failed_save_rolls_the_compositor_back():
+    daemon = _daemon_with_sessions([UserPolicy(uid=1001, username="t", mode="filtered",
+                                               layout="advanced")])
+
+    def boom():
+        raise OSError("disk full")
+
+    daemon._save_only = boom
+    with pytest.raises(OSError):
+        daemon.impl_SetMyCompositor("hyprland", _uid=1001)
+    assert daemon.policy.user(1001).compositor == "niri"
+    assert daemon.sessions_named == []
+
+
+def test_every_compositor_has_a_login_session():
+    assert set(Daemon.COMPOSITOR_SESSIONS) == set(COMPOSITORS)
+    assert Daemon.COMPOSITOR_SESSIONS[DEFAULT_COMPOSITOR] == Daemon.LAYOUT_SESSIONS["advanced"]
+    assert set(COMPOSITORS) == set(layout_mod.NOCTALIA_COMPOSITORS)
+
+
 def test_the_helper_gets_its_own_layout_and_strangers_get_the_default():
     daemon = _daemon([UserPolicy(uid=1001, username="t", mode="filtered",
                                  layout="tiling")])
@@ -223,11 +299,13 @@ def test_no_seed_means_nothing_to_do(tmp_path):
     assert layout_mod.seed_noctalia(tmp_path, tmp_path / "missing.toml") is False
 
 
-def test_under_niri_is_read_from_the_session():
-    assert layout_mod.under_niri("niri")
-    assert layout_mod.under_niri("niri:wlroots")
-    assert not layout_mod.under_niri("gnome")
-    assert not layout_mod.under_niri("")
+def test_the_running_compositor_is_read_from_the_session():
+    assert layout_mod.running_compositor("niri") == "niri"
+    assert layout_mod.running_compositor("niri:wlroots") == "niri"
+    assert layout_mod.running_compositor("Hyprland") == "hyprland"
+    assert layout_mod.running_compositor("Umbriel") == "umbriel"
+    assert layout_mod.running_compositor("GNOME") is None
+    assert layout_mod.running_compositor("") is None
 
 
 def test_dry_run_prints_the_plan_and_touches_nothing(capsys, monkeypatch):

@@ -15,11 +15,14 @@ price of that is a desktop they have to live with until they sign in again,
 when this puts it back. The keys the image does lock are the ones that are
 the same for everyone (see /etc/dconf/db/local.d/locks).
 
-The advanced layout is a separate niri session rather than GNOME, chosen
-for the account at the login screen by kosherd. Under niri this only seeds
-Noctalia's configuration once, so the shell starts with the polkit agent
-on and the KosherOS wallpaper, and leaves the person's own edits alone
-afterwards. Should someone with the advanced layout sign in to GNOME
+The advanced layout is the Noctalia shell in a separate session rather
+than GNOME, on niri, Hyprland or Umbriel as the person chose, picked for
+the account at the login screen by kosherd. Under any of the three this
+only seeds Noctalia's configuration once, so the shell starts with the
+polkit agent on and the KosherOS wallpaper, and leaves the person's own
+edits alone afterwards. The compositors need no seed: each reads a
+system-wide configuration the image ships until the person writes their
+own. Should someone with the advanced layout sign in to GNOME
 anyway (the login screen still offers it), they get the classic layout —
 a sane desktop rather than a bare one.
 """
@@ -108,8 +111,19 @@ def current_desktop() -> str:
     return os.environ.get("XDG_CURRENT_DESKTOP", "").lower()
 
 
-def under_niri(desktop: str | None = None) -> bool:
-    return "niri" in (desktop if desktop is not None else current_desktop())
+# The compositors the advanced layout runs on, as they name themselves in
+# XDG_CURRENT_DESKTOP (their session files' DesktopNames), lower-cased.
+NOCTALIA_COMPOSITORS = ("niri", "hyprland", "umbriel")
+
+
+def running_compositor(desktop: str | None = None) -> str | None:
+    """Which of the advanced desktop's compositors is running, or None for
+    GNOME (or anything else)."""
+    names = (desktop if desktop is not None else current_desktop()).lower().split(":")
+    for name in NOCTALIA_COMPOSITORS:
+        if name in names:
+            return name
+    return None
 
 
 def apply_gsettings(steps, run=subprocess.run) -> list[str]:
@@ -125,7 +139,7 @@ def apply_gsettings(steps, run=subprocess.run) -> list[str]:
 
 
 def seed_noctalia(home: Path, seed: Path = NOCTALIA_SEED) -> bool:
-    """Give a first niri sign-in a Noctalia configuration; never overwrite.
+    """Give a first advanced sign-in a Noctalia configuration; never overwrite.
 
     Noctalia reads only the person's own ~/.config; there is no system-wide
     layer to put defaults in. What matters in the seed is the polkit agent
@@ -170,11 +184,12 @@ def main(argv=None) -> int:
                         stream=sys.stderr)
 
     layout = args.layout or fetch_layout()
-    if under_niri():
+    compositor = running_compositor()
+    if compositor is not None:
         # Not a GNOME session: nothing to write into GNOME Shell. Seed the
         # shell's own configuration on the first sign-in and leave it.
         if args.dry_run:
-            print("under niri: would seed Noctalia's configuration if absent")
+            print(f"under {compositor}: would seed Noctalia's configuration if absent")
             return 0
         if seed_noctalia(Path.home()):
             log.info("seeded Noctalia's configuration")

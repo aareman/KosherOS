@@ -155,6 +155,12 @@ INTROSPECTION_XML = """
     <method name="SetMyLayout">
       <arg direction="in" type="s" name="layout"/>
     </method>
+    <method name="GetMyCompositor">
+      <arg direction="out" type="s" name="compositor"/>
+    </method>
+    <method name="SetMyCompositor">
+      <arg direction="in" type="s" name="compositor"/>
+    </method>
     <method name="SetTimeLimits">
       <arg direction="in" type="i" name="uid"/>
       <arg direction="in" type="s" name="settings_json"/>
@@ -1540,6 +1546,40 @@ class Daemon:
         """
         return self.impl_SetLayout(_uid, layout)
 
+    def impl_GetMyCompositor(self, _uid: int):
+        """Which compositor the caller's advanced desktop runs on, for the
+        Look app. An unmanaged account gets the default."""
+        from .policy import DEFAULT_COMPOSITOR
+
+        user = self.policy.user(_uid)
+        compositor = user.compositor if user is not None else DEFAULT_COMPOSITOR
+        return GLib.Variant("(s)", (compositor,))
+
+    def impl_SetMyCompositor(self, compositor: str, _uid: int):
+        """The caller picks the compositor their advanced desktop runs on.
+
+        Like the layout, a preference and the caller's own: the uid comes
+        from the bus. When the layout is advanced, the login screen is
+        pointed at the new compositor's session; otherwise the choice waits
+        until the person chooses advanced.
+        """
+        from .policy import COMPOSITORS
+
+        if compositor not in COMPOSITORS:
+            raise PolicyError(f"unknown compositor {compositor!r}")
+        user = self._managed(_uid)
+        previous = user.compositor
+        user.compositor = compositor
+        try:
+            self._save_only()
+        except Exception:
+            user.compositor = previous
+            raise
+        if user.layout == "advanced":
+            self._accounts_set_session(_uid, user.layout)
+        log.info("uid %d advanced desktop compositor -> %s", _uid, compositor)
+        return None
+
     def impl_GetMySettings(self, _uid: int):
         """What applies to the CALLER's own account, read-only.
 
@@ -1996,8 +2036,19 @@ class Daemon:
 
     # Which login-screen session each layout lives in. The classic and
     # tiling layouts are both GNOME (the difference is applied inside the
-    # session by kosher-layout); the advanced layout is its own session.
+    # session by kosher-layout); the advanced layout is its own session,
+    # one per compositor, named after its wayland-sessions file. The
+    # advanced entry is the default compositor's.
     LAYOUT_SESSIONS = {"classic": "gnome", "tiling": "gnome", "advanced": "niri"}
+    COMPOSITOR_SESSIONS = {"niri": "niri", "hyprland": "hyprland", "umbriel": "umbriel"}
+
+    def _session_for(self, uid: int, layout: str) -> str:
+        if layout == "advanced":
+            user = self.policy.user(uid)
+            if user is not None:
+                return self.COMPOSITOR_SESSIONS.get(user.compositor,
+                                                    self.LAYOUT_SESSIONS[layout])
+        return self.LAYOUT_SESSIONS[layout]
 
     def _accounts_set_session(self, uid: int, layout: str) -> None:
         """Make the login screen default this account to the right session.
@@ -2008,7 +2059,7 @@ class Daemon:
         A failure here is logged, not raised: the layout is saved already
         and the session can still be picked by hand.
         """
-        session = self.LAYOUT_SESSIONS[layout]
+        session = self._session_for(uid, layout)
         if self.connection is None:
             return
         try:

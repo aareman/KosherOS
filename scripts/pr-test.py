@@ -645,7 +645,7 @@ def main() -> int:
     outdir = REPO / "build" / "pr-test" / run_id
     if outdir.exists():
         for child in outdir.iterdir():
-            if child.name not in ("src", "disk", "machine.qcow2"):
+            if child.name not in ("src", "disk", "machine.qcow2", "id_ed25519", "id_ed25519.pub"):
                 shutil.rmtree(child) if child.is_dir() else child.unlink()
     outdir.mkdir(parents=True, exist_ok=True)
     env = sudo_trap(outdir)

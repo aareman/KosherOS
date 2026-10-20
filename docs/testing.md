@@ -13,10 +13,14 @@ new test belongs.
 | **Live checks** | the built image does what the rendered files say: the firewall stops people, the resolver answers as claimed, traffic is diverted, the services run | podman | `just check-all` |
 | **Integration** | the whole stack on a booted system: services, real traffic, polkit, malcontent, TLS interception, the guest session | a dev VM | `just test-vm` |
 | **Boot** | power-on reaches the setup wizard | a disk image, KVM | `just test-boot` |
+| **Pull request** | all of the above on the branch's own image, plus a signed-in desktop | KVM | `just pr-test 168` |
 
 CI runs the unit layer with coverage, byte-compiles every app and
 shellchecks every script on every pull request, and builds the image on
-every merge that changes it.
+every merge that changes it. A pull request that changes anything the
+machine runs also goes through `just pr-test` on a runner with KVM.
+
+Nothing on this page needs sudo. Membership of the `kvm` group is enough.
 
 ## Unit tests
 
@@ -163,3 +167,68 @@ serial console, and asserts the machine reaches it. Four shipped bugs lived
 between power-on and the wizard. It runs on a throwaway overlay, so the
 disk image is not modified, and it refuses a disk built from an image older
 than the current build rather than testing last morning's code.
+
+`just vm-rootless` makes the disk it boots. It uses
+[bcvk](https://github.com/bootc-dev/bcvk), which starts the image as a
+small VM inside a rootless container and installs it from there onto a new
+qcow2, so it needs KVM but not root. The disk carries no ssh key: the boot
+recipes give root's key to the machine at each boot as a systemd
+credential. `just vm` makes the same disk with bootc-image-builder and
+needs sudo. The first `just vm-rootless` downloads bcvk at a pinned
+version and builds a static virtiofsd with nix, because the one Ubuntu
+ships is too old for bcvk.
+
+## A whole pull request in a VM
+
+`just pr-test` takes a pull request number, a branch, or `HEAD` for the
+checkout as it is, and runs everything a machine can check with nobody at
+the keyboard:
+
+1. **build**: `just build` in a temporary worktree of the target, tagged
+   for this run only, so the checkout you are working in is untouched.
+2. **disk**: a qcow2 from that image, made as in `just vm-rootless`.
+3. **boot**: the boot test, which answers the setup wizard and checks the
+   administrator's filtering. The machine it set up is kept for the next
+   two stages.
+4. **desktop**: the same machine booted again with a screen. A filtered
+   test account signs in at the GDM login screen, with the keys typed
+   through QEMU's control socket. The session must have a seat, be active
+   and local, and run Wayland. Then polkit is asked about the session's
+   own processes: the Store is allowed and a filter change needs an
+   administrator. A real filter change from the session brings up the
+   administrator's password prompt, the password is typed into it, and
+   the change must go through. The Look app, the admin app, My Filter and
+   the Store must open and stay open, and the account's user services
+   must all start. Last, the filter is checked the way a browser meets
+   it: sixteen requests at once to a gambling site must all get the block
+   page, an ordinary site must load through the proxy, and Firefox opens
+   the gambling site on the desktop and the filter must record the visit.
+5. **suites**: the target's own `scripts/vm-tests`, as root over ssh.
+
+The test account at the login screen is what the in-VM suites cannot be.
+Their accounts have no seat, so polkit never treats them as the person at
+the computer, and they reach kosherd through root paths instead. The
+desktop stage is where the polkit rules, the password prompt and the
+desktop apps are checked as a family meets them.
+
+Everything a run produces is in `build/pr-test/<id>/`: `summary.json` with
+every check, `report.md` for people, a log per stage, both serial consoles
+and the screenshots. The exit status is non-zero when anything failed.
+The disk, the machine, the worktree and the image tag are removed at the
+end; `--keep` leaves them for a look, and `--only boot,desktop` runs some
+of the stages on what a kept run left.
+
+The harness never runs sudo. A `sudo` that fails and records who called
+it is first on the PATH of everything it starts, and before it starts
+`scripts/check-no-sudo.py` reads the recipes it calls and everything they
+depend on.
+
+The desktop stage draws on a plain virtual screen by default.
+`KOSHER_GL=1` (or `--gl`) gives it a virgl GPU through the host's QEMU
+instead, for checks of the compositor, on a machine that has a GPU.
+
+In CI, `.github/workflows/vm-test.yml` runs `just pr-test HEAD` on pull
+requests from this repository that change anything the machine runs. It
+fails at once on a runner without KVM, never uses the GPU mode, and
+uploads the run's directory, without the disks and the key, as an
+artifact.

@@ -25,20 +25,31 @@ if not Gtk.init_check():  # pragma: no cover - no display
     pytest.skip("no display", allow_module_level=True)
 Adw.init()
 
-from kosherd.policy import LAYOUTS  # noqa: E402
+from kosherd.policy import COMPOSITORS, LAYOUTS  # noqa: E402
 from kosherlook import app  # noqa: E402
 
 ROOT = Path(__file__).parents[2]
 
 
 class FakeClient:
-    def __init__(self, layout="classic", fail=False):
+    def __init__(self, layout="classic", fail=False, compositor="niri"):
         self.layout = layout
+        self.compositor = compositor
         self.fail = fail
         self.chosen = []
+        self.compositors_chosen = []
 
     def my_layout(self):
         return self.layout
+
+    def my_compositor(self):
+        return self.compositor
+
+    def set_my_compositor(self, compositor):
+        if self.fail:
+            raise RuntimeError("GDBus.Error:org.kosherlinux.Error: not now")
+        self.compositors_chosen.append(compositor)
+        self.compositor = compositor
 
     def set_my_layout(self, layout):
         if self.fail:
@@ -99,10 +110,12 @@ def _pump(seconds=0.5):
         ctx.iteration(False)
 
 
-def _window(client=None, glass=None, in_niri=False):
+def _window(client=None, glass=None, running=None, compositors=COMPOSITORS):
     applied = []
     win = app.Window(None, client=client or FakeClient(), glass=glass or _glass(),
-                     apply=applied.append, in_niri=in_niri)
+                     apply=applied.append, running=running, compositors=compositors,
+                     quit=lambda r: win.quits.append(r))
+    win.quits = []
     _pump()
     return win, applied
 
@@ -142,13 +155,101 @@ def test_choosing_advanced_waits_for_the_next_sign_in():
 
 def test_under_niri_the_gnome_desktops_wait_too():
     client = FakeClient("advanced")
-    win, applied = _window(client, in_niri=True)
+    win, applied = _window(client, running="niri")
     assert not win.banner.get_revealed(), "running what was chosen: nothing to announce"
     win.checks["classic"].set_active(True)
     _pump()
     assert client.chosen == ["classic"]
     assert applied == [], "kosher-layout writes GNOME settings; this is not GNOME"
     assert win.banner.get_revealed()
+
+
+# ---- what Advanced runs on --------------------------------------------------
+
+def test_the_compositors_offered_are_exactly_the_ones_kosherd_knows():
+    assert tuple(k for k, _, _ in app.COMPOSITOR_CHOICES) == COMPOSITORS
+    assert set(app.QUIT) == set(COMPOSITORS)
+
+
+def test_the_compositor_choice_shows_only_under_advanced():
+    win, _ = _window(FakeClient("classic"))
+    assert not win.compositor_group.get_visible()
+    win.checks["advanced"].set_active(True)
+    _pump()
+    assert win.compositor_group.get_visible()
+    assert win.compositor_checks["niri"].get_active()
+
+
+def test_choosing_hyprland_under_niri_reaches_the_daemon_and_asks_for_a_sign_out():
+    client = FakeClient("advanced", compositor="niri")
+    win, applied = _window(client, running="niri")
+    assert not win.banner.get_revealed()
+    win.compositor_checks["hyprland"].set_active(True)
+    _pump()
+    assert client.compositors_chosen == ["hyprland"]
+    assert client.chosen == [], "the layout stays advanced"
+    assert applied == []
+    assert win.banner.get_revealed()
+    win.banner.emit("button-clicked")
+    assert win.quits == ["niri"], "signing out leaves the compositor that is running"
+
+
+@pytest.mark.parametrize("running", COMPOSITORS)
+def test_running_the_chosen_compositor_needs_no_sign_out(running):
+    win, _ = _window(FakeClient("advanced", compositor=running), running=running)
+    assert not win.banner.get_revealed()
+    assert win.compositor_checks[running].get_active()
+
+
+def test_under_umbriel_choosing_classic_signs_out_of_umbriel():
+    client = FakeClient("advanced", compositor="umbriel")
+    win, applied = _window(client, running="umbriel")
+    win.checks["classic"].set_active(True)
+    _pump()
+    assert applied == []
+    assert win.banner.get_revealed()
+    win.banner.emit("button-clicked")
+    assert win.quits == ["umbriel"]
+
+
+def test_only_installed_compositors_are_offered():
+    win, _ = _window(FakeClient("advanced"), compositors=("niri", "umbriel"))
+    assert set(win.compositor_checks) == {"niri", "umbriel"}
+    alone, _ = _window(FakeClient("advanced"), compositors=("niri",))
+    assert alone.compositor_group is None, "nothing to choose between"
+
+
+def test_a_chosen_compositor_that_is_gone_counts_as_niri():
+    win, _ = _window(FakeClient("advanced", compositor="hyprland"), running="niri",
+                     compositors=("niri", "umbriel"))
+    assert win.compositor_checks["niri"].get_active()
+    assert not win.banner.get_revealed()
+
+
+def test_a_refused_compositor_goes_back_to_what_it_was():
+    client = FakeClient("advanced", compositor="niri", fail=True)
+    win, _ = _window(client, running="niri")
+    win.compositor_checks["umbriel"].set_active(True)
+    _pump()
+    assert client.compositors_chosen == []
+    assert win.compositor_checks["niri"].get_active()
+    assert win.compositor == "niri"
+    assert not win.banner.get_revealed()
+
+
+def test_the_running_compositor_is_read_from_the_session():
+    assert app.running_compositor("niri") == "niri"
+    assert app.running_compositor("Hyprland") == "hyprland"
+    assert app.running_compositor("Umbriel") == "umbriel"
+    assert app.running_compositor("GNOME") is None
+    assert app.running_compositor("") is None
+
+
+def test_installed_compositors_are_the_ones_with_a_session(tmp_path):
+    (tmp_path / "niri.desktop").write_text("[Desktop Entry]\n")
+    (tmp_path / "umbriel.desktop").write_text("[Desktop Entry]\n")
+    (tmp_path / "gnome.desktop").write_text("[Desktop Entry]\n")
+    assert app.installed_compositors(str(tmp_path)) == ("niri", "umbriel")
 
 
 def test_a_refused_choice_goes_back_to_what_it_was():
@@ -166,7 +267,7 @@ def test_the_daemon_being_away_is_a_page_not_a_crash():
     class Away:
         def my_layout(self):
             raise RuntimeError("GDBus.Error:org.freedesktop.DBus.Error.ServiceUnknown: gone")
-    win = app.Window(None, client=Away(), glass=_glass(), apply=lambda _l: None, in_niri=False)
+    win = app.Window(None, client=Away(), glass=_glass(), apply=lambda _l: None, running=None)
     _pump()
     page = win.view.get_content()
     assert isinstance(page, Adw.StatusPage)
@@ -242,8 +343,9 @@ def test_back_to_the_kosheros_look_unsets_everything():
     assert win.strength.get_value() == 38 and win.transparency.get_value() == 12
 
 
-def test_under_niri_there_is_no_blur_switch():
-    win, _ = _window(FakeClient("advanced"), in_niri=True)
+@pytest.mark.parametrize("running", COMPOSITORS)
+def test_outside_gnome_there_is_no_blur_switch(running):
+    win, _ = _window(FakeClient("advanced", compositor=running), running=running)
     assert not win.glass_group.get_visible()
 
 

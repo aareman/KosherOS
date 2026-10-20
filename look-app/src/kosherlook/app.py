@@ -28,7 +28,12 @@ gi.require_version("Adw", "1")
 from gi.repository import Adw, Gio, GLib, Gtk  # noqa: E402
 
 from kosherd.client import DaemonClient  # noqa: E402
-from kosherd.policy import DEFAULT_LAYOUT, LAYOUTS  # noqa: E402
+from kosherd.policy import (  # noqa: E402
+    COMPOSITORS,
+    DEFAULT_COMPOSITOR,
+    DEFAULT_LAYOUT,
+    LAYOUTS,
+)
 
 APP_ID = "org.kosherlinux.Look"
 
@@ -43,15 +48,41 @@ DESKTOPS = (
      "Windows arranged in a scrolling row, driven from the keyboard. The "
      "same settings, lock screen and accessibility tools as Classic."),
     ("advanced", "Advanced",
-     "A separate niri session with the Noctalia shell, set up through text "
-     "files you own. GNOME Settings is not available there."),
+     "The Noctalia shell in a separate session, set up through text files "
+     "you own. GNOME Settings is not available there."),
 )
+# What the advanced desktop runs on. Keys match kosherd.policy.COMPOSITORS.
+COMPOSITOR_CHOICES = (
+    ("niri", "niri",
+     "Windows open side by side in columns, and the row scrolls sideways "
+     "as it grows."),
+    ("hyprland", "Hyprland",
+     "Each new window takes half the space of the one before it, so "
+     "everything stays on screen."),
+    ("umbriel", "Umbriel",
+     "Made by the Noctalia developers to go with the shell. Windows "
+     "scroll in columns, like niri."),
+)
+# Each compositor's login-screen session, which is how the app knows one
+# is installed: a choice that cannot start is not offered.
+SESSIONS_DIR = "/usr/share/wayland-sessions"
+# How to leave each one. niri and Umbriel ask first; Hyprland's
+# hyprshutdown closes the windows before it quits.
+QUIT = {
+    "niri": ["niri", "msg", "action", "quit"],
+    "hyprland": ["sh", "-c", "command -v hyprshutdown >/dev/null 2>&1 && exec hyprshutdown"
+                 " || exec hyprctl dispatch 'hl.dsp.exit()'"],
+    "umbriel": ["umbriel", "msg", "session-quit"],
+}
 # Classic and Tiling are both GNOME and switch in place; Advanced is a
 # different session and waits for the next sign-in.
 IN_PLACE = {"classic", "tiling"}
 
 TEXT = {
     "desktop": "Your desktop",
+    "runs_on": "Advanced runs on",
+    "runs_on_hint": ("Noctalia is the same on each of them; what changes is how "
+                     "windows are arranged."),
     "desktop_hint": ("Which desktop you sign in to. Changing it changes nothing "
                      "about how the internet is filtered for you."),
     "next_sign_in": "Your new desktop is ready at your next sign-in.",
@@ -69,6 +100,7 @@ TEXT = {
     "rest_hint": "Settings does these well.",
     "open_settings": "Open Settings",
     "chosen": "{title} desktop",
+    "runs_on_chosen": "Advanced runs on {title}",
     "loading": "Looking at your desktop…",
     "error_title": "Could not reach the desktop settings",
 }
@@ -93,8 +125,18 @@ def _run_async(work, on_done, on_error) -> None:
     threading.Thread(target=runner, daemon=True).start()
 
 
-def under_niri() -> bool:
-    return "niri" in os.environ.get("XDG_CURRENT_DESKTOP", "").lower()
+def running_compositor(desktop: str | None = None) -> str | None:
+    """Which of the advanced desktop's compositors this session is, or None
+    for GNOME."""
+    if desktop is None:
+        desktop = os.environ.get("XDG_CURRENT_DESKTOP", "")
+    names = desktop.lower().split(":")
+    return next((c for c in COMPOSITORS if c in names), None)
+
+
+def installed_compositors(sessions_dir: str = SESSIONS_DIR) -> tuple[str, ...]:
+    return tuple(c for c in COMPOSITORS
+                 if os.path.exists(os.path.join(sessions_dir, f"{c}.desktop")))
 
 
 def apply_now(layout: str) -> None:
@@ -105,11 +147,8 @@ def apply_now(layout: str) -> None:
                    capture_output=True, text=True, timeout=30)
 
 
-def sign_out() -> None:
-    if under_niri():
-        subprocess.Popen(["niri", "msg", "action", "quit"])
-    else:
-        subprocess.Popen(["gnome-session-quit", "--logout"])
+def sign_out(running: str | None = None) -> None:
+    subprocess.Popen(QUIT.get(running, ["gnome-session-quit", "--logout"]))
 
 
 def open_appearance_settings() -> None:
@@ -284,15 +323,21 @@ class Glass:
 
 class Window(Adw.ApplicationWindow):
     def __init__(self, app: Adw.Application | None, *, client=None, glass=None,
-                 apply=apply_now, in_niri: bool | None = None):
+                 apply=apply_now, running: str | None = "detect",
+                 compositors: tuple[str, ...] | None = None, quit=sign_out):
         super().__init__(application=app, title="Look",
                          default_width=560, default_height=700)
         self.client = client
         self.glass = glass if glass is not None else Glass()
         self._quiet = False
         self.apply = apply
-        self.in_niri = under_niri() if in_niri is None else in_niri
+        # Which compositor this session is (None for GNOME), and which ones
+        # this machine can start.
+        self.running = running_compositor() if running == "detect" else running
+        self.compositors = installed_compositors() if compositors is None else compositors
+        self.quit = quit
         self.layout = DEFAULT_LAYOUT
+        self.compositor = DEFAULT_COMPOSITOR
         self.toasts = Adw.ToastOverlay()
         self.set_content(self.toasts)
         self.view = Adw.ToolbarView()
@@ -309,7 +354,11 @@ class Window(Adw.ApplicationWindow):
         self.view.set_content(Adw.StatusPage(
             title=TEXT["loading"], paintable=None,
             child=Gtk.Spinner(spinning=True, width_request=32, height_request=32)))
-        _run_async(lambda: self._client().my_layout(), self._on_loaded, self._on_error)
+        def work():
+            client = self._client()
+            return client.my_layout(), client.my_compositor()
+
+        _run_async(work, self._on_loaded, self._on_error)
 
     def _on_error(self, e: Exception) -> None:
         retry = Gtk.Button(label="Try again", halign=Gtk.Align.CENTER)
@@ -319,8 +368,10 @@ class Window(Adw.ApplicationWindow):
             icon_name="dialog-warning-symbolic", title=TEXT["error_title"],
             description=_error_text(e), child=retry))
 
-    def _on_loaded(self, layout: str) -> None:
+    def _on_loaded(self, found: tuple[str, str]) -> None:
+        layout, compositor = found
         self.layout = layout if layout in LAYOUTS else DEFAULT_LAYOUT
+        self.compositor = compositor if compositor in COMPOSITORS else DEFAULT_COMPOSITOR
         self.view.set_content(self._build())
 
     # ---- the page ----------------------------------------------------------
@@ -328,6 +379,9 @@ class Window(Adw.ApplicationWindow):
     def _build(self) -> Gtk.Widget:
         page = Adw.PreferencesPage()
         page.add(self._desktop_group())
+        self.compositor_group = self._compositor_group()
+        if self.compositor_group is not None:
+            page.add(self.compositor_group)
         self.glass_group = self._glass_group()
         if self.glass_group is not None:
             page.add(self.glass_group)
@@ -338,7 +392,7 @@ class Window(Adw.ApplicationWindow):
     def _desktop_group(self) -> Adw.PreferencesGroup:
         group = Adw.PreferencesGroup(title=TEXT["desktop"], description=TEXT["desktop_hint"])
         self.banner = Adw.Banner(title=TEXT["next_sign_in"], button_label=TEXT["sign_out"])
-        self.banner.connect("button-clicked", lambda _b: sign_out())
+        self.banner.connect("button-clicked", lambda _b: self.quit(self.running))
         group.add(self.banner)
         self.rows: dict[str, Adw.ActionRow] = {}
         self.checks: dict[str, Gtk.CheckButton] = {}
@@ -366,7 +420,7 @@ class Window(Adw.ApplicationWindow):
 
         def work():
             self._client().set_my_layout(key)
-            if key in IN_PLACE and not self.in_niri:
+            if key in IN_PLACE and self.running is None:
                 self.apply(key)
             return key
 
@@ -387,12 +441,81 @@ class Window(Adw.ApplicationWindow):
         _run_async(work, done, failed)
 
     def _show_for(self, key: str) -> None:
-        """The glass switch while a GNOME desktop is running, and the
-        sign-out banner when the running session is not the chosen one."""
+        """The glass switch while a GNOME desktop is running, the compositor
+        choice while Advanced is chosen, and the sign-out banner when the
+        running session is not the chosen one."""
         if self.glass_group is not None:
-            self.glass_group.set_visible(not self.in_niri)
-        running_is_chosen = (key not in IN_PLACE) == self.in_niri
+            self.glass_group.set_visible(self.running is None)
+        if self.compositor_group is not None:
+            self.compositor_group.set_visible(key == "advanced")
+        if key in IN_PLACE:
+            running_is_chosen = self.running is None
+        else:
+            running_is_chosen = self.running == self._chosen_compositor()
         self.banner.set_revealed(not running_is_chosen)
+
+    def _chosen_compositor(self) -> str:
+        """The compositor the next advanced sign-in starts. One the person
+        chose that is no longer installed counts as niri, which the login
+        screen would fall back to as well."""
+        if self.compositor in self.compositors:
+            return self.compositor
+        return DEFAULT_COMPOSITOR
+
+    # ---- what Advanced runs on ----------------------------------------------
+
+    def _compositor_group(self) -> Adw.PreferencesGroup | None:
+        """The compositors this machine has, one row each. Nothing to choose
+        between with only one, so the group is left out."""
+        offered = [c for c in COMPOSITOR_CHOICES if c[0] in self.compositors]
+        if len(offered) < 2:
+            return None
+        group = Adw.PreferencesGroup(title=TEXT["runs_on"], description=TEXT["runs_on_hint"])
+        self.compositor_rows: dict[str, Adw.ActionRow] = {}
+        self.compositor_checks: dict[str, Gtk.CheckButton] = {}
+        chosen = self._chosen_compositor()
+        first = None
+        for key, title, words in offered:
+            check = Gtk.CheckButton(valign=Gtk.Align.CENTER, active=(key == chosen))
+            if first is None:
+                first = check
+            else:
+                check.set_group(first)
+            row = Adw.ActionRow(title=title, subtitle=words, activatable_widget=check)
+            row.add_prefix(check)
+            check.connect("toggled", self._on_compositor_toggled, key)
+            group.add(row)
+            self.compositor_rows[key] = row
+            self.compositor_checks[key] = check
+        return group
+
+    def _on_compositor_toggled(self, check: Gtk.CheckButton, key: str) -> None:
+        if not check.get_active() or key == self.compositor:
+            return
+        previous, self.compositor = self.compositor, key
+        for row in self.compositor_rows.values():
+            row.set_sensitive(False)
+
+        def work():
+            self._client().set_my_compositor(key)
+            return key
+
+        def done(_key):
+            for row in self.compositor_rows.values():
+                row.set_sensitive(True)
+            self._show_for(self.layout)
+            title = next(t for k, t, _ in COMPOSITOR_CHOICES if k == key)
+            self.toasts.add_toast(Adw.Toast(title=TEXT["runs_on_chosen"].format(title=title)))
+
+        def failed(e):
+            for row in self.compositor_rows.values():
+                row.set_sensitive(True)
+            self.compositor = previous
+            if previous in self.compositor_checks:
+                self.compositor_checks[previous].set_active(True)
+            self.toasts.add_toast(Adw.Toast(title=_error_text(e)))
+
+        _run_async(work, done, failed)
 
     def _glass_group(self) -> Adw.PreferencesGroup | None:
         g = self.glass

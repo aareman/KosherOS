@@ -334,6 +334,13 @@ class DemoClient:
         """The Look app's choice for the person at the keyboard: in the demo, yosef."""
         self.set_layout(1002, layout)
 
+    def my_compositor(self): return self._user(1002).get("compositor", "niri")
+
+    def set_my_compositor(self, compositor):
+        """What the advanced desktop runs on, for yosef. Not logged: the
+        person's own choice, like SetMyLayout."""
+        self._user(1002)["compositor"] = compositor
+
     def get_my_settings(self):
         """What My Filter shows the person at the keyboard: in the demo, yosef."""
         u = self._user(1002)

@@ -31,6 +31,11 @@ kosher-time-notify = "kosherd.timenotify:main"
 # In the person's session too: sends their own keyd file
 # (~/.config/keyd/default.conf) to kosherd at sign-in and on every save.
 kosher-keyboard = "kosherd.keyboard:main"
+# keyd-application-mapper's KEYD_BIN: hands its `bind` calls to kosherd,
+# since nobody has keyd's socket.
+kosher-keyd-bind = "kosherd.keyboard:bind_main"
+# Starts keyd-application-mapper that way (kosher-keyd-apps.service).
+kosher-keyd-apps = "kosherd.keyboard:apps_main"
 # Run by pam_exec after pam_time refuses a sign-in, so the refusal shows in
 # the activity log.
 kosher-time-refused = "kosherd.timelimits:refused_login_main"

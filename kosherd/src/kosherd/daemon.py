@@ -156,7 +156,10 @@ INTROSPECTION_XML = """
       <arg direction="in" type="s" name="layout"/>
     </method>
     <method name="SetMyKeyboard">
-      <arg direction="in" type="s" name="config"/>
+      <arg direction="in" type="a{ss}" name="files"/>
+    </method>
+    <method name="SetMyAppKeys">
+      <arg direction="in" type="as" name="bindings"/>
     </method>
     <method name="SetTimeLimits">
       <arg direction="in" type="i" name="uid"/>
@@ -1591,16 +1594,24 @@ class Daemon:
         """
         return self.impl_SetLayout(_uid, layout)
 
-    def impl_SetMyKeyboard(self, config: str, _uid: int):
-        """The caller's own keyd file (~/.config/keyd/default.conf), sent
-        by kosher-keyboard at sign-in and on every save. "" means none.
+    def impl_SetMyKeyboard(self, files: dict, _uid: int):
+        """The caller's own keyd files (~/.config/keyd/*.conf by name, not
+        app.conf), sent by kosher-keyboard at sign-in and on every save.
+        None at all means no remaps.
 
         Any active local user, for themselves only: the uid comes from the
-        bus. The text is checked before keyd sees it (keyboard.prepare:
-        no command(), which keyd would run as root), and is in force only
-        while that person's session is the one on the screen.
+        bus. The files are checked before keyd sees them (keyboard.py: a
+        command() key runs as the person, never as root), and are in force
+        only while that person's session is the one on the screen.
         """
-        self.keyboards.set(_uid, config, self._active_seat_uid())
+        self.keyboards.set(_uid, dict(files), self._active_seat_uid())
+        return None
+
+    def impl_SetMyAppKeys(self, bindings: list, _uid: int):
+        """keyd-application-mapper's bindings for the window in front, from
+        the caller's own app.conf (through kosher-keyd-bind). Refused
+        unless the caller's session is the one on the screen."""
+        self.keyboards.bind(_uid, list(bindings), self._active_seat_uid())
         return None
 
     def impl_GetMySettings(self, _uid: int):

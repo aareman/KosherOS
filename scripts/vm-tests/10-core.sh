@@ -3,7 +3,19 @@
 set -uo pipefail
 . "$(dirname "$0")/lib.sh"
 
+# The redirect probe below runs as dnskid. Run on its own, as `just
+# pr-test` runs each suite, this suite came before any other had made the
+# test accounts.
+ensure_test_users
+
 section "Services"
+# kosherd is started by D-Bus a moment into boot; asked straight after the
+# machine answers ssh it can still be starting. Give it the time a boot
+# gives it before calling it down.
+for _ in $(seq 1 30); do
+    systemctl is-active --quiet kosherd && break
+    sleep 1
+done
 for s in kosher-firewall kosher-dns kosherd; do
     check "$s is active" 0 systemctl is-active --quiet "$s"
 done

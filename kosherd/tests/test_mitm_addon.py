@@ -626,6 +626,38 @@ def test_a_stale_content_length_is_not_left_behind(addon):
     assert "content-length" not in flow.response.headers
 
 
+def test_a_blocked_request_is_counted_and_timed(addon, tmp_path):
+    from kosherd import usage
+
+    filt = _shop_filter(addon)
+    filt.usage = usage.Tally("proxy", spool=tmp_path)
+    flow = _request_flow("https://www.amazon.com/s?k=lingerie")
+    filt.request(flow)
+    assert flow.metadata["kosher_filter_s"] > 0
+    filt._tally(flow)
+    filt._tally(flow)  # the error hook after the response hook: once only
+    filt.usage.flush()
+    [line] = [json.loads(x) for x in (tmp_path / "proxy.usage").read_text().splitlines()]
+    assert line["uid"] == 1001
+    assert line["requests"] == 1 and line["blocked"] == 1
+    assert sum(line["lat"]) == 1
+    assert "url" not in line
+
+
+def test_a_held_response_counts_what_reached_the_person(addon, tmp_path):
+    from kosherd import usage
+
+    filt = _shop_filter(addon)
+    filt.usage = usage.Tally("proxy", spool=tmp_path)
+    body = json.dumps(["lamp", "lingerie"]).encode()
+    flow = _suggestion_flow(
+        "https://completion.amazon.com/api/2017/suggestions?prefix=l", body)
+    asyncio.run(filt.response(flow))
+    filt.usage.flush()
+    [line] = [json.loads(x) for x in (tmp_path / "proxy.usage").read_text().splitlines()]
+    assert line["bytes_in"] == len(flow.response.content) < len(body)
+
+
 def test_suggestions_are_left_alone_for_accounts_that_did_not_ask(addon):
     import json
 

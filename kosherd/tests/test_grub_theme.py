@@ -79,9 +79,13 @@ def test_the_snippet_tries_uefi_then_bios_and_falls_through_quietly():
     assert "${cmdpath}/kosheros/theme.txt" in text
     assert "${prefix}/themes/starfield/theme.txt" in text
     assert "if loadfont ${kosheros_font}; then" in text
-    for module in ("gfxterm", "png", "all_video"):
+    for module in ("gfxterm", "png", "all_video", "vbe"):
         assert f"insmod {module}" in text
     assert "set theme=${kosheros_theme}" in text and "export theme" in text
+    # BIOS loads VBE alone: with all_video, GRUB hung on a BIOS machine
+    # with no video device, and the boot test boots exactly that.
+    bios = text.index('if [ "${grub_platform}" = "pc" ]; then')
+    assert text.index("insmod vbe") > bios and text.index("insmod all_video") > text.index("insmod vbe")
     # It is sorted before the entries are listed and after greenboot.
     assert "08_greenboot" < SNIPPET.name < "10_blscfg"
 

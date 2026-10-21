@@ -128,6 +128,7 @@ ACTIONS = {
     "AllowUrl": ACTION_MANAGE_FILTER,
     "ListActivity": ACTION_READ_CONFIG,
     "ActivitySummary": ACTION_READ_CONFIG,
+    "Usage": ACTION_READ_CONFIG,
     "SetMediaLevel": ACTION_MANAGE_FILTER,
     "SetLanguageFilter": ACTION_MANAGE_FILTER,
     "SetYouTube": ACTION_MANAGE_FILTER,

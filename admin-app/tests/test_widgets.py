@@ -130,6 +130,17 @@ class FakeClient:
     def set_boot_menu_password(self, password, guardian_password=""):
         self.calls.append(("set_boot_menu_password", password))
 
+    def tailscale_status(self):
+        return self._overrides.get("tailscale", {"installed": True, "state": "NeedsLogin",
+                                                 "signed_in": False, "connected": False})
+
+    def tailscale_sign_in(self, guardian_password=""):
+        self.calls.append(("tailscale_sign_in", guardian_password))
+        return self._overrides.get("login_url", "https://login.tailscale.com/a/abc123")
+
+    def tailscale_sign_out(self):
+        self.calls.append(("tailscale_sign_out",))
+
     def connect_update_signals(self, on_progress, on_finished):
         self.on_update_progress, self.on_update_finished = on_progress, on_finished
         return 7
@@ -2765,6 +2776,125 @@ def test_the_protection_page_says_whether_the_boot_menu_has_a_password():
     page = computer.ProtectionPage(win)
     drain()
     assert _row_named(page, "Boot menu password").get_subtitle().startswith("Set.")
+
+
+# -- Tailscale (#30) -------------------------------------------------------------
+
+def _until(check, seconds=5):
+    """Run the main loop until `check()` holds: these loads go through a thread."""
+    from gi.repository import GLib
+
+    context = GLib.MainContext.default()
+    deadline = time.time() + seconds
+    while time.time() < deadline:
+        while context.pending():
+            context.iteration(False)
+        if check():
+            return True
+        time.sleep(0.01)
+    return check()
+
+
+def _titles(widget):
+    return [r.get_title() for r in _rows(widget)]
+
+
+SIGNED_IN = {"installed": True, "state": "Running", "signed_in": True, "connected": True,
+             "user": "avi@example.com", "tailnet": "avi@example.com",
+             "dns_suffix": "tail230de1.ts.net", "name": "kosheros.tail230de1.ts.net",
+             "addresses": ["100.101.102.103"]}
+
+
+def test_a_computer_not_on_a_tailnet_offers_to_sign_in():
+    win = FakeWindow(FakeClient())
+    page = computer.ProtectionPage(win)
+    group = page.tailscale
+    assert _until(lambda: "Not signed in" in _titles(group))
+    assert group.action.get_visible() and group.action.get_label() == "Sign In…"
+    assert "suggested-action" in group.action.get_css_classes()
+
+
+def test_a_signed_in_computer_shows_who_where_and_its_address():
+    win = FakeWindow(FakeClient(tailscale=SIGNED_IN))
+    group = computer.ProtectionPage(win).tailscale
+    assert _until(lambda: "Signed in as" in _titles(group))
+    assert _row_named(group, "Signed in as").get_subtitle() == "avi@example.com"
+    assert "100.101.102.103" in _row_named(group, "This computer").get_subtitle()
+    assert _row_named(group, "Connection").get_subtitle() == "Connected"
+    assert group.action.get_label() == "Sign Out"
+    assert "destructive-action" in group.action.get_css_classes()
+
+
+def test_signing_in_goes_through_the_guardian_and_shows_the_address_to_open():
+    guarded = []
+
+    class Guarded(FakeWindow):
+        def with_guardian(self, then):
+            guarded.append(True)
+            then("")
+
+    win = Guarded(FakeClient())
+    group = computer.ProtectionPage(win).tailscale
+    assert _until(lambda: "Not signed in" in _titles(group))
+    group.action.emit("clicked")
+    assert _until(lambda: "Open the sign-in page" in _titles(group))
+    assert guarded == [True]
+    assert ("tailscale_sign_in", "") in win.client.calls
+    row = _row_named(group, "Open the sign-in page")
+    assert "https://login.tailscale.com/a/abc123" in row.get_subtitle()
+    labels_shown = [t for t in _texts(row)]
+    assert "Open" in labels_shown and "Copy" in labels_shown
+    assert "Waiting for you to sign in…" in _titles(group)
+    # A reload while waiting must not throw the address away.
+    group.refresh()
+    assert "Open the sign-in page" in _titles(group)
+
+
+def test_the_page_notices_when_the_sign_in_is_finished_in_the_browser():
+    client = FakeClient()
+    win = FakeWindow(client)
+    group = computer.ProtectionPage(win).tailscale
+    assert _until(lambda: "Not signed in" in _titles(group))
+    group._sign_in("")
+    assert _until(lambda: group.login_url is not None)
+    client._overrides["tailscale"] = SIGNED_IN
+    group._poll()
+    assert _until(lambda: "Signed in as" in _titles(group))
+    assert group.login_url is None
+    assert "This computer is on your tailnet" in win.toasts
+
+
+def test_copying_the_address_does_not_throw():
+    win = FakeWindow(FakeClient())
+    group = computer.ProtectionPage(win).tailscale
+    group._copy("https://login.tailscale.com/a/abc123")
+    assert win.toasts[-1] == "Address copied"
+
+
+def test_signing_out_asks_first_then_calls_the_daemon():
+    win = FakeWindow(FakeClient(tailscale=SIGNED_IN))
+    group = computer.ProtectionPage(win).tailscale
+    assert _until(lambda: "Signed in as" in _titles(group))
+    asked = []
+    original = computer.confirm
+    computer.confirm = lambda parent, heading, body, verb, on_yes, **kw: (
+        asked.append(heading), on_yes())
+    try:
+        group.action.emit("clicked")
+    finally:
+        computer.confirm = original
+    assert asked == ["Sign out of Tailscale?"]
+    assert _until(lambda: ("tailscale_sign_out",) in win.client.calls)
+    assert _until(lambda: "Signed out of Tailscale" in win.toasts)
+
+
+def test_tailscale_that_is_not_running_says_so_and_can_be_checked_again():
+    win = FakeWindow(FakeClient(tailscale={"installed": True, "state": "Unavailable",
+                                           "signed_in": False, "connected": False,
+                                           "error": "failed to connect to local tailscaled"}))
+    group = computer.ProtectionPage(win).tailscale
+    assert _until(lambda: "Tailscale is not running" in _titles(group))
+    assert group.action.get_label() == "Check Again"
 
 
 # -- usage ---------------------------------------------------------------------

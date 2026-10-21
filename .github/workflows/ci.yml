@@ -191,6 +191,15 @@ jobs:
           podman build --build-arg "KOSHER_VERSION=$version" \
             -t "$IMAGE:${SHA::12}" -t "$IMAGE:edge" -f os-image/Containerfile .
 
+      - name: The category lists are complete
+        # Reads the catalogue back out of the built image and holds every
+        # category a family can switch on to its floor. The build step
+        # refuses to produce a short catalogue already; this is the check
+        # that does not depend on the script having behaved, so an image
+        # that only looks filtered is never pushed (#202). A container is
+        # created and one file copied out: seconds.
+        run: python3 scripts/fetch-categories.py --check-image "$IMAGE:edge"
+
       - name: Push
         # Retried: the registry answered a 502 once, in the middle of a
         # layer, and that one answer cost a release its image — the

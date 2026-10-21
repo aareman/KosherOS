@@ -224,6 +224,56 @@ an inbound port. Enrolling and unenrolling take the guardian password.
 Losing the portal does not unlock a device: the last applied policy keeps
 being enforced.
 
+## Tailscale
+
+Tailscale is in the image, from Tailscale's own signed repository, and
+`tailscaled` starts at boot. It does nothing until an administrator signs
+the computer in from **Admin → Protection → Tailscale**. The daemon starts
+the sign-in and the page shows the address to open, on this computer or a
+phone. Signing in takes the guardian password, because it puts the
+computer on a network with other machines that every account can then
+reach. Signing out does not. `kosherctl tailscale` does the same from a
+terminal.
+
+No operator is set on `tailscaled`, so an account can read its status but
+only root can change it, and root is kosherd. Every sign-in runs
+`tailscale up` with the whole configuration and `--reset`, so nothing set
+another way survives it:
+
+| Flag | Why |
+|---|---|
+| `--accept-dns=false` | tailscaled never rewrites `/etc/resolv.conf`; dnsmasq stays the only resolver |
+| `--shields-up` | no tailnet machine can open a connection to this one |
+| `--ssh=false` | Tailscale's own SSH server stays off |
+| `--netfilter-mode=off` | tailscaled adds no firewall rules of its own; its usual ones accept anything arriving on `tailscale0` |
+| `--accept-routes=false` | other machines' subnets are not routed through here |
+
+Serve and Funnel are never used, and the input chain drops what nobody
+asked for, on `tailscale0` as anywhere else.
+
+**Names.** dnsmasq forwards the signed-in tailnet's own domain, for
+example `tail230de1.ts.net`, to tailscaled's resolver at 100.100.100.100,
+in both the family resolver and the plain one. So `git.tail230de1.ts.net`
+resolves for every account and every other name goes where it always did.
+Only that one tailnet is forwarded, not all of `ts.net`: tailscaled hands
+a name it does not own back to the system resolver, and that would be a
+loop. The forward is written when the daemon sees the computer signed in
+and removed when it signs out. `tailscale.com` is in the category list of
+proxies and VPNs, which supervised accounts block by default, so it is
+left out of the resolver's blocks. The resolver answers the machine's own
+services too, and tailscaled cannot sign in without it. The proxy still
+blocks the site itself for a filtered account.
+
+**Filtering.** tailscaled runs as root, so its own traffic is let out like
+every system service's. An account's traffic is matched by its owner in
+the output hook, before it is routed, so a tailnet address is one more
+destination behind the same rules. That would hold for an exit node too,
+but none is set: the admin app does not offer one and every sign-in
+clears it. A filtered account reaches it through its proxy listener, a
+basic-protection account on the web and mail ports, an approved-sites
+account only by an approved name, and an account with no internet not at
+all.
+
 ## First boot
 
 The installer creates no users and asks no passwords. On first boot a

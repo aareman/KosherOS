@@ -202,6 +202,23 @@ def test_installed_details_include_the_nix_apps_kosherd_installed(home, monkeypa
     assert details[0]["approved"] is True
 
 
+def test_the_store_sees_every_flatpak_and_only_its_own_apps(monkeypatch):
+    # #182: the Store opens on any account without a password, so its view
+    # of what is installed names nobody and holds no other account's apps.
+    monkeypatch.setattr(apps, "installed_details", lambda: [
+        {"ref": "org.gnome.Chess", "name": "Chess", "installed_by": "avi",
+         "installed_by_uid": 1000},
+        {"ref": "nixpkgs#gh", "name": "GitHub CLI", "installed_by": "u1001",
+         "installed_by_uid": 1001},
+        {"ref": "nixpkgs#ripgrep", "name": "ripgrep", "installed_by": "u1002",
+         "installed_by_uid": 1002},
+    ])
+    mine = apps.installed_details_for(1001)
+    assert [d["ref"] for d in mine] == ["org.gnome.Chess", "nixpkgs#gh"]
+    for detail in mine:
+        assert "installed_by" not in detail and "installed_by_uid" not in detail
+
+
 # -- the image ---------------------------------------------------------------------
 
 def test_the_session_environment_is_left_alone():

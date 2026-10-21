@@ -574,6 +574,9 @@ class DemoClient:
 
     def list_installed(self): return [a["ref"] for a in self.installed]
     def list_installed_details(self): return list(self.installed)
+    def list_my_installed_details(self):
+        return [{k: v for k, v in a.items() if k not in ("installed_by", "installed_by_uid")}
+                for a in self.installed]
     def set_user_apps(self, uid, refs): self._user(uid)["apps"] = list(refs)
     def install_app(self, ref):
         self._install_app(ref)
@@ -757,7 +760,7 @@ class DemoClient:
                              "version": "0.1.0-pre.9", "timestamp": now - 90000},
                 "staged": None, "rollback_queued": False}
 
-    def rollback(self): self._change(None, "Rollback", [])
+    def rollback(self, guardian_password=""): self._change(None, "Rollback", [])
 
     def list_unused_apps(self): return []
 

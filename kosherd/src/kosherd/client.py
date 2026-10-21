@@ -458,6 +458,17 @@ class DaemonClient:
     def set_captive_mode(self, uid: int, minutes: int) -> None:
         self._call("Network", "SetCaptiveMode", "(ii)", uid, minutes)
 
+    # Tailscale (#30): machine-wide, the administrator's alone.
+    def tailscale_status(self) -> dict:
+        return json.loads(self._call("Network", "TailscaleStatus")[0])
+
+    def tailscale_sign_in(self, guardian_password: str = "") -> str:
+        """Start signing in; the address to open, or "" if none was needed."""
+        return self._call("Network", "TailscaleSignIn", "(s)", guardian_password)[0]
+
+    def tailscale_sign_out(self) -> None:
+        self._call("Network", "TailscaleSignOut")
+
     # Guardian
     def guardian_enabled(self) -> bool:
         return self._call("Guardian", "IsEnabled")[0]

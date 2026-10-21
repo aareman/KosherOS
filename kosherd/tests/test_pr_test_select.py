@@ -20,6 +20,11 @@ def test_a_desktop_app_runs_the_signed_in_session_only():
     assert sel.desktop == {"session"} and not sel.suites and not sel.boot
 
 
+def test_a_check_on_the_signed_in_desktop_runs_the_session():
+    sel = select(["scripts/vm-tests/desktop/keyd.sh", "scripts/vm-tests/desktop/keys.py"])
+    assert sel.desktop == {"session"} and not sel.suites and not sel.boot
+
+
 def test_the_filter_runs_the_filtering_suites_and_the_block_page():
     sel = select(["kosherd/src/kosherd/nft.py", "mitm/kosher_filter.py"])
     assert sel.suites == set(FILTER_SUITES)

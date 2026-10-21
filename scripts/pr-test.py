@@ -477,7 +477,7 @@ def session_of(vm: Machine, user: str) -> dict:
 
 
 def stage_desktop(st: Stage, machine: Path, outdir: Path, key: Path, gl: bool,
-                  parts: set = frozenset({"session", "filter"})) -> None:
+                  tree: Path = REPO, parts: set = frozenset({"session", "filter"})) -> None:
     vm = Machine(machine, outdir, key, gl)
     log = st.log.open("a")
 
@@ -647,9 +647,43 @@ def stage_desktop(st: Stage, machine: Path, outdir: Path, key: Path, gl: bool,
                 st.check("the filter records Firefox's visit to the gambling site",
                          "unibet" in activity.lower(), activity[-1200:])
                 vm.user_unit(USER, "stop", "pr-test-firefox")
+
+        # Last, since one of them may sign the account out.
+        desktop_scripts(st, vm, tree, gl, sh)
     finally:
         log.close()
         vm.stop()
+
+
+def desktop_scripts(st: Stage, vm: Machine, tree: Path, gl: bool, sh) -> None:
+    """The target's scripts/vm-tests/desktop/*.sh, on the desktop machine
+    with the test account signed in at the screen, for what only a real
+    session can show: whose files are in force, what a sign-in starts.
+    Each runs as root with PR_USER (the account at the screen), ADMIN_USER
+    and PR_GL (1 when the machine has a GPU), sources ../lib.sh, and
+    prints PASS, FAIL and SKIP lines as the suites do."""
+    scripts = sorted((tree / "scripts/vm-tests/desktop").glob("*.sh"))
+    if not scripts:
+        return
+    tar = subprocess.run(["tar", "-C", str(tree / "scripts"), "-czf", "-", "vm-tests"],
+                         capture_output=True, check=True).stdout
+    subprocess.run(vm.ssh_cmd() + ["rm -rf /tmp/kosher-vm-tests && mkdir -p /tmp/kosher-vm-tests"
+                                   " && tar -xzf - -C /tmp/kosher-vm-tests --strip-components=1"],
+                   input=tar, check=True)
+    env = f"PR_USER={USER} ADMIN_USER={ADMIN_USER} PR_GL={1 if gl else 0}"
+    for script in scripts:
+        rc, out = sh(f"{env} bash /tmp/kosher-vm-tests/desktop/{script.name}", timeout=1500)
+        text = re.sub(r"\x1b\[[0-9;]*m", "", out)
+        before = len(st.checks)
+        for m in re.finditer(r"^\s*(PASS|FAIL|SKIP):?\s+(.*)$", text, re.M):
+            st.checks.append({"name": f"{script.stem}: {m.group(2)}", "ok": m.group(1) != "FAIL",
+                              "detail": "skipped" if m.group(1) == "SKIP" else ""})
+        bad = sum(1 for c in st.checks[before:] if not c["ok"])
+        if rc != 0 and not bad:
+            st.check(f"{script.stem}: finished", False, f"exit {rc}\n{text[-1500:]}")
+            bad = 1
+        print(f"  [{st.name}] {script.stem}: {len(st.checks) - before - bad} passed, "
+              f"{bad} failed", flush=True)
 
 
 
@@ -1227,7 +1261,7 @@ def main() -> int:
             def desktop():
                 with stage("desktop") as st:
                     stage_desktop(st, child_overlay(machine, outdir / "desktop.qcow2"),
-                                  outdir, key, args.gl, parts=sel.desktop)
+                                  outdir, key, args.gl, tree=tree, parts=sel.desktop)
             workers.append(threading.Thread(target=desktop))
         groups = groups_for(sel.ordered_suites(), machines_to_use(args.vms))
         # The longest group starts first, so the machines finish together.

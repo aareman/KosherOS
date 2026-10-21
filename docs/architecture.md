@@ -259,6 +259,12 @@ setup does the same. Starting the computer never asks for it; editing an
 entry or opening GRUB's command line does. A machine installed before this
 was the default sets one from **Admin → Protection → Boot menu password**.
 
+Text consoles are for administrators. Ctrl+Alt+F3 and a serial line still
+show a login prompt, but only an account in KosherOS Admin's administrators
+gets a shell there; anyone else is refused, so nobody steps outside the
+desktop's app list, lock screen and time warnings. An administrator can
+still sign in on one when the desktop will not start.
+
 Nothing in the image loads an out-of-tree kernel module, so lockdown costs
 the family nothing.
 

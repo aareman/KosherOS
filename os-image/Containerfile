@@ -526,6 +526,18 @@ RUN for f in gdm-password gdm-autologin login; do \
     done \
     && grep -q pam_time /etc/pam.d/gdm-password \
     && grep -q kosher-time-refused /etc/pam.d/gdm-password \
+    # Text consoles are for administrators (F8 in #33, #186). Every getty,
+    # on the screen's Ctrl+Alt+F2 to F6 and on a serial line, signs in
+    # through the `login` service, so that is where the line is drawn: an
+    # account outside kosher-admin is refused there, and a supervised
+    # account gets no shell outside the desktop, where its app list, lock
+    # screen and time warnings are. Root stays allowed (it is locked, so
+    # only matters with a key), and an administrator can still reach a
+    # text console when the desktop will not start. The login screen has
+    # its own PAM services and is not affected.
+    && { grep -q 'ingroup kosher-admin' /etc/pam.d/login || \
+        sed -i '0,/^account/{s|^account|account    [success=1 default=ignore] pam_succeed_if.so quiet uid eq 0\naccount    required     pam_succeed_if.so quiet user ingroup kosher-admin\n&|}' /etc/pam.d/login; } \
+    && grep -q 'ingroup kosher-admin' /etc/pam.d/login \
     && test -x /usr/bin/kosher-time-refused \
     && test -x /usr/bin/kosher-time-notify \
     && test -x /usr/bin/kosher-nix-desktop \

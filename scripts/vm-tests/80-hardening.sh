@@ -71,9 +71,52 @@ except OSError:
 PY
 }
 
+# Whether `login` gives an account a shell. Every getty signs in through
+# it, on the screen's text consoles and on a serial line, so this is what
+# Ctrl+Alt+F3 would do for that account. `login -f` skips the password but
+# not the account checks, which is where a refusal lives. Run on a pty of
+# its own, so nothing is typed into a real console.
+console_admits() {
+    python3 - "$1" <<'PY'
+import os, pty, select, signal, sys, time
+pid, fd = pty.fork()
+if pid == 0:
+    os.execv("/usr/bin/login", ["login", "-f", sys.argv[1]])
+seen, deadline, next_try = b"", time.monotonic() + 20, 0.0
+try:
+    while time.monotonic() < deadline and b"KOSHER-IN-42" not in seen:
+        if time.monotonic() >= next_try:
+            os.write(fd, b"echo KOSHER-IN-$((6*7))\n")
+            next_try = time.monotonic() + 2
+        r, _, _ = select.select([fd], [], [], 0.5)
+        if r:
+            try:
+                chunk = os.read(fd, 4096)
+            except OSError:
+                break
+            if not chunk:
+                break
+            seen += chunk
+finally:
+    try:
+        os.kill(pid, signal.SIGHUP)
+        os.waitpid(pid, 0)
+    except OSError:
+        pass
+sys.exit(0 if b"KOSHER-IN-42" in seen else 1)
+PY
+}
+
+# Text consoles are for administrators: a supervised account is refused,
+# and an administrator (root, where the machine has none yet) still gets
+# in, which is also what shows the probe can tell the two apart. Closed
+# virtual terminals would pass as well, but a serial line would still be
+# open to everyone, so the login itself is what is measured.
 consoles_closed() {
-    [ "$(systemctl show -p LoadState --value getty@tty2.service 2>/dev/null)" = masked ] && return 0
-    systemd-analyze cat-config systemd/logind.conf 2>/dev/null | grep -qE '^\s*NAutoVTs\s*=\s*0'
+    local admin
+    admin=$(getent group kosher-admin | cut -d: -f4 | cut -d, -f1)
+    console_admits "${admin:-root}" || { echo "  (the console did not admit ${admin:-root} either)"; return 1; }
+    ! console_admits wlkid
 }
 
 firefox_doh_off() {

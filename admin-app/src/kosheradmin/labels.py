@@ -437,6 +437,10 @@ def change_sentence(event: dict, users_by_uid: dict | None = None) -> tuple[str,
         what = f"{who}: developer tools {'on' if arg(1) else 'off'}"
     elif method == "SetBootMenuPassword":
         what = "Boot menu password set"
+    elif method == "TailscaleSignIn":
+        what = "Signing this computer in to Tailscale"
+    elif method == "TailscaleSignOut":
+        what = "This computer signed out of Tailscale"
     elif method == "SetNetworkAccess":
         ports = arg(2) if isinstance(arg(2), list) else []
         what = f"{who}: video calls {'on' if arg(1) else 'off'}" + \

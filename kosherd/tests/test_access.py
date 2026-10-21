@@ -184,7 +184,10 @@ def test_the_guardian_gate_covers_every_filter_weakening_method():
                 "Rollback",
                 # Opening an account to the whole store, or lifting an app
                 # block, widens what it can reach.
-                "SetUserAppAccess", "SetUserBlockedAppKinds", "SetUserBlockedApps"}
+                "SetUserAppAccess", "SetUserBlockedAppKinds", "SetUserBlockedApps",
+                # Joining a tailnet puts the computer on a network with
+                # other people's machines, reachable by every account.
+                "TailscaleSignIn"}
     assert GUARDIAN_GATED == expected
     filter_actions = {m for m, a in ACTIONS.items()
                       if a == access.ACTION_MANAGE_FILTER}
@@ -251,6 +254,39 @@ def test_the_wizard_can_list_pre_existing_accounts_before_setup():
     assert evaluate("ExistingAccounts", **FRESH).allowed
     # ...but not forever: it is only the wizard's business.
     assert not evaluate("ExistingAccounts", **LOCKED).allowed
+
+
+# -- Tailscale (#30) ---------------------------------------------------------
+
+def test_reading_the_tailnet_status_is_a_read():
+    assert evaluate("TailscaleStatus", **LOCKED).polkit_action == access.ACTION_READ_CONFIG
+    assert not evaluate("TailscaleStatus",
+                        **{**UNLOCKED, "guardian_enabled": True}).needs_guardian
+
+
+def test_signing_in_and_out_are_network_actions_for_an_administrator():
+    for method in ("TailscaleSignIn", "TailscaleSignOut"):
+        assert ACTIONS[method] == access.ACTION_MANAGE_NETWORK
+        assert evaluate(method, **LOCKED).polkit_action == access.ACTION_MANAGE_NETWORK
+        # Both are written to the activity log with the admin who did it.
+        assert method in access.CHANGES
+
+
+def test_joining_a_tailnet_takes_the_guardian_and_leaving_does_not():
+    guarded = {**UNLOCKED, "guardian_enabled": True}
+    assert evaluate("TailscaleSignIn", **guarded).needs_guardian
+    assert not evaluate("TailscaleSignIn",
+                        **{**guarded, "guardian_proven": True}).needs_guardian
+    assert not evaluate("TailscaleSignOut", **guarded).needs_guardian
+
+
+def test_the_tailnet_methods_are_on_the_bus_and_run_off_the_main_loop():
+    from kosherd import daemon
+
+    for method in ("TailscaleStatus", "TailscaleSignIn", "TailscaleSignOut"):
+        assert f'<method name="{method}"' in daemon.INTROSPECTION_XML
+        assert method in daemon.IN_BACKGROUND
+        assert hasattr(daemon.Daemon, f"impl_{method}")
 
 
 # -- one prompt per sitting (#181, #182) ----------------------------------------

@@ -246,6 +246,13 @@ deploy-admin VM="kosher-gui":
 build:
     podman build --build-arg "KOSHER_VERSION=$(python3 scripts/version.py show)" -t {{image}} -f os-image/Containerfile .
 
+# The category lists inside a built image, each against its floor: the
+# check CI makes before it pushes :edge (#202). Any image name works:
+# `just check-categories ghcr.io/aareman/kosher-linux:edge`.
+[group('image')]
+check-categories IMAGE=image:
+    python3 scripts/fetch-categories.py --check-image {{IMAGE}}
+
 # A bootable qcow2 from the local image, for a genuinely fresh machine,
 # made by bootc-image-builder (needs sudo; `just vm-rootless` does not).
 # For the image you just rebuilt, `just vm-upgrade` is the everyday path:

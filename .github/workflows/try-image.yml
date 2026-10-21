@@ -63,6 +63,11 @@ jobs:
           podman build --build-arg "KOSHER_VERSION=$version" \
             -t "$IMAGE:$TAG" -f os-image/Containerfile .
 
+      - name: The category lists are complete
+        # The same check ci.yml makes on :edge; a build for a real machine
+        # must not go out with an empty adult or proxy category (#202).
+        run: python3 scripts/fetch-categories.py --check-image "$IMAGE:$TAG"
+
       - name: Push
         # Retried like the edge push: one 502 in the middle of a layer
         # should not cost the whole build.

@@ -108,7 +108,7 @@ def test_the_block_is_dispatched_to_the_owners_chain():
 
 def test_the_block_is_redirected_to_the_owners_proxy():
     out = _render(_policy("filtered"))
-    assert "meta skuid { 1000, 524288-589823 } tcp dport != { 53, 465, 587, 993 } redirect to :30000" in out
+    assert "meta skuid { 1000, 524288-589823 } tcp dport != { 21, 22, 25, 53, 110, 143, 465, 587, 993 } redirect to :30000" in out
 
 
 def test_the_block_shares_the_owners_exceptions():
@@ -124,7 +124,7 @@ def test_the_block_shares_the_owners_resolver():
 
 def test_without_blocks_nothing_changes():
     out = nft.render(_policy("filtered"), dns_uid=989, mitm_uid=988)
-    assert "meta skuid 1000 tcp dport != { 53, 465, 587, 993 } redirect to :30000" in out
+    assert "meta skuid 1000 tcp dport != { 21, 22, 25, 53, 110, 143, 465, 587, 993 } redirect to :30000" in out
     assert "524288" not in out
 
 

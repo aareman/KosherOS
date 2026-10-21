@@ -19,6 +19,12 @@ table inet kosher {
     set sys6 {
         type ipv6_addr;
     }
+    set git4 {
+        type ipv4_addr;
+    }
+    set git6 {
+        type ipv6_addr;
+    }
     set doh4 {
         type ipv4_addr;
         flags interval;

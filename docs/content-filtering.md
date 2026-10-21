@@ -41,6 +41,13 @@ page served on 8080 meets the same rules as one on 443. Loopback is never
 redirected. Anything that reaches the proxy and is not HTTP, or TLS carrying
 HTTP, is refused rather than passed through.
 
+SSH, FTP, SMTP, POP3 and IMAP (ports 22, 21, 25, 110 and 143) are the
+exception. In these the server speaks first, so the proxy would have nothing
+to read and the program would wait forever. They are not sent to the proxy
+and are refused at once, so the program says the connection was refused.
+On any other port, the proxy closes a connection if the program has sent
+nothing after ten seconds.
+
 Three things do not go through the proxy, because they are not web and the
 proxy could not read them:
 
@@ -73,6 +80,13 @@ can build anything from nixpkgs from a terminal and reaches the package
 registries (npm, PyPI, crates.io, GitHub and the rest) through its own filter
 mode. Those registries are no longer in the set every account reaches: a
 whitelist-only account without the switch sees exactly its list.
+
+The switch also lets the account use git over SSH with GitHub, GitLab,
+Codeberg and Bitbucket, so `git clone git@github.com:...` and `gh repo clone`
+work. Port 22 is open to those four hosts only, and SSH to any other server is
+refused, because an SSH connection can carry a tunnel around the filter. For a
+git server of the family's own, an administrator can add port 22 under *Extra
+ports*, which opens SSH to every server for that account.
 
 A build's own downloads — `fetchurl`, `fetchFromGitHub` — run as the Nix build
 users, which belong to no account. Their web goes through the proxy on a

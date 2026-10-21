@@ -20,4 +20,3 @@ suites: 80-hardening: [F11] manual rollback needs the guardian password  #187
 suites: 80-hardening: [F13] the lockout survives a reboot           #188
 suites: 80-hardening: [F6] a dnsfilter account cannot reach a web service on the LAN  #192
 suites: 90-developer: a build could not fetch from GitHub           #190
-suites: 90-developer: and runs from a login shell                   #191

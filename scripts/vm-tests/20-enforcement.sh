@@ -91,9 +91,12 @@ else
     }
     # A non-git host that runs an SSH server, to tell "refused by the
     # firewall" from "nothing listens there". Root is never filtered.
-    other=test.rebex.net
+    # Public SSH servers: the first that answers root is the one used.
     root_gh=$(ssh_as - git@github.com)
-    root_other=$(ssh_as - "demo@$other")
+    for other in sdf.org tty.sdf.org test.rebex.net; do
+        root_other=$(ssh_as - "demo@$other")
+        answered "$root_other" && break
+    done
     if answered "$root_gh"; then
         ok "root reaches GitHub over SSH (the precondition)"
     else

@@ -649,9 +649,9 @@ def stage_desktop(st: Stage, machine: Path, outdir: Path, key: Path, gl: bool,
 
 # How long each suite took on one machine (seconds, measured), so the groups
 # come out even. A suite not listed counts as a minute.
-SUITE_SECONDS = {"10-core": 15, "20-enforcement": 30, "30-apps": 55, "40-guest": 30,
-                 "50-inspect": 30, "60-persistence": 110, "70-categories": 25,
-                 "80-hardening": 50, "90-developer": 200}
+SUITE_SECONDS = {"10-core": 12, "20-enforcement": 32, "30-apps": 61, "40-guest": 9,
+                 "50-inspect": 16, "60-persistence": 77, "70-categories": 22,
+                 "80-hardening": 51, "90-developer": 93}
 
 # Waits that only make a failing check slower, cut short in the fast run.
 # --full leaves them as they are. Each one is listed in the report.

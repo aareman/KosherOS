@@ -203,22 +203,33 @@ section "[F6] The LAN in filtered modes"
 # Measured, not grepped: the rules that refuse the LAN are not one line
 # naming @lan4 (they are the mode chains' own refusal, after the local
 # services are let through), so a grep for one failed while the LAN was in
-# fact closed. Find something on the LAN that root reaches, then try it as
-# the supervised accounts.
+# fact closed. Find a web service on the LAN that root reaches, then ask
+# it the same thing as the supervised accounts. Judged by the answer, not
+# by a connection: a port the proxy takes in connects to the proxy, not to
+# the LAN.
 gw=$(ip -4 route show default | awk '{print $3; exit}')
-lan_port=""
-for p in 22 80 443 5078 5077; do
-    if [ -n "$gw" ] && timeout 4 bash -c "echo > /dev/tcp/$gw/$p" 2>/dev/null; then
-        lan_port=$p
+lan_url=""
+lan_code=""
+for p in 80 8080 5078 5077; do
+    [ -n "$gw" ] || break
+    code=$(curl -s -m 4 -o /dev/null -w '%{http_code}' "http://$gw:$p/" 2>/dev/null)
+    if [ -n "$code" ] && [ "$code" != 000 ]; then
+        lan_url="http://$gw:$p/"
+        lan_code=$code
         break
     fi
 done
-lan_open_as() { runuser -u "$1" -- timeout 6 bash -c "echo > /dev/tcp/$gw/$lan_port" 2>/dev/null; }
-if [ -z "$lan_port" ]; then
-    skip "[F6] supervised accounts are limited to local services on the LAN: nothing on the LAN answers root to try"
+lan_reached_by() {
+    local out code
+    out=$(runuser -u "$1" -- curl -s -m 8 -w '\n__CODE__%{http_code}' "$lan_url" 2>/dev/null)
+    code=${out##*__CODE__}
+    [ "$code" = "$lan_code" ] && ! printf '%s' "$out" | grep -qi "KosherOS blocked"
+}
+if [ -z "$lan_url" ]; then
+    skip "[F6] supervised accounts are limited to local services on the LAN: no web service on the LAN answers root"
 else
-    check "[F6] supervised accounts are limited to local services on the LAN ($gw:$lan_port, whitelist)" 1 lan_open_as wlkid
-    check "[F6] supervised accounts are limited to local services on the LAN ($gw:$lan_port, dnsfilter)" 1 lan_open_as dnskid
+    check "[F6] a whitelist account cannot reach a web service on the LAN" 1 lan_reached_by wlkid
+    check "[F6] a dnsfilter account cannot reach a web service on the LAN" 1 lan_reached_by dnskid
 fi
 
 # -- F7: the boot path ----------------------------------------------------------------

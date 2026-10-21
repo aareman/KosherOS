@@ -79,7 +79,12 @@ has_gh() { test -x "/home/$1/.local/state/nix/profiles/profile/bin/gh"; }
 out=$(python3 - <<'PY' 2>&1
 import pwd
 from kosherd.client import DaemonClient
-DaemonClient().install_app_for(pwd.getpwnam("wlkid").pw_uid, "nixpkgs#gh")
+# An install for an account holds to its own switch (#124): it has to be
+# allowed to have apps at all.
+client = DaemonClient()
+uid = pwd.getpwnam("wlkid").pw_uid
+client.set_user_can_install(uid, True)
+client.install_app_for(uid, "nixpkgs#gh")
 print("QUEUED")
 PY
 )

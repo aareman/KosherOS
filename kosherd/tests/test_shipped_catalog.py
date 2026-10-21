@@ -52,17 +52,17 @@ def test_the_ai_tools_and_editors_come_from_nixpkgs():
             assert appkinds.kind_of(app) == "develop", app["ref"]
 
 
-def test_the_terminals_run_on_the_host_and_sit_with_console():
+def test_the_terminals_run_on_the_host_and_sit_with_ptyxis():
     # A terminal in a Flatpak sandbox cannot see the host's PATH, the Nix
     # profile or podman, which is the whole point of a developer's
     # terminal; these come from nixpkgs, or from the developer's own build
     # where the Nix one cannot find the graphics drivers (kitty), and
-    # shelve with Console.
+    # shelve with Ptyxis.
     terminals = {a["ref"]: a for a in APPS if "TerminalEmulator" in a.get("categories", [])}
     for ref in ("upstream#kitty", "nixpkgs#ghostty", "nixpkgs#foot", "nixpkgs#alacritty",
                 "nixpkgs#cool-retro-term"):
         assert ref in terminals, ref
-        assert appkinds.kind_of(terminals[ref]) == appkinds.kind_of(terminals["org.gnome.Console"])
+        assert appkinds.kind_of(terminals[ref]) == appkinds.kind_of(terminals["app.devsuite.Ptyxis"])
 
 
 def test_the_languages_from_the_issue_are_there_and_not_baked_into_the_image():
@@ -126,3 +126,49 @@ def test_fonts_have_their_own_shelf_and_no_app_launchers():
             "nixpkgs#liberation_ttf", "nixpkgs#noto-fonts-color-emoji"} <= refs
     assert all("exec" not in font for font in fonts)
     assert len(refs) == len(fonts)
+
+
+# -- the approved ids are on Flathub (#184) -----------------------------------
+#
+# Flathub renames apps (org.gnome.Endeavour became org.gnome.Todo,
+# org.gnome.Clocks became org.gnome.clocks), retire them (org.gnome.Dictionary
+# is end-of-life and gone from the listing) and some never get there (GNOME
+# Console). An approved id Flathub does not have is an app a family picks
+# and cannot install, and nothing else notices until somebody tries. So ask
+# Flathub, when it can be asked: offline, or with OFFLINE=1, this skips;
+# online, a 404 fails.
+
+FLATHUB_APP = "https://flathub.org/api/v2/appstream/{}"
+
+
+def _flathub_status(ref: str) -> int | None:
+    """Flathub's HTTP status for this app id, None when it cannot be reached."""
+    import urllib.error
+    import urllib.request
+
+    request = urllib.request.Request(FLATHUB_APP.format(ref), method="HEAD",
+                                     headers={"User-Agent": "KosherOS catalog test"})
+    try:
+        with urllib.request.urlopen(request, timeout=10) as answer:
+            return answer.status
+    except urllib.error.HTTPError as error:
+        return error.code
+    except (urllib.error.URLError, OSError):
+        return None
+
+
+def test_every_approved_flatpak_is_on_flathub():
+    import os
+    from concurrent.futures import ThreadPoolExecutor
+
+    if os.environ.get("OFFLINE"):
+        pytest.skip("OFFLINE is set")
+    # Flathub itself has to answer first, or a 404 cannot be told from a
+    # network that is down or behind a portal.
+    if _flathub_status("org.mozilla.firefox") != 200:
+        pytest.skip("Flathub cannot be reached from here")
+    refs = [a["ref"] for a in APPS if "#" not in a["ref"]]
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        status = dict(zip(refs, pool.map(_flathub_status, refs)))
+    missing = sorted(ref for ref, code in status.items() if code == 404)
+    assert not missing, f"not on Flathub: {missing}"

@@ -85,10 +85,35 @@ else
 fi
 
 section "A bad file is refused and the last good one stays"
+# keyd check says "WARNING: <path>:4: invalid key or action" for this line;
+# kosherd takes the two header lines off and names the person's own line.
+watcher_pid=$(systemctl --machine="$u@.host" --user show kosher-keyboard.service -p MainPID --value)
+since=$(date '+%Y-%m-%d %H:%M:%S')
 printf '[main]\nx = definitely_not_a_key\n' | save default.conf
-sleep 5
-check_contains "kosher-keyboard names the file and line" "default.conf line" \
-    journalctl -b --no-pager _SYSTEMD_USER_UNIT=kosher-keyboard.service -n 20
+kosherd_log() { journalctl -b --no-pager -u kosherd --since "$since" -o cat; }
+watcher_log() {
+    journalctl -b --no-pager --since "$since" -o cat _SYSTEMD_USER_UNIT=kosher-keyboard.service
+}
+kosherd_refused() { kosherd_log | grep -q "SetMyKeyboard.*refused"; }
+wait_until 20 kosherd_refused || true
+if kosherd_log | grep -q "refused: default.conf line 2: invalid key or action"; then
+    ok "kosherd refuses it, naming the file and line"
+else
+    bad "kosherd did not refuse it by file and line: $(kosherd_log | grep -i keyboard | tail -3 | tr '\n' '|')"
+fi
+sleep 2
+if watcher_log | grep -q "not applied: default.conf line 2"; then
+    ok "kosher-keyboard reports it, naming the file and line"
+else
+    bad "kosher-keyboard did not report it: $(watcher_log | tail -4 | tr '\n' '|' | head -c 400)"
+fi
+restarts=$(systemctl --machine="$u@.host" --user show kosher-keyboard.service -p NRestarts --value)
+now_pid=$(systemctl --machine="$u@.host" --user show kosher-keyboard.service -p MainPID --value)
+if [ "$restarts" = 0 ] && [ "$now_pid" = "$watcher_pid" ]; then
+    ok "and keeps running (pid $watcher_pid, no restart)"
+else
+    bad "kosher-keyboard restarted after the refusal (restarts=$restarts, pid $watcher_pid -> $now_pid)"
+fi
 check_contains "the previous file is still in force" "x = y" person_file
 out=$(keys 45)
 if [ "$out" = 21 ]; then

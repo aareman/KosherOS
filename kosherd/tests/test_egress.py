@@ -95,7 +95,9 @@ def test_filtered_mode_is_default_deny():
 
 def test_dnsfilter_mode_allows_the_web_and_mail_and_refuses_the_rest():
     rules = _chain(_render(_policy(mode="dnsfilter")), "mode_dnsfilter")
-    assert "tcp dport { 80, 443, 465, 587, 993 } accept" in rules
+    # Only to an address the account's resolver handed out (#189).
+    assert "ip daddr @dns4 tcp dport { 80, 443, 465, 587, 993 } accept" in rules
+    assert not any(r.startswith("tcp dport") and r.endswith("accept") for r in rules)
     assert rules[-1] == "reject"
 
 

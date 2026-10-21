@@ -25,3 +25,10 @@ def test_the_script_is_copied_into_run_before_start():
     assert "ExecStartPre=" in UNIT
     assert "install -m 0644" in UNIT.replace("\\\n    ", " ")
     assert "RuntimeDirectory=kosher-mitm" in UNIT
+
+
+def test_the_far_end_is_reached_only_for_an_allowed_request():
+    # #183: connecting upstream first (mitmproxy's eager default) meant a
+    # blocked site that was slow or unreachable failed the connection, and
+    # the browser sat on a blank page instead of getting the block page.
+    assert "--set connection_strategy=lazy" in UNIT

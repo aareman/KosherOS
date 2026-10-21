@@ -58,6 +58,10 @@ check "names resolve through the local resolver" 0 dig +time=5 +short example.co
 grep -q kosher-redirect-probe /etc/hosts \
     || echo "203.0.113.77 kosher-redirect-probe.internal" >> /etc/hosts
 systemctl reload kosher-dns >/dev/null 2>&1 || systemctl restart kosher-dns
+# dnskid asks its own resolver (the dnsfilter accounts'), which reads the
+# same hosts file.
+systemctl try-restart kosher-dns-dnsfilter >/dev/null 2>&1
+wait_for_dns
 sleep 1
 if [ "$(as dnskid dig +time=5 @8.8.8.8 +short kosher-redirect-probe.internal)" = "203.0.113.77" ]; then
     ok "queries aimed elsewhere are answered by the local resolver"

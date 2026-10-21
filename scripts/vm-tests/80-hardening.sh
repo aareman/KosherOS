@@ -185,6 +185,18 @@ check "the dns-filtered account reaches an ordinary site" 0 fetch_as dnskid http
 # because nothing answered).
 addr=$(resolve4 example.com)
 check "a bare-address probe target answers (root, http://$addr/)" 0 fetch "http://$addr/"
+# A dnsfilter account may connect to what its own resolver handed it, and
+# dnskid just looked up example.com, so that address says nothing about
+# browsing by address there. Root's lookups go to the family resolver and
+# open nothing for dnskid: take a site dnskid has not asked for.
+dns_addr=""
+for host in neverssl.com httpforever.com info.cern.ch; do
+    a=$(resolve4 "$host")
+    if [ -n "$a" ] && [ "$a" != "0.0.0.0" ] && fetch "http://$a/"; then
+        dns_addr=$a
+        break
+    fi
+done
 
 # -- F1: every port goes through the proxy ---------------------------------------
 
@@ -211,8 +223,12 @@ section "[F2] [F3] Browsing by address instead of name"
 # Judged like F3, by the block page or a refused connection: curl exits 0
 # on any answer, and the far end here (a CDN) answers a bare address with
 # its own 403, which is not KosherOS letting it through or stopping it.
-assert_that "[F2] dns-filtered account cannot browse by address" \
-    blocked_as dnskid "http://$addr/"
+if [ -z "$dns_addr" ]; then
+    bad "[F2] dns-filtered account cannot browse by address: no probe target answers root"
+else
+    assert_that "[F2] dns-filtered account cannot browse by address (http://$dns_addr/)" \
+        blocked_as dnskid "http://$dns_addr/"
+fi
 assert_that "[F3] filtered account is blocked on a bare address" \
     blocked_as wlkid "http://$addr/"
 

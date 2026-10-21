@@ -71,52 +71,54 @@ except OSError:
 PY
 }
 
-# Whether `login` gives an account a shell. Every getty signs in through
-# it, on the screen's text consoles and on a serial line, so this is what
-# Ctrl+Alt+F3 would do for that account. `login -f` skips the password but
-# not the account checks, which is where a refusal lives. Run on a pty of
-# its own, so nothing is typed into a real console.
+# Whether a text console would give an account a shell: PAM's account
+# stack for the `login` service, with PAM_TTY set to that console, which
+# is the decision agetty's login makes after the password. Every getty
+# signs in this way, on the screen's Ctrl+Alt+F2 to F6 and on a serial
+# line. Asked of libpam directly: `login -f` on a pty of its own was tried
+# first and was not reliable, because login hangs up the terminal it is
+# given and the probe's end of the pty sometimes went with it.
 console_admits() {
-    python3 - "$1" <<'PY'
-import os, pty, select, signal, sys, time
-pid, fd = pty.fork()
-if pid == 0:
-    os.execv("/usr/bin/login", ["login", "-f", sys.argv[1]])
-seen, deadline, next_try = b"", time.monotonic() + 20, 0.0
-try:
-    while time.monotonic() < deadline and b"KOSHER-IN-42" not in seen:
-        if time.monotonic() >= next_try:
-            os.write(fd, b"echo KOSHER-IN-$((6*7))\n")
-            next_try = time.monotonic() + 2
-        r, _, _ = select.select([fd], [], [], 0.5)
-        if r:
-            try:
-                chunk = os.read(fd, 4096)
-            except OSError:
-                break
-            if not chunk:
-                break
-            seen += chunk
-finally:
-    try:
-        os.kill(pid, signal.SIGHUP)
-        os.waitpid(pid, 0)
-    except OSError:
-        pass
-sys.exit(0 if b"KOSHER-IN-42" in seen else 1)
+    python3 - "$1" "$2" <<'PY'
+import ctypes, ctypes.util, sys
+libpam = ctypes.CDLL(ctypes.util.find_library("pam") or "libpam.so.0")
+class Msg(ctypes.Structure):
+    _fields_ = [("msg_style", ctypes.c_int), ("msg", ctypes.c_char_p)]
+class Resp(ctypes.Structure):
+    _fields_ = [("resp", ctypes.c_char_p), ("resp_retcode", ctypes.c_int)]
+CONV = ctypes.CFUNCTYPE(ctypes.c_int, ctypes.c_int, ctypes.POINTER(ctypes.POINTER(Msg)),
+                        ctypes.POINTER(ctypes.POINTER(Resp)), ctypes.c_void_p)
+class Conv(ctypes.Structure):
+    _fields_ = [("conv", CONV), ("appdata_ptr", ctypes.c_void_p)]
+user, tty = sys.argv[1], sys.argv[2]
+conv = Conv(CONV(lambda n, m, r, d: 19), None)  # PAM_CONV_ERR: the account stack asks nothing
+handle = ctypes.c_void_p()
+libpam.pam_start.argtypes = [ctypes.c_char_p, ctypes.c_char_p, ctypes.POINTER(Conv),
+                             ctypes.POINTER(ctypes.c_void_p)]
+if libpam.pam_start(b"login", user.encode(), ctypes.byref(conv), ctypes.byref(handle)):
+    sys.exit(2)
+libpam.pam_set_item.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_char_p]
+libpam.pam_set_item(handle, 3, tty.encode())  # PAM_TTY
+libpam.pam_acct_mgmt.argtypes = [ctypes.c_void_p, ctypes.c_int]
+rc = libpam.pam_acct_mgmt(handle, 0)
+libpam.pam_end.argtypes = [ctypes.c_void_p, ctypes.c_int]
+libpam.pam_end(handle, rc)
+sys.exit(0 if rc == 0 else 1)
 PY
 }
 
-# Text consoles are for administrators: a supervised account is refused,
-# and an administrator (root, where the machine has none yet) still gets
-# in, which is also what shows the probe can tell the two apart. Closed
-# virtual terminals would pass as well, but a serial line would still be
-# open to everyone, so the login itself is what is measured.
+# Text consoles are for administrators: a supervised account is refused
+# on a virtual terminal and on a serial line, and an administrator (root,
+# where the machine has none yet) still gets in, which is also what shows
+# the probe can tell the two apart. Closed virtual terminals would pass as
+# well, but a serial line would still be open to everyone, so the login
+# decision itself is what is measured.
 consoles_closed() {
     local admin
     admin=$(getent group kosher-admin | cut -d: -f4 | cut -d, -f1)
-    console_admits "${admin:-root}" || { echo "  (the console did not admit ${admin:-root} either)"; return 1; }
-    ! console_admits wlkid
+    console_admits "${admin:-root}" /dev/tty2 \
+        || { echo "  (the console did not admit ${admin:-root} either)"; return 1; }
+    ! console_admits wlkid /dev/tty2 && ! console_admits wlkid /dev/ttyS0
 }
 
 firefox_doh_off() {

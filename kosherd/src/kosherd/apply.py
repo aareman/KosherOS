@@ -26,11 +26,14 @@ NFT_RULESET_PATH = Path("/etc/kosher/nft/kosher.nft")
 DNSMASQ_DROPIN_PATH = Path(dns.WHITELIST_CONF)
 SAFESEARCH_PATH = Path(dns.SAFESEARCH_CONF)
 CATEGORY_BLOCK_PATH = Path(dns.CATEGORY_BLOCK_CONF)
+LEGACY_CATEGORY_BLOCK_PATH = Path(dns.LEGACY_CATEGORY_BLOCK_CONF)
 ADBLOCK_PATH = Path(dns.ADBLOCK_CONF)
 ADBLOCK_OPEN_PATH = Path(dns.ADBLOCK_OPEN_CONF)
 DNS_SERVICE = "kosher-dns.service"
 # Only runs while somebody is unfiltered (see nft.OPEN_DNS_PORT).
 OPEN_DNS_SERVICE = "kosher-dns-open.service"
+# Only runs while somebody is on dnsfilter (see nft.DNSFILTER_DNS_PORT).
+DNSFILTER_DNS_SERVICE = "kosher-dns-dnsfilter.service"
 MITM_SERVICE = "kosher-mitm.service"
 # The proxy runs unprivileged and cannot traverse /var/lib/kosher
 # (root-only: it holds the policy), so it gets its own state dir.
@@ -243,6 +246,7 @@ def apply_policy(policy: Policy) -> None:
     _write_atomic(SAFESEARCH_PATH, dns.render_safesearch(policy))
     bundle = categories_mod.load_any()
     _write_atomic(CATEGORY_BLOCK_PATH, dns.render_category_blocks(policy, bundle))
+    LEGACY_CATEGORY_BLOCK_PATH.unlink(missing_ok=True)
     # Ads and trackers, for every account: the same drop-in into both
     # resolvers, so the unfiltered account's plain resolver blocks them too.
     adblock = dns.render_adblock(policy, bundle)
@@ -257,6 +261,16 @@ def apply_policy(policy: Policy) -> None:
         _restart(OPEN_DNS_SERVICE)
     else:
         subprocess.run(["systemctl", "stop", OPEN_DNS_SERVICE],
+                       capture_output=True, text=True)
+    # The dnsfilter accounts' resolver, likewise only while one exists.
+    # Restarted on every change like the family one: the nft load above
+    # emptied the dns4/dns6 sets, and only a fresh cache refills them.
+    if any(u.mode == "dnsfilter" for u in policy.effective_users()):
+        res = _restart(DNSFILTER_DNS_SERVICE)
+        if res.returncode != 0:
+            log.error("failed to restart %s: %s", DNSFILTER_DNS_SERVICE, res.stderr)
+    else:
+        subprocess.run(["systemctl", "stop", DNSFILTER_DNS_SERVICE],
                        capture_output=True, text=True)
     # Full restart, not reload: dnsmasq's SIGHUP re-reads /etc/hosts and clears
     # the cache but does NOT re-read config files, so new nftset= directives

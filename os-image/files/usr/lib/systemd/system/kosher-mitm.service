@@ -29,8 +29,13 @@ EnvironmentFile=-/var/lib/kosher-mitm/listen.env
 # /run always has a real timestamp.
 ExecStartPre=/usr/bin/install -m 0644 \
     /usr/share/kosher/mitm/kosher_filter.py /run/kosher-mitm/kosher_filter.py
+# connection_strategy=lazy: the far end is reached only for a request the
+# filter lets through. With the default (eager) the proxy connected first,
+# so a blocked site that was slow or unreachable failed the connection and
+# the browser hung on a blank page instead of getting the block page (#183).
 ExecStart=/usr/bin/env mitmdump \
     $MITM_MODES \
+    --set connection_strategy=lazy \
     --set confdir=/var/lib/kosher-mitm \
     --set block_global=false \
     --set termlog_verbosity=warn \

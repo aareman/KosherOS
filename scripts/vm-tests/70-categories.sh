@@ -23,21 +23,27 @@ else
   bad "no categories"
 fi
 
+# The category blocks live in the dnsfilter accounts' own resolver, which
+# the firewall sends catkid to; root and filtered accounts use the family
+# resolver, which has none (#183). So the lookups are made as catkid.
+cats=/etc/kosher/dnsmasq-dnsfilter.d/categories.conf
+kid_dig() { runuser -u catkid -- dig +short +time=3 "$1" | tail -1; }
+
 echo "== blocking a category for a dnsfilter user (DNS path)"
 kosherctl categories "$uid" block social --guardian-password "" >/dev/null
 sleep 3
-if grep -q "address=/facebook.com/0.0.0.0" /etc/kosher/dnsmasq.d/categories.conf; then
+if grep -q "address=/facebook.com/0.0.0.0" "$cats"; then
   ok "the blocklist reached dnsmasq"
 else
   bad "categories.conf missing the domain"
 fi
-ip=$(dig +short facebook.com | tail -1)
+ip=$(kid_dig facebook.com)
 if [ "$ip" = "0.0.0.0" ]; then
   ok "a categorised domain resolves to 0.0.0.0"
 else
   bad "resolved to '$ip'"
 fi
-good=$(dig +short chinuch.org | tail -1)
+good=$(kid_dig chinuch.org)
 if [[ "$good" =~ ^[0-9]+\. ]] && [ "$good" != "0.0.0.0" ]; then
   ok "an uncategorised domain still resolves ($good)"
 else
@@ -47,7 +53,7 @@ fi
 echo "== unblocking restores it"
 kosherctl categories "$uid" clear --guardian-password "" >/dev/null
 sleep 3
-ip=$(dig +short facebook.com | tail -1)
+ip=$(kid_dig facebook.com)
 if [[ "$ip" =~ ^[0-9]+\. ]] && [ "$ip" != "0.0.0.0" ]; then
   ok "unblocking restores resolution ($ip)"
 else
@@ -58,10 +64,15 @@ echo "== filtered users are left to the proxy, not DNS"
 kosherctl set-mode "$uid" filtered --guardian-password "" >/dev/null
 kosherctl categories "$uid" block social --guardian-password "" >/dev/null
 sleep 3
-if grep -q "address=" /etc/kosher/dnsmasq.d/categories.conf; then
-  bad "DNS is over-blocking for a filtered user"
+# Asked as the filtered account, so whatever another account on the
+# machine blocks by DNS counts too: the proxy must get the real address,
+# or it cannot show its block page.
+ip=$(kid_dig facebook.com)
+if grep -qs "address=" /etc/kosher/dnsmasq.d/categories.conf \
+    || ! [[ "$ip" =~ ^[0-9]+\. ]] || [ "$ip" = "0.0.0.0" ]; then
+  bad "DNS is over-blocking for a filtered user (facebook.com -> '$ip')"
 else
-  ok "no DNS blocks for a filtered user"
+  ok "no DNS blocks for a filtered user ($ip)"
 fi
 if python3 -c "
 import json

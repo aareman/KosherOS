@@ -45,6 +45,11 @@ wait_for_dns() {
         # without a fallback this returned at once and every check raced
         # the restarting resolver.
         if command -v dig >/dev/null 2>&1; then
+            # The dnsfilter accounts' resolver restarts with it, when it runs.
+            if systemctl is-active --quiet kosher-dns-dnsfilter 2>/dev/null; then
+                dig +time=2 +tries=1 +short -p 5356 @127.0.0.1 example.com >/dev/null 2>&1 \
+                    || { sleep 1; continue; }
+            fi
             dig +time=2 +tries=1 +short example.com >/dev/null 2>&1 && return 0
         else
             getent hosts example.com >/dev/null 2>&1 && return 0

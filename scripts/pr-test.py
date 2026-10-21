@@ -13,7 +13,8 @@ and the report says why. The stages:
 
   build    `just build` in the target's tree
   base     once per master revision: master's image installed on a fresh
-           disk and set up by the boot test, kept in build/pr-test/cache
+           disk and set up by the boot test, kept in ~/.cache/kosher-pr-test
+           (KOSHER_PR_TEST_CACHE), shared by every checkout of the repo
   switch   that machine `bootc switch`ed to the change's image from a
            local registry, the way an update reaches a family
   disk, boot
@@ -40,6 +41,7 @@ checked beforehand (scripts/check-no-sudo.py).
 from __future__ import annotations
 
 import argparse
+import fcntl
 import json
 import os
 import re
@@ -733,7 +735,14 @@ def stage_suites(st: Stage, machine: Path, workdir: Path, key: Path, tree: Path,
 
 # --- the set-up machine: a cached base, switched to the change's image ------------
 
-CACHE = REPO / "build" / "pr-test" / "cache"
+# One cache for every checkout and worktree on the host, not one per tree:
+# a base is about 11 GB, and five worktrees each making their own for the
+# same master filled the disk. A run holds CACHE_LOCK for as long as it
+# lives, so runs that share the cache, the registry port and the host's
+# memory take turns instead of colliding.
+CACHE = Path(os.environ.get("KOSHER_PR_TEST_CACHE")
+             or Path(os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache") / "kosher-pr-test")
+CACHE_LOCK = CACHE / "lock"
 REGISTRY = "kosher-pr-test-registry"
 REGISTRY_PORT = 5078
 BASE_MAX_AGE_DAYS = 7
@@ -1103,6 +1112,12 @@ def main() -> int:
                 shutil.rmtree(child) if child.is_dir() else child.unlink()
     outdir.mkdir(parents=True, exist_ok=True)
     CACHE.mkdir(parents=True, exist_ok=True)
+    lock_file = CACHE_LOCK.open("a")
+    try:
+        fcntl.flock(lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        print(f"Another pr-test is using {CACHE}; waiting for it to finish.", flush=True)
+        fcntl.flock(lock_file, fcntl.LOCK_EX)
     env = sudo_trap(outdir)
     image = args.image or f"localhost/kosher-linux:pr-test-{run_id.lower()}"
     disk = outdir / "disk" / "disk.qcow2"

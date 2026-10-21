@@ -13,7 +13,7 @@ new test belongs.
 | **Live checks** | the built image does what the rendered files say: the firewall stops people, the resolver answers as claimed, traffic is diverted, the services run | podman | `just check-all` |
 | **Integration** | the whole stack on a booted system: services, real traffic, polkit, malcontent, TLS interception, the guest session | a dev VM | `just test-vm` |
 | **Boot** | power-on reaches the setup wizard | a disk image, KVM | `just test-boot` |
-| **Pull request** | all of the above on the branch's own image, plus a signed-in desktop | KVM | `just pr-test 168` |
+| **Pull request** | what a change touches, on a machine running its image, plus a signed-in desktop | KVM | `just pr-test 168` |
 
 CI runs the unit layer with coverage, byte-compiles every app and
 shellchecks every script on every pull request, and builds the image on
@@ -181,34 +181,76 @@ ships is too old for bcvk.
 ## A whole pull request in a VM
 
 `just pr-test` takes a pull request number, a branch, or `HEAD` for the
-checkout as it is, and runs everything a machine can check with nobody at
-the keyboard:
+checkout as it is, and runs what a machine can check with nobody at the
+keyboard. It builds the target's image in a temporary worktree, so the
+checkout you are working in is untouched, and then decides from the
+paths the change touches what else to run. The top of the report says
+what it chose and why.
 
-1. **build**: `just build` in a temporary worktree of the target, tagged
-   for this run only, so the checkout you are working in is untouched.
-2. **disk**: a qcow2 from that image, made as in `just vm-rootless`.
-3. **boot**: the boot test, which answers the setup wizard and checks the
-   administrator's filtering. The machine it set up is kept for the next
-   two stages. When the wizard does not finish, the boot stage fails and
-   the machine is set up over ssh instead, with the non-interactive
-   `kosherctl setup --username`, so a broken wizard does not also hide
-   what the later stages would find.
-4. **desktop**: the same machine booted again with a screen. A filtered
-   test account signs in at the GDM login screen, with the keys typed
-   through QEMU's control socket. The session must have a seat, be active
-   and local, and run Wayland, and the account's user services must all
-   start. polkit is asked about the session's own processes: the Store is
-   allowed, and a filter change needs an administrator. Then a real filter
-   change is made from the session. Each password prompt it brings up is
-   found in a screenshot and answered, the change must go through, and it
-   should take one prompt. Look, My Filter and the Store must open and stay
-   open without asking for a password; the admin app on this account must
-   ask for one. Last, the filter is checked the way a browser meets it.
-   Sixteen requests at once to a gambling site must all fail to load it
-   and all get the block page, an ordinary site must load through the
-   proxy, and when Firefox opens the gambling site on the desktop the
-   filter must record the visit.
-5. **suites**: the target's own `scripts/vm-tests`, as root over ssh.
+- Documentation, unit tests and other workflows run nothing.
+- A desktop app (Look, the admin app, My Filter, Welcome) runs the
+  signed-in session. The Store runs it too, with the app suites.
+- The filter (`nft`, `dns`, the proxy, the lists, the search service)
+  runs the filtering suites and the block-page checks on the desktop.
+- A suite runs itself.
+- The bootloader, the kernel arguments, first-boot setup, the disk and
+  installer config, the boot splash, and the lines of the Containerfile
+  that deal with booting run a fresh install as well.
+- Anything else in the daemon or the image, the harness itself, or a path
+  no rule knows runs every check.
+
+`--all` runs every check whatever the change touches. `--full` installs
+the change's own image on a fresh disk and runs every check, which is the
+most a run can do.
+
+### The machine
+
+A fresh install takes about fifteen minutes: ten to make the disk and
+three for the first-boot test. So it is done once per master revision.
+The disk is made from master's image as in `just vm-rootless`, and the
+boot test answers the setup wizard. The machine it sets up is kept under
+`build/pr-test/cache/` and reused for a week, or until `--fresh-base`.
+
+For a change, that machine is switched to the change's image with
+`bootc switch`, from a registry the harness runs on the host (QEMU's
+10.0.2.2 inside the machine), and rebooted into it. This is the way a
+family's machine takes an update, from a machine that has been set up,
+so only the layers the change made are pulled. The harness takes its
+registry back out of the machine's trust before anything is tested.
+
+When the change can alter power-on to setup, that is not enough. Those
+changes, and `--full`, get a fresh disk from their own image and the
+boot test on it. When the wizard does not finish there, the boot stage
+fails and the machine is set up over ssh instead, with the
+non-interactive `kosherctl setup --username`, so a broken wizard does not
+also hide what the rest would find.
+
+### The checks
+
+Every machine after that is an overlay of the set-up one, and they run
+at the same time. One is the desktop. The suites are split over the
+others by how long each takes, longest first, so they finish together.
+`--vms` (or `KOSHER_PR_TEST_VMS`) says how many suite machines to use,
+three by default, and fewer start when the host is short of memory.
+
+- **desktop**: the machine booted with a screen. A filtered test account
+  signs in at the GDM login screen, with the keys typed through QEMU's
+  control socket. The session must have a seat, be active and local, and
+  run Wayland, and the account's user services must all start. polkit is
+  asked about the session's own processes: the Store is allowed, and a
+  filter change needs an administrator. Then a real filter change is
+  made from the session. Each password prompt it brings up is found in a
+  screenshot and answered, the change must go through, and it should
+  take one prompt. Look, My Filter and the Store must open and stay open
+  without asking for a password; the admin app on this account must ask
+  for one. Last, the filter is checked the way a browser meets it.
+  Sixteen requests at once to a gambling site must all fail to load it
+  and all get the block page, an ordinary site must load through the
+  proxy, and when Firefox opens the gambling site on the desktop the
+  filter must record the visit.
+- **suites**: the target's own `scripts/vm-tests`, as root over ssh, each
+  suite timed. A fast run cuts Nix's download retries short; `--full`
+  leaves them alone.
 
 The test account at the login screen is what the in-VM suites cannot be.
 Their accounts have no seat, so polkit never treats them as the person at
@@ -216,12 +258,21 @@ the computer, and they reach kosherd through root paths instead. The
 desktop stage is where the polkit rules, the password prompt and the
 desktop apps are checked as a family meets them.
 
-Everything a run produces is in `build/pr-test/<id>/`: `summary.json` with
-every check, `report.md` for people, a log per stage, both serial consoles
-and the screenshots. The exit status is non-zero when anything failed.
-The disk, the machine, the worktree and the image tag are removed at the
-end; `--keep` leaves them for a look, and `--only boot,desktop` runs some
-of the stages on what a kept run left.
+### Known failures
+
+`scripts/vm-tests/known-failures.txt` lists the checks that fail on
+master today, each with the issue that will fix it. A run passes when
+every failure is on that list and fails on any other. A listed check that
+passes is reported as a warning, and the change that fixed it removes its
+line. The report lists the new failures, the known ones and the fixed
+ones separately.
+
+### What a run leaves
+
+Everything a run produces is in `build/pr-test/<id>/`: `summary.json`
+with every check and the selection, `report.md` for people, a log per
+stage, the serial consoles and the screenshots. The run's machines, its
+worktree and its image tag are removed at the end; `--keep` leaves them.
 
 The harness never runs sudo. A `sudo` that fails and records who called
 it is first on the PATH of everything it starts, and before it starts
@@ -233,7 +284,8 @@ The desktop stage draws on a plain virtual screen by default.
 instead, for checks of the compositor, on a machine that has a GPU.
 
 In CI, `.github/workflows/vm-test.yml` runs `just pr-test HEAD` on pull
-requests from this repository that change anything the machine runs. It
-fails at once on a runner without KVM, never uses the GPU mode, and
-uploads the run's directory, without the disks and the key, as an
-artifact.
+requests from this repository that change anything the machine runs. A
+runner keeps no cache, so there it makes a disk from the change's own
+image every time and runs the checks the change selects. It fails at
+once on a runner without KVM, never uses the GPU mode, and uploads the
+run's directory, without the disks and the key, as an artifact.

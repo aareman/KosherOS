@@ -191,6 +191,11 @@ image_only "[F4] Firefox is told never to use DoH (config)" \
 image_only "[F4] Chromium is told never to use DoH (config)" \
     && check "[F4] Chromium is told never to use DoH (config)" 0 bash -c \
         'grep -rqs "DnsOverHttpsMode.*off" /etc/chromium/policies/managed /etc/opt/chrome/policies/managed'
+# The Chromium the Store installs is a Flatpak, which cannot see /etc. It
+# reads policies from an extension point under the system installation.
+image_only "[F4] the Chromium Flatpak reads that policy" \
+    && check "[F4] the Chromium Flatpak reads that policy" 0 grep -qs "DnsOverHttpsMode.*off" \
+        "/var/lib/flatpak/extension/org.chromium.Chromium.Extension.system-policies/$(uname -m)/1/policies/managed/kosheros.json"
 
 # -- F5 -------------------------------------------------------------------------------
 

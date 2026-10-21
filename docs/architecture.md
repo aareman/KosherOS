@@ -99,7 +99,10 @@ owning uid:
 
 An account with no policy falls through to `none`. A shared chain refuses
 DNS over TLS, QUIC and a set of DNS-over-HTTPS resolver addresses,
-including the unfiltered public resolvers. Rootless containers do not
+including the unfiltered public resolvers. The browsers are also told to
+leave DNS over HTTPS off: Firefox by its policy file, and Chromium, Chrome,
+Edge and Brave by a managed policy in the place each one's Flatpak reads.
+Rootless containers do not
 escape any of this: a user's network namespace reaches the host through an
 ordinary process owned by that user, so the uid rules still match. A
 captive-portal window, for hotel and airport Wi-Fi, is a set element with a

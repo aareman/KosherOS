@@ -126,6 +126,38 @@ def test_firefox_cannot_step_around_the_resolver_with_doh():
     assert pol["policies"]["DNSOverHTTPS"] == {"Enabled": False, "Locked": True}
 
 
+# F4 (#185): Chromium is a Flatpak from the Store, and nothing told it to
+# keep DNS-over-HTTPS off. These are the paths each Chromium-based browser
+# on Flathub reads: its own /etc path on the host (Chrome, Edge and Brave
+# link those into the sandbox at start), and for the Chromium Flatpaks an
+# extension point in the system installation that points at /etc/chromium.
+CHROMIUM_POLICIES = (
+    "etc/chromium/policies/managed/kosheros.json",
+    "etc/opt/chrome/policies/managed/kosheros.json",
+    "etc/opt/edge/policies/managed/kosheros.json",
+    "etc/brave/policies/managed/kosheros.json",
+)
+
+
+@pytest.mark.parametrize("path", CHROMIUM_POLICIES)
+def test_chromium_based_browsers_keep_doh_off(path):
+    assert json.loads((FILES / path).read_text())["DnsOverHttpsMode"] == "off"
+
+
+@pytest.mark.parametrize("app", [
+    "org.chromium.Chromium",
+    "io.github.ungoogled_software.ungoogled_chromium",
+])
+def test_chromium_flatpaks_are_pointed_at_the_policy(app):
+    lines = (FILES / "usr/lib/tmpfiles.d/kosher-browser-policy.conf").read_text().splitlines()
+    link = f"/var/lib/flatpak/extension/{app}.Extension.system-policies/x86_64/1"
+    entries = [line.split() for line in lines if line and not line.startswith("#")]
+    assert ["L+", link, "-", "-", "-", "-", "/etc/chromium"] in entries
+    # tmpfiles makes the parents too, in order, so the link has somewhere to go.
+    made = [e[1] for e in entries if e[0] == "d"]
+    assert f"/var/lib/flatpak/extension/{app}.Extension.system-policies/x86_64" in made
+
+
 # -- the list -----------------------------------------------------------------------
 
 spec = importlib.util.spec_from_file_location("fetch_categories", ROOT / "scripts/fetch-categories.py")

@@ -8,6 +8,11 @@ set -uo pipefail
 . "$(dirname "$0")/lib.sh"
 
 ensure_test_users
+# Developer tools are a per-account switch (#123): without it the daemon
+# refuses the account and its filter keeps it off the registries. The
+# whitelist account is the one this suite builds as, so it gets them.
+kctl developer-tools "$(id -u wlkid)" on >/dev/null
+wait_for_dns >/dev/null 2>&1 || true
 
 section "Nix is on the machine"
 if ! command -v nix >/dev/null 2>&1; then
@@ -74,15 +79,24 @@ has_gh() { test -x "/home/$1/.local/state/nix/profiles/profile/bin/gh"; }
 out=$(python3 - <<'PY' 2>&1
 import pwd
 from kosherd.client import DaemonClient
-DaemonClient().install_app_for(pwd.getpwnam("wlkid").pw_uid, "nixpkgs#gh")
+# An install for an account holds to its own switch (#124): it has to be
+# allowed to have apps at all.
+client = DaemonClient()
+uid = pwd.getpwnam("wlkid").pw_uid
+client.set_user_can_install(uid, True)
+client.install_app_for(uid, "nixpkgs#gh")
 print("QUEUED")
 PY
 )
+queued=0
 case "$out" in
-    *QUEUED*) ok "an administrator may install it for a filtered account" ;;
+    *QUEUED*) ok "an administrator may install it for a filtered account"; queued=1 ;;
     *) bad "the install was refused: $(printf '%s' "$out" | tail -2 | head -c 240)" ;;
 esac
+# Wait for the install only when one was queued: a refused install never
+# arrives, and waiting the full ten minutes for it only made the run slow.
 for _ in $(seq 1 120); do
+    [ "$queued" = 1 ] || break
     has_gh wlkid && break
     sleep 5
 done
@@ -104,6 +118,8 @@ section "Nix apps find the graphics drivers (#157)"
 # first boot with a network; wait for it rather than racing it.
 for _ in $(seq 1 120); do
     systemctl is-active --quiet kosher-nix-opengl.service && break
+    # A service that has already failed will not become active by waiting.
+    systemctl is-failed --quiet kosher-nix-opengl.service && break
     sleep 5
 done
 check "the driver service has run" 0 systemctl is-active --quiet kosher-nix-opengl.service

@@ -2,7 +2,7 @@
 
 Two groups. **Family** first — a row to add a person, then one row per
 account, the guest last — because the people are what an admin came to
-configure. Then **Administration**: the activity feed, what protects
+configure. Then **Administration**: the activity feed, usage, what protects
 everyone, what may be installed, what version runs.
 
 There is no overview page any more. The board of cards duplicated this
@@ -32,6 +32,7 @@ from .computer import health_problems  # noqa: E402
 # The rows that are always there, below the family.
 ADMIN = (
     ("activity", "Activity", "document-open-recent-symbolic"),
+    ("usage", "Usage", "network-transmit-receive-symbolic"),
     ("protection", "Protection", "security-high-symbolic"),
     ("apps", "Apps", "view-grid-symbolic"),
     ("updates", "Updates", "software-update-available-symbolic"),

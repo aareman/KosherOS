@@ -10,6 +10,7 @@ gi.require_version("Gio", "2.0")
 from gi.repository import Gio, GLib
 
 from . import BUS_NAME, OBJECT_PATH
+from .access import needs_admin_session
 
 
 # The ref the daemon reports the leftover-runtime cleanup under (apps.py
@@ -18,10 +19,18 @@ CLEANUP_REF = "kosheros.cleanup"
 
 
 class DaemonClient:
-    def __init__(self) -> None:
+    def __init__(self, *, unlock_first: bool = False) -> None:
+        """`unlock_first`: open the administrator session (Unlock) before
+        the first call that would otherwise ask for a password, so a run
+        of such calls is one prompt rather than one per polkit action.
+        kosherctl sets it; the admin app unlocks for itself on opening."""
         self._conn = Gio.bus_get_sync(Gio.BusType.SYSTEM, None)
+        self._unlock_first = unlock_first
 
     def _call(self, iface: str, method: str, signature: str | None = None, *args):
+        if self._unlock_first and needs_admin_session(method):
+            self._unlock_first = False
+            self.unlock()
         params = GLib.Variant(signature, args) if signature else None
         result = self._conn.call_sync(
             BUS_NAME, OBJECT_PATH, f"org.kosherlinux.Daemon1.{iface}", method,
@@ -140,6 +149,11 @@ class DaemonClient:
     def activity_summary(self) -> dict:
         """Today's counts, keyed by uid as a string (JSON keys)."""
         return json.loads(self._call("Profiles", "ActivitySummary")[0])
+
+    def usage(self) -> dict:
+        """Traffic, blocks and filter time by range, then by uid as a
+        string (usage.report)."""
+        return json.loads(self._call("Profiles", "Usage")[0])
 
     def set_media_level(self, uid: int, level: str,
                         guardian_password: str = "") -> None:
@@ -303,6 +317,11 @@ class DaemonClient:
     def list_installed_details(self) -> list[dict]:
         return json.loads(self._call("Apps", "ListInstalledDetails")[0])
 
+    def list_my_installed_details(self) -> list[dict]:
+        """What is installed as the caller sees it: every Flatpak and the
+        caller's own apps, without who installed them. No password."""
+        return json.loads(self._call("Apps", "ListMyInstalledDetails")[0])
+
     def set_user_apps(self, uid: int, refs: list[str]) -> None:
         self._call("Apps", "SetUserApps", "(ias)", uid, refs)
 
@@ -426,8 +445,8 @@ class DaemonClient:
         """Which image is booted, and what a rollback would return to."""
         return json.loads(self._call("System", "DeploymentStatus")[0])
 
-    def rollback(self) -> None:
-        self._call("System", "Rollback")
+    def rollback(self, guardian_password: str = "") -> None:
+        self._call("System", "Rollback", "(s)", guardian_password)
 
     def try_image(self, what: str, guardian_password: str = "") -> None:
         """Run a build that is on no channel — a pull request number, or a

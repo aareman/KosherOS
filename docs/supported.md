@@ -35,7 +35,7 @@ are reachable from every account, including whitelist‑only ones.
 | cargo, rustup | `CARGO_HTTP_CAINFO`, `SSL_CERT_FILE` | crates.io, static.rust-lang.org |
 | deno | `DENO_TLS_CA_STORE=system` | deno.land, jsr.io |
 | go | system store (no change needed) | proxy.golang.org, sum.golang.org, go.dev |
-| git | system store; `GIT_SSL_CAINFO` for builds with a bundled OpenSSL | github.com and its release hosts |
+| git | system store; `GIT_SSL_CAINFO` for builds with a bundled OpenSSL | github.com and its release hosts; with Developer tools on, SSH to GitHub, GitLab, Codeberg and Bitbucket |
 | curl, wget | system store (no change needed) | — |
 | nix, nix-shell, nix build | `ssl-cert-file` in `/etc/nix/nix.conf`; `NIX_SSL_CERT_FILE` for what a Nix shell brings | cache.nixos.org, channels.nixos.org, GitHub (nixpkgs and flakes) |
 | devenv | ships as a launcher; the first run adds it to the account's own Nix profile from nixpkgs | devenv.cachix.org, and nix's |

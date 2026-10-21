@@ -131,6 +131,7 @@ ACTIONS = {
     "AllowUrl": ACTION_MANAGE_FILTER,
     "ListActivity": ACTION_READ_CONFIG,
     "ActivitySummary": ACTION_READ_CONFIG,
+    "Usage": ACTION_READ_CONFIG,
     "SetMediaLevel": ACTION_MANAGE_FILTER,
     "SetLanguageFilter": ACTION_MANAGE_FILTER,
     "SetYouTube": ACTION_MANAGE_FILTER,
@@ -165,6 +166,12 @@ ACTIONS = {
     # the store's, which is open to the account alone.
     "InstallAppFor": ACTION_INSTALL_APPS,
     "ListInstalledDetails": ACTION_READ_CONFIG,
+    # The same list as the Store shows it to the CALLER: every Flatpak
+    # (system-wide, which `flatpak list` already shows anyone) and the
+    # caller's own nixpkgs apps, with nothing about who installed what.
+    # ListInstalledDetails stays an admin read because it names the
+    # accounts and lists every account's own apps.
+    "ListMyInstalledDetails": ACTION_USE_STORE,
     # Updating an installed, approved app is for everyone the store is for:
     # it widens nothing, and the newer build is the safer one to be on.
     "ListAppUpdates": ACTION_USE_STORE,
@@ -195,11 +202,13 @@ ACTIONS = {
     # the family computer onto edge puts it on builds nobody has tried
     # yet, and that is a decision for whoever holds the second password.
     "SetChannel": ACTION_APPLY_UPDATES,
-    # Going back to the previously booted image. Not guardian-gated: the
-    # image is one this machine already ran, and greenboot must be able to
-    # do the same thing with no password when a new image fails to bring
-    # the filter up. Gating it would mainly risk a broken machine nobody
-    # present can repair. See impl_Rollback.
+    # Going back to the previously booted image. Guardian-gated: the image
+    # gone back to carries the filter it was built with, which can be older
+    # and weaker than the one running now, so going back is a filter change
+    # like any other (F11 on #33). The automatic return is not held up by
+    # this: greenboot never calls kosherd, the boot counter takes a machine
+    # whose filter did not come up back to the last good deployment by
+    # itself. See impl_Rollback.
     "Rollback": ACTION_APPLY_UPDATES,
     # Trying a build that is on no channel (a pull request's) while
     # keeping the one the machine came from, and going back to it. The
@@ -223,7 +232,7 @@ GUARDIAN_GATED = frozenset({
     "SetMediaLevel",
     "SetLanguageFilter", "SetYouTube",
     "SetGuestConfig", "DisableGuardian", "Enrol", "Unenrol",
-    "SetAdBlock", "SetTimeLimits", "SetChannel", "TryImage", "SetNetworkAccess",
+    "SetAdBlock", "SetTimeLimits", "SetChannel", "TryImage", "Rollback", "SetNetworkAccess",
     "SetDeveloperTools",
     "SetBootMenuPassword",
     "SetUserAppAccess", "SetUserBlockedAppKinds", "SetUserBlockedApps",
@@ -238,7 +247,7 @@ SETUP_READS = frozenset({"IsComplete", "AdminExists"})
 
 # Methods that need to know which uid called them (session management).
 UID_AWARE = frozenset({"Unlock", "Lock", "Status", "VerifyGuardian", "InstallApp",
-                       "ListStoreApps", "GetMyLayout", "SetMyLayout", "GetMySettings",
+                       "ListStoreApps", "ListMyInstalledDetails", "GetMyLayout", "SetMyLayout", "GetMySettings",
                        "GetMyCompositor", "SetMyCompositor",
                        # A nixpkgs app is in one account's profile: what is
                        # installed, and whose copy to update or remove,
@@ -289,6 +298,29 @@ PER_USER = frozenset({
 NO_ARGS_LOGGED = frozenset({"SetGuardianPassword", "DisableGuardian", "SetBootMenuPassword",
                             "Enrol", "EditList", "SetWhitelist",
                             "SetUrlRules"})
+
+# Actions every active local account has without a password
+# (49-kosher-admin.rules answers yes to these before it asks for one).
+FREE_ACTIONS = frozenset({ACTION_USE_STORE, ACTION_READ_OWN, ACTION_SET_OWN})
+
+
+def needs_admin_session(method: str) -> bool:
+    """Would `method` ask a non-administrator for an administrator's
+    password when no session is open?
+
+    polkit keeps an answered prompt per action, so a command that read a
+    setting and then changed one asked twice. A client about to make such
+    calls opens the session first with Unlock, which is the one prompt;
+    kosherd then skips polkit for that uid until the session ends. The gate
+    is the same either way: Unlock takes an administrator's password just
+    as the read and the change do.
+    """
+    if method not in ACTIONS or method in SETUP_METHODS:
+        return False
+    if method in ("Unlock", "Lock"):
+        return False
+    return ACTIONS[method] not in FREE_ACTIONS
+
 
 SETUP_CLOSED = "initial setup is already complete"
 UNKNOWN_METHOD = "unknown method"

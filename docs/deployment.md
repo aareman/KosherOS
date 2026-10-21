@@ -142,11 +142,10 @@ The daemon knows which image is booted and which one "go back" would return
 to. The admin app's Updates page has a "Go back to the previous version"
 control that names the version it would return to and is disabled with a
 reason when there is nothing to go back to. `kosherctl system rollback`
-does the same. Going back needs the update right but not the guardian
-password, because the image is one this machine already ran and the
-machine has to be able to do the same thing with no password at all. Both
-directions are written to the activity log; a rollback especially, since
-it can restore an older filter.
+does the same. Going back needs the update right and the guardian
+password. The older version brings the filter it was built with, which
+can be weaker than the one running now, so it is treated like any other
+filter change. Both directions are written to the activity log.
 
 **The machine puts itself back on its own.** greenboot runs a required
 health check on every boot: the daemon is up, the resolver answers on

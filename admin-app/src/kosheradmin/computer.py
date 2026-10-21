@@ -775,10 +775,12 @@ class UpdatesPage(_Page):
                 "This computer will start the previous version of KosherOS at "
                 "its next restart. Settings and files are kept. Do this if an "
                 "update broke something.", "Go back",
-                lambda: self.win.call(
-                    self.win.client.rollback, refresh=False,
+                # The older version brings its own filter with it, so going
+                # back takes the guardian password like a filter change.
+                lambda: self.win.with_guardian(lambda pw: self.win.call(
+                    lambda: self.win.client.rollback(pw), refresh=False,
                     done_msg=f"Going back to {version} at the next restart",
-                    on_done=self._load_deployment),
+                    on_done=self._load_deployment)),
                 destructive=False)
 
     def _check(self, _b) -> None:

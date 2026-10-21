@@ -45,6 +45,7 @@ try:
     from kosherd import search as search_mod
     from kosherd import siterules as siterules_mod
     from kosherd import suggest as suggest_mod
+    from kosherd import usage as usage_mod
     from kosherd import videocheck as videocheck_mod
     from kosherd import vision as vision_mod
     from kosherd.uidmap import UidLookup
@@ -67,6 +68,7 @@ except ImportError:  # pragma: no cover - only when interpreters differ
     from kosherd import search as search_mod
     from kosherd import siterules as siterules_mod
     from kosherd import suggest as suggest_mod
+    from kosherd import usage as usage_mod
     from kosherd import videocheck as videocheck_mod
     from kosherd import vision as vision_mod
     from kosherd.uidmap import UidLookup
@@ -858,6 +860,10 @@ class KosherFilter:
         # page's images within seconds of the page.
         self.page_levels: dict[str, str] = {}
         self.blocklist = search_mod.load_blocklist()
+        # Running totals for the admin app's Usage page, written out once a
+        # minute (usage.py). Numbers only; no address is ever kept.
+        self.usage = usage_mod.Tally("proxy")
+        self._flusher = None
 
     def _uid_of(self, flow) -> int | None:
         """Who made this connection: the LISTENER PORT it arrived on.
@@ -902,7 +908,96 @@ class KosherFilter:
         match = re.search(r"@[^@]*:(\d+)\b", spec)
         return int(match.group(1)) if match else None
 
+    # ---- usage: how much went through and how long the filter took --------
+
+    def running(self) -> None:
+        """Start writing the usage totals out once a minute."""
+        import asyncio
+
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return
+        self._flusher = loop.create_task(self._flush_usage())
+
+    async def _flush_usage(self) -> None:
+        import asyncio
+
+        while True:
+            await asyncio.sleep(usage_mod.FLUSH_SECONDS)
+            self.usage.flush()
+
+    def done(self) -> None:
+        self.usage.flush()
+
+    @staticmethod
+    def _timed(flow: http.HTTPFlow, started: float) -> None:
+        """Add the time since `started` to this request's time in the filter."""
+        flow.metadata["kosher_filter_s"] = \
+            flow.metadata.get("kosher_filter_s", 0.0) + time.perf_counter() - started
+
+    def _tally(self, flow: http.HTTPFlow) -> None:
+        """Count one finished request, once. Never lets counting become a
+        filtering problem."""
+        try:
+            metadata = flow.metadata
+            if metadata.get("kosher_tallied"):
+                return
+            metadata["kosher_tallied"] = True
+            uid = metadata.get("kosher_uid")
+            if uid is None:
+                return
+            response = flow.response
+            stream = getattr(response, "stream", False)
+            if response is None:
+                received = 0
+            elif callable(stream):
+                received = 0  # refused as it arrived; nothing reached the person
+            elif stream:
+                # Let through without being held, so never in memory to
+                # measure; the length the server declared is the best count.
+                received = _content_length(flow) or 0
+            else:
+                received = len(_body(response))
+            sent = len(_body(flow.request))
+            self.usage.add(uid, requests=1, bytes_in=received, bytes_out=sent)
+            self.usage.latency(uid, metadata.get("kosher_filter_s", 0.0))
+        except Exception:  # noqa: BLE001 - the numbers are a convenience
+            log.debug("could not count usage", exc_info=True)
+
+    def _count(self, flow: http.HTTPFlow, **counts: int) -> None:
+        try:
+            self.usage.add(flow.metadata.get("kosher_uid"), **counts)
+        except Exception:  # noqa: BLE001 - the numbers are a convenience
+            log.debug("could not count usage", exc_info=True)
+
     def request(self, flow: http.HTTPFlow) -> None:
+        started = time.perf_counter()
+        try:
+            self._request(flow)
+        finally:
+            self._timed(flow, started)
+
+    def responseheaders(self, flow: http.HTTPFlow) -> None:
+        started = time.perf_counter()
+        try:
+            self._responseheaders(flow)
+        finally:
+            self._timed(flow, started)
+
+    async def response(self, flow: http.HTTPFlow) -> None:
+        started = time.perf_counter()
+        try:
+            await self._response(flow)
+        finally:
+            self._timed(flow, started)
+            self._tally(flow)
+
+    def error(self, flow: http.HTTPFlow) -> None:
+        """A request that failed still went through the filter."""
+        self._tally(flow)
+
+    def _request(self, flow: http.HTTPFlow) -> None:
         # Everything reaching this proxy belongs to a filtered user: only
         # their traffic is redirected here.
         _force_safesearch(flow)
@@ -979,7 +1074,7 @@ class KosherFilter:
 
     # ---- what to hold and what to let through as it arrives ----------------
 
-    def responseheaders(self, flow: http.HTTPFlow) -> None:
+    def _responseheaders(self, flow: http.HTTPFlow) -> None:
         """Decide, from the headers alone, whether the body must be held.
 
         mitmproxy buffers every response body before `response` runs unless
@@ -1021,7 +1116,7 @@ class KosherFilter:
                 and not content_type.startswith("text/")):
             flow.response.stream = True
 
-    async def response(self, flow: http.HTTPFlow) -> None:
+    async def _response(self, flow: http.HTTPFlow) -> None:
         # Async so that a picture being judged, or a clip being sampled,
         # waits on its own: the synchronous hook held the proxy's one event
         # loop for up to the detection deadline per picture, and every other
@@ -1814,7 +1909,11 @@ class KosherFilter:
         self._note_picture(flow)
 
     def _note_picture(self, flow: http.HTTPFlow) -> None:
-        """Write down that pictures were hidden on the page this one is on."""
+        """Write down that pictures were hidden on the page this one is on.
+
+        Every picture counts on the Usage page; the activity log gets one
+        line per page."""
+        self._count(flow, pictures=1)
         try:
             page = self._page_of(flow)
             uid = flow.metadata.get("kosher_uid")
@@ -1988,6 +2087,10 @@ class KosherFilter:
         become a filtering problem."""
         try:
             metadata = getattr(flow, "metadata", None) or {}
+            if kind == activity_mod.BLOCK:
+                self._count(flow, blocked=1)
+            elif kind == activity_mod.VIDEO:
+                self._count(flow, videos=1)
             activity_mod.record("proxy", kind, metadata.get("kosher_uid"),
                                 **fields)
         except Exception:  # noqa: BLE001 - the log is a convenience
@@ -2031,6 +2134,14 @@ class KosherFilter:
                               message=message).encode(),
             {"Content-Type": "text/html; charset=utf-8",
              "Cache-Control": "no-store"})
+
+
+def _body(message) -> bytes:
+    """A request's or response's body as it went over the wire."""
+    body = getattr(message, "raw_content", None)
+    if body is None:
+        body = getattr(message, "content", None)
+    return body if isinstance(body, bytes) else b""
 
 
 def _escape(text: str) -> str:

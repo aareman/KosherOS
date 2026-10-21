@@ -11,19 +11,28 @@ uid=$(id -u wlkid)
 arch=$(flatpak --default-arch 2>/dev/null || echo x86_64)
 
 section "Allowlist"
-refusal=$(python3 - <<'PY' 2>&1
+# Asked for an approved-only account that may install. Root's own view is
+# an administrator's, which is open to the whole store, so an install as
+# root is not a test of the list.
+refusal=$(python3 - "$uid" <<'PY' 2>&1
+import sys
 from kosherd.client import DaemonClient
+uid = int(sys.argv[1])
 client = DaemonClient()
 client.unlock()
+client.set_user_app_access(uid, "approved")
+client.set_user_can_install(uid, True)
 try:
-    client.install_app("com.spotify.Client")
+    client.install_app_for(uid, "com.spotify.Client")
     print("ACCEPTED")
 except Exception as e:  # noqa: BLE001 - the message is the assertion
     print(e)
+finally:
+    client.set_user_can_install(uid, False)
 PY
 )
 case "$refusal" in
-    *"not on the approved app list"*) ok "unapproved apps are refused" ;;
+    *"not on the approved"*) ok "unapproved apps are refused" ;;
     *) bad "unapproved app was not refused: $(printf '%s' "$refusal" | head -c 100)" ;;
 esac
 check "approved apps exist upstream" 0 kosherctl check-catalog

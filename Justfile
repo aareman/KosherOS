@@ -5,7 +5,8 @@
 #   Inner loop  (seconds):  just test | just render | just deploy-kosherd
 #   Stage-1 VM  (minutes):  just fedora-vm && just dev-install
 #   Image loop  (minutes):  just build && just vm-upgrade        a running VM
-#                           just build && just vm && just try    a fresh disk
+#                           just vm-rootless && just try         a fresh disk
+#   Whole PR    (an hour):  just pr-test 168                     no sudo, no hands
 #
 # `just` alone lists the recipes by group. A script with its own --help
 # (scripts/*.py) is run directly rather than wrapped here; what is here
@@ -35,6 +36,12 @@ qemu_gui := if env_var_or_default("KOSHER_GL", "") != "" {
     "qemu-system-x86_64 -device virtio-vga -display " + display
 }
 qemu_net := "-netdev user,id=n0,hostfwd=tcp:127.0.0.1:2223-:22 -device virtio-net-pci,netdev=n0"
+# Root's ssh key, handed to the machine at boot as a systemd credential
+# (the image's tmpfiles write it to /root/.ssh/authorized_keys). A disk from
+# `just vm-rootless` has no key in it, so this is how it offers the root
+# shell on 2223; a `just vm` disk has the key already and ignores it.
+# Expanded by the recipe's shell, not by just.
+ssh_cred := "-smbios \"type=11,value=io.systemd.credential:ssh.authorized_keys.root=$(cat ~/.ssh/id_ed25519.pub 2>/dev/null || cat ~/.ssh/id_rsa.pub 2>/dev/null || cat build/vm/id_ed25519.pub)\""
 
 _default:
     @just --list --unsorted
@@ -152,6 +159,15 @@ benchmark CPUS="": build
 test-boot DISK="build/qcow2/disk.qcow2":
     scripts/boot-test.py {{DISK}}
 
+# A pull request, a branch, or this checkout (HEAD) through everything a
+# VM can check, without sudo: build, a rootless disk, the boot test, a
+# signed-in desktop for a test account, and the in-VM suites. Results in
+# build/pr-test/<id>/ (summary.json, report.md, logs, screenshots).
+# `just pr-test 168 --keep` keeps the disk and the machine to look at.
+[group('test')]
+pr-test TARGET="HEAD" *ARGS:
+    scripts/pr-test.py {{TARGET}} {{ARGS}}
+
 # --- Apps and docs, with no OS at all ----------------------------------------
 
 # The admin app on a pretend daemon with a sample family: nothing touched,
@@ -230,9 +246,10 @@ deploy-admin VM="kosher-gui":
 build:
     podman build --build-arg "KOSHER_VERSION=$(python3 scripts/version.py show)" -t {{image}} -f os-image/Containerfile .
 
-# A bootable qcow2 from the local image, for a genuinely fresh machine
-# (needs sudo). For the image you just rebuilt, `just vm-upgrade` is the
-# everyday path: it updates the running VM and keeps its state.
+# A bootable qcow2 from the local image, for a genuinely fresh machine,
+# made by bootc-image-builder (needs sudo; `just vm-rootless` does not).
+# For the image you just rebuilt, `just vm-upgrade` is the everyday path:
+# it updates the running VM and keeps its state.
 [group('image')]
 vm: _sudo build _dev-config (_bib "qcow2" "build/dev-config.toml" image "qcow2")
     # Stamp which image this disk came from, so a boot test can refuse a
@@ -246,6 +263,14 @@ vm: _sudo build _dev-config (_bib "qcow2" "build/dev-config.toml" image "qcow2")
         > build/qcow2/.image-id
     @echo "qcow2 at build/qcow2/disk.qcow2 — boot with: just boot-image"
 
+# The same disk as `just vm`, made without sudo: bcvk installs the image
+# from inside a throwaway VM (scripts/rootless-disk.sh says how). Same
+# place, same stamp, so boot-image, try and test-boot take it as it is.
+[group('image')]
+vm-rootless: build
+    scripts/rootless-disk.sh {{image}} build/qcow2/disk.qcow2
+    @echo "boot with: just boot-image (root shell on 127.0.0.1:2223)"
+
 # Boot a disk image for real: changes persist, a root shell is on
 # localhost:2223, the console goes to a log next to the disk. The default
 # is the disk `just vm` built; `just boot-image build/test-install.qcow2`
@@ -253,7 +278,7 @@ vm: _sudo build _dev-config (_bib "qcow2" "build/dev-config.toml" image "qcow2")
 [group('image')]
 boot-image DISK="build/qcow2/disk.qcow2":
     {{qemu_gui}} -enable-kvm -cpu host -m 4096 -smp 4 \
-        -drive file={{DISK}},if=virtio {{qemu_net}} \
+        -drive file={{DISK}},if=virtio {{qemu_net}} {{ssh_cred}} \
         -serial file:{{parent_directory(DISK)}}/console.log
 
 # Try a disk image in a window on a THROWAWAY overlay: the image itself is
@@ -263,7 +288,7 @@ try DISK="build/qcow2/disk.qcow2":
     @mkdir -p build/try
     qemu-img create -q -f qcow2 -b "$PWD/{{DISK}}" -F qcow2 build/try/overlay.qcow2 40G
     {{qemu_gui}} -enable-kvm -cpu host -m 4096 -smp 4 \
-        -drive file=build/try/overlay.qcow2,if=virtio {{qemu_net}}
+        -drive file=build/try/overlay.qcow2,if=virtio {{qemu_net}} {{ssh_cred}}
     rm -f build/try/overlay.qcow2
 
 # The same, headless with the console in this terminal: no video device, so

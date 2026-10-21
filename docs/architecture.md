@@ -18,6 +18,7 @@ flowchart LR
         DBus[D-Bus API, polkit gated]
         Policy[(policy.json)]
         Activity[(activity log)]
+        Usage[(usage totals)]
     end
     subgraph enforcement [Enforcement, per account]
         NFT[nftables: per-user rules]
@@ -34,7 +35,8 @@ flowchart LR
     DBus --> Policy
     Policy -->|rendered on every change| NFT & DNS & Proxy & Search & MCT
     Proxy & Search -->|what they blocked| Activity
-    Activity --> Admin
+    Proxy & Search -->|counts and filter time| Usage
+    Activity & Usage --> Admin
     Portal[Self-hosted portal, optional] -->|signed policy and lists| DBus
 ```
 
@@ -69,7 +71,7 @@ account's mode, its sites, rules, categories, pictures, language, YouTube,
 time limits or ports beyond the web; putting an account in a group or
 changing the group; editing a list; approving a request; opening the store
 or changing app blocks; the guest account; ad blocking; the update channel;
-enrolling in or leaving a portal; making someone an administrator; and
+going back to the previous version; enrolling in or leaving a portal; making someone an administrator; and
 turning the guardian off. It is stored as a yescrypt hash and rate limited, five tries
 and then a fifteen-minute lockout.
 

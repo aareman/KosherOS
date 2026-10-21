@@ -42,6 +42,7 @@ log = logging.getLogger("kosherd")
 # hours because of that is a store that looks broken.
 APP_INDEX_REFRESH_SECONDS = 6 * 3600
 APP_INDEX_RETRY_SECONDS = 120
+USAGE_FOLD_SECONDS = 300
 
 INTROSPECTION_XML = """
 <node>
@@ -112,6 +113,9 @@ INTROSPECTION_XML = """
     </method>
     <method name="ActivitySummary">
       <arg direction="out" type="s" name="summary_json"/>
+    </method>
+    <method name="Usage">
+      <arg direction="out" type="s" name="usage_json"/>
     </method>
     <method name="SetMediaLevel">
       <arg direction="in" type="i" name="uid"/>
@@ -268,6 +272,9 @@ INTROSPECTION_XML = """
     <method name="ListInstalledDetails">
       <arg direction="out" type="s" name="details_json"/>
     </method>
+    <method name="ListMyInstalledDetails">
+      <arg direction="out" type="s" name="details_json"/>
+    </method>
     <method name="SetUserApps">
       <arg direction="in" type="i" name="uid"/>
       <arg direction="in" type="as" name="refs"/>
@@ -346,7 +353,9 @@ INTROSPECTION_XML = """
     <method name="DeploymentStatus">
       <arg direction="out" type="s" name="status_json"/>
     </method>
-    <method name="Rollback"/>
+    <method name="Rollback">
+      <arg direction="in" type="s" name="guardian_password"/>
+    </method>
     <method name="TryImage">
       <arg direction="in" type="s" name="what"/>
       <arg direction="in" type="s" name="guardian_password"/>
@@ -706,6 +715,9 @@ class Daemon:
         GLib.timeout_add_seconds(APP_INDEX_REFRESH_SECONDS,
                                  lambda: (self._warm_app_index(), True)[1])
         GLib.timeout_add_seconds(TICK_SECONDS, self._time_tick)
+        # The spool is capped (usage.MAX_SPOOL_BYTES); folding every few
+        # minutes keeps it far below the cap and the counts current.
+        GLib.timeout_add_seconds(USAGE_FOLD_SECONDS, self._fold_usage)
         try:
             loop.run()
         finally:
@@ -1287,6 +1299,25 @@ class Daemon:
         counts = {str(uid): entry
                   for uid, entry in activity.summary(found).items()}
         return GLib.Variant("(s)", (json.dumps(counts),))
+
+    def impl_Usage(self):
+        """Traffic, blocks and filter time per account, for today, the
+        past week, the past month and all time (usage.py). Folds what the
+        proxy and the search service have written first, so the page is
+        never more than a minute behind."""
+        from . import usage
+
+        self._fold_usage()
+        return GLib.Variant("(s)", (json.dumps(usage.report(usage.load())),))
+
+    def _fold_usage(self) -> bool:
+        from . import usage
+
+        try:
+            usage.fold()
+        except Exception:  # noqa: BLE001 - a bad fold must not stop the timer
+            log.exception("usage: could not fold the spool")
+        return True  # keep the timeout
 
     _activity_trimmed_at = 0.0
 
@@ -2057,6 +2088,11 @@ class Daemon:
     def impl_ListInstalledDetails(self):
         return GLib.Variant("(s)", (json.dumps(apps.installed_details()),))
 
+    def impl_ListMyInstalledDetails(self, *, _uid: int):
+        # The Store's Installed shelf, for the uid on the connection: no
+        # names of who installed what, and no other account's own apps.
+        return GLib.Variant("(s)", (json.dumps(apps.installed_details_for(_uid)),))
+
     def impl_SetUserApps(self, uid: int, refs: list[str]):
         """Restrict which installed apps a user may run (empty = all)."""
         user = self.policy.user(uid)
@@ -2595,8 +2631,9 @@ class Daemon:
         """Back to the deployment kept by TryImage, with no download: the
         test builds in between are removed so the kept one is next in
         line, `bootc rollback` queues it (and discards a staged build),
-        and the pin comes off. Not guardian-gated, for the reasons
-        Rollback is not: the image is one this machine already ran."""
+        and the pin comes off. Not guardian-gated: the kept image is the
+        one this machine ran before the guardian let a test build on, so
+        this only undoes a change the guardian already agreed to."""
         from . import updates
 
         try:
@@ -2620,17 +2657,20 @@ class Daemon:
         log.info("back to the kept deployment %s", plan["kept"].get("image"))
         return None
 
-    def impl_Rollback(self):
+    def impl_Rollback(self, _guardian_pw: str = ""):
         """Go back to the deployment this machine booted before.
 
-        Deliberately NOT guardian-gated, unlike the calls that weaken the
-        filter. Two reasons. The image being returned to is one this
-        machine already ran and already trusted, so this is not a way to
-        reach anything new. And greenboot has to be able to do this with no
-        password at all when a new image fails to bring the filter up — so
-        gating the manual path would buy very little while risking the
-        thing this exists to prevent: a family with a broken computer and
-        nobody home who can fix it.
+        Guardian-gated like the calls that weaken the filter (the
+        dispatcher checks the password before this runs). The image gone
+        back to carries the filter it was built with, which can be older
+        and weaker than the one running now, so an administrator alone
+        must not be able to choose it (F11 on #33).
+
+        The automatic return does not come through here. When a new image
+        fails to bring the filter up, greenboot's boot counter takes the
+        machine back to the last good deployment with nobody present and
+        no password, so a family is never left with a broken computer
+        waiting on the guardian.
         """
         res = self._bootc("rollback")
         if res.returncode != 0:

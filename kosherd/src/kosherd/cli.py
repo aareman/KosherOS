@@ -21,10 +21,24 @@ from . import dns, nft, policy as policy_mod
 log = logging.getLogger(__name__)
 
 
-def _client():
-    from .client import DaemonClient  # Gio import deferred: offline cmds need no GObject
+_shared_client = None
 
-    return DaemonClient()
+
+def _client():
+    """The one daemon client for this command.
+
+    It opens the administrator session before its first call that needs
+    one, so a command that reads a setting and then changes it asks for
+    the password once: polkit keeps an answer per action, and a read
+    followed by a change was two prompts on any account that is not an
+    administrator's. Root needs no session; kosherd does not ask root.
+    """
+    global _shared_client
+    if _shared_client is None:
+        from .client import DaemonClient  # Gio import deferred: offline cmds need no GObject
+
+        _shared_client = DaemonClient(unlock_first=os.geteuid() != 0)
+    return _shared_client
 
 
 def _guardian_pw(args) -> str:
@@ -766,7 +780,7 @@ def cmd_system(args) -> int:
             print("there is no previous version to go back to",
                   file=sys.stderr)
             return 1
-        c.rollback()
+        c.rollback(_guardian_pw(args))
         print(f"going back to {target.get('version') or 'the previous version'}"
               " at the next restart")
         return 0

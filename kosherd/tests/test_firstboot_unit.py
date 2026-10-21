@@ -46,3 +46,16 @@ def test_the_wizard_still_runs_before_the_login_screen_and_only_once():
     assert "getty.target" not in hooks[0] and "getty@tty1" not in hooks[0]
     assert "serial-getty@$c.service" in hooks[0] and "ttyS0" in hooks[0] and "hvc0" in hooks[0]
     assert '[ -e "/dev/$c" ]' in hooks[0], "only a console that exists; a missing one would fail its unit"
+
+
+def test_a_serial_console_has_a_size_before_the_wizard_asks_anything():
+    # With a 0x0 console, systemd asked the terminal for its size and read
+    # the answer from the line the wizard was reading: the typed password
+    # arrived empty and setup never finished (#177). Only a console with no
+    # size is given one; a real screen is left as it is.
+    pre = [v for k, v in _directives("Service") if k == "ExecStartPre"]
+    assert len(pre) == 1
+    assert 'stty -F /dev/console size' in pre[0] and '!= "0 0"' in pre[0]
+    assert "stty -F /dev/console rows 24 cols 80" in pre[0]
+    assert pre[0].startswith("-"), "a console stty cannot set must not stop setup"
+    assert "$$(" in pre[0], "systemd's own $ must not eat the shell's"

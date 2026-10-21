@@ -230,14 +230,18 @@ RUN git clone --depth 1 --branch "${SEARXNG_REF}" \
     || echo "WARNING: SearXNG did not install; search will be unavailable"
 
 # The category database is built here rather than committed: a family must
-# not have to assemble lists, and the shipped JSON seed is only a fallback
-# for a build with no network. Millions of domains in SQLite cost a few MB
+# not have to assemble lists. Millions of domains in SQLite cost a few MB
 # of page cache to query; the same data in a dict would cost hundreds of MB
 # of RAM on exactly the low-end machine this has to run on.
+#
+# No fallback. This step used to say "|| echo WARNING" and carry on, and
+# when the UT1 site went down two :edge images were built and signed with
+# an adult category of nothing (#202). The script tries UT1 and then its
+# GitHub mirror, and exits non-zero when a category a family can switch on
+# is empty or short; an image is simply not built that day.
 COPY scripts/fetch-categories.py scripts/curated-sites.json /tmp/
 RUN python3 /tmp/fetch-categories.py \
-        --out /usr/share/kosher/categories/categories.sqlite \
-    || echo "WARNING: category import failed; falling back to the seed list"
+        --out /usr/share/kosher/categories/categories.sqlite
 RUN rm -f /tmp/fetch-categories.py /tmp/curated-sites.json
 
 # Third-party sources are enabled outright rather than prompted for: the

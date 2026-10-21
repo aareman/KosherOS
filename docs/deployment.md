@@ -213,11 +213,13 @@ In the order it blocks a family installing KosherOS.
    public key pinned into the image, and the per-family portal for
    enrolment and policy. Same code, two deployments.
 2. **The list build belongs in CI, not the image build.** The image build
-   fetches the category lists and falls back to a seed list with a warning
-   if the fetch fails, so one bad upstream day could ship an image with the
-   seed list. A nightly job should build the database, publish it as a
-   release asset, and publish the signed manifest; the image then carries
-   the last good snapshot and machines pull newer on their own.
+   fetches the category lists from UT1, or from their GitHub mirror when
+   UT1 is down, and fails when a category a family can switch on comes
+   out short, so a bad upstream day means no image that day rather than
+   an image with empty lists. A nightly job should build the database,
+   publish it as a release asset, and publish the signed manifest; the
+   image then carries the last good snapshot and machines pull newer on
+   their own.
 3. **Updates in the background.** Today a parent checks for and applies
    updates from the Updates page. Fetching them in the background, and
    whether a fetched update should wait for the next natural restart

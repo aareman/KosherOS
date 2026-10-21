@@ -382,6 +382,14 @@ INTROSPECTION_XML = """
       <arg direction="in" type="i" name="uid"/>
       <arg direction="in" type="i" name="minutes"/>
     </method>
+    <method name="TailscaleStatus">
+      <arg direction="out" type="s" name="status_json"/>
+    </method>
+    <method name="TailscaleSignIn">
+      <arg direction="in" type="s" name="guardian_password"/>
+      <arg direction="out" type="s" name="login_url"/>
+    </method>
+    <method name="TailscaleSignOut"/>
   </interface>
   <interface name="org.kosherlinux.Daemon1.Portal">
     <method name="Enrol">
@@ -475,9 +483,11 @@ UID_AWARE = access.UID_AWARE
 # to finish off the main loop.
 # A YouTube channel search waits on YouTube instead, which is as good a
 # reason: the main loop must not stop for the network.
+# Tailscale's calls wait on its control server the same way.
 IN_BACKGROUND = frozenset({"CheckUpdate", "DeploymentStatus", "ListChannels",
                            "SetChannel", "Rollback", "TryImage", "ReturnToKept",
-                           "SearchYouTubeChannels"})
+                           "SearchYouTubeChannels",
+                           "TailscaleStatus", "TailscaleSignIn", "TailscaleSignOut"})
 
 # Seconds to wait on each short bootc command before saying so. A check
 # goes to the registry, so it gets longer than reading local status. A pull
@@ -706,6 +716,10 @@ class Daemon:
         except Exception:
             log.exception("could not apply the flatpak remote filter")
         self._warm_app_index()
+        # The tailnet forward follows tailscaled, not the policy, so it is
+        # checked once tailscaled has had time to come up after a boot.
+        from . import tailnet
+        tailnet.refresh_dns_later()
         GLib.timeout_add_seconds(APP_INDEX_REFRESH_SECONDS,
                                  lambda: (self._warm_app_index(), True)[1])
         GLib.timeout_add_seconds(TICK_SECONDS, self._time_tick)
@@ -2755,6 +2769,54 @@ class Daemon:
         return None
 
     # ---- First-boot setup ------------------------------------------------
+
+    # ---- Tailscale (tailnet.py) ------------------------------------------
+
+    def impl_TailscaleStatus(self):
+        """Who this computer is signed in to Tailscale as, and whether it is
+        connected. Reading it also brings the resolvers' tailnet forward in
+        line, so a sign-in finished in the browser takes effect at the
+        admin app's next look even if the daemon missed the moment."""
+        from . import tailnet
+
+        try:
+            now = tailnet.refresh_dns() or tailnet.status()
+        except tailnet.TailnetError as e:
+            raise PolicyError(str(e)) from None
+        return GLib.Variant("(s)", (json.dumps(now),))
+
+    def impl_TailscaleSignIn(self, _guardian_pw: str):
+        """Start signing in; return the address the administrator opens.
+
+        Guardian-gated: joining a tailnet puts the family's computer on a
+        network with other people's machines, and every account can then
+        reach them by name (through its own filter). The address is for a
+        browser on any device; the sign-in finishes there.
+        """
+        from . import tailnet
+
+        def finished(ok: bool) -> None:
+            if ok:
+                tailnet.refresh_dns()
+
+        try:
+            return GLib.Variant("(s)", (tailnet.sign_in(on_finished=finished),))
+        except tailnet.TailnetError as e:
+            raise PolicyError(str(e)) from None
+
+    def impl_TailscaleSignOut(self):
+        """Not guardian-gated: leaving the tailnet takes a way out of the
+        house away and opens nothing, like a rollback onto an image this
+        machine already ran."""
+        from . import tailnet
+
+        try:
+            tailnet.sign_out()
+        except tailnet.TailnetError as e:
+            raise PolicyError(str(e)) from None
+        finally:
+            tailnet.sync_dns(None)
+        return None
 
     def setup_complete(self) -> bool:
         """Setup is finished only when FinishSetup has stamped it.

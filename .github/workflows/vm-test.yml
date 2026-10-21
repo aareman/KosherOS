@@ -127,7 +127,11 @@ jobs:
           devenv shell -- true
 
       - name: just pr-test
-        run: devenv shell -- just pr-test HEAD --id ci
+        # CI has no cached base, so this is the direct path: a disk from the
+        # change's own image, a fresh install only when the change needs one,
+        # and the checks its paths select. Two suite machines beside the
+        # desktop on a 4-core runner.
+        run: devenv shell -- just pr-test HEAD --id ci --vms 2
 
       - name: Report
         if: always()

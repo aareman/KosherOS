@@ -73,4 +73,69 @@ fi
 check "DNS-over-TLS is rejected" 1 as dnskid nc -w 3 1.1.1.1 853
 check "DoH to a public resolver IP is rejected" 1 fetch_as dnskid https://1.1.1.1
 
+section "Tailscale (#30)"
+# A real tailnet sign-in needs a person at a browser, so what is checked is
+# everything up to the sign-in address: the daemon runs, the resolver is
+# still ours, kosherctl answers, the sign-in is behind the guardian
+# password, and Tailscale's control server resolves with a dns-filtered
+# account on the machine (tailscale.com is in the proxy category, and the
+# resolver used to block it for root too).
+if ! command -v tailscale >/dev/null 2>&1; then
+    skip "Tailscale is not installed (only the image ships it)"
+else
+    check "tailscaled is running" 0 systemctl is-active --quiet tailscaled
+    check_contains "/etc/resolv.conf is still the local resolver" "nameserver 127.0.0.1" \
+        cat /etc/resolv.conf
+    check "and names no other server" 1 \
+        sh -c 'grep "^nameserver" /etc/resolv.conf | grep -vq "127.0.0.1"'
+    check_contains "kosherctl tailscale status answers" "not signed in" kosherctl tailscale status
+    cp_answer=$(getent ahostsv4 controlplane.tailscale.com | awk '{print $1; exit}')
+    if [ -n "$cp_answer" ] && [ "$cp_answer" != 0.0.0.0 ]; then
+        ok "Tailscale's control server resolves with a dns-filtered account present"
+    else
+        bad "controlplane.tailscale.com does not resolve (got '${cp_answer:-nothing}')"
+    fi
+    # The guardian password, set for these checks only and removed after.
+    # A wrong one and an empty one go first: a right one proves the
+    # guardian for the rest of the caller's session.
+    gpw=pr-test-guardian-1
+    ts_sign_in() {
+        timeout 120 python3 -c 'import sys; from kosherd.client import DaemonClient
+print(DaemonClient().tailscale_sign_in(sys.argv[1]))' "$1" 2>&1
+    }
+    if python3 -c 'import sys; from kosherd.client import DaemonClient
+DaemonClient().set_guardian_password("", sys.argv[1])' "$gpw" >/dev/null 2>&1; then
+        out=$(ts_sign_in wrong-password)
+        case "$out" in
+            *https://*) bad "sign-in went ahead with a wrong guardian password: $out" ;;
+            *) ok "sign-in is refused with a wrong guardian password" ;;
+        esac
+        out=$(ts_sign_in "")
+        case "$out" in
+            *https://*) bad "sign-in went ahead with no guardian password: $out" ;;
+            *) ok "sign-in is refused with no guardian password" ;;
+        esac
+        out=$(ts_sign_in "$gpw")
+        case "$out" in
+            *https://login.tailscale.com/*) ok "with the guardian password, sign-in gives a login address" ;;
+            *) bad "sign-in with the guardian password gave no login address: $(printf '%s' "$out" | tail -2 | head -c 240)" ;;
+        esac
+        check_contains "and kosherctl tailscale status shows it is waiting there" "login.tailscale.com" \
+            kosherctl tailscale status
+        check "sign-out needs no password" 0 kosherctl tailscale sign-out
+        check_contains "and is back to not signed in" "not signed in" kosherctl tailscale status
+        check_contains "resolv.conf is still the local resolver after all that" "nameserver 127.0.0.1" \
+            cat /etc/resolv.conf
+        check "the tailnet forward is not written while signed out" 1 \
+            sh -c 'grep -qs 100.100.100.100 /etc/kosher/dnsmasq.d/tailnet.conf'
+        python3 -c 'import sys; from kosherd.client import DaemonClient
+DaemonClient().disable_guardian(sys.argv[1])' "$gpw" >/dev/null 2>&1
+        check "the guardian password is removed again" 1 python3 -c \
+            'import sys; from kosherd.client import DaemonClient; sys.exit(0 if DaemonClient().guardian_enabled() else 1)'
+    else
+        bad "could not set a guardian password to test the sign-in gate"
+    fi
+    skip "a real tailnet sign-in needs a person at the login page: names on the tailnet, the 100.100.100.100 forward, a filtered account reaching a tailnet host through its proxy"
+fi
+
 report

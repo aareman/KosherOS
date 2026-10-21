@@ -1,28 +1,36 @@
 #!/usr/bin/env python3
 """Test a pull request, a branch or this checkout in a real VM, without sudo.
 
-    scripts/pr-test.py [TARGET] [--id ID] [--only STAGES] [--keep] [--gl]
+    scripts/pr-test.py [TARGET] [--full | --all] [--direct] [--vms N] [--keep] [--gl]
 
 TARGET is a pull request number, a branch on origin, or HEAD (the default:
 this checkout as it is, which is what CI hands over). Anything other than
 HEAD is checked out into a temporary worktree, so the checkout you are
 working in is left alone.
 
-The stages, in order:
+What runs is decided by the paths the change touches (pr_test_select.py),
+and the report says why. The stages:
 
-  build    `just build` in the target's tree, tagged for this run only
-  disk     a qcow2 made from that image without root (scripts/rootless-disk.sh)
-  boot     scripts/boot-test.py: power-on, the first-boot wizard over the
-           serial line, the administrator's filtering
-  desktop  the same machine booted again with a screen: a test account
-           signs in through GDM, and its session is checked for a seat, the
-           polkit answers, a real password prompt, the apps and the user
-           services, and the filter as Firefox meets it
-  suites   the target's own scripts/vm-tests, as root over ssh
+  build    `just build` in the target's tree
+  base     once per master revision: master's image installed on a fresh
+           disk and set up by the boot test, kept in build/pr-test/cache
+  switch   that machine `bootc switch`ed to the change's image from a
+           local registry, the way an update reaches a family
+  disk, boot
+           instead, for a change to power-on and setup (or --full, or in
+           CI): a fresh disk from the change's own image and
+           scripts/boot-test.py on it
+  desktop  a test account signs in through GDM; its session, the polkit
+           answers, the password prompts, the apps, the filter in Firefox
+  suites-N the target's scripts/vm-tests, split over several machines
+
+The desktop and the suite groups run at the same time, each on its own
+overlay of the set-up machine.
 
 Everything lands in build/pr-test/<ID>/: summary.json (for machines),
 report.md (for people), each stage's log, the serial consoles and the
-screenshots. The exit status is non-zero when anything failed.
+screenshots. A failure listed in scripts/vm-tests/known-failures.txt is
+known; the exit status is non-zero when anything else failed.
 
 Nothing here runs sudo. A `sudo` that fails loudly is put first on the PATH
 of every command the harness starts, and the just recipes it calls are
@@ -46,7 +54,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
-STAGES = ["build", "disk", "boot", "desktop", "suites"]
 
 # The account boot-test.py makes in the wizard: the computer's administrator.
 ADMIN_USER = "boottest"

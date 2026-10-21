@@ -1,0 +1,19 @@
+# Checks that fail on master today, each with the issue that will fix it.
+#
+# `just pr-test` passes when every failing check is listed here, fails on
+# any failure that is not, and warns about a listed check that now passes:
+# the change that fixed it removes its line, in the same pull request.
+#
+# One per line: where it runs (boot, desktop or suites), the check's name
+# or the start of it, and the issue. A suite check is named with its suite.
+
+boot: the administrator can log in                                  #180
+desktop: and every one of them gets the block page                  #183
+desktop: the filter records Firefox's visit to the gambling site    #183
+suites: 70-categories: DNS is over-blocking for a filtered user     #183
+suites: 80-hardening: [F2] dns-filtered account cannot browse by address  #189
+suites: 80-hardening: [F4] Chromium is told never to use DoH        #185
+suites: 80-hardening: [F8] text consoles are not offered to accounts  #186
+suites: 80-hardening: [F13] the lockout survives a reboot           #188
+suites: 80-hardening: [F6] a dnsfilter account cannot reach a web service on the LAN  #192
+suites: 90-developer: a build could not fetch from GitHub           #190

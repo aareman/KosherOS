@@ -117,15 +117,18 @@ Changes to the image itself go through a build:
 
 ```sh
 just build        # build the OS image (layer-cached; minutes the first time)
-just vm           # make a bootable disk from it (needs sudo)
+just vm-rootless  # make a bootable disk from it, as your own user
 just try          # boot a throwaway copy; the first boot runs the setup wizard
 just vm-upgrade   # update a running VM to the image just built, without a new disk
 just check-all    # the live checks inside the built image: firewall, resolver, redirect, services
+just pr-test 168  # a whole pull request through a VM, start to finish
 ```
 
-`just vm`, `just iso` and the other recipes that run podman as root ask for
-the sudo password first and keep it fresh until they finish, so the prompt
-never appears in the middle of a long build.
+None of these needs sudo; being in the `kvm` group is enough. `just vm`
+makes the same disk with bootc-image-builder, which runs as root. It and
+`just iso`, which has no rootless equivalent yet, ask for the sudo
+password first and keep it fresh until they finish, so the prompt never
+appears in the middle of a long build.
 
 ## Making a change
 

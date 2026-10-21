@@ -14,7 +14,7 @@
     { "ref": "org.onlyoffice.desktopeditors", "name": "ONLYOFFICE", "summary": "Documents that keep Microsoft Office formatting", "categories": ["Office", "WordProcessor"] },
     { "ref": "org.gnome.Calendar", "name": "Calendar", "summary": "Keep track of the week", "categories": ["Office", "Calendar"] },
     { "ref": "org.gnome.Contacts", "name": "Contacts", "summary": "Keep addresses and phone numbers", "categories": ["Office"] },
-    { "ref": "org.gnome.Endeavour", "name": "Endeavour", "summary": "Lists of things to do", "categories": ["Office", "ProjectManagement"] },
+    { "ref": "org.gnome.Todo", "name": "Endeavour", "summary": "Lists of things to do", "categories": ["Office", "ProjectManagement"] },
     { "ref": "org.gnome.Papers", "name": "Document Viewer", "summary": "Read PDFs and documents", "categories": ["Office", "Viewer"] },
     { "ref": "org.gnome.SimpleScan", "name": "Document Scanner", "summary": "Scan documents to PDF", "categories": ["Office", "Scanning"] },
     { "ref": "com.github.johnfactotum.Foliate", "name": "Foliate", "summary": "Read e-books", "categories": ["Office", "Viewer"] },
@@ -46,7 +46,7 @@
     { "ref": "org.gnome.meld", "name": "Meld", "summary": "Compare files and folders", "categories": ["Development"] },
     { "ref": "io.dbeaver.DBeaverCommunity", "name": "DBeaver", "summary": "Work with databases", "categories": ["Development"] },
     { "ref": "com.jgraph.drawio.desktop", "name": "draw.io", "summary": "Draw diagrams", "categories": ["Development", "Graphics"] },
-    { "ref": "org.gnome.Console", "name": "Console", "summary": "A terminal", "categories": ["System", "TerminalEmulator"] },
+    { "ref": "app.devsuite.Ptyxis", "name": "Ptyxis", "summary": "A terminal that opens on the computer or in a container", "categories": ["System", "TerminalEmulator"] },
     { "ref": "upstream#kitty", "name": "kitty", "summary": "A fast terminal that draws with the GPU", "categories": ["System", "TerminalEmulator"], "description": "kitty is a fast, feature-rich terminal that draws with the graphics card. It has tabs, split windows, images in the terminal and a large set of small tools called kittens. This is kitty's official build, fetched from its developer and checked against the developer's signature.", "developer": "Kovid Goyal", "license": "GPL-3.0-only", "homepage": "https://sw.kovidgoyal.net/kitty/" },
     { "ref": "nixpkgs#ghostty", "name": "Ghostty", "summary": "A fast, native terminal", "categories": ["System", "TerminalEmulator"] },
     { "ref": "nixpkgs#foot", "name": "foot", "summary": "A small, quick Wayland terminal", "categories": ["System", "TerminalEmulator"] },
@@ -86,7 +86,7 @@
     { "ref": "nixpkgs#zig", "name": "Zig", "summary": "The Zig compiler and build system", "categories": ["Development", "Building"] },
 
     { "ref": "org.gnome.Calculator", "name": "Calculator", "summary": "Everyday calculations", "categories": ["Utility"] },
-    { "ref": "org.gnome.Clocks", "name": "Clocks", "summary": "Alarms, timers and world clocks", "categories": ["Utility"] },
+    { "ref": "org.gnome.clocks", "name": "Clocks", "summary": "Alarms, timers and world clocks", "categories": ["Utility"] },
     { "ref": "org.gnome.FileRoller", "name": "Archive Manager", "summary": "Open and make archives", "categories": ["Utility", "Archiving"] },
     { "ref": "org.gnome.baobab", "name": "Disk Usage Analyzer", "summary": "See what is filling the disk", "categories": ["Utility", "FileTools"] },
     { "ref": "com.github.tchx84.Flatseal", "name": "Flatseal", "summary": "Review what each app is allowed to do", "categories": ["Utility", "Security"] },
@@ -94,7 +94,7 @@
 
     { "ref": "org.kde.gcompris", "name": "GCompris", "summary": "Learning games for young children", "categories": ["Education"] },
     { "ref": "org.kde.kstars", "name": "KStars", "summary": "The night sky, explained", "categories": ["Education", "Astronomy"] },
-    { "ref": "org.gnome.Dictionary", "name": "Dictionary", "summary": "Look up a word", "categories": ["Education", "Languages"] },
+    { "ref": "dev.mufeed.Wordbook", "name": "Wordbook", "summary": "Look up a word", "categories": ["Education", "Languages"] },
 
     {"ref": "nixpkgs#nerd-fonts.jetbrains-mono", "name": "JetBrains Mono Nerd Font", "summary": "Coding font with extra icons for terminal prompts", "categories": ["Font"]},
     {"ref": "nixpkgs#nerd-fonts.fira-code", "name": "Fira Code Nerd Font", "summary": "Coding ligatures and extra terminal icons", "categories": ["Font"]},

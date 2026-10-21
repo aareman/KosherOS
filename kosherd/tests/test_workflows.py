@@ -270,3 +270,46 @@ def test_the_image_carries_its_version_where_bootc_reads_it():
     # the installer and the daemon; an empty one fails the build.
     assert 'test -n "$KOSHER_VERSION"' in containerfile
     assert '"$KOSHER_VERSION" > /usr/share/kosher/VERSION' in containerfile
+
+
+def test_every_pull_request_that_reaches_the_machine_is_tested_in_a_vm():
+    """vm-test.yml runs `just pr-test`, the recipe a developer runs (#173).
+
+    It must stop loudly on a runner without KVM rather than emulate for
+    hours, keep to same-repository pull requests like try-image.yml, upload
+    what it saw whatever the result, and never ask for the GPU mode."""
+    text = (ROOT / ".github/workflows/vm-test.yml").read_text()
+    document = yaml.safe_load(text)
+    triggers = document.get(True) or document.get("on")
+    assert "pull_request" in triggers
+    gate = " ".join(document["jobs"]["changes"]["if"].split())
+    assert "head.repo.full_name == github.repository" in gate
+    vm = document["jobs"]["vm"]
+    assert vm["needs"] == ["changes"]
+    runs = "\n".join(step.get("run", "") for step in vm["steps"])
+    assert "just pr-test" in runs
+    assert "/dev/kvm" in runs and "exit 1" in runs, "no KVM is a failure, not a slow run"
+    assert "99-kvm4all.rules" in runs, "the runner's /dev/kvm needs the udev rule"
+    assert "--gl" not in runs and "KOSHER_GL" not in text, "runners have no GPU"
+    uploads = [s for s in vm["steps"] if s.get("uses", "").startswith("actions/upload-artifact")]
+    assert uploads and uploads[0]["if"] == "always()"
+    assert "!build/pr-test/ci/**/*.qcow2" in uploads[0]["with"]["path"]
+    assert "id_ed25519" in uploads[0]["with"]["path"], "the run's private key stays behind"
+    assert document["concurrency"]["cancel-in-progress"] is True
+
+
+def test_the_vm_harness_never_needs_sudo():
+    """The recipes `just pr-test` calls, and what they depend on, run no
+    sudo; scripts/check-no-sudo.py is the check, and it must also catch a
+    recipe that does (just vm, through _sudo and _bib)."""
+    import shutil
+    import subprocess
+    import sys
+
+    if shutil.which("just") is None:
+        pytest.skip("just is not installed")
+    check = [sys.executable, str(ROOT / "scripts/check-no-sudo.py")]
+    clean = subprocess.run(check, cwd=ROOT, capture_output=True, text=True)
+    assert clean.returncode == 0, clean.stdout + clean.stderr
+    dirty = subprocess.run(check + ["vm"], cwd=ROOT, capture_output=True, text=True)
+    assert dirty.returncode == 1 and "_sudo" in dirty.stdout

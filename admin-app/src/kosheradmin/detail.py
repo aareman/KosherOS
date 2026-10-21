@@ -256,12 +256,43 @@ class UserDetailPage(Adw.NavigationPage):
         self.blocked_group.add(self.blocked_loading)
         groups.append(self.blocked_group)
 
+        groups.append(self._usage_group(user))
+
         self.changes_group = Adw.PreferencesGroup(title="Changes to this account")
         self.changes_loading = Adw.ActionRow(title="Loading…")
         self.changes_group.add(self.changes_loading)
         groups.append(self.changes_group)
         self._load_activity(user)
         return groups
+
+    def _usage_group(self, user: dict) -> Adw.PreferencesGroup:
+        """Today's numbers in three rows; the Usage page has the rest."""
+        from .usage import count, counted, size
+
+        group = Adw.PreferencesGroup(title="Usage today")
+        more = small_button("See more", "flat")
+        more.connect("clicked", lambda _b: self.win.show_usage(user["uid"]))
+        group.set_header_suffix(more)
+        if not counted(user):
+            group.add(Adw.ActionRow(title="Not counted on this internet setting"))
+            return group
+        rows = {}
+        for key, title in (("requests", "Pages and files loaded"),
+                           ("bytes_in", "Downloaded"), ("blocked", "Pages blocked")):
+            row = Adw.ActionRow(title=title)
+            rows[key] = Gtk.Label(label="…", xalign=1)
+            rows[key].add_css_class("numeric")
+            row.add_suffix(rows[key])
+            group.add(row)
+
+        def on_done(data):
+            numbers = (data.get("today", {}).get("people") or {}).get(str(user["uid"])) or {}
+            rows["requests"].set_label(count(numbers.get("requests")))
+            rows["bytes_in"].set_label(size(numbers.get("bytes_in")))
+            rows["blocked"].set_label(count(numbers.get("blocked")))
+
+        run_async(self.win.client.usage, on_done, lambda e: self.win.toast(error_text(e)))
+        return group
 
     def _load_activity(self, user: dict) -> None:
         since = int(time.time()) - 7 * 86400
@@ -1067,17 +1098,19 @@ class UserDetailPage(Adw.NavigationPage):
     def _developer_group(self, user: dict) -> Adw.PreferencesGroup:
         """One switch (#123). Off, the Store installs catalogue apps and that
         is all; on, the account can use nix, devbox and devenv itself and
-        reach the package registries. The sentence says what "on" opens, and
+        reach the package registries and the big git hosts over SSH (#164).
+        The sentence says what "on" opens, and
         that the account's own web filter still applies to what it fetches."""
         group = Adw.PreferencesGroup(title="Developer tools")
         row = Adw.SwitchRow(
             title="Developer tools",
             subtitle="Lets this account use Nix, devbox and devenv from a terminal "
-                     "and install anything from nixpkgs, and reach the package "
-                     "registries (npm, PyPI, crates.io, GitHub) directly. Its web "
-                     "filter still applies to everything it fetches. Off, the "
+                     "and install anything from nixpkgs, reach the package "
+                     "registries (npm, PyPI, crates.io, GitHub) directly, and use "
+                     "git over SSH with GitHub, GitLab, Codeberg and Bitbucket. Its "
+                     "web filter still applies to everything it downloads. Off, the "
                      "Store is the only way to install.",
-            subtitle_lines=5,
+            subtitle_lines=6,
             active=bool(user.get("developer_tools", False)))
 
         def on_toggle(switch, _param):

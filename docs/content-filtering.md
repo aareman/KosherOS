@@ -41,6 +41,13 @@ page served on 8080 meets the same rules as one on 443. Loopback is never
 redirected. Anything that reaches the proxy and is not HTTP, or TLS carrying
 HTTP, is refused rather than passed through.
 
+SSH, FTP, SMTP, POP3 and IMAP (ports 22, 21, 25, 110 and 143) are the
+exception. In these the server speaks first, so the proxy would have nothing
+to read and the program would wait forever. They are not sent to the proxy
+and are refused at once, so the program says the connection was refused.
+On any other port, the proxy closes a connection if the program has sent
+nothing after ten seconds.
+
 Three things do not go through the proxy, because they are not web and the
 proxy could not read them:
 
@@ -73,6 +80,13 @@ can build anything from nixpkgs from a terminal and reaches the package
 registries (npm, PyPI, crates.io, GitHub and the rest) through its own filter
 mode. Those registries are no longer in the set every account reaches: a
 whitelist-only account without the switch sees exactly its list.
+
+The switch also lets the account use git over SSH with GitHub, GitLab,
+Codeberg and Bitbucket, so `git clone git@github.com:...` and `gh repo clone`
+work. Port 22 is open to those four hosts only, and SSH to any other server is
+refused, because an SSH connection can carry a tunnel around the filter. For a
+git server of the family's own, an administrator can add port 22 under *Extra
+ports*, which opens SSH to every server for that account.
 
 A build's own downloads — `fetchurl`, `fetchFromGitHub` — run as the Nix build
 users, which belong to no account. Their web goes through the proxy on a
@@ -302,6 +316,26 @@ the proxy answers itself and never forwards, because a browser refuses to
 submit a plain-HTTP form from a page it considers secure. Requests are
 individual files in a spool that the two unprivileged services may write
 to but not list or read, and the daemon is the only reader.
+
+## Usage
+
+The admin app's Usage page shows how much went through the filter and how
+much it stopped, as numbers: pages and files loaded, data downloaded and
+uploaded, pages, pictures, videos and searches blocked, and how long the
+filter held each request (the average, the time half of all requests
+finished within, and the time 95 in 100 finished within). It covers today,
+this week, this month or all time, for everyone or for one person, and
+each person's overview shows today's figures. Only accounts on filtered
+internet are counted, because on the other settings the filter never sees
+the pages.
+
+Only totals are kept, never an address. The proxy adds up in memory and
+writes its totals once a minute, the search service writes a line for each
+search it refuses, and kosherd folds both into a file of daily totals. Days
+are kept for sixty days and then dropped, after they have been added to
+an all-time total, so the file stays under a megabyte however long
+the computer runs. A writer stops writing if kosherd stops collecting, and
+keeps counting in memory until it can.
 
 ## Saying when the filter is not filtering
 

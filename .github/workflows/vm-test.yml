@@ -1,0 +1,153 @@
+name: VM test
+
+# Every pull request through a real VM: `just pr-test`, the same recipe a
+# developer runs, on a GitHub runner with KVM. It builds the image, makes a
+# disk without root, boots it through the first-boot wizard, signs a test
+# account in at the login screen, and runs the in-VM suites. The report and
+# the logs, consoles and screenshots are uploaded whatever the result.
+#
+# Same-repository pull requests only, as in try-image.yml: a fork's run has
+# no secrets and its hour on a runner is better spent after a look at the
+# change. Run it by hand (Actions -> VM test -> Run workflow) for a branch.
+#
+# Whether this is a required check is the maintainer's decision, made in
+# the branch protection settings, not here.
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  # A new push supersedes the run in progress for the same pull request.
+  group: vm-test-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  changes:
+    name: Does it reach the machine
+    # A pull request that changes only docs, unit tests or other workflows
+    # cannot change what boots, and an hour of runner for it is waste.
+    # Skipped here rather than with a paths filter, so that a skipped run
+    # still reports and could be made a required check.
+    if: >-
+      github.event_name == 'workflow_dispatch'
+      || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    outputs:
+      vm: ${{ steps.filter.outputs.vm }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - id: filter
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          if [ "$GITHUB_EVENT_NAME" != "pull_request" ]; then
+            echo "vm=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          changed="$(git diff --name-only "$BASE" "$HEAD")"
+          echo "$changed"
+          if echo "$changed" | grep -E -q \
+               '^(os-image/|kosherd/src/|kosherd/pyproject|admin-app/src/|store-app/src/|setup-app/src/|myfilter-app/src/|welcome-app/src/|look-app/src/|search-app/kosher_search/|mitm/|branding/|policy/|scripts/vm-tests/|scripts/(pr-test|boot-test|check-no-sudo)\.py|scripts/rootless-disk\.sh|scripts/fetch-categories\.py|scripts/curated-sites\.json|scripts/check-searxng-settings\.py|scripts/version\.py|Justfile|devenv\.(nix|lock|yaml)|\.github/workflows/vm-test\.yml)'; then
+            echo "vm=true" >> "$GITHUB_OUTPUT"
+            echo "this reaches the machine: testing it in a VM"
+          else
+            echo "vm=false" >> "$GITHUB_OUTPUT"
+            echo "nothing that boots changed: no VM test"
+          fi
+
+  vm:
+    name: Boot, desktop and suites
+    needs: [changes]
+    if: needs.changes.outputs.vm == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          # The branch's own commit rather than GitHub's merge commit, so
+          # the report names a commit that exists on the branch.
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0 # the version is counted from the last tag
+
+      - name: KVM
+        # The runners have /dev/kvm, owned by root and closed to the
+        # runner's user until a udev rule opens it. Without KVM the VM would
+        # crawl under emulation for hours and then time out, so this stops
+        # here and says why instead.
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+            | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+          # The trigger is applied asynchronously; one run checked before
+          # it had and found /dev/kvm still closed.
+          sudo udevadm settle --timeout=30 || true
+          ls -l /dev/kvm || echo "no /dev/kvm on this runner"
+          if [ ! -e /dev/kvm ] || [ ! -w /dev/kvm ]; then
+            echo "::error::This runner has no usable /dev/kvm. The VM test needs hardware virtualisation."
+            exit 1
+          fi
+          ls -l /dev/kvm
+
+      - name: Room on the disk
+        # The image is about 9 GB, its disk as much again, and the build's
+        # layers more; the runner starts with too little free.
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL /usr/local/share/boost
+          sudo docker image prune --all --force >/dev/null
+          df -h /
+
+      - name: Host packages
+        # bcvk runs QEMU from the host's /usr, not from the dev shell.
+        # Ubuntu 24.04 lets only programs with an AppArmor profile make
+        # user namespaces, and the dev shell's rootless podman has none
+        # ("failed to reexec: Permission denied"), so that is switched off
+        # on this throwaway runner.
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y qemu-system-x86 qemu-utils uidmap
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+
+      - uses: cachix/install-nix-action@v31
+
+      - name: The static virtiofsd bcvk needs
+        id: virtiofsd
+        uses: actions/cache@v4
+        with:
+          path: /var/tmp/kosher-harness-1001
+          key: virtiofsd-${{ hashFiles('devenv.lock') }}
+
+      - name: Dev shell
+        run: |
+          nix profile install nixpkgs#devenv
+          devenv shell -- true
+
+      - name: just pr-test
+        # CI has no cached base, so this is the direct path: a disk from the
+        # change's own image, a fresh install only when the change needs one,
+        # and the checks its paths select. Two suite machines beside the
+        # desktop on a 4-core runner.
+        run: devenv shell -- just pr-test HEAD --id ci --vms 2
+
+      - name: Report
+        if: always()
+        run: |
+          if [ -f build/pr-test/ci/report.md ]; then
+            cat build/pr-test/ci/report.md >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: vm-test-${{ github.event.pull_request.number || github.run_id }}
+          path: |
+            build/pr-test/ci/
+            !build/pr-test/ci/**/*.qcow2
+            !build/pr-test/ci/src/
+            !build/pr-test/ci/id_ed25519*
+            !build/pr-test/ci/no-sudo/
+          retention-days: 14

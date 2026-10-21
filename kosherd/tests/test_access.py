@@ -172,6 +172,9 @@ def test_the_guardian_gate_covers_every_filter_weakening_method():
                 "SetChannel",
                 # A pull request's build, tried on purpose: the same decision.
                 "TryImage",
+                # Going back: the older version brings its older filter
+                # with it (F11, #187).
+                "Rollback",
                 # Opening an account to the whole store, or lifting an app
                 # block, widens what it can reach.
                 "SetUserAppAccess", "SetUserBlockedAppKinds", "SetUserBlockedApps"}
@@ -241,3 +244,49 @@ def test_the_wizard_can_list_pre_existing_accounts_before_setup():
     assert evaluate("ExistingAccounts", **FRESH).allowed
     # ...but not forever: it is only the wizard's business.
     assert not evaluate("ExistingAccounts", **LOCKED).allowed
+
+
+# -- one prompt per sitting (#181, #182) ----------------------------------------
+
+def test_a_client_opens_the_session_before_anything_that_would_prompt():
+    # polkit keeps an answered prompt per action, so `kosherctl set-mode`
+    # on a child's account asked twice: read-config for the guardian
+    # check, then manage-filter for the change. A client that opens the
+    # session first asks once, for Unlock, which needs the same
+    # administrator's password as either of them.
+    assert access.needs_admin_session("IsEnabled")
+    assert access.needs_admin_session("SetFilterMode")
+    assert access.needs_admin_session("Rollback")
+    assert ACTIONS["Unlock"] not in access.FREE_ACTIONS
+
+
+@pytest.mark.parametrize("method", ["Unlock", "Lock", "IsComplete", "AdminExists",
+                                    "GetMySettings", "GetMyLayout", "SetMyLayout",
+                                    "ListStoreApps", "ListMyInstalledDetails",
+                                    "InstallApp", "NoSuchMethod"])
+def test_free_and_setup_calls_never_open_a_session(method):
+    # Opening one would put a password prompt in front of something every
+    # account may do without one, or in front of the wizard.
+    assert not access.needs_admin_session(method)
+
+
+def test_the_free_actions_are_the_ones_the_rule_answers_yes_to():
+    import pathlib
+
+    rule = (pathlib.Path(__file__).parents[2]
+            / "os-image/files/etc/polkit-1/rules.d/49-kosher-admin.rules").read_text()
+    for action in access.FREE_ACTIONS:
+        assert f'"{action}"' in rule
+    for action in set(ACTIONS.values()) - access.FREE_ACTIONS:
+        assert f'"{action}"' not in rule, f"{action} must stay behind the password"
+
+
+def test_the_store_lists_what_is_installed_without_a_password():
+    # #182: the Store asked a child's account for an administrator's
+    # password because it read ListInstalledDetails, which names who
+    # installed what and lists every account's own apps. That stays an
+    # admin read; the Store reads the caller's own view instead.
+    assert ACTIONS["ListInstalledDetails"] == access.ACTION_READ_CONFIG
+    assert ACTIONS["ListMyInstalledDetails"] == access.ACTION_USE_STORE
+    assert "ListMyInstalledDetails" in access.UID_AWARE
+    assert ACTIONS["GetPolicy"] == access.ACTION_READ_CONFIG

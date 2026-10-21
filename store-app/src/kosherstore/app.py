@@ -491,8 +491,6 @@ class Window(Adw.ApplicationWindow):
     # -- data ------------------------------------------------------------------
 
     def reload(self) -> None:
-        import os
-
         self.refresh_button.set_sensitive(False)
         if self.stack.get_visible_child_name() == "loading":
             self.load_status.set_title("Loading apps…")
@@ -509,16 +507,20 @@ class Window(Adw.ApplicationWindow):
             except Exception:  # noqa: BLE001 - an older daemon has only the approved list
                 catalog = self.client.list_catalog().get("apps", [])
             installed = set(self.client.list_installed())
+            # Only calls that are free for every account. The Store opens on
+            # a child's account without a password, and the whole policy or
+            # who installed what are an administrator's to read: asking for
+            # them put the password prompt on the screen.
             details = []
             try:
-                details = self.client.list_installed_details()
+                details = self.client.list_my_installed_details()
             except Exception:  # noqa: BLE001 - an older daemon has only the refs
                 pass
-            policy = None
+            mine = None
             try:
-                policy = self.client.get_policy()
-            except Exception:  # noqa: BLE001 - non-admins can read policy too,
-                pass          # but never fail the store if they cannot
+                mine = self.client.get_my_settings()
+            except Exception:  # noqa: BLE001 - never fail the store over this
+                pass
             updates = {}
             try:
                 updates = {u["ref"]: u for u in self.client.list_app_updates()}
@@ -529,19 +531,17 @@ class Window(Adw.ApplicationWindow):
                 unused = self.client.list_unused_apps()
             except Exception:  # noqa: BLE001 - an older daemon has no cleanup
                 pass
-            return catalog, installed, details, policy, updates, access, ready, unused
+            return catalog, installed, details, mine, updates, access, ready, unused
 
         def on_done(result):
             self.refresh_button.set_sensitive(True)
             if self.stack.get_visible_child_name() == "loading":
                 self.stack.set_visible_child_name("home")
-            (self.catalog, self.installed, self.installed_apps, policy, self.updates,
+            (self.catalog, self.installed, self.installed_apps, mine, self.updates,
              self.access, self.ready, self.unused) = result
-            if policy:
-                me = next((u for u in policy["users"] if u["uid"] == os.getuid()), None)
-                if me is not None:
-                    self.can_install = me.get("can_install_apps", True)
-                    self.is_admin = me.get("admin", False)
+            if mine and mine.get("managed"):
+                self.can_install = mine.get("can_install_apps", True)
+                self.is_admin = mine.get("admin", False)
             self._render_home()
             self._render_sidebar()
             self._render()

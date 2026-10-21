@@ -315,16 +315,10 @@ def test_installing_shows_progress_then_the_app_is_installed(window):
 
 def test_a_user_who_may_not_install_sees_why(monkeypatch):
     class NoInstalls(DemoClient):
-        def get_policy(self):
-            import os
-
-            policy = super().get_policy()
-            # The account at the keyboard, and only it: the demo family
-            # already uses uid 1000, which is usually the developer's own.
-            policy["users"] = [{"uid": os.getuid(), "username": "kid",
-                                "mode": "filtered", "can_install_apps": False,
-                                "admin": False}]
-            return policy
+        def get_my_settings(self):
+            # The account at the keyboard, as kosherd describes it to itself.
+            return {"managed": True, "username": "kid", "mode": "filtered",
+                    "can_install_apps": False, "admin": False}
 
     monkeypatch.setattr(store, "DaemonClient", NoInstalls)
     win = store.Window()
@@ -450,13 +444,36 @@ def test_the_installing_shelf_says_so_when_nothing_is_happening(window):
     assert window.empty.get_title() == "No app changes in progress"
 
 
+def test_opening_the_store_asks_nothing_an_administrator_must_answer(monkeypatch):
+    # #182: on a child's account the Store brought up the administrator's
+    # password prompt, because it read the whole policy and the admin's
+    # list of who installed what. It reads only what any account may.
+    asked = []
+
+    class Watching(DemoClient):
+        def get_policy(self):
+            asked.append("GetPolicy")
+            return super().get_policy()
+
+        def list_installed_details(self):
+            asked.append("ListInstalledDetails")
+            return super().list_installed_details()
+
+    monkeypatch.setattr(store, "DaemonClient", Watching)
+    win = store.Window()
+    drain()
+    win.reload()
+    drain()
+    assert asked == []
+
+
 def test_installed_lists_what_the_machine_has_even_outside_the_catalogue(monkeypatch):
     # An app approved when it was installed, since taken off the list, is
     # still on the machine. The shelf used to filter the catalogue, so it
     # showed nothing for it.
     class Extra(DemoClient):
-        def list_installed_details(self):
-            return super().list_installed_details() + [
+        def list_my_installed_details(self):
+            return super().list_my_installed_details() + [
                 {"ref": "org.example.Old", "name": "An Older App", "approved": False}]
 
         def list_installed(self):
@@ -480,7 +497,7 @@ def test_installed_says_so_when_nothing_is_installed(monkeypatch):
         def list_installed(self):
             return []
 
-        def list_installed_details(self):
+        def list_my_installed_details(self):
             return []
 
     monkeypatch.setattr(store, "DaemonClient", Nothing)

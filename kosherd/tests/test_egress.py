@@ -50,7 +50,7 @@ def _chain(out: str, name: str) -> list[str]:
 
 def test_every_tcp_port_of_a_filtered_account_is_redirected_to_its_listener():
     out = _render(_policy())
-    assert "meta skuid 1001 tcp dport != { 53, 465, 587, 993 } redirect to :30000" in out
+    assert "meta skuid 1001 tcp dport != { 21, 22, 25, 53, 110, 143, 465, 587, 993 } redirect to :30000" in out
 
 
 def test_loopback_is_never_redirected_and_comes_first():
@@ -62,7 +62,7 @@ def test_loopback_is_never_redirected_and_comes_first():
 
 def test_an_accounts_extra_ports_are_excluded_from_the_redirect_and_accepted():
     out = _render(_policy(extra_ports=[22, 2222]))
-    assert "tcp dport != { 22, 53, 465, 587, 993, 2222 } redirect to :30000" in out
+    assert "tcp dport != { 21, 22, 25, 53, 110, 143, 465, 587, 993, 2222 } redirect to :30000" in out
     assert "meta skuid 1001 tcp dport { 22, 2222 } accept" in out
     # ...and before the mode dispatch, so the mode chain's reject never sees them
     output = _chain(out, "output")

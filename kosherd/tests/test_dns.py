@@ -206,6 +206,42 @@ def test_nothing_is_rendered_when_no_account_needs_safe_search():
     assert "cname=" not in out and "host-record=" not in out
 
 
+# -- git over SSH, and names in more than one list (#164) -----------------------
+
+def test_the_git_hosts_feed_the_git_sets():
+    from kosherd.nft import GIT_SSH_HOSTS
+
+    out = dns.render(Policy())
+    for host in GIT_SSH_HOSTS:
+        assert f"nftset=/{host}/4#inet#kosher#git4,6#inet#kosher#git6" in out
+
+
+def test_a_name_in_two_lists_fills_both_sets_from_one_line():
+    # dnsmasq uses one nftset= line per name (the longest match), so a
+    # second line for github.com would have been ignored.
+    from kosherd.policy import UserPolicy
+
+    dev = UserPolicy(uid=1002, username="dev", mode="whitelist", developer_tools=True)
+    out = dns.render(Policy(users=[dev]))
+    lines = [l for l in out.splitlines() if l.startswith("nftset=/github.com/")]
+    assert lines == ["nftset=/github.com/4#inet#kosher#wl4,6#inet#kosher#wl6,"
+                     "4#inet#kosher#git4,6#inet#kosher#git6"]
+    names = [l.split("/")[1] for l in out.splitlines() if l.startswith("nftset=")]
+    assert len(names) == len(set(names))
+
+
+def test_a_longer_name_keeps_the_sets_of_the_pattern_that_covers_it():
+    from kosherd.policy import UserPolicy
+
+    kid = UserPolicy(uid=1001, username="kid", mode="whitelist",
+                     whitelist=["example.org", "docs.example.org"])
+    pol = Policy(users=[kid], system_whitelist=["docs.example.org"])
+    out = dns.render(pol)
+    assert ("nftset=/docs.example.org/4#inet#kosher#sys4,6#inet#kosher#sys6,"
+            "4#inet#kosher#wl4,6#inet#kosher#wl6") in out
+    assert "nftset=/example.org/4#inet#kosher#wl4,6#inet#kosher#wl6" in out
+
+
 # -- the dnsfilter accounts' own resolver (#183, #189) ------------------------
 
 FILES = Path(__file__).parents[2] / "os-image" / "files"

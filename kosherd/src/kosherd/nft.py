@@ -16,10 +16,14 @@ Design (see docs/architecture.md):
 - The supervised modes are DEFAULT-DENY (issue #33, F1). A filtered account's
   every TCP port is redirected into its own proxy listener — web on 8080 is
   still web — except the resolver's 53, the named non-web protocols
-  (DIRECT_TCP_PORTS: mail) and the account's own extra_ports; what still
-  reaches the mode chain is refused. dnsfilter, which has no proxy, allows
-  80/443 and the same named protocols to addresses its own resolver handed
-  out, never to the LAN, and refuses other TCP. Loopback is
+  (DIRECT_TCP_PORTS: mail), the protocols where the server speaks first
+  (SERVER_FIRST_TCP_PORTS: ssh and the like, which would hang in the
+  proxy) and the account's own extra_ports; what still reaches the mode
+  chain is refused. An account with developer tools on may also use SSH
+  to the major git hosts (GIT_SSH_HOSTS, the @git4/@git6 sets). dnsfilter,
+  which has no proxy, allows 80/443 and the same named protocols to
+  addresses its own resolver handed out, never to the LAN, and refuses
+  other TCP. Loopback is
   never redirected. UDP cannot be inspected, so it is a decision: NTP, and
   high ports for video calls (UserPolicy.video_calls, on by default).
 """
@@ -125,6 +129,21 @@ LAN4 = ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "169.254.0.0/16")
 # TCP goes to the proxy (filtered) or is refused (dnsfilter); an account
 # that genuinely needs more gets it in `extra_ports`, an advanced setting.
 DIRECT_TCP_PORTS = (465, 587, 993)
+# Protocols where the SERVER speaks first: the client waits for a greeting
+# before it sends a byte. mitmproxy picks a connection's protocol from the
+# client's first bytes, so in the proxy these hang with neither side
+# moving (#164: `gh repo clone` over SSH sat there forever). They are not
+# redirected; they reach the mode chain, which refuses them at once, so
+# the program says "Connection refused" instead of waiting. ftp, ssh,
+# smtp, pop3, imap. extra_ports still opens any of them for an account.
+SERVER_FIRST_TCP_PORTS = (21, 22, 25, 110, 143)
+# Git over SSH for accounts with developer tools on, to these hosts only.
+# dnsmasq adds their addresses to @git4/@git6 as they resolve (dns.py), as
+# it does for the whitelists. Port 22 is never open to any host: `ssh -D`
+# to a server of one's own is a tunnel around the filter. A git server of
+# the family's own is the administrator's call, through extra_ports.
+GIT_SSH_HOSTS = ("github.com", "gitlab.com", "codeberg.org", "bitbucket.org")
+GIT_SSH_PORT = 22
 # UDP cannot be inspected at all. Below this a port is a named service and
 # the account gets only NTP; above it is where video calls live, and that
 # is a per-account switch (UserPolicy.video_calls), on by default.
@@ -226,9 +245,11 @@ def render(policy: Policy, *, dns_uid: int, mitm_uid: int | None = None,
         # only 80 and 443: web on 8080 or 8443 is still web, and a port
         # that is not redirected is a port that is not read. The
         # exceptions are 53 (the resolver's, redirected above), the named
-        # non-web protocols, and the account's own extra ports.
+        # non-web protocols, the server-first ones (refused in the mode
+        # chain rather than left to hang in the proxy), and the account's
+        # own extra ports.
         web_redirect = "".join(
-            f"        meta skuid {owner_match(uid)} tcp dport != {{ {_ports(53, *DIRECT_TCP_PORTS, *_extras(by_uid.get(uid)))} }} "
+            f"        meta skuid {owner_match(uid)} tcp dport != {{ {_ports(53, *DIRECT_TCP_PORTS, *SERVER_FIRST_TCP_PORTS, *_extras(by_uid.get(uid)))} }} "
             f"redirect to :{port}\n"
             for uid, port in ports.items())
     else:
@@ -240,6 +261,17 @@ def render(policy: Policy, *, dns_uid: int, mitm_uid: int | None = None,
     per_user = "".join(
         f"        meta skuid {owner_match(u.uid)} tcp dport {{ {_ports(*u.extra_ports)} }} accept\n"
         for u in supervised if u.extra_ports)
+    # Git over SSH to the major hosts for the accounts with developer
+    # tools on — to those addresses only, never port 22 at large.
+    # Whitelist accounts too: the hosts are the same few, and git is what
+    # developer tools are for.
+    git_ssh = sorted(u.uid for u in policy.developer_accounts()
+                     if u.mode not in UNFILTERED_MODES)
+    if git_ssh:
+        elems = ", ".join(e for uid in git_ssh for e in owner(uid))
+        per_user += (
+            f"        meta skuid {{ {elems} }} ip daddr @git4 tcp dport {GIT_SSH_PORT} accept\n"
+            f"        meta skuid {{ {elems} }} ip6 daddr @git6 tcp dport {GIT_SSH_PORT} accept\n")
     no_video = sorted(u.uid for u in supervised if not u.video_calls)
     if no_video:
         elems = [e for uid in no_video for e in owner(uid)]
@@ -307,6 +339,9 @@ table {TABLE} {{
 {_set_block("wl6", "ipv6_addr")}
 {_set_block("sys4", "ipv4_addr")}
 {_set_block("sys6", "ipv6_addr")}
+    # The git hosts' addresses (GIT_SSH_HOSTS), filled by dnsmasq.
+{_set_block("git4", "ipv4_addr")}
+{_set_block("git6", "ipv6_addr")}
 {_set_block("doh4", "ipv4_addr", doh_block4, interval=True)}
 {_set_block("lan4", "ipv4_addr", LAN4, interval=True)}
     # Every address the dnsfilter resolver handed out (its nftset=/#/ line),
@@ -415,12 +450,15 @@ table {TABLE} {{
         ip6 daddr {{ {", ".join(LAN6)} }} reject
         ip daddr @dns4 tcp dport {{ {dnsfilter_tcp} }} accept
         ip6 daddr @dns6 tcp dport {{ {dnsfilter_tcp} }} accept
-        # A name on a whitelist or the system list resolves into those sets
-        # instead: dnsmasq feeds the most specific nftset= line only.
+        # A name on a whitelist, the system list or the git hosts resolves
+        # into those sets instead: dnsmasq feeds the most specific nftset=
+        # line only.
         ip daddr @wl4 tcp dport {{ {dnsfilter_tcp} }} accept
         ip6 daddr @wl6 tcp dport {{ {dnsfilter_tcp} }} accept
         ip daddr @sys4 tcp dport {{ {dnsfilter_tcp} }} accept
         ip6 daddr @sys6 tcp dport {{ {dnsfilter_tcp} }} accept
+        ip daddr @git4 tcp dport {{ {dnsfilter_tcp} }} accept
+        ip6 daddr @git6 tcp dport {{ {dnsfilter_tcp} }} accept
         udp dport {{ {_ports(*UDP_LOW_ALLOWED)} }} accept
         udp dport >= {UDP_HIGH} accept
         reject

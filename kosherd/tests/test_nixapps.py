@@ -216,7 +216,8 @@ def test_the_session_environment_is_left_alone():
     conf = (ROOT / "os-image/files/etc/environment.d/60-kosher-nix-path.conf").read_text()
     line = next(l for l in conf.splitlines() if l.startswith("PATH="))
     assert line == ("PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
-                    ":${HOME}/.nix-profile/bin:/nix/var/nix/profiles/default/bin")
+                    ":${HOME}/.nix-profile/bin:${HOME}/.local/state/nix/profiles/profile/bin"
+                    ":/nix/var/nix/profiles/default/bin")
     # The system's directories are literal text, never "${PATH}": in the
     # login screen's launch environment that expands to nothing, and a
     # PATH of two Nix directories left 0.13.0 on a black screen (#110).
@@ -226,6 +227,35 @@ def test_the_session_environment_is_left_alone():
                 assert "${PATH" not in l and ":/usr/bin:" in l, conf.name
     assert "kosher-nix-desktop" in (ROOT / "kosherd/pyproject.toml").read_text()
     assert "test -x /usr/bin/kosher-nix-desktop" in (ROOT / "os-image/Containerfile").read_text()
+
+
+def test_a_login_shell_finds_what_was_installed_for_the_account():
+    # #191: an admin's install for an account lands in
+    # ~/.local/state/nix/profiles/profile. Nix's own nix.sh adds only
+    # ~/.nix-profile/bin, and skips itself entirely in a shell whose
+    # environment already carries its marker (runuser from root's shell),
+    # so `bash -lc gh` said "command not found" with gh installed.
+    script = ROOT / "os-image/files/etc/profile.d/kosher-nix-path.sh"
+
+    def path_after(path: str, times: int = 1) -> str:
+        source = " && ".join([f". {script}"] * times)
+        env = {"HOME": "/home/kid", "PATH": path, "__ETC_PROFILE_NIX_SOURCED": "1"}
+        return subprocess.run(["sh", "-c", f"{source} && printf %s \"$PATH\""], env=env,
+                              capture_output=True, text=True, check=True).stdout
+
+    expected = ("/usr/bin:/bin:/root/.nix-profile/bin:/home/kid/.nix-profile/bin"
+                ":/home/kid/.local/state/nix/profiles/profile/bin")
+    assert path_after("/usr/bin:/bin:/root/.nix-profile/bin") == expected
+    # Sourced again (a login shell inside a login shell): nothing doubles.
+    assert path_after("/usr/bin:/bin:/root/.nix-profile/bin", times=2) == expected
+    # After the system's directories, never before them.
+    assert path_after("/usr/bin").startswith("/usr/bin:")
+    # The session PATH names the same two directories.
+    conf = (ROOT / "os-image/files/etc/environment.d/60-kosher-nix-path.conf").read_text()
+    assert "${HOME}/.local/state/nix/profiles/profile/bin" in conf
+    # nix.sh still runs after it, so this does not depend on the order of
+    # the profile scripts.
+    assert script.name < "nix.sh"
 
 
 def test_desktop_entries_are_linked_after_every_change(home, monkeypatch):

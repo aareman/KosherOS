@@ -1900,6 +1900,31 @@ def test_going_back_asks_first_and_then_calls_the_daemon():
     assert called == []
 
 
+def test_going_back_takes_the_guardian_password(monkeypatch):
+    # F11 (#187): the older version brings its own, possibly weaker,
+    # filter, so Go back is asked for the guardian password and passes it.
+    called, asked = [], []
+
+    class Recording(FakeClient):
+        def rollback(self, guardian_password=""):
+            called.append(guardian_password)
+
+    class Guarded(FakeWindow):
+        def with_guardian(self, then):
+            asked.append(True)
+            then("the guardian's")
+
+    monkeypatch.setattr(computer, "confirm",
+                        lambda _win, _title, _body, _label, action, **_kw: action())
+    win = Guarded(Recording())
+    page = computer.UpdatesPage(win)
+    drain()
+    page._confirm_rollback()
+    drain()
+    assert asked == [True]
+    assert called == ["the guardian's"]
+
+
 # -- the demo mode ------------------------------------------------------------------
 
 def test_the_demo_client_answers_everything_the_real_client_does():

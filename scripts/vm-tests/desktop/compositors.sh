@@ -49,7 +49,7 @@ check "Hyprland is installed" 0 command -v Hyprland
 check_contains "Hyprland --verify-config accepts /etc/xdg/hypr/hyprland.lua" "config ok" \
     Hyprland --verify-config -c /etc/xdg/hypr/hyprland.lua
 check "umbriel is installed" 0 command -v umbriel
-check_contains "umbriel config validate accepts /etc/xdg/umbriel/config.toml" "config ok" \
+check_contains "umbriel config validate accepts /etc/xdg/umbriel/config.toml" "config: ok" \
     umbriel config validate -c /etc/xdg/umbriel/config.toml
 check "the Hyprland session target is installed" 0 \
     test -f /usr/lib/systemd/user/kosher-hyprland-session.target
@@ -95,8 +95,16 @@ for c in hyprland umbriel niri; do
         bad "$c: $u is not signed in on seat0 after an automatic login"
         continue
     fi
-    s=$(seat_session)
-    check_contains "$c: the session GDM starts is $c" "$c" loginctl show-session "$s" -p Desktop --value
+    # Which session this is: the compositor names itself in the session's
+    # XDG_CURRENT_DESKTOP (logind's Desktop property stays empty under an
+    # automatic login), once it has imported its environment.
+    sleep 15
+    desktop=$(user_systemctl show-environment 2>/dev/null | sed -n 's/^XDG_CURRENT_DESKTOP=//p')
+    if printf '%s' "$desktop" | grep -qi "$c"; then
+        ok "$c: the session GDM starts is $c (XDG_CURRENT_DESKTOP=$desktop)"
+    else
+        bad "$c: the session GDM starts is not $c (XDG_CURRENT_DESKTOP='$desktop')"
+    fi
     proc=$c
     [ "$c" = hyprland ] && proc=Hyprland
     if wait_until 60 pgrep -u "$uid" -x "$proc" >/dev/null; then

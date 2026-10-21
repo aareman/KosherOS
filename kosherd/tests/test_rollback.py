@@ -51,12 +51,32 @@ def _daemon(monkeypatch, stdout="", returncode=0, stderr="", record=None):
 
 # ---- the gate ---------------------------------------------------------------
 
-def test_rollback_needs_the_update_right_and_not_the_guardian():
-    # greenboot has to do the same thing with no password at all when an
-    # image fails its health check, so gating the manual path on the
-    # guardian would buy little and risk a machine nobody present can fix.
+def test_rollback_needs_the_update_right_and_the_guardian():
+    # F11 (#187): the version gone back to brings the filter it was built
+    # with, which can be older and weaker, so an administrator alone must
+    # not be able to choose it.
     assert ACTIONS["Rollback"] == access.ACTION_APPLY_UPDATES
-    assert "Rollback" not in GUARDIAN_GATED
+    assert "Rollback" in GUARDIAN_GATED
+    req = access.evaluate("Rollback", setup_complete=True, session_unlocked=True,
+                          guardian_enabled=True, guardian_proven=False)
+    assert req.needs_guardian
+    # And the password is the call's own trailing argument, which the
+    # dispatcher checks before the call runs.
+    from kosherd.daemon import INTROSPECTION_XML
+
+    method = INTROSPECTION_XML.split('<method name="Rollback">', 1)[1].split("</method>", 1)[0]
+    assert 'name="guardian_password"' in method
+
+
+def test_the_automatic_return_does_not_go_through_kosherd():
+    # What lets the manual path take the guardian password: greenboot's
+    # check only says whether the filter is up, and the boot counter does
+    # the going back. If it ever asked kosherd, it would be asked for a
+    # password nobody is there to give. (It reads `kosherctl status`, as
+    # root, which is a read.)
+    text = CHECK.read_text()
+    assert "system rollback" not in text
+    assert "Rollback" not in text
 
 
 def test_changing_which_image_the_machine_runs_is_logged_either_way():

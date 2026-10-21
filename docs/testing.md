@@ -209,7 +209,11 @@ A fresh install takes about fifteen minutes: ten to make the disk and
 three for the first-boot test. So it is done once per master revision.
 The disk is made from master's image as in `just vm-rootless`, and the
 boot test answers the setup wizard. The machine it sets up is kept under
-`build/pr-test/cache/` and reused for a week, or until `--fresh-base`.
+`~/.cache/kosher-pr-test/` (or `$KOSHER_PR_TEST_CACHE`) and reused for a
+week, or until `--fresh-base`.
+Every checkout and worktree on the machine shares that one cache. A run
+holds a lock on it from start to finish, so two runs take turns rather
+than fight over the machine, the registry port or the host's memory.
 
 For a change, that machine is switched to the change's image with
 `bootc switch`, from a registry the harness runs on the host (QEMU's

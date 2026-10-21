@@ -910,7 +910,7 @@ def make_base(st: Stage, master: str, sha: str, image: str, key: Path, env: dict
     (base / "meta.json").write_text(json.dumps(
         {"master": master, "image_id": stamp.read_text().strip(), "created": time.time()}))
     if base_image != image:
-        subprocess.run(["podman", "rmi", "--ignore", base_image], capture_output=True)
+        keep_build_cache(base_image)
     return base
 
 
@@ -1026,6 +1026,31 @@ def machines_to_use(requested: int) -> int:
     except (OSError, StopIteration):
         return requested
     return max(1, min(requested, int((avail - 3 - 3.5) // 2.5)))
+
+
+CACHE_TAG = "localhost/kosher-linux:pr-test-cache"
+
+
+def image_id(ref: str) -> str:
+    return subprocess.run(["podman", "image", "inspect", ref, "--format", "{{.Id}}"],
+                          capture_output=True, text=True).stdout.strip()
+
+
+def keep_build_cache(image: str) -> None:
+    """Drop the run's tag but keep its layers for the next build.
+
+    Removing the last tag on an image removes its build cache with it, and
+    the next build then starts from nothing (twenty minutes instead of
+    half of one). So the newest build holds one harness tag, and the one
+    it replaces is removed: one image's worth of layers, not one per run.
+    """
+    old = image_id(CACHE_TAG)
+    new = image_id(image)
+    if new:
+        subprocess.run(["podman", "tag", image, CACHE_TAG], capture_output=True)
+    subprocess.run(["podman", "rmi", "--ignore", image], capture_output=True)
+    if old and old != new:
+        subprocess.run(["podman", "rmi", "--ignore", old], capture_output=True)
 
 
 class Done(Exception):
@@ -1230,7 +1255,7 @@ def main() -> int:
                 subprocess.run(["git", "-C", str(REPO), "worktree", "remove", "--force", str(tree)],
                                capture_output=True)
             if not args.image:
-                subprocess.run(["podman", "rmi", "--ignore", image], capture_output=True)
+                keep_build_cache(image)
             for sock in ("qmp.sock", "vnc.sock"):
                 (outdir / sock).unlink(missing_ok=True)
 

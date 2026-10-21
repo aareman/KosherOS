@@ -366,6 +366,33 @@ class DemoClient:
     def boot_menu_protected(self):
         return getattr(self, "_boot_menu", True)
 
+    # Tailscale: signed out to begin with; signing in "finishes in the
+    # browser" on the second look at the status.
+    def tailscale_status(self):
+        looks = getattr(self, "_tailscale_looks", None)
+        if looks is not None:
+            self._tailscale_looks = looks + 1
+            if looks >= 1:
+                self._tailscale_looks = None
+                self._tailscale = True
+        if not getattr(self, "_tailscale", False):
+            return {"installed": True, "state": "NeedsLogin", "signed_in": False,
+                    "connected": False}
+        return {"installed": True, "state": "Running", "signed_in": True,
+                "connected": True, "user": "parent@example.com",
+                "tailnet": "parent@example.com", "dns_suffix": "tail1234.ts.net",
+                "name": "kosheros.tail1234.ts.net",
+                "addresses": ["100.101.102.103", "fd7a:115c:a1e0::1"]}
+
+    def tailscale_sign_in(self, pw=""):
+        self._tailscale_looks = 0
+        self._change(None, "TailscaleSignIn", [])
+        return "https://login.tailscale.com/a/demo"
+
+    def tailscale_sign_out(self):
+        self._tailscale = False
+        self._change(None, "TailscaleSignOut", [])
+
     def set_network_access(self, uid, video_calls, extra_ports, pw=""):
         u = self._user(uid)
         u["video_calls"] = bool(video_calls)

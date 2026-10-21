@@ -62,6 +62,8 @@ def env(tmp_path, monkeypatch):
     monkeypatch.setattr(apply_mod, "DNSMASQ_DROPIN_PATH", tmp_path / "dnsmasq" / "wl.conf")
     monkeypatch.setattr(apply_mod, "SAFESEARCH_PATH", tmp_path / "dnsmasq" / "safesearch.conf")
     monkeypatch.setattr(apply_mod, "CATEGORY_BLOCK_PATH",
+                        tmp_path / "dnsmasq-dnsfilter" / "categories.conf")
+    monkeypatch.setattr(apply_mod, "LEGACY_CATEGORY_BLOCK_PATH",
                         tmp_path / "dnsmasq" / "categories.conf")
     monkeypatch.setattr(apply_mod, "ADBLOCK_PATH", tmp_path / "dnsmasq" / "adblock.conf")
     monkeypatch.setattr(apply_mod, "ADBLOCK_OPEN_PATH",
@@ -138,6 +140,29 @@ def test_dns_failure_does_not_undo_the_firewall(env, monkeypatch, tmp_path):
                         "run", FakeRun(fail=["kosher-dns"]))
     apply_policy(policy_with("whitelist"))  # logged, not raised
     assert (tmp_path / "nft" / "kosher.nft").exists()
+
+
+def test_the_dnsfilter_resolver_runs_only_while_someone_is_on_dnsfilter(env):
+    apply_policy(policy_with("dnsfilter", "filtered"))
+    assert env.matching("restart", "kosher-dns-dnsfilter.service")
+    # After the nft load, which empties the sets its answers fill.
+    assert env.index_of("nft", "-f", "kosher.nft") < \
+        env.index_of("restart", "kosher-dns-dnsfilter.service")
+    env.calls.clear()
+    apply_policy(policy_with("filtered", "whitelist"))
+    assert env.matching("stop", "kosher-dns-dnsfilter.service")
+    assert not env.matching("restart", "kosher-dns-dnsfilter.service")
+
+
+def test_category_blocks_are_written_for_the_dnsfilter_resolver_only(env, tmp_path):
+    # #183: in the family resolver they answered filtered accounts and the
+    # proxy too, so a blocked site never reached the proxy's block page.
+    legacy = tmp_path / "dnsmasq" / "categories.conf"
+    legacy.parent.mkdir(parents=True, exist_ok=True)
+    legacy.write_text("address=/bet.example/0.0.0.0\n")
+    apply_policy(policy_with("dnsfilter"))
+    assert (tmp_path / "dnsmasq-dnsfilter" / "categories.conf").exists()
+    assert not legacy.exists()
 
 
 # -- the inspection proxy ----------------------------------------------------

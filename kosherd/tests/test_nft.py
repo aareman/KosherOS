@@ -199,3 +199,104 @@ def test_user_ports_are_deterministic_and_shared_by_every_renderer():
     out = nft.render(pol, dns_uid=989, mitm_uid=988)
     for uid, port in ports.items():
         assert f"meta skuid {uid} tcp dport != {{ 53, 465, 587, 993 }} redirect to :{port}" in out
+
+
+# -- the dnsfilter accounts' own resolver (#183) and addresses (#189, #192) --
+
+def test_dnsfilter_accounts_get_their_own_resolver():
+    out = nft.render(policy_of("dnsfilter", "filtered"), dns_uid=989, mitm_uid=988)
+    chain = out[out.index("chain dns_redirect"):out.index("chain output")]
+    for proto in ("udp", "tcp"):
+        rule = f"meta skuid {{ 1000 }} {proto} dport 53 redirect to :{nft.DNSFILTER_DNS_PORT}"
+        assert rule in chain
+        # Ahead of the loopback return: asking 127.0.0.1:53 by hand must
+        # not reach the family resolver, which holds no category blocks.
+        assert chain.index(rule) < chain.index('oif "lo" return')
+    # The filtered account is not sent there: the proxy decides its
+    # categories, and needs the real address to show the block page.
+    assert "meta skuid { 1001 }" not in chain.split("oif")[0]
+
+
+def test_no_dnsfilter_resolver_redirect_without_a_dnsfilter_account():
+    out = nft.render(policy_of("filtered", "whitelist"), dns_uid=989, mitm_uid=988)
+    assert f"redirect to :{nft.DNSFILTER_DNS_PORT}" not in out
+
+
+def test_a_dnsfilter_accounts_container_uses_the_same_resolver():
+    out = nft.render(policy_of("dnsfilter"), dns_uid=989,
+                     subids={1000: [(524288, 589823)]})
+    assert (f"meta skuid {{ 1000, 524288-589823 }} udp dport 53 redirect to "
+            f":{nft.DNSFILTER_DNS_PORT}") in out
+
+
+def _mode_chain(out: str, name: str) -> list[str]:
+    body = out[out.index(f"chain {name} {{"):]
+    body = body[:body.index("\n    }")]
+    return [l.strip() for l in body.splitlines()[1:]
+            if l.strip() and not l.strip().startswith("#")]
+
+
+def test_dnsfilter_connects_only_to_addresses_its_resolver_handed_out():
+    rules = _mode_chain(nft.render(policy_of("dnsfilter"), dns_uid=989), "mode_dnsfilter")
+    accepts = [r for r in rules if "tcp dport" in r and r.endswith("accept")]
+    assert accepts, rules
+    # Every TCP accept names a set dnsmasq fills: a bare address nobody
+    # looked up matches none of them and falls to the final reject.
+    for rule in accepts:
+        assert any(f"daddr @{s}" in rule for s in
+                   ("dns4", "dns6", "wl4", "wl6", "sys4", "sys6")), rule
+    assert rules[-1] == "reject"
+
+
+def test_the_safe_search_addresses_are_in_the_dns_set():
+    # dnsmasq answers those from its own host-records and adds nothing to a
+    # set for them; without this, safe search would break Google outright.
+    from kosherd.dns import SAFESEARCH_ADDRESSES
+
+    out = nft.render(policy_of("dnsfilter"), dns_uid=989)
+    block = out[out.index("set dns4 {"):]
+    block = block[:block.index("}\n")]
+    for address in SAFESEARCH_ADDRESSES.values():
+        assert address in block
+
+
+def test_dnsfilter_never_reaches_the_home_network():
+    rules = _mode_chain(nft.render(policy_of("dnsfilter"), dns_uid=989), "mode_dnsfilter")
+    lan = rules.index("ip daddr @lan4 reject")
+    lan6 = next(i for i, r in enumerate(rules) if r.startswith("ip6 daddr { fc00::/7"))
+    first_tcp = next(i for i, r in enumerate(rules) if "tcp dport" in r)
+    assert lan < first_tcp and lan6 < first_tcp
+    # The local services every mode keeps are let through before the mode
+    # chain, so printing and mDNS still work.
+    out = nft.render(policy_of("dnsfilter"), dns_uid=989)
+    output = out[out.index("chain output {"):]
+    assert output.index("jump local_services") < output.index("meta skuid vmap")
+
+
+def test_a_nix_build_may_ask_the_family_resolver():
+    # #190: the builders' loopback was refused whole, the resolver with it,
+    # so no build resolved a name and none reached the proxy.
+    out = nft.render(policy_of("filtered"), dns_uid=989, mitm_uid=988, build_gid=999)
+    output = out[out.index("chain output {"):]
+    for proto in ("udp", "tcp"):
+        rule = f"meta skgid 999 ip daddr 127.0.0.1 {proto} dport 53 accept"
+        assert rule in output
+        assert output.index(rule) < output.index('meta skgid 999 oif "lo" reject')
+    # ...and only that resolver: the plain one stays out of reach.
+    assert f"meta skgid 999 ip daddr 127.0.0.1 udp dport {nft.OPEN_DNS_PORT}" not in out
+
+
+@pytest.mark.skipif(shutil.which("nft") is None, reason="nft binary not installed")
+def test_a_ruleset_with_every_mode_and_nix_passes_nft_check(tmp_path):
+    from kosherd.policy import MODES
+
+    f = tmp_path / "kosher.nft"
+    f.write_text(nft.render(policy_of(*MODES), dns_uid=989, mitm_uid=988,
+                            search_uid=987, build_gid=999,
+                            subids={1002: [(524288, 589823)]}))
+    res = subprocess.run(
+        ["unshare", "-rn", "nft", "--check", "-f", str(f)], capture_output=True, text=True
+    )
+    if "unshare" in res.stderr and res.returncode != 0:
+        pytest.skip(f"cannot create user/net namespace here: {res.stderr.strip()}")
+    assert res.returncode == 0, res.stderr

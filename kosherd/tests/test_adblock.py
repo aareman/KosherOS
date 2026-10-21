@@ -90,6 +90,7 @@ def test_the_same_drop_in_goes_to_both_resolvers(tmp_path, monkeypatch):
     monkeypatch.setattr(apply_mod, "ADBLOCK_PATH", tmp_path / "a" / "adblock.conf")
     monkeypatch.setattr(apply_mod, "ADBLOCK_OPEN_PATH", tmp_path / "b" / "adblock.conf")
     monkeypatch.setattr(apply_mod, "CATEGORY_BLOCK_PATH", tmp_path / "a" / "categories.conf")
+    monkeypatch.setattr(apply_mod, "LEGACY_CATEGORY_BLOCK_PATH", tmp_path / "old" / "categories.conf")
     monkeypatch.setattr(apply_mod, "DNSMASQ_DROPIN_PATH", tmp_path / "a" / "whitelist.conf")
     monkeypatch.setattr(apply_mod, "SAFESEARCH_PATH", tmp_path / "a" / "safesearch.conf")
     monkeypatch.setattr(apply_mod, "NFT_RULESET_PATH", tmp_path / "kosher.nft")

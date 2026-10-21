@@ -18,14 +18,18 @@ Design (see docs/architecture.md):
   still web — except the resolver's 53, the named non-web protocols
   (DIRECT_TCP_PORTS: mail) and the account's own extra_ports; what still
   reaches the mode chain is refused. dnsfilter, which has no proxy, allows
-  80/443 and the same named protocols and refuses other TCP. Loopback is
+  80/443 and the same named protocols to addresses its own resolver handed
+  out, never to the LAN, and refuses other TCP. Loopback is
   never redirected. UDP cannot be inspected, so it is a decision: NTP, and
   high ports for video calls (UserPolicy.video_calls, on by default).
 """
 
 from __future__ import annotations
 
+from .dns import SAFESEARCH_ADDRESSES
 from .policy import INSPECTED_MODES, UNFILTERED_MODES, Policy
+
+SAFESEARCH_ELEMENTS = tuple(sorted(set(SAFESEARCH_ADDRESSES.values())))
 
 # First human UID. Everything below is trusted system territory.
 UID_MIN = 1000
@@ -82,6 +86,18 @@ SEARCH_BACKEND_PORT = 8889
 # redirects. Unfiltered users get a second, plain resolver instead, because
 # one machine-wide resolver cannot give different answers per user.
 OPEN_DNS_PORT = 5354
+
+# The resolver that answers dnsfilter accounts, and only them: the family
+# resolver plus their category blocks (#183). The proxy decides a filtered
+# account's categories, and it can only show its block page for a name
+# that resolved to the real site, so those blocks cannot sit in the
+# resolver that filtered accounts and the proxy itself use. Every address
+# this one hands out goes into the dns4/dns6 sets, which are where a
+# dnsfilter account may open a connection to (#189).
+DNSFILTER_DNS_PORT = 5356
+
+# Private and link-local IPv6, which @lan4 does not cover.
+LAN6 = ("fc00::/7", "fe80::/10")
 
 # Known DoH-on-tcp-443 resolver IPs (indistinguishable from HTTPS, so blocked
 # by address). Curated, shipped with the OS image, portal-refreshed later.
@@ -182,8 +198,13 @@ def render(policy: Policy, *, dns_uid: int, mitm_uid: int | None = None,
     build_redirect = (
         f"        meta skgid {build_gid} tcp dport {{ 80, 443 }} redirect to :{BUILDER_PORT}\n"
         if build_gid is not None else "")
+    # The one other thing on loopback a build needs is the family resolver
+    # (#190): without it no name resolved, so a build never reached the
+    # proxy that is meant to judge it.
     build_loopback = (
         f"        meta skgid {build_gid} ip daddr 127.0.0.0/8 tcp dport {BUILDER_PORT} accept\n"
+        f"        meta skgid {build_gid} ip daddr 127.0.0.1 udp dport 53 accept\n"
+        f"        meta skgid {build_gid} ip daddr 127.0.0.1 tcp dport 53 accept\n"
         f'        meta skgid {build_gid} oif "lo" reject\n'
         f"        meta skgid {build_gid} ip daddr 127.0.0.0/8 reject\n"
         f"        meta skgid {build_gid} ip6 daddr ::1 reject\n"
@@ -225,6 +246,19 @@ def render(policy: Policy, *, dns_uid: int, mitm_uid: int | None = None,
         per_user += (f"        meta skuid {{ {', '.join(elems)} }} "
                      f"udp dport >= {UDP_HIGH} reject\n")
 
+    # dnsfilter accounts are sent to their own resolver, which holds their
+    # category blocks. Ahead of the loopback returns: a query aimed at
+    # 127.0.0.1:53 would otherwise reach the family resolver, which has none.
+    dnsfiltered = sorted(u.uid for u in policy.effective_users()
+                         if u.mode == "dnsfilter")
+    if dnsfiltered:
+        uids = ", ".join(e for uid in dnsfiltered for e in owner(uid))
+        dnsfilter_dns = "".join(
+            f"        meta skuid {{ {uids} }} {proto} dport 53 redirect to :{DNSFILTER_DNS_PORT}\n"
+            for proto in ("udp", "tcp"))
+    else:
+        dnsfilter_dns = ""
+
     # Unfiltered users are sent to the plain resolver, so the safe-search
     # answers the filtered resolver hands out do not reach them.
     unfiltered = sorted(u.uid for u in policy.effective_users()
@@ -237,6 +271,7 @@ def render(policy: Policy, *, dns_uid: int, mitm_uid: int | None = None,
         )
     else:
         open_dns = ""
+    dnsfilter_tcp = _ports(80, 443, *DIRECT_TCP_PORTS)
     mitm_exempt = f", {mitm_uid}" if mitm_uid is not None else ""
     search_exempt = f", {search_uid}" if search_uid is not None else ""
     # Loopback is otherwise wide open (see the output chain), which is what
@@ -274,6 +309,11 @@ table {TABLE} {{
 {_set_block("sys6", "ipv6_addr")}
 {_set_block("doh4", "ipv4_addr", doh_block4, interval=True)}
 {_set_block("lan4", "ipv4_addr", LAN4, interval=True)}
+    # Every address the dnsfilter resolver handed out (its nftset=/#/ line),
+    # and the safe-search addresses it answers from its own records, which
+    # dnsmasq does not add to a set.
+{_set_block("dns4", "ipv4_addr", SAFESEARCH_ELEMENTS)}
+{_set_block("dns6", "ipv6_addr")}
     # UIDs granted a temporary captive-portal window (element timeout).
 {_set_block("captive", "uid", timeout=True)}
 
@@ -281,7 +321,7 @@ table {TABLE} {{
         type nat hook output priority dstnat; policy accept;
         # Loopback is nobody's business but the machine's: a dev server or a
         # local service on any port — 443 included — is never redirected.
-        oif "lo" return
+{dnsfilter_dns}        oif "lo" return
         ip daddr 127.0.0.0/8 return
         ip6 daddr ::1 return
         # Never redirect the resolver's or the proxy's own traffic, or they
@@ -362,11 +402,25 @@ table {TABLE} {{
     }}
 
     chain mode_dnsfilter {{
-        # No proxy here, so the web is 80 and 443 to anywhere, plus the
-        # named non-web protocols; other TCP is refused, not left unread.
+        # No proxy here, so the web is 80 and 443, plus the named non-web
+        # protocols; other TCP is refused, not left unread. Only to an
+        # address the account's resolver handed out (#189): a typed address,
+        # an app with its own resolver or a shared hosts list would step
+        # around every block DNS makes. Never to the home network (#192):
+        # what an account may use there is the local services (DHCP, mDNS,
+        # printing), let through before this chain.
         jump evasion_block
         meta l4proto {{ icmp, ipv6-icmp }} accept
-        tcp dport {{ 80, 443, {_ports(*DIRECT_TCP_PORTS)} }} accept
+        ip daddr @lan4 reject
+        ip6 daddr {{ {", ".join(LAN6)} }} reject
+        ip daddr @dns4 tcp dport {{ {dnsfilter_tcp} }} accept
+        ip6 daddr @dns6 tcp dport {{ {dnsfilter_tcp} }} accept
+        # A name on a whitelist or the system list resolves into those sets
+        # instead: dnsmasq feeds the most specific nftset= line only.
+        ip daddr @wl4 tcp dport {{ {dnsfilter_tcp} }} accept
+        ip6 daddr @wl6 tcp dport {{ {dnsfilter_tcp} }} accept
+        ip daddr @sys4 tcp dport {{ {dnsfilter_tcp} }} accept
+        ip6 daddr @sys6 tcp dport {{ {dnsfilter_tcp} }} accept
         udp dport {{ {_ports(*UDP_LOW_ALLOWED)} }} accept
         udp dport >= {UDP_HIGH} accept
         reject

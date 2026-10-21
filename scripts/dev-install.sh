@@ -23,6 +23,11 @@ semanage port -a -t dns_port_t -p udp 5354 2>/dev/null || \
     semanage port -m -t dns_port_t -p udp 5354 || true
 semanage port -a -t dns_port_t -p tcp 5354 2>/dev/null || \
     semanage port -m -t dns_port_t -p tcp 5354 || true
+# The dnsfilter accounts' resolver listens on 5356, likewise.
+semanage port -a -t dns_port_t -p udp 5356 2>/dev/null || \
+    semanage port -m -t dns_port_t -p udp 5356 || true
+semanage port -a -t dns_port_t -p tcp 5356 2>/dev/null || \
+    semanage port -m -t dns_port_t -p tcp 5356 || true
 rm -rf "$tmpdir"
 
 echo "== installing mitmproxy (inspect mode)"

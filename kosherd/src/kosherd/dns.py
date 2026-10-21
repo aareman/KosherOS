@@ -4,7 +4,7 @@ The base dnsmasq config (/etc/kosher/dnsmasq.conf, shipped in the OS image)
 binds 127.0.0.1:53 with the Cloudflare family resolvers hardcoded upstream and
 includes /etc/kosher/dnsmasq.d/*.conf. kosherd owns exactly one drop-in there:
 the whitelist rendering below. As dnsmasq resolves a whitelisted domain it adds
-the answer's IPs to the kosher table's wl4/wl6 (or sys4/sys6) sets via its
+the answer's IPs to the kosher table's wl4/wl6 (or sys4/sys6, git4/git6) sets via its
 native nftset support, which is what actually opens the firewall for that
 destination.
 """
@@ -83,14 +83,19 @@ SAFESEARCH_CNAMES = {
 }
 
 
-def _nftset_line(domain: str, set4: str, set6: str) -> str:
+def _nftset_line(domain: str, *pairs: tuple[str, str]) -> str:
     # dnsmasq nftset syntax: nftset=/example.org/4#inet#kosher#wl4,6#inet#kosher#wl6
     # A dnsmasq domain pattern matches the domain and all its subdomains, which
     # is what our "*." wildcard means; a bare domain should match exactly, but
     # dnsmasq has no exact-only form — accepting subdomains of an approved
     # domain is an acceptable over-match for a family whitelist.
     name = domain.removeprefix("*.")
-    return f"nftset=/{name}/4#inet#kosher#{set4},6#inet#kosher#{set6}"
+    sets = ",".join(f"4#inet#kosher#{set4},6#inet#kosher#{set6}" for set4, set6 in pairs)
+    return f"nftset=/{name}/{sets}"
+
+
+def _covers(pattern: str, name: str) -> bool:
+    return name == pattern or name.endswith("." + pattern)
 
 
 def render(policy: Policy) -> str:
@@ -113,14 +118,35 @@ def render(policy: Policy) -> str:
     )
     system_domains = sorted({d.removeprefix("*.") for d in policy.effective_system_whitelist()})
 
+    # The git hosts developer accounts may reach over SSH (nft.py, #164).
+    from .nft import GIT_SSH_HOSTS
+    git_domains = sorted(GIT_SSH_HOSTS)
+
+    # One directive per name, naming every set the name belongs in. dnsmasq
+    # uses only the single nftset= line with the longest matching domain, so
+    # github.com in two lists would have filled one set and not the other,
+    # and a whitelisted sub.example.org would have hidden a system-wide
+    # example.org from it. A name therefore also carries the sets of every
+    # shorter pattern that covers it.
+    groups = (
+        ("# System domains (updates, connectivity check, portal) -> sys4/sys6",
+         ("sys4", "sys6"), system_domains),
+        ("# User whitelists -> wl4/wl6", ("wl4", "wl6"), user_domains),
+        ("# Git over SSH for developer accounts -> git4/git6", ("git4", "git6"), git_domains),
+    )
     lines = [
         f"# Rendered by kosherd from policy revision {policy.revision}. DO NOT EDIT.",
-        "",
-        "# System domains (updates, connectivity check, portal) -> sys4/sys6",
     ]
-    lines += [_nftset_line(d, "sys4", "sys6") for d in system_domains]
-    lines += ["", "# User whitelists -> wl4/wl6"]
-    lines += [_nftset_line(d, "wl4", "wl6") for d in user_domains]
+    done: set[str] = set()
+    for heading, _, names in groups:
+        lines += ["", heading]
+        for name in names:
+            if name in done:
+                continue
+            done.add(name)
+            pairs = [pair for _, pair, patterns in groups
+                     if any(_covers(p, name) for p in patterns)]
+            lines.append(_nftset_line(name, *pairs))
     return "\n".join(lines) + "\n"
 
 

@@ -566,6 +566,25 @@ def installed_details() -> list[dict]:
     return details
 
 
+def installed_details_for(uid: int) -> list[dict]:
+    """What is installed as one account sees it, for the Store.
+
+    installed_details() is the administrator's view: it says which account
+    installed each app and lists every account's own apps. The Store opens
+    on any account without a password, so it gets this instead: every
+    Flatpak (system-wide, as `flatpak list` shows anyone) and only this
+    account's own apps, with nothing about who installed what.
+    """
+    out = []
+    for detail in installed_details():
+        if accountapps.is_account_app(detail["ref"]) \
+                and detail.get("installed_by_uid") != uid:
+            continue
+        out.append({k: v for k, v in detail.items()
+                    if k not in ("installed_by", "installed_by_uid")})
+    return out
+
+
 def nix_installed_details(catalog: dict, ledger: dict) -> list[dict]:
     """The per-account apps kosherd installed (nixpkgs packages and
     developers' own builds), each in the home of the account that asked

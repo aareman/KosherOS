@@ -251,7 +251,12 @@ three by default, and fewer start when the host is short of memory.
   Sixteen requests at once to a gambling site must all fail to load it
   and all get the block page, an ordinary site must load through the
   proxy, and when Firefox opens the gambling site on the desktop the
-  filter must record the visit.
+  filter must record the visit. Last, each script in
+  `scripts/vm-tests/desktop/` runs on this machine, as root, with
+  `PR_USER` naming the account at the screen and `PR_GL` saying whether
+  the machine has a GPU: the checks that need someone signed in at a
+  seat, such as whose keyboard files are in force, go there and print
+  PASS, FAIL and SKIP lines like a suite.
 - **suites**: the target's own `scripts/vm-tests`, as root over ssh, each
   suite timed. A fast run cuts Nix's download retries short; `--full`
   leaves them alone.

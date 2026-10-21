@@ -46,6 +46,19 @@ if [ "$want_text" = yes ]; then
     # takes its questions off that pipe entirely; errors still flow to the
     # log via stderr. /dev/console is a real tty and needs no controlling
     # terminal, unlike /dev/tty.
+    #
+    # And take the boot splash down first. On a machine with no display
+    # nothing else ever quits Plymouth (GDM does so once its greeter is on
+    # a screen), and a plymouthd left running keeps /dev/console open,
+    # reads what is typed there, and replays the whole boot log over it
+    # when a unit sends it a message. That is where the password typed at
+    # the serial login went after setup (#180). Quit it the way the
+    # graphical path does below, and finish the job if quitting hangs.
+    echo "step: releasing the boot splash"
+    timeout 10s plymouth quit >/dev/null 2>&1 || true
+    if pgrep -x plymouthd >/dev/null 2>&1; then
+        pkill -x plymouthd || true
+    fi
     if [ -w /dev/console ]; then
         kosherctl setup <>/dev/console >/dev/console && rc=0 || rc=$?
     else

@@ -86,6 +86,7 @@ RULES = [
     (r"^(scripts/(pr-test\.py|pr_test_select\.py|check-no-sudo\.py)|Justfile|devenv\.(nix|lock|yaml)|"
      r"\.github/workflows/vm-test\.yml)$", EVERYTHING, "the VM harness"),
     (r"^scripts/vm-tests/(lib|run)\.sh$", "suites:all", "the suites' shared code"),
+    (r"^scripts/vm-tests/desktop/", "desktop", "a check on the signed-in desktop"),
     (r"^scripts/vm-tests/(\d\d-[a-z-]+)\.sh$", "suites:own", "a suite"),
     # The filter.
     (r"^kosherd/src/kosherd/(nft|dns|egress|mitm\w*|categories|lists|media|youtube|"

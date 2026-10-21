@@ -64,6 +64,43 @@ COPY os-image/desktop/build-umbriel.sh /build-umbriel.sh
 RUN bash /build-umbriel.sh /tmp/umbriel /tmp/xdg-desktop-portal-umbriel /out \
         "$UMBRIEL_REF" "$UMBRIEL_PORTAL_REF"
 
+# keyd, the key remapper (kosherd/keyboard.py), is not packaged by Fedora
+# 44. A pinned release, checked against its hash, is compiled here so the
+# compiler stays out of the image. CONFIG_DIR=/run/keyd: keyd reads the
+# config of whoever's session is on the screen from /run, where kosherd
+# writes it, so nothing at run time writes /etc and every boot starts from
+# the computer's own config (files/etc/keyd, which remaps nothing).
+# keyd-application-mapper (per-app keys) goes to /usr/libexec/kosher, not
+# PATH: on its own it would call keyd's socket, which nobody has (see
+# keyboard.py). kosher-keyd-apps.service runs it with KEYD_BIN pointing at
+# kosher-keyd-bind, which goes through kosherd. Its GNOME extension is
+# replaced by KosherOS's own (files/usr/share/gnome-shell/extensions), which
+# only reports the window in front: upstream's also starts the mapper, and
+# kills it whenever GNOME turns extensions off, as it does at the lock screen.
+FROM quay.io/fedora/fedora:44 as keyd-build
+ARG KEYD_VERSION=2.6.0
+ARG KEYD_SHA256=697089681915b89d9e98caf93d870dbd4abce768af8a647d54650a6a90744e26
+RUN dnf -y install gcc make && dnf clean all
+RUN curl -fsSL -o /tmp/keyd.tar.gz \
+        "https://github.com/rvaiya/keyd/archive/refs/tags/v${KEYD_VERSION}.tar.gz" \
+    && echo "${KEYD_SHA256}  /tmp/keyd.tar.gz" | sha256sum -c - \
+    && tar -xzf /tmp/keyd.tar.gz -C /tmp \
+    && cd "/tmp/keyd-${KEYD_VERSION}" \
+    && make PREFIX=/usr CONFIG_DIR=/run/keyd COMMIT="v${KEYD_VERSION}" \
+    && make install PREFIX=/usr CONFIG_DIR=/run/keyd COMMIT="v${KEYD_VERSION}" \
+        DESTDIR=/out FORCE_SYSTEMD=1 \
+    && install -Dm755 scripts/keyd-application-mapper \
+        /out/usr/libexec/kosher/keyd-application-mapper \
+    && grep -q "KEYD_BIN = os.environ.get('KEYD_BIN', 'keyd')" \
+        /out/usr/libexec/kosher/keyd-application-mapper \
+    && grep -q zwlr_foreign_toplevel_manager_v1 /out/usr/libexec/kosher/keyd-application-mapper \
+    && rm -rf /out/run /out/usr/bin/keyd-application-mapper \
+        /out/usr/share/keyd/gnome-extension* \
+    && install -Dm644 LICENSE /out/usr/share/licenses/keyd/LICENSE \
+    && /out/usr/bin/keyd -v | grep -q "v${KEYD_VERSION}" \
+    && test -f /out/usr/lib/systemd/system/keyd.service \
+    && test -f /out/usr/lib/sysusers.d/keyd.conf
+
 FROM quay.io/fedora/fedora-bootc:44
 
 # --- Packages ---------------------------------------------------------------
@@ -167,6 +204,13 @@ RUN d=/usr/share/gnome-shell/extensions/paperwm@paperwm.github.com \
     && glib-compile-schemas "$d/schemas" \
     && grep -q '"50"' "$d/metadata.json" \
     || echo "WARNING: PaperWM did not install; the tiling layout will be plain GNOME"
+# keyd, from its builder stage above. The keyd group owns its socket and
+# has no members: kosherd, as root, is the only client (keyboard.py).
+COPY --from=keyd-build /out/usr/ /usr/
+RUN getent group keyd >/dev/null || groupadd -r keyd \
+    && test -z "$(getent group keyd | cut -d: -f4)" \
+    && test -x /usr/bin/keyd && ! test -e /usr/bin/keyd-application-mapper \
+    && test -x /usr/libexec/kosher/keyd-application-mapper
 # ArcMenu, from the builder stage above. Its schema lands in the shared
 # schema directory (that is how its Makefile installs system-wide), so the
 # compiled schema cache is refreshed for GNOME Shell to find it.
@@ -358,6 +402,11 @@ RUN true && \
      semanage port -m -t dns_port_t -p udp 5354) && \
     (semanage port -a -t dns_port_t -p tcp 5354 || \
      semanage port -m -t dns_port_t -p tcp 5354) && \
+    # And the dnsfilter accounts' resolver on 5356, likewise.
+    (semanage port -a -t dns_port_t -p udp 5356 || \
+     semanage port -m -t dns_port_t -p udp 5356) && \
+    (semanage port -a -t dns_port_t -p tcp 5356 || \
+     semanage port -m -t dns_port_t -p tcp 5356) && \
     checkmodule -M -m -o /tmp/kosher-dnsmasq-nftset.mod /usr/share/kosher/selinux/kosher-dnsmasq-nftset.te && \
     semodule_package -o /tmp/kosher-dnsmasq-nftset.pp -m /tmp/kosher-dnsmasq-nftset.mod && \
     semodule -i /tmp/kosher-dnsmasq-nftset.pp && rm -f /tmp/kosher-dnsmasq-nftset.* && \
@@ -511,6 +560,10 @@ RUN passwd -l root \
     && systemctl mask systemd-resolved.service debug-shell.service \
     && systemctl enable sshd.service \
     && systemctl enable kosherd.service kosher-firewall.service kosher-dns.service \
+    # The key remapper. It remaps nothing until a person's own file says
+    # to, and then only while their session is on the screen.
+    && systemctl enable keyd.service \
+    && systemctl is-enabled keyd.service \
     # Updates are applied by a parent from the admin app (kosherd's path,
     # which turns signature enforcement on with the first switch), never on
     # their own: the stock timer would pull the first update before that
@@ -586,6 +639,10 @@ RUN python3 -m pip install --prefix=/usr --no-deps \
     # ...and listens for kosherd's time warnings, so "5 minutes left" is a
     # notification on the person's screen, not a line in a log.
     && systemctl --global enable kosher-time-notify.service \
+    # ...and sends the person's own keyd files to kosherd (keyboard.py),
+    # and runs the per-app key mapper for people with an app.conf.
+    && systemctl --global enable kosher-keyboard.service kosher-keyd-apps.service \
+    && chmod 755 /usr/libexec/kosher-keyd-run \
     && systemctl enable kosher-search-secret.service kosher-searxng.service \
         kosher-search.service \
     # Portal sync is inert until the device enrols (the unit and timer
@@ -605,6 +662,21 @@ RUN for f in gdm-password gdm-autologin login; do \
     done \
     && grep -q pam_time /etc/pam.d/gdm-password \
     && grep -q kosher-time-refused /etc/pam.d/gdm-password \
+    # Text consoles are for administrators (F8 in #33, #186). Every getty,
+    # on the screen's Ctrl+Alt+F2 to F6 and on a serial line, signs in
+    # through the `login` service, so that is where the line is drawn: at
+    # a terminal, an account outside kosher-admin is refused, and a
+    # supervised account gets no shell outside the desktop, where its app
+    # list, lock screen and time warnings are. Root stays allowed (it is
+    # locked, so only matters with a key), and an administrator can still
+    # reach a text console when the desktop will not start. A session root
+    # opens through the same service with no terminal at all (systemd-run
+    # with PAMName=login, which the VM tests use for a seat-less session)
+    # is no console and passes. The login screen has its own PAM services
+    # and is not affected.
+    && { grep -q 'ingroup kosher-admin' /etc/pam.d/login || \
+        sed -i '0,/^account/{s|^account|account    [success=2 default=ignore] pam_succeed_if.so quiet uid eq 0\naccount    [success=1 default=ignore] pam_succeed_if.so quiet user ingroup kosher-admin\naccount    required     pam_succeed_if.so quiet tty !~ ?*\n&|}' /etc/pam.d/login; } \
+    && grep -q 'ingroup kosher-admin' /etc/pam.d/login \
     && test -x /usr/bin/kosher-time-refused \
     && test -x /usr/bin/kosher-time-notify \
     && test -x /usr/bin/kosher-nix-desktop \

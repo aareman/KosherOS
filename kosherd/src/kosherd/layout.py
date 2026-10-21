@@ -53,6 +53,9 @@ EXT_APPINDICATOR = "appindicatorsupport@rgcjonas.gmail.com"
 EXT_BLUR = "blur-my-shell@aunetx"
 EXT_USER_THEME = "user-theme@gnome-shell-extensions.gcampax.github.com"
 EXT_PAPERWM = "paperwm@paperwm.github.com"
+# Says which window is in front, for the per-app keys in app.conf. Writes
+# nothing unless that person's key mapper is running (keyboard.py).
+EXT_KEYD_FOCUS = "keyd-focus@kosherlinux.org"
 
 # Where the seed for a Noctalia configuration ships, and where it goes.
 NOCTALIA_SEED = Path("/usr/share/kosher/desktop/noctalia.toml")
@@ -75,7 +78,8 @@ PLANS: dict[str, list[tuple[str, str, str]]] = {
     # login (#132); writing "true" here puts those accounts right.
     "classic": [
         ("org.gnome.shell", "enabled-extensions",
-         _gvariant_list([EXT_DASH_TO_PANEL, EXT_ARCMENU, EXT_APPINDICATOR, EXT_BLUR, EXT_USER_THEME])),
+         _gvariant_list([EXT_DASH_TO_PANEL, EXT_ARCMENU, EXT_APPINDICATOR, EXT_BLUR,
+                         EXT_USER_THEME, EXT_KEYD_FOCUS])),
         ("org.gnome.desktop.wm.preferences", "button-layout",
          "'appmenu:minimize,maximize,close'"),
         ("org.gnome.desktop.interface", "enable-hot-corners", "false"),
@@ -88,7 +92,8 @@ PLANS: dict[str, list[tuple[str, str, str]]] = {
     # workspaces come back and its edge tiling gets out of the way.
     "tiling": [
         ("org.gnome.shell", "enabled-extensions",
-         _gvariant_list([EXT_PAPERWM, EXT_APPINDICATOR, EXT_BLUR, EXT_USER_THEME])),
+         _gvariant_list([EXT_PAPERWM, EXT_APPINDICATOR, EXT_BLUR, EXT_USER_THEME,
+                         EXT_KEYD_FOCUS])),
         ("org.gnome.desktop.wm.preferences", "button-layout", "'appmenu:close'"),
         ("org.gnome.desktop.interface", "enable-hot-corners", "false"),
         ("org.gnome.mutter", "dynamic-workspaces", "true"),

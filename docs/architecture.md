@@ -82,8 +82,13 @@ loopback, with its upstream fixed to a family-filtered service. nftables
 redirects every human account's port-53 traffic to it, so picking another
 resolver is impossible. Everyone gets family-filtered DNS and ad blocking
 as a baseline; per-account differences happen at the packet layer. There
-are two resolver instances, one for filtered accounts and a plain one for
-unfiltered accounts, and the ad list is rendered into both.
+are three resolver instances. The family one answers filtered and
+whitelist accounts, the proxy and the system. Basic protection
+(`dnsfilter`) accounts get one of their own that adds the categories they
+block, since nothing else can stop those for them. Unfiltered accounts get
+a plain one. The ad list is rendered into all three. A category a filtered
+account blocks is never blocked in DNS: the proxy needs the site's real
+address to show the page that says why.
 
 **Packets.** One nftables table, rendered from the policy and loaded
 fail-closed before the network comes up. Every packet is dispatched by the
@@ -93,13 +98,16 @@ owning uid:
 |---|---|---|
 | `none` | No internet | loopback and LAN printing only; everything else refused |
 | `whitelist` | Approved sites only | only addresses in the whitelist sets, which dnsmasq fills as it resolves approved names, so browsing by bare address is blocked for free |
-| `dnsfilter` | Basic protection | open on 80 and 443 and the named mail ports, behind family DNS and evasion blocking |
+| `dnsfilter` | Basic protection | 80, 443 and the named mail ports, only to addresses its own resolver handed out (so not by bare address) and never to the home network, behind family DNS, its category blocks and evasion blocking |
 | `filtered` | Filtered internet | every TCP connection diverted into the account's own proxy listener |
 | `unfiltered` | No filtering | open |
 
 An account with no policy falls through to `none`. A shared chain refuses
 DNS over TLS, QUIC and a set of DNS-over-HTTPS resolver addresses,
-including the unfiltered public resolvers. Rootless containers do not
+including the unfiltered public resolvers. The browsers are also told to
+leave DNS over HTTPS off: Firefox by its policy file, and Chromium, Chrome,
+Edge and Brave by a managed policy in the place each one's Flatpak reads.
+Rootless containers do not
 escape any of this: a user's network namespace reaches the host through an
 ordinary process owned by that user, so the uid rules still match. A
 captive-portal window, for hotel and airport Wi-Fi, is a set element with a
@@ -305,6 +313,12 @@ default, the administrator's own unless another is typed, and the text
 setup does the same. Starting the computer never asks for it; editing an
 entry or opening GRUB's command line does. A machine installed before this
 was the default sets one from **Admin → Protection → Boot menu password**.
+
+Text consoles are for administrators. Ctrl+Alt+F3 and a serial line still
+show a login prompt, but only an account in KosherOS Admin's administrators
+gets a shell there; anyone else is refused, so nobody steps outside the
+desktop's app list, lock screen and time warnings. An administrator can
+still sign in on one when the desktop will not start.
 
 Nothing in the image loads an out-of-tree kernel module, so lockdown costs
 the family nothing.

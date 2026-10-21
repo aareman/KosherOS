@@ -18,7 +18,14 @@ from .policy import INSPECTED_MODES, SAFESEARCH_MODES, Policy
 
 WHITELIST_CONF = "/etc/kosher/dnsmasq.d/whitelist.conf"
 SAFESEARCH_CONF = "/etc/kosher/dnsmasq.d/safesearch.conf"
-CATEGORY_BLOCK_CONF = "/etc/kosher/dnsmasq.d/categories.conf"
+# Category blocks belong to the dnsfilter accounts' own resolver (#183),
+# which reads dnsmasq.d as well as its own directory. In the family
+# resolver they answered filtered accounts and the proxy too, so a blocked
+# site was refused by DNS and the proxy never got to show its block page.
+CATEGORY_BLOCK_CONF = "/etc/kosher/dnsmasq-dnsfilter.d/categories.conf"
+# Where they used to be written; removed on apply so an upgraded machine
+# does not keep feeding them to the family resolver.
+LEGACY_CATEGORY_BLOCK_CONF = "/etc/kosher/dnsmasq.d/categories.conf"
 # The tailnet's names, forwarded to Tailscale's own resolver (render_tailnet).
 # In both resolvers, like the ad list: an unfiltered account reaches the
 # family's machines by name as much as a filtered one does.
@@ -186,11 +193,11 @@ def render_category_blocks(policy: Policy, bundle) -> str:
     """dnsmasq entries blocking categorised domains at the DNS layer.
 
     Filtered users are handled precisely in the proxy, which knows who is
-    asking. Users whose traffic is NOT read (dnsfilter, whitelist) can only
-    be served by the resolver, and one resolver cannot answer differently
-    per user — so this blocks the UNION of what those users block. That is
-    a deliberate over-block: with mixed profiles the stricter one wins for
-    everybody on this resolver, which is the safe direction to err.
+    asking, and they never see these: the file is read only by the
+    resolver dnsfilter accounts are sent to (nft.DNSFILTER_DNS_PORT). One
+    resolver cannot answer differently per user, so this blocks the UNION
+    of what the dnsfilter accounts block. That is a deliberate over-block
+    among them: the stricter one wins, which is the safe direction to err.
     """
     wanted: set[str] = set()
     for user in policy.effective_users():

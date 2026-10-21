@@ -89,6 +89,14 @@ ACTIONS = {
     # And which compositor their advanced desktop runs on.
     "GetMyCompositor": ACTION_READ_OWN,
     "SetMyCompositor": ACTION_SET_OWN,
+    # Your own key remaps (keyd), from your own file. A preference about
+    # your own keyboard: it is in force only while your session is on the
+    # screen, and a command() key runs as you, never as root (kosherd
+    # never hands keyd your text). See keyboard.py.
+    "SetMyKeyboard": ACTION_SET_OWN,
+    # Per-application keys from your own app.conf, the same way: checked
+    # like your files, and only while your session is on the screen.
+    "SetMyAppKeys": ACTION_SET_OWN,
     # Your own filter settings, read-only, no password: what applies to
     # THIS account and nothing about any other. A filtered account should
     # not be a mystery to the person using it — someone who can see the
@@ -258,6 +266,7 @@ SETUP_READS = frozenset({"IsComplete", "AdminExists"})
 UID_AWARE = frozenset({"Unlock", "Lock", "Status", "VerifyGuardian", "InstallApp",
                        "ListStoreApps", "ListMyInstalledDetails", "GetMyLayout", "SetMyLayout", "GetMySettings",
                        "GetMyCompositor", "SetMyCompositor",
+                       "SetMyKeyboard", "SetMyAppKeys",
                        # A nixpkgs app is in one account's profile: what is
                        # installed, and whose copy to update or remove,
                        # depends on who is asking.

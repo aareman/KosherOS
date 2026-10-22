@@ -728,3 +728,17 @@ def test_the_focus_pipe_always_has_a_writer(tmp_path):
     (plain / "keyd.fifo").write_text("not a pipe")
     with pytest.raises(OSError, match="not a pipe"):
         keyboard.open_focus_pipe(plain)
+
+
+def test_a_refusal_is_reported_by_its_text_not_a_bool():
+    """strip_remote_error returns a bool; the watcher once logged
+    "not applied: True" for a refused file (stack VM run, #169)."""
+    gi = pytest.importorskip("gi")
+    gi.require_version("Gio", "2.0")
+    from gi.repository import Gio, GLib
+
+    error = GLib.Error.new_literal(
+        Gio.DBusError.quark(),
+        "GDBus.Error:org.kosherlinux.Error: default.conf line 2: invalid key or action",
+        Gio.DBusError.FAILED)
+    assert keyboard._dbus_message(error) == "default.conf line 2: invalid key or action"

@@ -668,6 +668,21 @@ def run_main(argv=None) -> int:  # pragma: no cover - runs as root, from keyd
 
 # ---- in the person's session ------------------------------------------------
 
+def _dbus_message(error) -> str:
+    """What kosherd said, without the D-Bus error name in front.
+
+    Not Gio.DBusError.strip_remote_error: it returns a bool, and under
+    PyGObject it strips a copy, so the watcher once reported "not applied:
+    True" for a refused file.
+    """
+    message = error.message
+    if message.startswith("GDBus.Error:"):
+        _name, sep, rest = message.partition(": ")
+        if sep:
+            return rest
+    return message
+
+
 def read_own(home: Path) -> dict[str, str]:
     """The person's keyboard files by name (app.conf is not one)."""
     folder = home / USER_DIR
@@ -738,7 +753,7 @@ def bind_main(argv=None) -> int:  # pragma: no cover - needs kosherd
             BUS_NAME, OBJECT_PATH, "org.kosherlinux.Daemon1.Profiles", "SetMyAppKeys",
             GLib.Variant("(as)", (bindings,)), None, Gio.DBusCallFlags.NONE, 10000, None)
     except GLib.Error as e:
-        print(Gio.DBusError.strip_remote_error(e) or e.message, file=sys.stderr)
+        print(_dbus_message(e), file=sys.stderr)
         return 1
     return 0
 
@@ -827,7 +842,7 @@ def main(argv=None) -> int:  # pragma: no cover - needs a session and kosherd
         except KeymapError as e:
             return str(e)
         except GLib.Error as e:
-            return Gio.DBusError.strip_remote_error(e) or e.message
+            return _dbus_message(e)
         return None
 
     if not args.watch:

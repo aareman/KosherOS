@@ -46,8 +46,10 @@ for c in niri hyprland umbriel; do
     check "the $c session file exists" 0 test -f "/usr/share/wayland-sessions/$c.desktop"
 done
 check "Hyprland is installed" 0 command -v Hyprland
+# As the person, not root: Hyprland refuses to start, even to check a
+# config, when it was started with root's privileges ("launched with su").
 check_contains "Hyprland --verify-config accepts /etc/xdg/hypr/hyprland.lua" "config ok" \
-    Hyprland --verify-config -c /etc/xdg/hypr/hyprland.lua
+    in_session Hyprland --verify-config -c /etc/xdg/hypr/hyprland.lua
 check "umbriel is installed" 0 command -v umbriel
 check_contains "umbriel config validate accepts /etc/xdg/umbriel/config.toml" "config: ok" \
     umbriel config validate -c /etc/xdg/umbriel/config.toml

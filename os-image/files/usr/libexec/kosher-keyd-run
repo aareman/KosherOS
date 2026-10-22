@@ -1,0 +1,10 @@
+#!/usr/bin/python3 -I
+# What keyd runs, as root, for a person's command() key: two numbers, the
+# person's uid and which of their commands. It runs that command as the
+# person, in their own session, and only while their session is the one on
+# the screen. The command's text never reaches keyd. See kosherd/keyboard.py.
+import sys
+
+from kosherd.keyboard import run_main
+
+sys.exit(run_main())

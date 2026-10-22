@@ -45,6 +45,100 @@ are an app of their own rather than a section of its Appearance page. The
 Look app is also the first piece of what may one day be a KosherOS
 settings app in place of GNOME's.
 
+## Remapping keys
+
+KosherOS runs [keyd](https://github.com/rvaiya/keyd), which can change what
+any key does: Caps Lock as Control when held and Escape when tapped, a
+layer of arrow keys under the home row, a different letter layout. It
+works the same under every layout and session, and at the level of the
+keyboard itself, so Hebrew and the other keyboard layouts in GNOME
+Settings still apply on top of it.
+
+Each person writes their own files in `~/.config/keyd/`, in keyd's own
+format (`man keyd`, and the examples in `/usr/share/doc/keyd/examples`).
+The simplest is one file, `default.conf`, for every keyboard:
+
+```ini
+[main]
+capslock = overload(control, esc)
+```
+
+The files apply as soon as one is saved, and again at every sign-in. If
+keyd cannot use them, a notification names the file and line that is
+wrong, and the keys stay as they were. Running `kosher-keyboard` in a
+terminal applies them once and prints the same message.
+
+### A file for one keyboard
+
+Any other `.conf` file in the folder can be for one keyboard (or mouse),
+named in an `[ids]` section at its top. `kosher-keyboard --list-devices`
+prints each keyboard and mouse with its id:
+
+```
+$ kosher-keyboard --list-devices
+0001:0001  keyboard  AT Translated Set 2 keyboard
+046d:c52b  keyboard  Logitech USB Receiver
+```
+
+A file for the Logitech keyboard alone, `~/.config/keyd/logitech.conf`:
+
+```ini
+[ids]
+046d:c52b
+
+[main]
+leftmeta = leftalt
+leftalt = leftmeta
+```
+
+A keyboard named in a file gets that file. Every other keyboard gets
+`default.conf`, or works as normal if there is no `default.conf`. Only one
+file may be for every keyboard (a file with no `[ids]`, or with `*` in
+it), and two files may not name the same keyboard, because keyd would
+then pick one of them in no particular order. A file for every keyboard
+can leave one out with a line such as `-046d:c52b`, and that keyboard
+then works as normal. There can be up to 8 files.
+
+### Keys that run a command
+
+`f5 = command(notify-send "Hello")` runs the command as the person, in
+their own session, exactly as if they had typed it in a terminal. It
+runs only while their session is the one on the screen, and at most a few
+times a second. `command(...)` has to be the key's whole action; inside
+`overload(...)` or a macro it is refused.
+
+### Keys for one app
+
+`~/.config/keyd/app.conf` gives keys that apply only while a particular
+app is in front, in the format of `man keyd-application-mapper`:
+
+```ini
+[firefox]
+alt.[ = C-pageup
+alt.] = C-pagedown
+```
+
+This works under GNOME, niri, Hyprland and Umbriel. The app mapper starts
+when `app.conf` is first saved, and at every sign-in after that.
+
+### Whose keys are in force
+
+A person's files are in force only while their session is the one on the
+screen. Switching to another person or to the login screen puts that
+person's files in force, or none. Without any files, nothing is remapped.
+
+No account is given access to keyd or to the keyboard devices. An account
+that could read the keyboard devices could record the guardian password
+as a parent types it, and keyd runs its own commands as root. kosherd
+checks each person's files and passes them to keyd for them. A key's
+command stays with kosherd and is never given to keyd, which only learns
+which numbered command to ask for. An `include` may only name one of
+keyd's own files, such as `include layouts/colemak`.
+
+If a remap makes the keyboard unusable, pressing Backspace, Escape and
+Enter together stops keyd. It starts again at once with nothing remapped,
+until a file is saved again or the person signs in again.
+
 ## Why not write our own desktop
 
 A desktop is not a panel and a launcher. It is a Wayland compositor, screen

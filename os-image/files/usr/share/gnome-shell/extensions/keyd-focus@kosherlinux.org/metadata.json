@@ -1,0 +1,6 @@
+{
+  "name": "keyd window reporter",
+  "description": "Tells keyd-application-mapper which window is in front, so the keys in ~/.config/keyd/app.conf follow it. Part of KosherOS; based on keyd's own extension (MIT).",
+  "uuid": "keyd-focus@kosherlinux.org",
+  "shell-version": ["50"]
+}

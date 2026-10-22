@@ -1,0 +1,25 @@
+[Unit]
+Description=KosherOS: per-app keys from this account's app.conf
+Documentation=file:///usr/share/doc/kosher/desktop.md
+# keyd-application-mapper, upstream's, for people who wrote
+# ~/.config/keyd/app.conf. It watches which window is in front (GNOME
+# through the keyd-focus extension's pipe; niri, Hyprland and Umbriel
+# through the wlr foreign-toplevel protocol) and asks for that window's
+# keys. kosher-keyd-apps points its KEYD_BIN at kosher-keyd-bind, which
+# sends those requests to kosherd instead of keyd's socket, which no
+# account has (kosherd/keyboard.py). kosher-keyboard starts this when
+# app.conf first appears in a session.
+PartOf=graphical-session.target
+After=graphical-session.target
+ConditionUser=!@system
+ConditionPathExists=%h/.config/keyd/app.conf
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/kosher-keyd-apps
+# It exits when it finds no window system yet, early in a sign-in.
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=graphical-session.target

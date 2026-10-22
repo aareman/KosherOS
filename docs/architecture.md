@@ -176,9 +176,11 @@ whose ref is `nixpkgs#<package>` is installed by the daemon into the asking
 account's own Nix profile, as that account. The same rule decides it, and
 because the profile is that account's alone there is no second gate to run
 it. Each card in the Store says which source it is from. The Nix daemon
-refuses an account on "No internet" outright, a build's downloads are held
-to the registries by the firewall, and a terminal tool installed this way
-gets a launcher in the app grid that opens a terminal running it.
+refuses an account on "No internet" outright, a build downloads only from
+known source hosts (the forges, registries and mirrors nixpkgs fetches from,
+plus any an administrator added; the builders' proxy refuses the rest), and
+a terminal tool installed this way gets a launcher in the app grid that
+opens a terminal running it.
 
 A Nix app that draws with OpenGL or Vulkan brings its own graphics loader,
 which looks for the drivers in `/run/opengl-driver`, as on NixOS. KosherOS

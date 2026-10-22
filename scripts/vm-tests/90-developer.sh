@@ -162,15 +162,17 @@ fi
 check "a no-internet account cannot pull" 1 pod nokid timeout 120 podman pull -q "$img"
 
 section "What a build may fetch"
-# A fixed-output build runs as a nixbld user with the network. The wrong
-# hash is deliberate: "hash mismatch" means the fetch SUCCEEDED (the
-# firewall let it through); a connection failure means it was refused.
+# A fixed-output build runs as a nixbld user with the network, and its web
+# goes through the builders' proxy, which lets it fetch only from the known
+# source hosts (#199). The wrong hash is deliberate: "hash mismatch" means
+# the fetch SUCCEEDED. curl fails on a refusal and prints the proxy's
+# reason into the build log, which is what a person building would read.
 probe() {
     as wlkid timeout 300 nix build --impure --no-link --expr "
         with import <nixpkgs> {}; derivation {
           name = \"kosher-probe\"; system = builtins.currentSystem;
           builder = \"\${bash}/bin/bash\";
-          args = [ \"-c\" \"\${curl}/bin/curl -sS --max-time 20 -o \$out $1\" ];
+          args = [ \"-c\" \"\${curl}/bin/curl -sS --max-time 20 --fail-with-body -o \$out $1 || { cat \$out; exit 1; }\" ];
           outputHashMode = \"flat\"; outputHashAlgo = \"sha256\";
           outputHash = \"0000000000000000000000000000000000000000000000000000000000000000\";
         }" 2>&1
@@ -183,8 +185,19 @@ esac
 out=$(probe https://example.com/)
 case "$out" in
     *"hash mismatch"*) bad "a build fetched a page that is not a registry (example.com)" ;;
-    *"curl"*|*"builder"*|*"failed"*) ok "a build cannot fetch a page (example.com refused)" ;;
+    *"not a source Nix builds may fetch from"*)
+        ok "a build cannot fetch a page (example.com refused, and the log says why)" ;;
     *) bad "unexpected result for example.com: $(printf '%s' "$out" | tail -3 | head -c 300)" ;;
 esac
+# An administrator can add a host, and take it away again.
+check_contains "an administrator adds a build source" "example.com" \
+    kctl build-sources add example.com
+sleep 2   # the proxy reads its rules file again when it changes
+out=$(probe https://example.com/)
+case "$out" in
+    *"hash mismatch"*) ok "a build fetches from a host the administrator added" ;;
+    *) bad "an added host was still refused: $(printf '%s' "$out" | tail -3 | head -c 300)" ;;
+esac
+check_contains "and removes it" "nothing else" kctl build-sources remove example.com
 
 report

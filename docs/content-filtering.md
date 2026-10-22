@@ -97,6 +97,17 @@ including loopback, so a build can never be a relay for the account that
 started it. The daemon's own fetches from the binary cache run as root, from
 caches only root can name.
 
+A build may also download only from known source hosts: GitHub and its
+download hosts, GitLab, Codeberg, Bitbucket and SourceHut, the SourceForge,
+GNU and kernel.org mirrors, the project download servers nixpkgs names in its
+mirror list, the language registries (PyPI, crates.io, npm, Go's module proxy,
+RubyGems, Hackage, Maven Central) and NixOS's own servers. The proxy refuses
+any other host, and the build log says which host it was and how to allow it.
+The categories still apply to the hosts on the list. An administrator can add
+a host with `kosherctl build-sources add HOST` (guardian-gated);
+`kosherctl build-sources` shows the list. The built-in list is in
+`kosherd/buildsources.py`.
+
 ## The category database
 
 The image imports the University of Toulouse blacklists at build time:

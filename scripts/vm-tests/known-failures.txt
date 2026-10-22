@@ -7,5 +7,4 @@
 # One per line: where it runs (boot, desktop or suites), the check's name
 # or the start of it, and the issue. A suite check is named with its suite.
 
-boot: the administrator can log in                                  #180
 suites: 90-developer: a build fetched a page that is not a registry  #199

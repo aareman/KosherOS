@@ -300,6 +300,11 @@ RUN true && \
      semanage port -m -t dns_port_t -p udp 5354) && \
     (semanage port -a -t dns_port_t -p tcp 5354 || \
      semanage port -m -t dns_port_t -p tcp 5354) && \
+    # And the dnsfilter accounts' resolver on 5356, likewise.
+    (semanage port -a -t dns_port_t -p udp 5356 || \
+     semanage port -m -t dns_port_t -p udp 5356) && \
+    (semanage port -a -t dns_port_t -p tcp 5356 || \
+     semanage port -m -t dns_port_t -p tcp 5356) && \
     checkmodule -M -m -o /tmp/kosher-dnsmasq-nftset.mod /usr/share/kosher/selinux/kosher-dnsmasq-nftset.te && \
     semodule_package -o /tmp/kosher-dnsmasq-nftset.pp -m /tmp/kosher-dnsmasq-nftset.mod && \
     semodule -i /tmp/kosher-dnsmasq-nftset.pp && rm -f /tmp/kosher-dnsmasq-nftset.* && \

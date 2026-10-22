@@ -84,10 +84,14 @@ rm -f "$out" "$(dirname "$out")/.image-id"
 # ext4, as `just vm` makes it. The console arguments are the ones
 # bootc-image-builder gives a qcow2: without ttyS0 the serial line stays
 # silent and boot-test.py has nothing to read.
+# KOSHER_DISK_LABEL (key=value) goes on bcvk's container, so whoever ran
+# this can find and remove that container if bcvk is killed (pr-test does).
+label=()
+[ -z "${KOSHER_DISK_LABEL:-}" ] || label=(--label "$KOSHER_DISK_LABEL")
 "$bcvk" to-disk --virtiofsd "$virtiofsd" --format qcow2 \
     --filesystem ext4 --disk-size 40G \
     --karg console=tty0 --karg console=ttyS0 \
-    "$image" "$out"
+    "${label[@]}" "$image" "$out"
 
 podman image inspect "$image" --format json \
     | python3 -c 'import json,sys; print(json.load(sys.stdin)[0]["Id"])' \

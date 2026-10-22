@@ -211,6 +211,9 @@ The disk is made from master's image as in `just vm-rootless`, and the
 boot test answers the setup wizard. The machine it sets up is kept under
 `~/.cache/kosher-pr-test/` (or `$KOSHER_PR_TEST_CACHE`) and reused for a
 week, or until `--fresh-base`.
+A set-up machine keeps the ssh key it was first booted with, so the base
+records that key's fingerprint, and a run whose cache holds a different
+key says so and sets up a fresh base instead of waiting on ssh.
 Every checkout and worktree on the machine shares that one cache. A run
 holds a lock on it from start to finish, so two runs take turns rather
 than fight over the machine, the registry port or the host's memory.
@@ -237,9 +240,12 @@ others by how long each takes, longest first, so they finish together.
 `--vms` (or `KOSHER_PR_TEST_VMS`) says how many suite machines to use,
 three by default, and fewer start when the host is short of memory.
 
-- **desktop**: the machine booted with a screen. A filtered test account
-  signs in at the GDM login screen, with the keys typed through QEMU's
-  control socket. The session must have a seat, be active and local, and
+- **desktop**: the machine booted with a screen. Once kosherd answers on
+  D-Bus, a filtered test account is made and signs in at the GDM login
+  screen, with the keys typed through QEMU's control socket. A sign-in
+  that does not start a session is tried once more after GDM restarts,
+  and when the login screen never stays up the stage says the machine
+  has no working graphical session. The session must have a seat, be active and local, and
   run Wayland, and the account's user services must all start. polkit is
   asked about the session's own processes: the Store is allowed, and a
   filter change needs an administrator. Then a real filter change is
@@ -281,7 +287,11 @@ ones separately.
 Everything a run produces is in `build/pr-test/<id>/`: `summary.json`
 with every check and the selection, `report.md` for people, a log per
 stage, the serial consoles and the screenshots. The run's machines, its
-worktree and its image tag are removed at the end; `--keep` leaves them.
+worktree, its image tag and any temp disk bcvk made for it in `/var/tmp`
+are removed when the run ends, also when it is stopped with SIGTERM or
+Ctrl-C; `--keep` leaves all of them. The build cache tag
+(`localhost/kosher-linux:pr-test-cache`) stays. Each run starts by
+removing dangling images over a day old that no container uses.
 
 The harness never runs sudo. A `sudo` that fails and records who called
 it is first on the PATH of everything it starts, and before it starts

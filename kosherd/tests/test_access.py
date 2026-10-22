@@ -41,7 +41,7 @@ def test_every_method_has_an_action():
 READS = ["GetPolicy", "Status", "IsEnabled", "ListCatalog", "ListInstalled",
          "ListInstalledDetails", "SearchApps", "CheckUpdate", "Lock",
          "VerifyGuardian", "PortalStatus", "SyncNow", "GetMyLayout", "GetTimeUsage",
-         "SetMyLayout"]
+         "SetMyLayout", "GetMyCompositor", "SetMyCompositor"]
 CHANGES = ["SetFilterMode", "SetWhitelist", "SetUrlRules", "CreateUser",
            "AdoptUser", "RemoveUser", "RemoveApp", "InstallAppFor", "ApproveApp",
            "UnapproveApp", "SetUserApps", "SetUserCanInstall", "SetUserAppAccess",
@@ -110,6 +110,13 @@ def test_choosing_your_own_layout_is_open_to_ordinary_users():
     assert access.ACTION_SET_OWN not in (access.ACTION_READ_CONFIG,
                                          access.ACTION_MANAGE_FILTER,
                                          access.ACTION_MANAGE_USERS)
+
+
+def test_the_advanced_desktops_compositor_is_yours_like_the_layout():
+    assert ACTIONS["GetMyCompositor"] == access.ACTION_READ_OWN
+    assert ACTIONS["SetMyCompositor"] == access.ACTION_SET_OWN
+    assert {"GetMyCompositor", "SetMyCompositor"} <= access.UID_AWARE
+    assert "SetMyCompositor" not in GUARDIAN_GATED
 
 
 def test_choosing_a_layout_is_an_admin_action_without_the_guardian():

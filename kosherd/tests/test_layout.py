@@ -20,6 +20,8 @@ import pytest
 from kosherd import layout as layout_mod
 from kosherd.daemon import Daemon
 from kosherd.policy import (
+    COMPOSITORS,
+    DEFAULT_COMPOSITOR,
     DEFAULT_LAYOUT,
     LAYOUT_LABELS,
     LAYOUTS,
@@ -34,6 +36,8 @@ CONTAINERFILE = (ROOT / "os-image/Containerfile").read_text()
 DESKTOP_DCONF = FILES / "etc/dconf/db/local.d/20-kosheros-desktop"
 LOCKS = FILES / "etc/dconf/db/local.d/locks/10-kosheros-locks"
 NIRI_CONFIG = FILES / "etc/niri/config.kdl"
+HYPRLAND_CONFIG = FILES / "etc/xdg/hypr/hyprland.lua"
+UMBRIEL_CONFIG = FILES / "etc/xdg/umbriel/config.toml"
 NOCTALIA_SEED = FILES / "usr/share/kosher/desktop/noctalia.toml"
 USER_UNIT = FILES / "usr/lib/systemd/user/kosher-layout.service"
 
@@ -133,6 +137,78 @@ def test_a_failed_save_rolls_the_layout_back():
     assert daemon.sessions_set == []
 
 
+def test_the_compositor_round_trips_and_the_default_stays_out_of_the_file():
+    hypr = UserPolicy(uid=1001, username="t", mode="filtered", compositor="hyprland")
+    plain = UserPolicy(uid=1002, username="p", mode="filtered")
+    doc = Policy(revision=1, users=[hypr, plain]).to_dict()
+    assert doc["users"][0]["compositor"] == "hyprland"
+    assert "compositor" not in doc["users"][1]
+    back = Policy.from_dict(doc)
+    assert back.user(1001).compositor == "hyprland"
+    assert back.user(1002).compositor == DEFAULT_COMPOSITOR == "niri"
+    doc["users"][0]["compositor"] = "sway"
+    with pytest.raises(PolicyError):
+        Policy.from_dict(doc)
+
+
+def _daemon_with_sessions(users):
+    """A daemon whose login-screen call records the session it would set."""
+    daemon = _daemon(users)
+    daemon.sessions_named = []
+    daemon._accounts_set_session = lambda uid, layout: daemon.sessions_named.append(
+        (uid, daemon._session_for(uid, layout)))
+    return daemon
+
+
+def test_the_login_screen_is_pointed_at_the_chosen_compositor():
+    daemon = _daemon_with_sessions([UserPolicy(uid=1001, username="t", mode="filtered",
+                                               compositor="umbriel")])
+    daemon.impl_SetMyLayout("advanced", _uid=1001)
+    daemon.impl_SetMyLayout("tiling", _uid=1001)
+    assert daemon.sessions_named == [(1001, "umbriel"), (1001, "gnome")]
+
+
+def test_choosing_a_compositor_under_advanced_changes_the_session_at_once():
+    daemon = _daemon_with_sessions([UserPolicy(uid=1001, username="t", mode="filtered",
+                                               layout="advanced")])
+    daemon.impl_SetMyCompositor("hyprland", _uid=1001)
+    assert daemon.policy.user(1001).compositor == "hyprland"
+    assert daemon.sessions_named == [(1001, "hyprland")]
+    assert daemon.saved == 1 and daemon.applied == 0
+    assert daemon.impl_GetMyCompositor(_uid=1001).unpack() == ("hyprland",)
+    assert daemon.impl_GetMyCompositor(_uid=1002).unpack() == ("niri",)
+
+
+def test_a_compositor_chosen_under_gnome_waits_for_advanced():
+    daemon = _daemon_with_sessions([UserPolicy(uid=1001, username="t", mode="filtered")])
+    daemon.impl_SetMyCompositor("umbriel", _uid=1001)
+    assert daemon.sessions_named == [], "classic stays on GNOME"
+    with pytest.raises(PolicyError):
+        daemon.impl_SetMyCompositor("sway", _uid=1001)
+    with pytest.raises(PolicyError):
+        daemon.impl_SetMyCompositor("niri", _uid=4242)
+
+
+def test_a_failed_save_rolls_the_compositor_back():
+    daemon = _daemon_with_sessions([UserPolicy(uid=1001, username="t", mode="filtered",
+                                               layout="advanced")])
+
+    def boom():
+        raise OSError("disk full")
+
+    daemon._save_only = boom
+    with pytest.raises(OSError):
+        daemon.impl_SetMyCompositor("hyprland", _uid=1001)
+    assert daemon.policy.user(1001).compositor == "niri"
+    assert daemon.sessions_named == []
+
+
+def test_every_compositor_has_a_login_session():
+    assert set(Daemon.COMPOSITOR_SESSIONS) == set(COMPOSITORS)
+    assert Daemon.COMPOSITOR_SESSIONS[DEFAULT_COMPOSITOR] == Daemon.LAYOUT_SESSIONS["advanced"]
+    assert set(COMPOSITORS) == set(layout_mod.NOCTALIA_COMPOSITORS)
+
+
 def test_the_helper_gets_its_own_layout_and_strangers_get_the_default():
     daemon = _daemon([UserPolicy(uid=1001, username="t", mode="filtered",
                                  layout="tiling")])
@@ -223,11 +299,13 @@ def test_no_seed_means_nothing_to_do(tmp_path):
     assert layout_mod.seed_noctalia(tmp_path, tmp_path / "missing.toml") is False
 
 
-def test_under_niri_is_read_from_the_session():
-    assert layout_mod.under_niri("niri")
-    assert layout_mod.under_niri("niri:wlroots")
-    assert not layout_mod.under_niri("gnome")
-    assert not layout_mod.under_niri("")
+def test_the_running_compositor_is_read_from_the_session():
+    assert layout_mod.running_compositor("niri") == "niri"
+    assert layout_mod.running_compositor("niri:wlroots") == "niri"
+    assert layout_mod.running_compositor("Hyprland") == "hyprland"
+    assert layout_mod.running_compositor("Umbriel") == "umbriel"
+    assert layout_mod.running_compositor("GNOME") is None
+    assert layout_mod.running_compositor("") is None
 
 
 def test_dry_run_prints_the_plan_and_touches_nothing(capsys, monkeypatch):
@@ -361,6 +439,98 @@ def test_the_niri_lock_screen_and_launcher_are_the_shells():
     assert "noctalia msg session lock" in text
     assert "noctalia msg panel-toggle launcher" in text
     assert "swaylock" not in text and "fuzzel" not in text and "alacritty" not in text
+
+
+# -- Hyprland and Umbriel ----------------------------------------------------------
+
+def test_hyprland_comes_from_the_copr_which_is_removed_afterwards():
+    assert "copr.fedorainfracloud.org/coprs/nett00n/hyprland/repo/fedora-44/" in CONTAINERFILE
+    assert re.search(r'install "hyprland-\$\{HYPRLAND_VERSION\}\.\*"', CONTAINERFILE)
+    assert "xdg-desktop-portal-hyprland" in CONTAINERFILE
+    # Whether or not the install worked, the repository does not stay.
+    assert re.search(r"; \\\n\s*rm -f /etc/yum.repos.d/kosher-hyprland.repo", CONTAINERFILE)
+    # Its bundled wallpapers are anime drawings; they do not ship.
+    assert "rm -f /usr/share/hypr/wall*.png" in CONTAINERFILE
+
+
+def test_umbriel_is_built_from_pinned_commits_and_checked():
+    for arg in ("UMBRIEL_REF", "UMBRIEL_PORTAL_REF"):
+        assert re.search(rf"^ARG {arg}=[0-9a-f]{{40}}$", CONTAINERFILE, re.M), arg
+    assert "FROM quay.io/fedora/fedora:44 as umbriel-build" in CONTAINERFILE
+    assert "COPY --from=umbriel-build /out/ /tmp/umbriel/" in CONTAINERFILE
+    script = (ROOT / "os-image/desktop/build-umbriel.sh").read_text()
+    assert 'test "$(git -C "$umbriel" rev-parse HEAD)" = "$umbriel_ref"' in script
+    assert 'test "$(git -C "$portal" rev-parse HEAD)" = "$portal_ref"' in script
+    assert "set -euo pipefail" in script
+
+
+def _hyprland_binds(text):
+    """The key strings of every hl.bind, with the loops spelled out."""
+    keys = re.findall(r'^hl\.bind\(([^,]+),', text, re.M)
+    out = []
+    for k in keys:
+        k = k.strip()
+        if k.startswith('"'):
+            out.append(k.strip('"'))
+        else:  # mainMod .. " + X"
+            out.append("SUPER" + "".join(re.findall(r'"([^"]*)"', k)))
+    for i in range(1, 10):
+        out += [f"SUPER + {i}", f"SUPER + CTRL + {i}"]
+    for direction, letter in (("left", "H"), ("down", "J"), ("up", "K"), ("right", "L")):
+        out += [f"SUPER + {direction}", f"SUPER + {letter}", f"SUPER + CTRL + {direction}",
+                f"SUPER + CTRL + {letter}", f"SUPER + SHIFT + {direction}"]
+    return [re.sub(r"\s+", "", k).upper() for k in out]
+
+
+def test_the_hyprland_session_starts_the_shell_and_the_session_target():
+    text = HYPRLAND_CONFIG.read_text()
+    start = re.search(r'hl\.on\("hyprland\.start", function\(\)(.*?)\nend\)', text, re.S).group(1)
+    assert 'hl.exec_cmd("noctalia")' in start
+    assert "systemctl --user import-environment WAYLAND_DISPLAY XDG_CURRENT_DESKTOP" in start
+    assert "systemctl --user start kosher-hyprland-session.target" in start
+    unit = (FILES / "usr/lib/systemd/user/kosher-hyprland-session.target").read_text()
+    assert "BindsTo=graphical-session.target" in unit
+    # What the target brings up: the helper that seeds Noctalia, and the
+    # time-limit warnings.
+    for name in ("kosher-layout.service", "kosher-time-notify.service"):
+        assert "WantedBy=graphical-session.target" in (FILES / "usr/lib/systemd/user" / name).read_text()
+
+
+def test_the_hyprland_keyboard_and_shell_binds():
+    text = HYPRLAND_CONFIG.read_text()
+    assert 'kb_layout  = "us,il"' in text
+    assert 'kb_options = "grp:alt_shift_toggle"' in text
+    assert 'ipc .. "session lock"' in text and 'ipc .. "panel-toggle launcher"' in text
+    assert 'local ipc      = "noctalia msg "' in text
+    assert '"switch:on:Lid Switch"' in text
+    assert "force_default_wallpaper  = 0" in text and "disable_hyprland_logo    = true" in text
+    binds = _hyprland_binds(text)
+    dupes = {k for k in binds if binds.count(k) > 1}
+    assert not dupes, dupes
+
+
+def test_the_umbriel_session_starts_the_shell_with_the_same_keys():
+    doc = tomllib.loads(UMBRIEL_CONFIG.read_text())  # a repeated key fails here
+    assert doc["general"]["autostart"] == ["noctalia"]
+    assert doc["events"]["lid_close"] == "noctalia msg session lock"
+    assert doc["input"]["keyboard"]["layout"] == "us,il"
+    assert doc["input"]["keyboard"]["options"] == "grp:alt_shift_toggle"
+    binds = doc["keybinds"]
+    assert binds["Mod+Space"] == "spawn:noctalia msg panel-toggle launcher"
+    assert binds["Mod+Escape"] == "spawn:noctalia msg session lock"
+    assert binds["Mod+Shift+E"] == "session-quit"
+
+
+def test_the_three_compositors_share_the_main_keys():
+    niri = NIRI_CONFIG.read_text()
+    hypr = HYPRLAND_CONFIG.read_text()
+    umbriel = tomllib.loads(UMBRIEL_CONFIG.read_text())["keybinds"]
+    assert 'Mod+T hotkey-overlay-title="Open a Terminal" { spawn "ptyxis"; }' in niri
+    assert 'hl.bind(mainMod .. " + T",             hl.dsp.exec_cmd(terminal))' in hypr
+    assert umbriel["Mod+T"]["action"] == "spawn:ptyxis"
+    assert 'Mod+Q repeat=false { close-window; }' in niri
+    assert 'hl.bind(mainMod .. " + Q",         hl.dsp.window.close())' in hypr
+    assert umbriel["Mod+Q"]["action"] == "window-close"
 
 
 def test_the_noctalia_seed_parses_and_turns_the_polkit_agent_on():

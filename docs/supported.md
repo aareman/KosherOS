@@ -142,7 +142,7 @@ are off until a parent sets them. See [time limits](time-limits.md).
 | Firmware | UEFI and legacy BIOS; Secure Boot works out of the box through Fedora's signed shim. |
 | Memory and disk | see the provisional [system requirements](install.md#system-requirements) in the installation guide. |
 | Picture checking | About 50 ms per picture on a current laptop CPU, 200–300 ms on four cores, near the limit on two: the filter hides pictures instead of checking them when the machine cannot keep up, and says so. See [pictures and video](media-filtering.md#running-on-the-familys-own-computer). |
-| The advanced (niri) desktop | needs a real GPU; it does not run in a VM without one. |
+| The advanced desktop (niri, Hyprland or Umbriel) | needs a real GPU; it does not run in a VM without one. |
 
 ## Updates
 

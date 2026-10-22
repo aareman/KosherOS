@@ -13,7 +13,7 @@ desktop is a different session and takes effect at the next sign-in.
 |---|---|---|
 | `classic` (default) | GNOME with a taskbar along the bottom, an **Apps** button that opens a Windows-style menu with pinned apps, an all-apps list and search, tray icons, minimise and maximise buttons, GNOME's dynamic workspaces, no hot corner, and no Activities overview at sign-in | almost everyone |
 | `tiling` | GNOME as GNOME ships it, plus PaperWM's scrolling tiling; the same lock screen, GNOME Settings, portals and accessibility | keyboard-driven power users who still want a supported desktop |
-| `advanced` | a separate login-screen session: the niri compositor with the Noctalia shell (bar, launcher, notifications, lock screen, control centre, polkit agent), configured by text files the user owns | people who already run a tiling compositor and want theirs |
+| `advanced` | a separate login-screen session: the Noctalia shell (bar, launcher, notifications, lock screen, control centre, polkit agent) on niri, Hyprland or Umbriel, configured by text files the user owns | people who already run a tiling compositor and want theirs |
 
 Filtering is identical under all three. It is per account at the network
 layer, so which program draws the windows cannot weaken it, and that is
@@ -31,6 +31,21 @@ nobody chooses for anybody else) and, for classic and tiling, applies it
 to the running session at once through the sign-in helper. Advanced is a
 separate session, so the app says it is ready at the next sign-in and
 offers to sign out.
+
+With Advanced chosen, the app also asks which compositor Noctalia runs
+on:
+
+| Compositor | How it arranges windows |
+|---|---|
+| niri (default) | in columns on a strip that scrolls sideways as it grows |
+| Hyprland | dynamic tiling: each new window splits the space of the one before it |
+| Umbriel | Noctalia's own compositor, from the same developers; columns that scroll, as in niri, with tiled layouts as well |
+
+Each compositor is its own login-screen session, and the app offers only
+the ones installed. The choice is kept per account (`SetMyCompositor`,
+which also takes the account from the connection) and the login screen is
+pointed at that session. When the session running is not the one chosen,
+the app offers to sign out of it.
 
 The app also has the glass: a switch for the blur behind the taskbar and
 the windows, how much they are blurred, how see-through the windows are
@@ -160,12 +175,15 @@ full-screen big-tiles launcher for approved-sites-only accounts.
 ### The setting
 
 The layout lives on each account's policy as an optional value defaulting
-to `classic`, so existing policies are unchanged on disk. Setting it for
+to `classic`, so existing policies are unchanged on disk. Beside it is the
+compositor, `niri` by default and left out of the file when it is, which
+only matters while the layout is `advanced`. Setting it for
 an account is a manage-users action with no guardian gate and no ruleset
 render; setting one's own is a separate action every active local user
 holds with no prompt, and the daemon takes the account from the bus. It also
 tells accountsservice which session the login screen should preselect for
-that account, so the person is never asked to find the gear menu. An
+that account (GNOME, or the chosen compositor's session for advanced), so
+the person is never asked to find the gear menu. An
 account can read its own layout through a polkit action any active local
 user holds with no prompt; it is the one thing a non-admin may read about
 themselves, and it says nothing about how they are filtered.
@@ -186,9 +204,10 @@ the next sign-in, when the helper puts it back. Keys that are the same for
 everyone are locked: the login logo, and extension installation, which is
 off.
 
-Under niri the helper does one thing: copies the shipped Noctalia
-configuration into the user's home if there is none yet, then never
-touches it again. The seed carries the settings that matter: the polkit
+Under niri, Hyprland or Umbriel the helper does one thing: copies the
+shipped Noctalia configuration into the user's home if there is none yet,
+then never touches it again. The one seed serves all three, so moving
+between compositors keeps the same shell settings. The seed carries the settings that matter: the polkit
 agent on, without which a password prompt has nowhere to appear; the
 KosherOS wallpaper; and a light theme whose colours Noctalia takes from
 that wallpaper, so the advanced desktop looks like this machine. The
@@ -223,8 +242,8 @@ login. Static wallpaper blur keeps the cost down. Windows are blurred as
 well: each one is slightly see-through over a blurred copy of the wallpaper,
 and goes solid when it is fullscreen. The notification background stays
 nearly opaque for readability.
-GTK app themes, icons, fonts, the wallpaper, and the niri session retain their
-existing defaults. This integrates Aura's shell styling, not its full personal
+GTK app themes, icons, fonts, the wallpaper, and the advanced sessions retain
+their existing defaults. This integrates Aura's shell styling, not its full personal
 desktop installer, settings GUI, or update service.
 
 The installed Dash to Panel version is seeded into the machine's dconf defaults
@@ -242,7 +261,19 @@ reopening to refresh their font lists.
 
 - Fedora packages: Dash to Panel, AppIndicator, niri, Noctalia, and the
   GTK portal backend Flatpak apps need outside GNOME. The classic GNOME
-  session is removed so the login screen offers exactly two sessions.
+  session is removed, so the login screen offers GNOME and the advanced
+  desktop's sessions, one per compositor.
+- Hyprland is not packaged by Fedora 44. It comes from the nett00n/hyprland
+  COPR, with its portal, its dialog helpers and hyprshutdown; dnf checks the
+  packages against the COPR's signing key, and the repository is removed
+  once they are in. Hyprland's bundled wallpapers include anime drawings of
+  its mascot, so they are deleted, and the configuration turns its logo and
+  splash text off. Noctalia draws the KosherOS wallpaper.
+- Umbriel and its screen-capture portal have no release tag and no Fedora
+  package, so a builder stage builds both from pinned commits against
+  Fedora's wlroots 0.20 and refuses a checkout whose commit is not the
+  pinned one. Only the installed files come over, with the runtime
+  packages their binaries link against.
 - ArcMenu is not packaged by Fedora and needs build tools, so a builder
   stage, pinned to a release, builds it and only the result is copied in.
   The button says "Apps" beside the front of the Bais Hamikdosh in the
@@ -264,13 +295,21 @@ reopening to refresh their font lists.
   checks for the current one.
 - The classic layout is also the machine-wide dconf default, so a desktop
   is right before the helper has ever run.
-- niri's system-wide fallback configuration is its default keymap with the
-  shell wired in: Noctalia at startup, launcher, lock, control-centre and
-  media keys through it, Ptyxis as the terminal, and an empty keyboard
-  block so the layout comes from the system keymap, where the wizard and
-  GNOME Settings put it. niri rejects a configuration with a key bound
-  twice and falls back to built-in defaults that start programs the image
-  does not have, so the unit tests check for duplicate binds.
+- Each compositor reads a system-wide configuration until the person writes
+  their own: `/etc/niri/config.kdl`, `/etc/xdg/hypr/hyprland.lua` and
+  `/etc/xdg/umbriel/config.toml`. Each is the compositor's own default with
+  the shell wired in: Noctalia at startup, launcher, lock, control-centre
+  and media keys through it, the lid locking the screen, Ptyxis as the
+  terminal, and binds kept close to one another so the same keys do the
+  same things on all three. niri takes the keyboard layout from the system
+  keymap, where the wizard puts it; Hyprland and Umbriel name English and
+  Hebrew with Alt+Shift themselves. niri rejects a configuration with a
+  key bound twice and falls back to built-in defaults that start programs
+  the image does not have, so the unit tests check for duplicate binds.
+- niri and Umbriel run as systemd user services and start the graphical
+  session target themselves. Hyprland does not, so its configuration
+  starts `kosher-hyprland-session.target` once it is up, which is what
+  runs the sign-in helper and the time-limit warnings in that session.
 
 ### Extensions and GNOME upgrades
 
@@ -288,22 +327,22 @@ notifications, lock screen, idle, on-screen displays, wallpaper, clipboard,
 tray, polkit agent. The plumbing a full session needs is only partly there,
 which is why this layout is opt-in and never a group's default:
 
-- **Display and input configuration** are text, in niri's own
+- **Display and input configuration** are text, in the compositor's own
   configuration. GNOME Settings runs under niri but its Displays, Keyboard
   shortcuts and Multitasking panels are GNOME Shell specific.
 - **Printers and Bluetooth pairing**: Noctalia has toggles; pairing and
   printer setup need GNOME Settings or standalone tools.
-- **Accessibility**: niri has basic Orca support and AccessKit on its own
-  UI; there is no on-screen keyboard, magnifier or high-contrast switch.
+- **Accessibility**: Orca runs under all three (Super+Alt+S), and niri has
+  AccessKit on its own UI; there is no on-screen keyboard, magnifier or
+  high-contrast switch.
 - **Churn**: Noctalia was rewritten from the ground up for its current
   major version, so expect configuration keys to move between releases.
   The seed uses only keys present in the shipped example.
 
 Before it is offered as more than "advanced": the polkit prompt from the
 admin app appears and works; a Flatpak app's file dialog opens; the lock
-screen locks and unlocks; a Hebrew layout typed in GNOME Settings is active
-under niri; all of it verified on the real image across two consecutive
-base-image bumps. The advanced layout needs a real GPU and does not run in
+screen locks and unlocks; Hebrew can be typed; all of it verified on the
+real image, on each compositor, across two consecutive base-image bumps. The advanced layout needs a real GPU and does not run in
 a VM without one.
 
 ## Verifying on a machine
@@ -317,6 +356,8 @@ gnome-extensions list --enabled
 journalctl --user -u kosher-layout    # what it did at sign-in
 # advanced:
 niri validate -c /etc/niri/config.kdl
+Hyprland --verify-config -c /etc/xdg/hypr/hyprland.lua
+umbriel config validate -c /etc/xdg/umbriel/config.toml
 noctalia msg --help
 ```
 

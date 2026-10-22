@@ -36,6 +36,34 @@ RUN git init /tmp/aura-glass \
 COPY os-image/desktop/ /build-glass/
 RUN bash /build-glass/build-glass.sh /tmp/aura-glass /tmp/blur-my-shell /out
 
+# Umbriel, one of the three compositors the advanced desktop can run Noctalia
+# on, and its screen-capture portal. Neither has a release tag or a Fedora
+# package, so both are built from pinned commits; the build script refuses a
+# checkout whose HEAD is not the pinned hash. Only the installed files and a
+# list of the runtime packages they need (NEEDS) go to the final stage.
+# Fedora 44's wlroots 0.20 is the series Umbriel is written against.
+FROM quay.io/fedora/fedora:44 as umbriel-build
+ARG UMBRIEL_REF=7097aeeb80e7b50d22c995b3905ce722e4fdbfaf
+ARG UMBRIEL_PORTAL_REF=1cc6eb18ba0d6c82dd66999646d7e554f76a85b6
+RUN dnf -y install --setopt=install_weak_deps=False git-core gcc-c++ meson ninja-build \
+        pkgconf-pkg-config wayland-devel wayland-protocols-devel wlroots-devel \
+        libxkbcommon-devel libinput-devel systemd-devel pixman-devel libdrm-devel \
+        libdisplay-info-devel cairo-devel pango-devel tomlplusplus-devel json-devel \
+        libxcb-devel xcb-util-wm-devel mesa-libEGL-devel mesa-libGLES-devel \
+        mesa-libgbm-devel lcms2-devel jemalloc-devel sdbus-cpp-devel pipewire-devel \
+        gtk4-devel \
+    && dnf clean all
+RUN for pair in "umbriel ${UMBRIEL_REF}" "xdg-desktop-portal-umbriel ${UMBRIEL_PORTAL_REF}"; do \
+        set -- $pair; \
+        git init "/tmp/$1" \
+        && git -C "/tmp/$1" remote add origin "https://github.com/noctalia-dev/$1" \
+        && git -C "/tmp/$1" fetch --depth 1 origin "$2" \
+        && git -C "/tmp/$1" checkout --detach FETCH_HEAD || exit 1; \
+    done
+COPY os-image/desktop/build-umbriel.sh /build-umbriel.sh
+RUN bash /build-umbriel.sh /tmp/umbriel /tmp/xdg-desktop-portal-umbriel /out \
+        "$UMBRIEL_REF" "$UMBRIEL_PORTAL_REF"
+
 # keyd, the key remapper (kosherd/keyboard.py), is not packaged by Fedora
 # 44. A pinned release, checked against its hash, is compiled here so the
 # compiler stays out of the image. CONFIG_DIR=/run/keyd: keyd reads the
@@ -107,9 +135,10 @@ RUN dnf -y install dnsmasq nftables python3-gobject python3-jsonschema python3-p
         greenboot \
         # The desktop layouts (docs/desktop.md). Classic: GNOME with a
         # taskbar (Dash to Panel) and tray icons; tiling adds PaperWM, which
-        # Fedora does not package, so it is fetched below. Advanced: a
-        # separate niri session with the Noctalia shell, plus the portal
-        # backend Flatpak apps need outside GNOME.
+        # Fedora does not package, so it is fetched below. Advanced: the
+        # Noctalia shell in a separate session on niri (here), Hyprland or
+        # Umbriel (both below), plus the portal backend Flatpak apps need
+        # outside GNOME.
         gnome-shell-extension-dash-to-panel gnome-shell-extension-appindicator \
         gnome-shell-extension-user-theme \
         niri noctalia xdg-desktop-portal-gtk \
@@ -194,6 +223,35 @@ RUN if [ -e /tmp/gnome-ext/FAILED ]; then \
     fi; rm -rf /tmp/gnome-ext
 
 COPY --from=glass-build /out/usr/ /usr/
+
+# The advanced desktop's other two compositors (niri is a Fedora package,
+# installed above). Each brings its own login-screen session.
+#
+# Fedora no longer packages Hyprland, so it comes from the
+# nett00n/hyprland COPR, which builds it for Fedora 44 and signs
+# its packages; dnf checks them against the COPR's key. The repository is
+# used for this install only and then removed, so nothing on the machine
+# points at it. Hyprland's own wallpapers include anime drawings of its
+# mascot, so they are deleted; the advanced desktop shows the KosherOS one.
+# A failed install leaves the image without Hyprland rather than without an
+# image; the Look app offers only the compositors that are installed.
+ARG HYPRLAND_VERSION=0.56
+RUN curl -fsSL -o /etc/yum.repos.d/kosher-hyprland.repo \
+        https://copr.fedorainfracloud.org/coprs/nett00n/hyprland/repo/fedora-44/nett00n-hyprland-fedora-44.repo \
+    && dnf -y --setopt=install_weak_deps=False install "hyprland-${HYPRLAND_VERSION}.*" \
+        xdg-desktop-portal-hyprland hyprland-guiutils hyprshutdown \
+    && dnf clean all \
+    && rm -f /usr/share/hypr/wall*.png \
+    || echo "WARNING: Hyprland did not install; the advanced desktop offers niri and Umbriel"; \
+    rm -f /etc/yum.repos.d/kosher-hyprland.repo
+# Umbriel and its portal, from the builder stage above, with the runtime
+# packages its binaries link against.
+COPY --from=umbriel-build /out/ /tmp/umbriel/
+RUN dnf -y --setopt=install_weak_deps=False install $(cat /tmp/umbriel/NEEDS) \
+    && dnf clean all \
+    && cp -a /tmp/umbriel/usr/. /usr/ \
+    && rm -rf /tmp/umbriel \
+    && test -x /usr/bin/umbriel && test -f /usr/share/wayland-sessions/umbriel.desktop
 
 # --- Developer tooling: Nix, devenv, devbox (issue #34) -----------------------
 # Fedora packages Nix, daemon and all, so it comes in like everything else

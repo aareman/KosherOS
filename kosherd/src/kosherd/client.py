@@ -239,6 +239,14 @@ class DaemonClient:
         """Choose the calling user's own desktop (any active local user)."""
         self._call("Profiles", "SetMyLayout", "(s)", layout)
 
+    def my_compositor(self) -> str:
+        """Which compositor the calling user's advanced desktop runs on."""
+        return self._call("Profiles", "GetMyCompositor")[0]
+
+    def set_my_compositor(self, compositor: str) -> None:
+        """Choose the compositor for the calling user's advanced desktop."""
+        self._call("Profiles", "SetMyCompositor", "(s)", compositor)
+
     def apply_profile(self, uid: int, profile: str,
                       guardian_password: str = "") -> None:
         self._call("Profiles", "ApplyProfile", "(iss)", uid, profile,

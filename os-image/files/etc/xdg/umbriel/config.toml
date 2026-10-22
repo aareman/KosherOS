@@ -1,0 +1,182 @@
+# KosherOS: the advanced desktop on Umbriel, with the Noctalia shell.
+#
+# Umbriel reads ~/.config/umbriel/config.toml if it exists and this file
+# otherwise, so this is what every account gets until it writes its own.
+# To customise, copy this file there and edit; it is reloaded on save, and
+# `umbriel config validate` checks it.
+#
+#     mkdir -p ~/.config/umbriel && cp /etc/xdg/umbriel/config.toml ~/.config/umbriel/
+#
+# Reference: https://docs.noctalia.dev/umbriel/
+# This is Umbriel's starting configuration with the shell wired in, and
+# binds kept close to the niri session's. Noctalia provides the bar,
+# launcher, notifications, lock screen, control centre, wallpaper and the
+# polkit agent. Nothing here touches filtering: that is per account at the
+# network layer, whatever draws the windows.
+
+[general]
+# The shell. Umbriel runs this once, after it starts.
+autostart = ["noctalia"]
+
+# Lock the screen when the lid closes.
+[events]
+lid_close = "noctalia msg session lock"
+
+[appearance.blur]
+radius = 3
+
+[input.keyboard]
+# English first and Hebrew ready, with Alt+Shift switching, the same as the
+# system keymap the niri session reads.
+layout = "us,il"
+options = "grp:alt_shift_toggle"
+numlock_toggle = true
+
+[input.touchpad]
+tap = true
+natural_scroll = true
+
+# Defining this table replaces Umbriel's built-in binds, so every bind that
+# should work is listed. Mod is the Super key.
+[keybinds]
+# Programs and the shell.
+"Mod+T" = { action = "spawn:ptyxis", repeat = false }
+"Mod+Space" = "spawn:noctalia msg panel-toggle launcher"
+"Mod+D" = "spawn:noctalia msg panel-toggle launcher"
+"Mod+S" = "spawn:noctalia msg panel-toggle control-center"
+"Mod+Shift+Comma" = "spawn:noctalia msg settings-toggle"
+"Alt+Tab" = "spawn:noctalia msg window-switcher hold"
+"Mod+Alt+L" = "spawn:noctalia msg session lock"
+"Mod+Escape" = "spawn:noctalia msg session lock"
+"Mod+Shift+A" = "spawn:noctalia msg screenshot-annotate"
+"Mod+Shift+Slash" = "cheatsheet-toggle"
+
+# The screen reader, even on the lock screen.
+"Mod+Alt+S" = { action = "spawn:sh -c 'pkill orca || exec orca'", allow_when_locked = true, repeat = false }
+
+# Media keys go through the shell so the on-screen display agrees.
+"XF86AudioRaiseVolume" = { action = "spawn:noctalia msg volume-up", allow_when_locked = true }
+"XF86AudioLowerVolume" = { action = "spawn:noctalia msg volume-down", allow_when_locked = true }
+"XF86AudioMute" = { action = "spawn:noctalia msg volume-mute", allow_when_locked = true, repeat = false }
+"XF86AudioPlay" = { action = "spawn:noctalia msg media toggle", allow_when_locked = true, repeat = false }
+"XF86AudioNext" = { action = "spawn:noctalia msg media next", allow_when_locked = true }
+"XF86AudioPrev" = { action = "spawn:noctalia msg media previous", allow_when_locked = true }
+"XF86MonBrightnessUp" = { action = "spawn:noctalia msg brightness-up", allow_when_locked = true }
+"XF86MonBrightnessDown" = { action = "spawn:noctalia msg brightness-down", allow_when_locked = true }
+
+"Mod+O" = { action = "overview-toggle", repeat = false }
+"Mod+Q" = { action = "window-close", repeat = false }
+
+# Focus.
+"Mod+Left" = "window-focus-left"
+"Mod+Down" = "window-focus-down"
+"Mod+Up" = "window-focus-up"
+"Mod+Right" = "window-focus-right"
+"Mod+H" = "window-focus-left"
+"Mod+J" = "window-focus-down"
+"Mod+K" = "window-focus-up"
+"Mod+L" = "window-focus-right"
+"Mod+Home" = "column-focus-first"
+"Mod+End" = "column-focus-last"
+
+# Move.
+"Mod+Ctrl+Left" = "column-move-left"
+"Mod+Ctrl+Down" = "window-move-down"
+"Mod+Ctrl+Up" = "window-move-up"
+"Mod+Ctrl+Right" = "column-move-right"
+"Mod+Ctrl+H" = "column-move-left"
+"Mod+Ctrl+J" = "window-move-down"
+"Mod+Ctrl+K" = "window-move-up"
+"Mod+Ctrl+L" = "column-move-right"
+
+# Monitors.
+"Mod+Shift+Left" = "output-focus-left"
+"Mod+Shift+Down" = "output-focus-down"
+"Mod+Shift+Up" = "output-focus-up"
+"Mod+Shift+Right" = "output-focus-right"
+"Mod+Shift+Ctrl+Left" = "column-move-to-output-left"
+"Mod+Shift+Ctrl+Down" = "column-move-to-output-down"
+"Mod+Shift+Ctrl+Up" = "column-move-to-output-up"
+"Mod+Shift+Ctrl+Right" = "column-move-to-output-right"
+
+# Workspaces: Mod and a number to go there, with Ctrl to take the window.
+"Mod+Page_Down" = "workspace-next"
+"Mod+Page_Up" = "workspace-previous"
+"Mod+U" = "workspace-next"
+"Mod+I" = "workspace-previous"
+"Mod+1" = "workspace-switch:1"
+"Mod+2" = "workspace-switch:2"
+"Mod+3" = "workspace-switch:3"
+"Mod+4" = "workspace-switch:4"
+"Mod+5" = "workspace-switch:5"
+"Mod+6" = "workspace-switch:6"
+"Mod+7" = "workspace-switch:7"
+"Mod+8" = "workspace-switch:8"
+"Mod+9" = "workspace-switch:9"
+"Mod+Ctrl+1" = "window-move-to-workspace:1"
+"Mod+Ctrl+2" = "window-move-to-workspace:2"
+"Mod+Ctrl+3" = "window-move-to-workspace:3"
+"Mod+Ctrl+4" = "window-move-to-workspace:4"
+"Mod+Ctrl+5" = "window-move-to-workspace:5"
+"Mod+Ctrl+6" = "window-move-to-workspace:6"
+"Mod+Ctrl+7" = "window-move-to-workspace:7"
+"Mod+Ctrl+8" = "window-move-to-workspace:8"
+"Mod+Ctrl+9" = "window-move-to-workspace:9"
+"Mod+WheelUp" = "window-focus-left"
+"Mod+WheelDown" = "window-focus-right"
+
+# Columns and sizes.
+"Mod+Comma" = "window-consume-left"
+"Mod+Period" = "window-consume-right"
+"Mod+R" = "window-cycle-primary-extent"
+"Mod+Shift+R" = "window-cycle-primary-extent-back"
+"Mod+F" = { action = "window-toggle-maximize", repeat = false }
+"Mod+Shift+F" = { action = "window-toggle-fullscreen", repeat = false }
+"Mod+C" = "column-center"
+"Mod+V" = { action = "window-toggle-floating", repeat = false }
+"Mod+Shift+V" = { action = "window-focus-switch-floating", repeat = false }
+"Mod+W" = { action = "column-toggle-tabbed", repeat = false }
+"Mod+P" = { action = "window-toggle-pinned", repeat = false }
+
+# Leaving: Umbriel asks first.
+"Mod+Shift+E" = "session-quit"
+"Ctrl+Alt+Delete" = "session-quit"
+
+[layout]
+extent_presets = [0.333, 0.5, 0.667]
+
+[layout.scrolling]
+default_extent_fraction = 0.5
+
+# Noctalia's own windows float.
+[[window_rule]]
+match.app_id = "^dev.noctalia.Noctalia$"
+default_floating = true
+default_floating_size_px = { width = 1080, height = 920 }
+
+[[window_rule]]
+match.app_id = "^dev.noctalia.UmbrielSharePicker$"
+default_floating = true
+default_floating_size_px = { width = 800, height = 600 }
+
+# Password prompts and the like float on top of the tiled columns.
+[[window_rule]]
+match.app_id = "^(org[.]kosherlinux[.].*|org[.]gnome[.]Settings)$"
+default_floating = true
+
+[[window_rule]]
+match.title = "^(Picture-in-Picture|Picture in picture)$"
+default_floating = true
+default_maximize = false
+default_position = { x = 20, y = 20, anchor = "bottom_right" }
+
+# Blur behind Noctalia's bar, panels, dock and notifications.
+[[layer_rule]]
+match.namespace = "^noctalia-(bar-[^\"]+|notification|dock|panel|attached-panel|osd|desktop-widget-[^\"]*)$"
+blur = true
+blur_ignore_alpha = 0.5
+blur_popups = true
+
+[[layer_rule]]
+match.namespace = "^noctalia-(notification|dock|panel|attached-panel|osd)$"
+blur_optimized = false

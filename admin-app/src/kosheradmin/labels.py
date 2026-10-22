@@ -158,7 +158,7 @@ def channel_result_subtitle(channel: dict) -> str:
 LAYOUT_LABELS = {
     "classic": "Classic desktop",
     "tiling": "Tiling desktop",
-    "advanced": "Advanced (niri)",
+    "advanced": "Advanced (Noctalia)",
 }
 
 NO_GROUP = "No group"

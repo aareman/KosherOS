@@ -100,7 +100,7 @@ permissions. A local SearXNG front end filters search results under the same pol
 An optional self-hosted portal supplies signed policy and list updates.
 
 The system ships no `sudo`, locks the root account and limits privileged actions to those
-the apps expose. The desktop offers classic GNOME, PaperWM tiling and niri with Noctalia.
+the apps expose. The desktop offers classic GNOME, PaperWM tiling, and the Noctalia shell on niri, Hyprland or Umbriel.
 
 [Architecture](docs/architecture.md) · [Desktop](docs/desktop.md) · [Branding](docs/branding.md)
 
@@ -257,7 +257,7 @@ trademark of Red Hat; KosherOS is a Fedora Remix and is not endorsed by the Fedo
 - [mitmproxy](https://mitmproxy.org), [nftables](https://netfilter.org/projects/nftables/) and [dnsmasq](https://thekelleys.org.uk/dnsmasq/doc.html), which do the enforcing
 - [SearXNG](https://github.com/searxng/searxng), behind the filtered search
 - [UT1 (Université Toulouse 1 Capitole)](https://dsi.ut-capitole.fr/blacklists/) and the other list maintainers named in [THIRD-PARTY.md](THIRD-PARTY.md), whose work is what makes "complete out of the box" possible
-- [PaperWM](https://github.com/paperwm/PaperWM), [niri](https://github.com/YaLTeR/niri) and Noctalia, for the tiling and advanced desktops
+- [PaperWM](https://github.com/paperwm/PaperWM), [niri](https://github.com/YaLTeR/niri), [Hyprland](https://github.com/hyprwm/Hyprland), [Umbriel](https://github.com/noctalia-dev/umbriel) and [Noctalia](https://github.com/noctalia-dev/noctalia), for the tiling and advanced desktops
 - [Pi-hole](https://pi-hole.net), whose approach to ad blocking this follows
 
 [ci-shield]: https://img.shields.io/github/actions/workflow/status/aareman/KosherOS/ci.yml?branch=master&style=for-the-badge&label=CI

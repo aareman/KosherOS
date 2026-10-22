@@ -117,15 +117,26 @@ def youtube_category_id(value: str | None) -> str | None:
 #             Dash to Panel)
 #   tiling    GNOME with PaperWM's scrolling tiling, for keyboard-driven
 #             power users; same lock screen, settings and accessibility
-#   advanced  a separate niri + Noctalia session, chosen at the login screen;
-#             configured by text files the user owns
+#   advanced  the Noctalia shell in a separate login-screen session, on the
+#             compositor the person picks (COMPOSITORS); configured by text
+#             files the user owns
 LAYOUTS = ("classic", "tiling", "advanced")
 LAYOUT_LABELS = {
     "classic": "Classic desktop",
     "tiling": "Tiling desktop",
-    "advanced": "Advanced (niri)",
+    "advanced": "Advanced (Noctalia)",
 }
 DEFAULT_LAYOUT = "classic"
+
+# Which compositor the advanced layout runs Noctalia on. Each is its own
+# session on the login screen, named by its wayland-sessions file:
+#   niri      windows in columns on a strip that scrolls sideways
+#   hyprland  dynamic tiling: each new window splits the space
+#   umbriel   Noctalia's own compositor, scrolling or tiled
+# Only read when the layout is advanced; kept when it is not, so going back
+# to advanced finds the compositor the person had.
+COMPOSITORS = ("niri", "hyprland", "umbriel")
+DEFAULT_COMPOSITOR = "niri"
 
 # What earlier policies called these modes.
 LEGACY_MODES = {"inspect": "filtered"}
@@ -261,6 +272,7 @@ class UserPolicy:
     youtube: dict = field(default_factory=dict)
     language_filter: str = "off"
     layout: str = DEFAULT_LAYOUT
+    compositor: str = DEFAULT_COMPOSITOR
     cover_style: str = DEFAULT_COVER_STYLE
     # How long and when the account may be signed in (see timelimits.py).
     # Empty means no daily limit and always allowed — the default, so a
@@ -317,6 +329,8 @@ class UserPolicy:
             d["blocked_apps"] = self.blocked_apps
         if self.layout != DEFAULT_LAYOUT:
             d["layout"] = self.layout
+        if self.compositor != DEFAULT_COMPOSITOR:
+            d["compositor"] = self.compositor
         if self.cover_style != DEFAULT_COVER_STYLE:
             d["cover_style"] = self.cover_style
         if self.time:
@@ -495,6 +509,7 @@ class Policy:
                     youtube=dict(u.get("youtube", {})),
                     language_filter=u.get("language_filter", "off"),
                     layout=u.get("layout", DEFAULT_LAYOUT),
+                    compositor=u.get("compositor", DEFAULT_COMPOSITOR),
                     cover_style=u.get("cover_style", DEFAULT_COVER_STYLE),
                     time=dict(u.get("time", {})),
                     video_calls=bool(u.get("video_calls", True)),

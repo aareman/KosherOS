@@ -86,6 +86,9 @@ ACTIONS = {
     "GetMyLayout": ACTION_READ_OWN,
     # The same choice, made by the person for themselves in the Look app.
     "SetMyLayout": ACTION_SET_OWN,
+    # And which compositor their advanced desktop runs on.
+    "GetMyCompositor": ACTION_READ_OWN,
+    "SetMyCompositor": ACTION_SET_OWN,
     # Your own key remaps (keyd), from your own file. A preference about
     # your own keyboard: it is in force only while your session is on the
     # screen, and a command() key runs as you, never as root (kosherd
@@ -262,6 +265,7 @@ SETUP_READS = frozenset({"IsComplete", "AdminExists"})
 # Methods that need to know which uid called them (session management).
 UID_AWARE = frozenset({"Unlock", "Lock", "Status", "VerifyGuardian", "InstallApp",
                        "ListStoreApps", "ListMyInstalledDetails", "GetMyLayout", "SetMyLayout", "GetMySettings",
+                       "GetMyCompositor", "SetMyCompositor",
                        "SetMyKeyboard", "SetMyAppKeys",
                        # A nixpkgs app is in one account's profile: what is
                        # installed, and whose copy to update or remove,

@@ -8,7 +8,4 @@
 # or the start of it, and the issue. A suite check is named with its suite.
 
 boot: the administrator can log in                                  #180
-suites: 80-hardening: [F4] Chromium is told never to use DoH        #185
-suites: 80-hardening: [F8] text consoles are not offered to accounts  #186
-suites: 80-hardening: [F13] the lockout survives a reboot           #188
 suites: 90-developer: a build fetched a page that is not a registry  #199

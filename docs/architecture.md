@@ -104,7 +104,10 @@ owning uid:
 
 An account with no policy falls through to `none`. A shared chain refuses
 DNS over TLS, QUIC and a set of DNS-over-HTTPS resolver addresses,
-including the unfiltered public resolvers. Rootless containers do not
+including the unfiltered public resolvers. The browsers are also told to
+leave DNS over HTTPS off: Firefox by its policy file, and Chromium, Chrome,
+Edge and Brave by a managed policy in the place each one's Flatpak reads.
+Rootless containers do not
 escape any of this: a user's network namespace reaches the host through an
 ordinary process owned by that user, so the uid rules still match. A
 captive-portal window, for hotel and airport Wi-Fi, is a set element with a
@@ -310,6 +313,12 @@ default, the administrator's own unless another is typed, and the text
 setup does the same. Starting the computer never asks for it; editing an
 entry or opening GRUB's command line does. A machine installed before this
 was the default sets one from **Admin → Protection → Boot menu password**.
+
+Text consoles are for administrators. Ctrl+Alt+F3 and a serial line still
+show a login prompt, but only an account in KosherOS Admin's administrators
+gets a shell there; anyone else is refused, so nobody steps outside the
+desktop's app list, lock screen and time warnings. An administrator can
+still sign in on one when the desktop will not start.
 
 Nothing in the image loads an out-of-tree kernel module, so lockdown costs
 the family nothing.

@@ -71,9 +71,54 @@ except OSError:
 PY
 }
 
+# Whether a text console would give an account a shell: PAM's account
+# stack for the `login` service, with PAM_TTY set to that console, which
+# is the decision agetty's login makes after the password. Every getty
+# signs in this way, on the screen's Ctrl+Alt+F2 to F6 and on a serial
+# line. Asked of libpam directly: `login -f` on a pty of its own was tried
+# first and was not reliable, because login hangs up the terminal it is
+# given and the probe's end of the pty sometimes went with it.
+console_admits() {
+    python3 - "$1" "$2" <<'PY'
+import ctypes, ctypes.util, sys
+libpam = ctypes.CDLL(ctypes.util.find_library("pam") or "libpam.so.0")
+class Msg(ctypes.Structure):
+    _fields_ = [("msg_style", ctypes.c_int), ("msg", ctypes.c_char_p)]
+class Resp(ctypes.Structure):
+    _fields_ = [("resp", ctypes.c_char_p), ("resp_retcode", ctypes.c_int)]
+CONV = ctypes.CFUNCTYPE(ctypes.c_int, ctypes.c_int, ctypes.POINTER(ctypes.POINTER(Msg)),
+                        ctypes.POINTER(ctypes.POINTER(Resp)), ctypes.c_void_p)
+class Conv(ctypes.Structure):
+    _fields_ = [("conv", CONV), ("appdata_ptr", ctypes.c_void_p)]
+user, tty = sys.argv[1], sys.argv[2]
+conv = Conv(CONV(lambda n, m, r, d: 19), None)  # PAM_CONV_ERR: the account stack asks nothing
+handle = ctypes.c_void_p()
+libpam.pam_start.argtypes = [ctypes.c_char_p, ctypes.c_char_p, ctypes.POINTER(Conv),
+                             ctypes.POINTER(ctypes.c_void_p)]
+if libpam.pam_start(b"login", user.encode(), ctypes.byref(conv), ctypes.byref(handle)):
+    sys.exit(2)
+libpam.pam_set_item.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_char_p]
+libpam.pam_set_item(handle, 3, tty.encode())  # PAM_TTY
+libpam.pam_acct_mgmt.argtypes = [ctypes.c_void_p, ctypes.c_int]
+rc = libpam.pam_acct_mgmt(handle, 0)
+libpam.pam_end.argtypes = [ctypes.c_void_p, ctypes.c_int]
+libpam.pam_end(handle, rc)
+sys.exit(0 if rc == 0 else 1)
+PY
+}
+
+# Text consoles are for administrators: a supervised account is refused
+# on a virtual terminal and on a serial line, and an administrator (root,
+# where the machine has none yet) still gets in, which is also what shows
+# the probe can tell the two apart. Closed virtual terminals would pass as
+# well, but a serial line would still be open to everyone, so the login
+# decision itself is what is measured.
 consoles_closed() {
-    [ "$(systemctl show -p LoadState --value getty@tty2.service 2>/dev/null)" = masked ] && return 0
-    systemd-analyze cat-config systemd/logind.conf 2>/dev/null | grep -qE '^\s*NAutoVTs\s*=\s*0'
+    local admin
+    admin=$(getent group kosher-admin | cut -d: -f4 | cut -d, -f1)
+    console_admits "${admin:-root}" /dev/tty2 \
+        || { echo "  (the console did not admit ${admin:-root} either)"; return 1; }
+    ! console_admits wlkid /dev/tty2 && ! console_admits wlkid /dev/ttyS0
 }
 
 firefox_doh_off() {
@@ -207,6 +252,11 @@ image_only "[F4] Firefox is told never to use DoH (config)" \
 image_only "[F4] Chromium is told never to use DoH (config)" \
     && check "[F4] Chromium is told never to use DoH (config)" 0 bash -c \
         'grep -rqs "DnsOverHttpsMode.*off" /etc/chromium/policies/managed /etc/opt/chrome/policies/managed'
+# The Chromium the Store installs is a Flatpak, which cannot see /etc. It
+# reads policies from an extension point under the system installation.
+image_only "[F4] the Chromium Flatpak reads that policy" \
+    && check "[F4] the Chromium Flatpak reads that policy" 0 grep -qs "DnsOverHttpsMode.*off" \
+        "/var/lib/flatpak/extension/org.chromium.Chromium.Extension.system-policies/$(uname -m)/1/policies/managed/kosheros.json"
 
 # -- F5 -------------------------------------------------------------------------------
 

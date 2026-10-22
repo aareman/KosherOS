@@ -2,10 +2,12 @@
 
 F8 in #33 (#186): every getty offered a shell to every account, outside
 the desktop and so outside its app list, lock screen and time warnings.
-The serial line also lost the password typed at its login prompt (#180):
-the boot splash was still up on a machine with no display, reading the
-console, and the line had no size, so systemd asked the terminal for one
-and read the answer from the same line (#177 was the wizard's version).
+The serial line needs two things of its own: the boot splash taken down
+on a machine with no display, since a plymouthd left running reads the
+console, and a size, or systemd asks the terminal for one and reads the
+answer from the same line (#177 was the wizard's version). The password
+the boot test lost at the serial login (#180) was the test's own doing;
+see test_boot_test_console.py.
 """
 
 import re

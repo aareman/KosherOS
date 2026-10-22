@@ -53,14 +53,26 @@ class Console:
         self.selector = selectors.DefaultSelector()
         self.selector.register(sock, selectors.EVENT_READ)
         self.text = ""
+        # Where the answer to the last thing typed starts. expect() looks
+        # only past it: a prompt printed before we typed is not the reply.
+        self.mark = 0
         log_path.parent.mkdir(parents=True, exist_ok=True)
         self.log = log_path.open("w")
 
     def expect(self, pattern: str, timeout: int) -> bool:
+        """Wait for PATTERN in what the machine printed since the last send.
+
+        Not in everything it ever printed. The wizard asks "Password: "
+        too, so after the user name was typed at the serial login a
+        search of the whole log matched the wizard's prompt at once and
+        the password went out before login had asked for it. login
+        flushes the line before it prompts, and the password was thrown
+        away: "Password:", then a 60-second timeout (#180).
+        """
         regex = re.compile(pattern, re.IGNORECASE)
         deadline = time.monotonic() + timeout
         while True:
-            if regex.search(self.text):
+            if regex.search(self.text, self.mark):
                 return True
             remaining = deadline - time.monotonic()
             if remaining <= 0:
@@ -82,6 +94,7 @@ class Console:
         return match.start() if match else -1
 
     def send(self, line: str) -> None:
+        self.mark = len(self.text)
         self.sock.sendall((line + "\n").encode())
 
     def tail(self, n: int = 700) -> str:

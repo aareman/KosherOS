@@ -166,13 +166,14 @@ section "What a build may fetch"
 # goes through the builders' proxy, which lets it fetch only from the known
 # source hosts (#199). The wrong hash is deliberate: "hash mismatch" means
 # the fetch SUCCEEDED. curl fails on a refusal and prints the proxy's
-# reason into the build log, which is what a person building would read.
+# reason into the build log (with bash builtins: the sandbox has no cat),
+# which is what a person building would read.
 probe() {
     as wlkid timeout 300 nix build --impure --no-link --expr "
         with import <nixpkgs> {}; derivation {
           name = \"kosher-probe\"; system = builtins.currentSystem;
           builder = \"\${bash}/bin/bash\";
-          args = [ \"-c\" \"\${curl}/bin/curl -sS --max-time 20 --fail-with-body -o \$out $1 || { cat \$out; exit 1; }\" ];
+          args = [ \"-c\" \"\${curl}/bin/curl -sS --max-time 20 --fail-with-body -o \$out $1 || { while read -r l; do echo \$l; done < \$out; exit 1; }\" ];
           outputHashMode = \"flat\"; outputHashAlgo = \"sha256\";
           outputHash = \"0000000000000000000000000000000000000000000000000000000000000000\";
         }" 2>&1

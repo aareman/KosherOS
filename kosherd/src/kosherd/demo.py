@@ -366,6 +366,10 @@ class DemoClient:
         self._user(uid)["developer_tools"] = bool(enabled)
         self._change(uid, "SetDeveloperTools", [uid, bool(enabled)])
 
+    def set_build_sources(self, hosts, pw=""):
+        self.policy.setdefault("developer", {})["build_sources_extra"] = sorted(set(hosts))
+        self._change(None, "SetBuildSources", [list(hosts)])
+
     def set_boot_menu_password(self, password, pw=""):
         self._boot_menu = True
         self._change(None, "SetBootMenuPassword", [])

@@ -96,9 +96,12 @@ def write_mitm_rules(policy: Policy) -> None:
         # The Nix build users (#123): a supervised identity of their own,
         # judged like the strictest account — the default categories, bare
         # addresses and DoH refused — and no picture or text scoring, since
-        # what a build fetches is a tarball, not a page.
+        # what a build fetches is a tarball, not a page. And only from the
+        # known source hosts (#199): the forges, registries and mirrors,
+        # plus what an administrator added; the proxy refuses the rest.
         per_user["builder"] = {
             "port": nft.BUILDER_PORT,
+            "allowed_hosts": policy.build_sources(),
             "rules": [],
             "blocked_categories": list(categories_mod.DEFAULT_BLOCKED),
             "media_level": "none",

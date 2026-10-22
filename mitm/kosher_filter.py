@@ -41,6 +41,7 @@ try:
     from kosherd import imageedit as imageedit_mod
     from kosherd import language as language_mod
     from kosherd import accessreq as accessreq_mod
+    from kosherd import buildsources as buildsources_mod
     from kosherd import activity as activity_mod
     from kosherd import search as search_mod
     from kosherd import siterules as siterules_mod
@@ -64,6 +65,7 @@ except ImportError:  # pragma: no cover - only when interpreters differ
     from kosherd import imageedit as imageedit_mod
     from kosherd import language as language_mod
     from kosherd import accessreq as accessreq_mod
+    from kosherd import buildsources as buildsources_mod
     from kosherd import activity as activity_mod
     from kosherd import search as search_mod
     from kosherd import siterules as siterules_mod
@@ -205,6 +207,7 @@ class PolicyCache:
         self._cover: dict[int, str] = {}
         self._language: dict[int, str] = {}
         self._youtube: dict[int, dict] = {}
+        self._build_sources: list[str] | None = None
         self._fallback = _fail_closed_entry()
 
     def uid_for_listener_port(self, port: int | None) -> int | None:
@@ -255,6 +258,15 @@ class PolicyCache:
             return dict(self._fallback["youtube"])
         return self._youtube.get(uid, {})
 
+    def build_sources(self) -> list[str]:
+        """Where a Nix build may download from (#199). A rules file with
+        no list for the builders (written by an older kosherd) gets the
+        built-in one, never the open web."""
+        self._refresh()
+        if self._build_sources is None:
+            return list(buildsources_mod.DEFAULT_BUILD_SOURCES)
+        return self._build_sources
+
     def _refresh(self) -> None:
         try:
             mtime = self.path.stat().st_mtime
@@ -275,6 +287,7 @@ class PolicyCache:
         language: dict[int, str] = {}
         youtube: dict[int, dict] = {}
         by_port: dict[int, int] = {}
+        build_sources: list[str] | None = None
         for uid_text, raw in doc.items():
             try:
                 uid = BUILDER_UID if uid_text == "builder" else int(uid_text)
@@ -289,6 +302,8 @@ class PolicyCache:
                 cover[uid] = entry.get("cover_style", "frost")
                 language[uid] = entry.get("language_filter", "off")
                 youtube[uid] = dict(entry.get("youtube", {}))
+                if uid == BUILDER_UID and entry.get("allowed_hosts") is not None:
+                    build_sources = [str(h) for h in entry["allowed_hosts"]]
             except Exception as e:  # noqa: BLE001 - one bad entry must not break all
                 log.error("bad entry for uid %s: %s", uid_text, e)
         self._rules = rules
@@ -297,6 +312,7 @@ class PolicyCache:
         self._cover = cover
         self._language = language
         self._youtube = youtube
+        self._build_sources = build_sources
         self._known = set(rules)
         self._by_port = by_port
         self._mtime = mtime
@@ -1004,6 +1020,11 @@ class KosherFilter:
 
         uid = self._uid_of(flow)
         flow.metadata["kosher_uid"] = uid
+
+        # A Nix build fetches source, and only from the known source hosts
+        # (#199); the categories below still apply to those.
+        if uid == BUILDER_UID and self._refuse_build_source(flow):
+            return
 
         # Reserved on every host, because the form is posted to the
         # blocked site's own origin (see REQUEST_PATH). The site never
@@ -2081,6 +2102,22 @@ class KosherFilter:
             {"Content-Type": "text/html; charset=utf-8"},
         )
         self._note(activity_mod.BLOCK, flow, url=url, why=why)
+
+    def _refuse_build_source(self, flow: http.HTTPFlow) -> bool:
+        """Refuse a build's download from a host that is not a known
+        source. Plain text, not the block page: nobody reads it in a
+        browser, and Nix prints an error's body in the build log."""
+        host = (flow.request.pretty_host or "").lower().rstrip(".")
+        if buildsources_mod.allows(host, self.policy.build_sources()):
+            return False
+        url = flow.request.pretty_url
+        log.info("blocked a Nix build's download %s (not a build source)", url)
+        flow.response = http.Response.make(
+            403, buildsources_mod.refusal(host or "this address").encode(),
+            {"Content-Type": "text/plain; charset=utf-8",
+             "Cache-Control": "no-store"})
+        self._note(activity_mod.BLOCK, flow, url=url, why="build-source")
+        return True
 
     def _note(self, kind: str, flow: http.HTTPFlow, **fields) -> None:
         """One line in the activity log. Never lets a logging problem

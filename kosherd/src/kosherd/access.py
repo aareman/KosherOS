@@ -126,6 +126,8 @@ ACTIONS = {
     # Developer tools: the Nix daemon and the registries, directly. On
     # widens what the account reaches, so dual-controlled like a filter.
     "SetDeveloperTools": ACTION_MANAGE_FILTER,
+    # Where a Nix build may download from, beyond the built-in hosts.
+    "SetBuildSources": ACTION_MANAGE_FILTER,
     # The boot menu: the way round every other protection, so setting its
     # password is dual-controlled like a filter change; reading whether one
     # is set is a read.
@@ -249,7 +251,7 @@ GUARDIAN_GATED = frozenset({
     "SetLanguageFilter", "SetYouTube",
     "SetGuestConfig", "DisableGuardian", "Enrol", "Unenrol",
     "SetAdBlock", "SetTimeLimits", "SetChannel", "TryImage", "Rollback", "SetNetworkAccess",
-    "SetDeveloperTools",
+    "SetDeveloperTools", "SetBuildSources",
     "SetBootMenuPassword",
     "SetUserAppAccess", "SetUserBlockedAppKinds", "SetUserBlockedApps",
     "TailscaleSignIn",
@@ -283,6 +285,7 @@ CHANGES = frozenset({
     "DismissRequest", "AllowUrl", "EditList", "SetMediaLevel",
     "SetLanguageFilter", "SetYouTube", "SetUserAdmin", "SetLayout",
     "SetCoverStyle", "SetAdBlock", "SetTimeLimits", "SetNetworkAccess", "SetDeveloperTools",
+    "SetBuildSources",
     "SetBootMenuPassword", "SetGuestConfig", "CreateUser",
     "AdoptUser", "RemoveUser", "ResetPassword", "SetUserApps", "RemoveApp", "RemoveUnusedApps",
     "InstallAppFor", "ApproveApp",

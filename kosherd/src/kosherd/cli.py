@@ -192,6 +192,46 @@ def cmd_developer_tools(args) -> int:
     return 0
 
 
+def cmd_build_sources(args) -> int:
+    """kosherctl build-sources [list | add HOST... | remove HOST...]
+
+    Where a Nix build may download from (#199): the built-in hosts, which
+    always apply, and the ones an administrator added.
+    """
+    from . import buildsources
+
+    c = _client()
+    extra = list((c.get_policy().get("developer") or {}).get("build_sources_extra", []))
+    if args.action == "list":
+        print("Built in:")
+        for host in buildsources.DEFAULT_BUILD_SOURCES:
+            print(f"  {host}")
+        print("Added:" if extra else "Added: none")
+        for host in extra:
+            print(f"  {host}")
+        return 0
+    if not args.hosts:
+        print(f"name at least one host to {args.action}", file=sys.stderr)
+        return 2
+    try:
+        hosts = [buildsources.normalize(h) for h in args.hosts]
+    except ValueError as e:
+        print(e, file=sys.stderr)
+        return 2
+    if args.action == "add":
+        wanted = list(dict.fromkeys([*extra, *hosts]))
+    else:
+        builtin = [h for h in hosts if h in buildsources.DEFAULT_BUILD_SOURCES]
+        if builtin:
+            print(f"{', '.join(builtin)} is built in and cannot be removed",
+                  file=sys.stderr)
+            return 2
+        wanted = [h for h in extra if h not in hosts]
+    c.set_build_sources(wanted, _guardian_pw(args))
+    print("Nix builds may also download from: " + (", ".join(wanted) or "nothing else"))
+    return 0
+
+
 def cmd_network(args) -> int:
     """kosherctl network UID [--video-calls on|off] [--extra-ports 22,2222|none]"""
     c = _client()
@@ -1179,6 +1219,13 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("state", choices=["on", "off"])
     s.add_argument("--guardian-password")
     s.set_defaults(func=cmd_developer_tools)
+
+    s = sub.add_parser("build-sources",
+                       help="where a Nix build may download from, beyond the built-in hosts")
+    s.add_argument("action", nargs="?", default="list", choices=["list", "add", "remove"])
+    s.add_argument("hosts", nargs="*")
+    s.add_argument("--guardian-password")
+    s.set_defaults(func=cmd_build_sources)
 
     s = sub.add_parser("network",
                        help="what an account may reach beyond the web: video calls, extra ports")

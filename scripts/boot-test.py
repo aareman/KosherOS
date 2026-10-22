@@ -157,6 +157,16 @@ def _shell(console: Console, command: str, marker: str, timeout: int = 60) -> st
     return out
 
 
+def counted_some(out: str) -> bool:
+    """Whether a `grep -c` in the shell printed a count above zero.
+
+    Its line starts with a carriage return: the shell turns bracketed paste
+    off (ESC[?2004l, then CR) before the command's output, and only the
+    escape is stripped.
+    """
+    return re.search(r"^\s*[1-9]\d*\s*$", out, re.M) is not None
+
+
 def enforcement(console: Console, results: "Results") -> None:
     """Log in on the serial console as the new administrator and probe.
 
@@ -197,7 +207,7 @@ def enforcement(console: Console, results: "Results") -> None:
                   "code=403" in dating, dating[-400:])
     page = _shell(console, "curl -s -m 20 https://www.unibet.com/ | grep -c 'This page is blocked'", "PAGE")
     results.check("a blocked site shows the block page, not an error",
-                  re.search(r"^[1-9]\d*\s*$", page, re.M) is not None, page[-400:])
+                  counted_some(page), page[-400:])
 
 
 def run(disk: Path, log: Path = Path("build/boot-test-console.log"),

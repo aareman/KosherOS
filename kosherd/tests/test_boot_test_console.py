@@ -47,3 +47,12 @@ def test_before_anything_is_typed_the_whole_boot_counts(tmp_path):
     machine.sendall(b"Starting kosher-firstboot.service\r\nUsername: ")
     assert c.expect(r"kosher-firstboot", 2)
     assert c.expect(r"Username:", 2)
+
+
+def test_a_grep_count_after_the_shell_turns_bracketed_paste_off_is_read():
+    # What _shell returned on a booted machine once the login worked: the
+    # count's line starts with the CR left behind by ESC[?2004l.
+    seen = ("[boottest@kosheros ~]$ curl -s -m 20 https://www.unibet.com/ | "
+            "grep -c 'This page is blocked'; echo PAGE=$?\r\n\r1\r\nPAGE=0\n")
+    assert boot_test.counted_some(seen)
+    assert not boot_test.counted_some(seen.replace("\r1\r", "\r0\r"))

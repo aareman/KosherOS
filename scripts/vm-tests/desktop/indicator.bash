@@ -106,7 +106,9 @@ indicator_check() {
         names=$(indicator_busctl list --no-legend 2>&1 | awk '{print $1}' | grep -i -E 'notifier|watcher|^org\.gnome\.Shell' | tr '\n' ' ')
         ext=$(indicator_busctl call org.gnome.Shell.Extensions /org/gnome/Shell/Extensions \
             org.gnome.Shell.Extensions GetExtensionInfo s appindicatorsupport@rgcjonas.gmail.com \
-            2>&1 | grep -o -E '"state" d [0-9.]+|"error" s "[^"]*"|Failed.*' | tr '\n' ' ' | head -c 400)
+            2>&1 | tr '\n' ' ' | sed 's/.*"state"/"state"/' | head -c 300)
+        ext="$ext journal: $(journalctl -b --no-pager -o cat _UID="$uid" 2>/dev/null \
+            | grep -i -E 'appindicator|StatusNotifier' | tail -4 | tr '\n' ' ' | head -c 600)"
         ext="$ext enabled: $(runuser -u "$u" -- env XDG_RUNTIME_DIR="/run/user/$uid" \
             DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$uid/bus" \
             gsettings get org.gnome.shell enabled-extensions 2>&1 | head -c 300)"

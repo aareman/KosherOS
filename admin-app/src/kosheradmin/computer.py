@@ -1018,6 +1018,11 @@ def check_words(info: dict, running: str | None) -> tuple[str, str]:
         if running:
             return f"Up to date — {running} is the newest on the {channel or 'update'} channel.", "Up to date"
         return "Up to date.", "Up to date"
+    if info.get("ok") is False:
+        # The check never reached the update server, so nothing is known
+        # about newer versions; saying "up to date" here was wrong (#207).
+        return ("Couldn't check for updates. Make sure the computer is connected "
+                "to the internet, then check again.", "Couldn't check")
     raw = (info.get("raw") or "").strip()
     first = next((line for line in raw.splitlines() if line.strip()), "Could not check.")
     return first[:120], first[:24]

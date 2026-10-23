@@ -391,7 +391,21 @@ RUN sed -i 's|^    if \[ -e /etc/ssl/certs/ca-certificates.crt \]; then|    if [
     && grep -q 'NIX_SSL_CERT_FILE=/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem' /etc/profile.d/nix.sh \
     && sh -n /etc/profile.d/nix.sh \
     && chmod 755 /usr/bin/devenv \
-    && grep -q '^!include /etc/nix/kosheros-users.conf' /etc/nix/nix.conf
+    && grep -q '^!include /etc/nix/kosheros-users.conf' /etc/nix/nix.conf \
+    # Only root and the accounts with developer tools may run Nix (#214).
+    # The daemon's allowed-users is not enough: with a store of its own
+    # under ~ (`nix --store ~/x`), nix needs no daemon, and any account
+    # could build anything from nixpkgs. So the program, the namespace
+    # helper and the libraries (Nix has a C API Python could load) are
+    # root's and kosher-nix's alone; kosherd keeps that group to the
+    # developer accounts (nixdaemon.py). The gid is fixed in sysusers.d so
+    # an updated machine's group owns these files too. The other nix-*
+    # commands are links to /usr/bin/nix.
+    && systemd-sysusers /usr/lib/sysusers.d/kosher-nix.conf \
+    && test "$(getent group kosher-nix | cut -d: -f3)" = 850 \
+    && chown root:850 /usr/bin/nix /usr/libexec/nix-nswrapper /usr/lib64/libnix*.so.* \
+    && chmod 0750 /usr/bin/nix /usr/libexec/nix-nswrapper /usr/lib64/libnix*.so.* \
+    && test -z "$(find /usr/bin /usr/libexec /usr/lib64 -maxdepth 1 -type f \( -name 'nix*' -o -name 'libnix*' \) -perm /o=rwx)"
 
 # SELinux: dnsmasq needs a netfilter netlink socket to feed the nft whitelist
 # sets (not covered by Fedora's stock dnsmasq policy).

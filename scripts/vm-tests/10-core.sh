@@ -99,6 +99,41 @@ else
     else
         bad "controlplane.tailscale.com does not resolve (got '${cp_answer:-nothing}')"
     fi
+    # Tailscale's own sites and the tailnet's names (#211): blocked while
+    # nothing is set up, open for every account once a sign-in has started,
+    # blocked again after the sign-out. nokid is made a filtered account
+    # blocking "proxy" for this and put back after; wlkid is whitelist and
+    # dnskid dnsfilter. The page is the sign-in page a person opens.
+    no_uid=$(id -u nokid)
+    no_cats=$(kosherctl get-policy | python3 -c 'import json, sys
+u = [u for u in json.load(sys.stdin)["users"] if u["username"] == "nokid"][0]
+print(" ".join(u.get("blocked_categories", [])))')
+    kctl set-mode "$no_uid" filtered >/dev/null
+    kctl categories "$no_uid" block proxy >/dev/null
+    wait_for_dns
+    sleep 2
+    ts_reach() {
+        local page="/tmp/ts-reach-$1.html" code
+        rm -f "$page"
+        code=$(http_code_as "$1" https://login.tailscale.com/ "$page")
+        if [ "$code" = 000 ]; then echo unreachable
+        elif grep -qi "Blocked — KosherOS" "$page" 2>/dev/null; then echo blocked
+        else echo "open ($code)"
+        fi
+    }
+    if python3 -c 'from kosherd import categories as c; import sys
+sys.exit(0 if "proxy" in c.load_any().categories_of("login.tailscale.com") else 1)' 2>/dev/null; then
+        got=$(ts_reach nokid)
+        assert_that "signed out, a filtered account gets the block page for login.tailscale.com (got $got)" \
+            test "$got" = blocked
+    else
+        skip "login.tailscale.com is not in the proxy category on this machine's catalogue"
+    fi
+    got=$(ts_reach wlkid)
+    assert_that "signed out, a whitelist account cannot reach login.tailscale.com (got $got)" \
+        test "$got" = unreachable
+    check "and the proxy is told of no Tailscale names" 1 \
+        grep -q '"\*\.tailscale\.com"' /var/lib/kosher-mitm/rules.json
     # The guardian password, set for these checks only and removed after.
     # A wrong one and an empty one go first: a right one proves the
     # guardian for the rest of the caller's session.
@@ -126,12 +161,49 @@ DaemonClient().set_guardian_password("", sys.argv[1])' "$gpw" >/dev/null 2>&1; t
         esac
         check_contains "and kosherctl tailscale status shows it is waiting there" "login.tailscale.com" \
             kosherctl tailscale status
+        # The sign-in returns once the names are in force; the apply
+        # restarted the resolvers and the proxy.
+        wait_for_dns
+        sleep 2
+        check_contains "with a sign-in waiting, the proxy is told Tailscale's names" '"*.tailscale.com"' \
+            cat /var/lib/kosher-mitm/rules.json
+        check_contains "and they are in the system set" "nftset=/tailscale.com/" \
+            cat /etc/kosher/dnsmasq.d/whitelist.conf
+        check "but no tailnet, and never all of ts.net, before a sign-in finishes" 1 \
+            grep -qE "[/.]ts\\.net/" /etc/kosher/dnsmasq.d/whitelist.conf
+        for who in nokid wlkid dnskid; do
+            got=$(ts_reach "$who")
+            case "$got" in
+                open*) ok "with a sign-in waiting, $who reaches login.tailscale.com ($got)" ;;
+                *) bad "with a sign-in waiting, $who could not reach login.tailscale.com ($got)" ;;
+            esac
+        done
         check "sign-out needs no password" 0 kosherctl tailscale sign-out
         check_contains "and is back to not signed in" "not signed in" kosherctl tailscale status
         check_contains "resolv.conf is still the local resolver after all that" "nameserver 127.0.0.1" \
             cat /etc/resolv.conf
         check "the tailnet forward is not written while signed out" 1 \
             sh -c 'grep -qs 100.100.100.100 /etc/kosher/dnsmasq.d/tailnet.conf'
+        wait_for_dns
+        sleep 2
+        check "after the sign-out the proxy is told of no Tailscale names" 1 \
+            grep -q '"\*\.tailscale\.com"' /var/lib/kosher-mitm/rules.json
+        check "and they are out of the system set" 1 \
+            grep -q "nftset=/tailscale.com/" /etc/kosher/dnsmasq.d/whitelist.conf
+        if grep -q '"\*\.tailscale\.com"' /var/lib/kosher-mitm/rules.json; then
+            # What kosherd saw, for whoever reads the failure.
+            echo "    status after the sign-out: $(kosherctl tailscale status --json 2>&1 | tr -d '\n' | head -c 600)"
+            journalctl -u kosherd -b --no-pager 2>/dev/null | grep -i tailscale | tail -12 | sed 's/^/    /'
+        fi
+        got=$(ts_reach wlkid)
+        assert_that "after the sign-out a whitelist account cannot reach login.tailscale.com (got $got)" \
+            test "$got" = unreachable
+        if python3 -c 'from kosherd import categories as c; import sys
+sys.exit(0 if "proxy" in c.load_any().categories_of("login.tailscale.com") else 1)' 2>/dev/null; then
+            got=$(ts_reach nokid)
+            assert_that "and a filtered account gets the block page again (got $got)" \
+                test "$got" = blocked
+        fi
         python3 -c 'import sys; from kosherd.client import DaemonClient
 DaemonClient().disable_guardian(sys.argv[1])' "$gpw" >/dev/null 2>&1
         check "the guardian password is removed again" 1 python3 -c \
@@ -139,6 +211,13 @@ DaemonClient().disable_guardian(sys.argv[1])' "$gpw" >/dev/null 2>&1
     else
         bad "could not set a guardian password to test the sign-in gate"
     fi
+    # nokid back to what it was.
+    kctl categories "$no_uid" clear >/dev/null
+    read -ra no_cat_list <<< "$no_cats"
+    [ "${#no_cat_list[@]}" -gt 0 ] && kctl categories "$no_uid" block "${no_cat_list[@]}" >/dev/null
+    kctl set-mode "$no_uid" none >/dev/null
+    check_contains "nokid is back to no internet" "none" \
+        sh -c "kosherctl get-policy | python3 -c 'import json, sys; print([u[\"mode\"] for u in json.load(sys.stdin)[\"users\"] if u[\"username\"] == \"nokid\"][0])'"
     skip "a real tailnet sign-in needs a person at the login page: names on the tailnet, the 100.100.100.100 forward, a filtered account reaching a tailnet host through its proxy"
 fi
 

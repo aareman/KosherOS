@@ -54,6 +54,68 @@ else
     bad "wlkid cannot reach the daemon: $(printf '%s' "$out" | head -c 120)"
 fi
 
+section "Without developer tools, no Nix of its own (#214)"
+# The daemon refusing an account is not enough: nix builds into a store
+# under ~ by itself. So the program and its libraries are root's and
+# kosher-nix's, and kosherd keeps the group to the developer accounts.
+# dnskid is filtered and has no developer tools.
+check_contains "nix is root's and kosher-nix's alone" "root:kosher-nix 750" stat -c '%U:%G %a' /usr/bin/nix
+check_contains "and so are its libraries" "root:kosher-nix 750" stat -c '%U:%G %a' /usr/lib64/libnixstorec.so.2.34.8
+check_contains "the developer account is in the group" "wlkid" getent group kosher-nix
+check "the account without developer tools is not" 1 sh -c 'getent group kosher-nix | grep -qw dnskid'
+dhome=$(readlink -f "$(getent passwd dnskid | cut -d: -f6)")
+priv="local?root=$dhome/.local/share/nix/root"
+has_private() { compgen -G "$dhome/.local/share/nix/root/nix/store/*-hello-*" >/dev/null; }
+check "it cannot run nix" 1 as dnskid nix --version
+check "nor build into a store of its own (--store)" 1 as dnskid timeout 300 nix --store "$priv" build --no-link nixpkgs#hello
+check "nor through NIX_CONFIG" 1 as dnskid env NIX_CONFIG="store = $priv" timeout 300 nix build --no-link nixpkgs#hello
+check "nor through NIX_REMOTE" 1 as dnskid env NIX_REMOTE="$priv" timeout 300 nix-build --version
+as dnskid mkdir -p "$dhome/.config/nix"
+as dnskid sh -c "printf 'store = %s\n' '$priv' > '$dhome/.config/nix/nix.conf'"
+check "nor through ~/.config/nix/nix.conf" 1 as dnskid timeout 300 nix build --no-link nixpkgs#hello
+as dnskid rm -f "$dhome/.config/nix/nix.conf"
+check "nor by its other names (nix-shell, nix-env)" 1 as dnskid sh -c 'nix-shell --version || nix-env --version'
+check "nor through the dynamic loader" 1 as dnskid /lib64/ld-linux-x86-64.so.2 /usr/bin/nix --version
+check "nor copy it" 1 as dnskid cp /usr/bin/nix "$dhome/nix"
+check "nor load Nix's C API from Python" 1 as dnskid python3 -I -c 'import ctypes; ctypes.CDLL("/usr/lib64/libnixstorec.so.2.34.8")'
+check "nothing reached a private store" 1 has_private
+check "a developer account runs nix" 0 as wlkid nix --version
+check "and root does" 0 nix --version
+# The residual risk, measured rather than asserted: a Nix of the account's
+# own, downloaded through its own filter (nix-portable is a GitHub release,
+# and the binary cache is an ordinary site). Not a failure; see #214.
+code=$(http_code_as dnskid https://cache.nixos.org/nix-cache-info)
+printf '  INFO the binary cache answers dnskid with %s (a downloaded Nix would work)\n' "$code"
+
+section "The same account keeps its Flatpaks, containers and Store (#214)"
+# A Flatpak is bubblewrap in a user namespace; so is a rootless container.
+# Neither may depend on Nix being open to the account.
+python3 - <<'PY' >/dev/null 2>&1
+import pwd
+from kosherd.client import DaemonClient
+client = DaemonClient()
+uid = pwd.getpwnam("dnskid").pw_uid
+client.set_user_can_install(uid, True)
+client.install_app_for(uid, "org.gnome.Calculator")
+client.install_app_for(uid, "nixpkgs#foot")
+PY
+for _ in $(seq 1 120); do
+    flatpak info --system org.gnome.Calculator >/dev/null 2>&1 && break
+    sleep 5
+done
+check_contains "it runs a Flatpak" "flatpak-ok" \
+    as_session dnskid flatpak run --command=sh org.gnome.Calculator -c 'echo flatpak-ok'
+check_contains "it runs a rootless container" "podman-ok" \
+    as_session dnskid timeout 600 podman run --rm registry.fedoraproject.org/fedora-minimal:44 echo podman-ok
+for _ in $(seq 1 120); do
+    test -x "$dhome/.local/state/nix/profiles/profile/bin/foot" && break
+    sleep 5
+done
+check "the Store installs a Nix app for it (as root, into its profile)" 0 \
+    test -x "$dhome/.local/state/nix/profiles/profile/bin/foot"
+check_contains "which it runs" "foot version" as dnskid bash -lc "foot --version"
+python3 -c 'from kosherd.client import DaemonClient; c=DaemonClient(); c.remove_app("nixpkgs#foot"); c.remove_app("org.gnome.Calculator")' >/dev/null 2>&1
+
 section "A filtered account can build"
 # nixpkgs comes from GitHub as the account (through its own filter; the
 # registries are reachable from every account), hello from the cache as

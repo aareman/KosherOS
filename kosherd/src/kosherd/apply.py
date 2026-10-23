@@ -16,7 +16,7 @@ import tempfile
 from pathlib import Path
 
 from . import categories as categories_mod
-from . import containers, dns, mitmca, nft, nixdaemon
+from . import containers, dns, mitmca, nft, nixdaemon, tailnet
 from . import search as search_mod
 from .policy import INSPECTED_MODES, SAFESEARCH_MODES, UNFILTERED_MODES, Policy
 
@@ -68,12 +68,18 @@ def mitm_uid() -> int | None:
         return None
 
 
-def write_mitm_rules(policy: Policy) -> None:
+def write_mitm_rules(policy: Policy, tailnet_allowed: tuple[str, ...] | None = None) -> None:
     """Render what the unprivileged proxy needs: per-uid rules and categories.
 
     The proxy never sees the policy itself — only what it must enforce,
     group readable by kosher-mitm.
+
+    `system_allowed` is what no category blocks for anybody: Tailscale's
+    sites and the tailnet's names while it is set up (tailnet.allowance,
+    #211). Only categories: rules, picture and text scoring still apply.
     """
+    if tailnet_allowed is None:
+        tailnet_allowed = tailnet.allowed()
     ports = nft.mitm_ports(policy)
     per_user = {}
     for user in policy.effective_users():
@@ -90,6 +96,7 @@ def write_mitm_rules(policy: Policy) -> None:
             "cover_style": getattr(user, "cover_style", "frost"),
             "language_filter": getattr(user, "language_filter", "off"),
             "youtube": user.youtube,
+            "system_allowed": list(tailnet_allowed),
         }
     listen_ports = sorted(ports.values())
     if nixdaemon.build_gid() is not None:
@@ -143,6 +150,9 @@ def write_nix_users(policy: Policy) -> bool:
     path = NIX_USERS_PATH
     if not path.parent.is_dir():
         return False
+    # And who may run nix at all (#214): without the daemon, an account
+    # can still build into a store of its own.
+    nixdaemon.sync_cli_group(policy)
     content = nixdaemon.render(policy)
     try:
         if path.read_text() == content:
@@ -188,6 +198,9 @@ def _restart(service: str):
 
 def apply_policy(policy: Policy) -> None:
     """Render and load enforcement for `policy`. Raises ApplyError on failure."""
+    # What Tailscale, while it is set up, needs every account to reach
+    # (#211). Read once, so the proxy and the resolvers agree.
+    allowed = tailnet.allowed()
     # Every managed account gets its block of subordinate ids (rootless
     # containers), and the ruleset filters the block as the account.
     try:
@@ -212,7 +225,7 @@ def apply_policy(policy: Policy) -> None:
     if res.returncode != 0:
         raise ApplyError(f"nft load failed: {res.stderr}")
 
-    write_mitm_rules(policy)
+    write_mitm_rules(policy, allowed)
     # The proxy runs for a filtered account — and wherever Nix is installed,
     # because the build users' fetches go through it (#123): a stopped proxy
     # would refuse every build, not let it through.
@@ -242,10 +255,10 @@ def apply_policy(policy: Policy) -> None:
             subprocess.run(["systemctl", "stop", service],
                            capture_output=True, text=True)
 
-    _write_atomic(DNSMASQ_DROPIN_PATH, dns.render(policy))
+    _write_atomic(DNSMASQ_DROPIN_PATH, dns.render(policy, allowed))
     _write_atomic(SAFESEARCH_PATH, dns.render_safesearch(policy))
     bundle = categories_mod.load_any()
-    _write_atomic(CATEGORY_BLOCK_PATH, dns.render_category_blocks(policy, bundle))
+    _write_atomic(CATEGORY_BLOCK_PATH, dns.render_category_blocks(policy, bundle, allowed))
     LEGACY_CATEGORY_BLOCK_PATH.unlink(missing_ok=True)
     # Ads and trackers, for every account: the same drop-in into both
     # resolvers, so the unfiltered account's plain resolver blocks them too.

@@ -80,3 +80,14 @@ def test_nix_string_license_and_short_description(monkeypatch):
                         subprocess.CompletedProcess(a, 0, '{"description":"Short","license":"unfree"}', ""))
     result = metadata.nix_details("nixpkgs#example")
     assert result["description"] == "Short" and result["license"] == "unfree"
+
+
+def test_nix_details_fall_back_to_the_catalog_without_developer_tools(monkeypatch):
+    # /usr/bin/nix is for root and the accounts with developer tools (#214).
+    def run(*args, **kwargs):
+        raise PermissionError(13, "Permission denied", "nix")
+    monkeypatch.setattr(metadata.subprocess, "run", run)
+    result = metadata.load_details({"ref": "nixpkgs#gh", "summary": "GitHub on the command line",
+                                    "homepage": "https://cli.github.com"})
+    assert result["description"] == "GitHub on the command line"
+    assert result["homepage"] == "https://cli.github.com"

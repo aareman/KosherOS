@@ -2222,3 +2222,74 @@ def test_a_decided_layer_or_a_disconnect_stops_the_clock(addon, monkeypatch):
 def test_the_guard_is_loaded_with_the_filter(addon):
     assert any(isinstance(a, addon.SilentClientGuard) for a in addon.addons)
     assert 5 <= addon.SILENT_CLIENT_SECONDS <= 10
+
+
+# -- Tailscale's sites while it is set up (#211) -----------------------------
+
+def test_host_in_matches_whole_hosts_and_wildcard_domains(addon):
+    names = ("tailscale.com", "*.tailscale.com", "*.tail230de1.ts.net")
+    for host in ("tailscale.com", "login.tailscale.com", "LOGIN.tailscale.com.",
+                 "git.tail230de1.ts.net", "tail230de1.ts.net"):
+        assert addon.host_in(host, names), host
+    for host in ("nottailscale.com", "tailscale.com.evil.example", "other.ts.net",
+                 "git.tail999.ts.net", "", None):
+        assert not addon.host_in(host, names), host
+
+
+def test_the_cache_reads_the_names_and_the_floor_gets_none(addon, tmp_path):
+    path = _rules_file(tmp_path, {
+        "1001": {"rules": [], "blocked_categories": ["proxy"],
+                 "system_allowed": ["tailscale.com", "*.tailscale.com"]},
+        "1002": {"rules": []},
+    })
+    cache = addon.PolicyCache(path)
+    assert cache.system_allowed_for(1001) == ("tailscale.com", "*.tailscale.com")
+    assert cache.system_allowed_for(1002) == ()
+    assert cache.system_allowed_for(4242) == ()
+
+
+def _tailscale_filter(addon, allowed):
+    filt = addon.KosherFilter.__new__(addon.KosherFilter)
+    filt.uids = type("U", (), {"uid_for_connection": staticmethod(lambda *a, **k: 1001)})()
+    policy = _request_policy(blocked=["proxy"])
+    type(policy).system_allowed_for = staticmethod(lambda uid: tuple(allowed))
+    filt.policy = policy
+    filt.categories = type("C", (), {
+        "blocked_categories_of": staticmethod(
+            lambda host, blocked: {"proxy"} if "proxy" in blocked and (
+                host == "tailscale.com" or host.endswith(".tailscale.com")
+                or host == "vpn.example") else set()),
+        "categories_of": staticmethod(lambda host: set()),
+    })()
+    filt.siterules = type("S", (), {"reason": staticmethod(lambda url: None)})()
+    filt.blocklist = _stub_blocklist()
+    filt._block = lambda flow, url, because, why="": setattr(
+        flow, "response", type("R", (), {"status_code": 403, "why": why})())
+    return filt
+
+
+def test_signed_out_tailscales_sites_are_blocked_as_a_proxy(addon):
+    filt = _tailscale_filter(addon, ())
+    flow = _request_flow("https://login.tailscale.com/a/abc123")
+    filt.request(flow)
+    assert flow.response is not None and flow.response.why == "category:proxy"
+
+
+def test_while_set_up_tailscales_sites_pass_the_category_lists(addon):
+    filt = _tailscale_filter(addon, ("tailscale.com", "*.tailscale.com"))
+    flow = _request_flow("https://login.tailscale.com/a/abc123")
+    filt.request(flow)
+    assert flow.response is None
+    # and only those: another site in the same category is still blocked.
+    other = _request_flow("https://vpn.example/")
+    filt.request(other)
+    assert other.response is not None and other.response.why == "category:proxy"
+
+
+def test_a_tailscale_page_is_still_judged_by_its_pictures(addon):
+    # Allowed means "not blocked by category". The category no longer
+    # blanks its pictures wholesale; they go to the model like any page's.
+    filt = _tailscale_filter(addon, ("tailscale.com", "*.tailscale.com"))
+    assert filt._blocked_categories_of("login.tailscale.com", 1001) == set()
+    filt = _tailscale_filter(addon, ())
+    assert filt._blocked_categories_of("login.tailscale.com", 1001) == {"proxy"}

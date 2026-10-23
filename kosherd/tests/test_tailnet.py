@@ -48,20 +48,6 @@ def test_a_name_that_is_not_a_dns_name_never_becomes_a_directive(suffix):
     assert len(out.splitlines()) == 2
 
 
-def test_tailscales_own_domain_is_never_blocked_at_the_resolver():
-    # tailscale.com is in the "proxy" list in the shipped catalogue, and
-    # proxy is blocked by default. The resolver answers root too, so the
-    # block would stop tailscaled reaching its control server.
-    bundle = parse({"domains": {"proxy": ["tailscale.com", "login.tailscale.com",
-                                          "vpn.example", "nottailscale.com"]}})
-    policy = Policy(users=[UserPolicy(uid=1001, username="k", mode="dnsfilter",
-                                      blocked_categories=["proxy"])])
-    out = dns.render_category_blocks(policy, bundle)
-    assert "address=/vpn.example/0.0.0.0" in out
-    assert "address=/nottailscale.com/0.0.0.0" in out
-    assert "tailscale.com/0.0.0.0" not in out.replace("nottailscale.com", "")
-
-
 def test_both_resolvers_get_the_forward_and_only_changed_ones_restart(tmp_path):
     family, plain = tmp_path / "dnsmasq.d", tmp_path / "dnsmasq-open.d"
     family.mkdir()
@@ -234,3 +220,202 @@ def test_nothing_on_the_tailnet_is_let_in():
     assert "tailscale0" not in text
     assert "policy drop;" in chain(text, "input")
     assert "41641" not in text
+
+
+SIGNED_IN_NAMES = ("tailscale.com", "*.tailscale.com", "*.tail230de1.ts.net")
+WAITING_NAMES = ("tailscale.com", "*.tailscale.com")
+
+
+def _dnsfilter_policy():
+    return Policy(users=[UserPolicy(uid=1001, username="k", mode="dnsfilter",
+                                    blocked_categories=["proxy"])])
+
+
+def test_tailscales_sites_are_left_out_of_the_resolvers_blocks_while_it_is_set_up():
+    # tailscale.com is in the "proxy" list in the shipped catalogue, and
+    # proxy is blocked by default (#211).
+    bundle = parse({"domains": {"proxy": ["tailscale.com", "login.tailscale.com",
+                                          "vpn.example", "nottailscale.com",
+                                          "tail230de1.ts.net"]}})
+    out = dns.render_category_blocks(_dnsfilter_policy(), bundle, SIGNED_IN_NAMES)
+    assert "address=/vpn.example/0.0.0.0" in out
+    assert "address=/nottailscale.com/0.0.0.0" in out
+    assert "tailscale.com/0.0.0.0" not in out.replace("nottailscale.com", "")
+    assert "tail230de1.ts.net" not in out
+
+
+def test_signed_out_the_resolver_blocks_tailscale_like_any_proxy_site():
+    bundle = parse({"domains": {"proxy": ["tailscale.com", "login.tailscale.com"]}})
+    out = dns.render_category_blocks(_dnsfilter_policy(), bundle)
+    assert "address=/tailscale.com/0.0.0.0" in out
+    assert "address=/login.tailscale.com/0.0.0.0" in out
+
+
+# -- what every account may reach while Tailscale is set up (#211) ---------
+
+def test_signed_in_allows_tailscales_sites_and_this_tailnet_only():
+    got = tailnet.allowance(tailnet.describe(SIGNED_IN))
+    assert got == SIGNED_IN_NAMES
+    assert "*.ts.net" not in got and "ts.net" not in got
+
+
+def test_a_waiting_sign_in_allows_tailscales_sites_but_no_tailnet():
+    waiting = tailnet.describe({"BackendState": "NeedsLogin",
+                                "AuthURL": "https://login.tailscale.com/a/abc123",
+                                "CurrentTailnet": None, "Self": {}})
+    # Waiting means kosherd's own `tailscale up` is still running...
+    assert tailnet.allowance(waiting, waiting=True) == WAITING_NAMES
+    plain = tailnet.describe({"BackendState": "NeedsLogin", "CurrentTailnet": None})
+    assert tailnet.allowance(plain, waiting=True) == WAITING_NAMES
+    # ...and an address in the status is not enough on its own:
+    # tailscaled can keep reporting it after the sign-out.
+    assert tailnet.allowance(waiting) == ()
+
+
+STALE_AFTER_SIGN_OUT = {"BackendState": "NeedsLogin",
+                        "AuthURL": "https://login.tailscale.com/a/abc123",
+                        "CurrentTailnet": None, "Self": {}}
+
+
+def test_after_a_sign_out_a_lingering_sign_in_address_allows_nothing(monkeypatch):
+    # The batch VM run: a sign-in started, then a sign-out. The status read
+    # after it (kosherctl tailscale status, and the killed `tailscale up`'s
+    # own last refresh) still carried the AuthURL, and the names were
+    # allowed again with nobody signing in.
+    calls = []
+    monkeypatch.setattr(tailnet, "_allowed", WAITING_NAMES)
+    monkeypatch.setattr(tailnet, "_login", None)
+    monkeypatch.setattr(tailnet, "on_allowed_change", lambda: calls.append(tailnet.allowed()))
+    monkeypatch.setattr(tailnet, "sync_dns", lambda suffix, **k: False)
+    monkeypatch.setattr(tailnet, "status", lambda: tailnet.describe(STALE_AFTER_SIGN_OUT))
+    tailnet.forget()
+    tailnet.refresh_dns()
+    assert tailnet.allowed() == ()
+    assert calls == [()]
+
+
+def test_a_status_read_begun_before_the_sign_out_cannot_land_after_it(monkeypatch):
+    # A poll that read "signed in" just before the sign-out must finish
+    # before forget() clears the names, not after it.
+    import threading
+
+    calls = []
+    reading = threading.Event()
+    release = threading.Event()
+    monkeypatch.setattr(tailnet, "_allowed", ())
+    monkeypatch.setattr(tailnet, "on_allowed_change", lambda: calls.append(tailnet.allowed()))
+    monkeypatch.setattr(tailnet, "sync_dns", lambda suffix, **k: False)
+
+    def slow_status():
+        reading.set()
+        release.wait(5)
+        return tailnet.describe(SIGNED_IN)
+
+    monkeypatch.setattr(tailnet, "status", slow_status)
+    poll = threading.Thread(target=tailnet.refresh_dns)
+    poll.start()
+    reading.wait(5)
+    out = threading.Thread(target=tailnet.forget)
+    out.start()
+    release.set()
+    poll.join(5)
+    out.join(5)
+    assert tailnet.allowed() == ()
+    assert calls == [SIGNED_IN_NAMES, ()]
+
+
+@pytest.mark.parametrize("now", [
+    None,
+    {"installed": False, "state": "NotInstalled", "signed_in": False},
+    {"installed": True, "state": "Unavailable", "signed_in": False},
+    {"installed": True, "state": "NeedsLogin", "signed_in": False, "login_url": "",
+     "dns_suffix": ""},
+])
+def test_signed_out_or_never_set_up_allows_nothing(now):
+    assert tailnet.allowance(now) == ()
+
+
+@pytest.mark.parametrize("suffix", ["", "a b.ts.net", "x/y.ts.net",
+                                    "tail.ts.net\naddress=/google.com/"])
+def test_a_suffix_that_is_not_a_dns_name_adds_no_tailnet(suffix):
+    raw = dict(SIGNED_IN, MagicDNSSuffix=suffix,
+               CurrentTailnet=dict(SIGNED_IN["CurrentTailnet"], MagicDNSSuffix=suffix))
+    assert tailnet.allowance(tailnet.describe(raw)) == WAITING_NAMES
+
+
+def test_the_tailnet_name_is_read_from_the_magicdns_suffix():
+    assert dns.tailnet_name("Tail230DE1.ts.net.") == "tail230de1.ts.net"
+    assert dns.tailnet_name(None) is None
+    assert dns.tailnet_name("../etc") is None
+
+
+def test_the_daemon_is_told_only_when_the_names_change(monkeypatch):
+    calls = []
+    monkeypatch.setattr(tailnet, "_allowed", ())
+    monkeypatch.setattr(tailnet, "on_allowed_change", lambda: calls.append(tailnet.allowed()))
+    assert tailnet.set_allowed(SIGNED_IN_NAMES)
+    assert not tailnet.set_allowed(SIGNED_IN_NAMES)
+    assert tailnet.set_allowed(())
+    assert calls == [SIGNED_IN_NAMES, ()]
+
+
+def test_a_status_read_sets_the_names_and_a_sign_out_clears_them(monkeypatch):
+    calls = []
+    monkeypatch.setattr(tailnet, "_allowed", ())
+    monkeypatch.setattr(tailnet, "on_allowed_change", lambda: calls.append(tailnet.allowed()))
+    monkeypatch.setattr(tailnet, "status", lambda: tailnet.describe(SIGNED_IN))
+    monkeypatch.setattr(tailnet, "sync_dns", lambda suffix, **k: False)
+    tailnet.refresh_dns()
+    assert tailnet.allowed() == SIGNED_IN_NAMES
+    tailnet.forget()
+    assert tailnet.allowed() == ()
+    assert calls == [SIGNED_IN_NAMES, ()]
+
+
+# -- the names in each mode ---------------------------------------------------
+
+def _modes_policy():
+    return Policy(users=[
+        UserPolicy(uid=1001, username="f", mode="filtered", blocked_categories=["proxy"]),
+        UserPolicy(uid=1002, username="w", mode="whitelist"),
+        UserPolicy(uid=1003, username="d", mode="dnsfilter", blocked_categories=["proxy"]),
+    ])
+
+
+def _system_line(out, name):
+    return next((l for l in out.splitlines() if l.startswith(f"nftset=/{name}/")), None)
+
+
+def test_whitelist_and_dnsfilter_reach_the_names_through_the_system_sets():
+    out = dns.render(_modes_policy(), SIGNED_IN_NAMES)
+    for name in ("tailscale.com", "tail230de1.ts.net"):
+        line = _system_line(out, name)
+        assert line and "#sys4" in line and "#sys6" in line, out
+    assert _system_line(out, "ts.net") is None
+    # and both modes accept the system sets on the web ports.
+    rules = nft.render(_modes_policy(), dns_uid=990, mitm_uid=991)
+    for chain in ("mode_whitelist", "mode_dnsfilter"):
+        body = rules.split(f"chain {chain} {{", 1)[1].split("\n    }\n", 1)[0]
+        assert "ip daddr @sys4 tcp dport" in body and "ip6 daddr @sys6 tcp dport" in body
+
+
+def test_signed_out_the_names_are_in_no_set():
+    out = dns.render(_modes_policy())
+    assert _system_line(out, "tailscale.com") is None
+    assert "ts.net" not in out
+
+
+def test_the_proxy_is_told_the_names_for_every_filtered_account(tmp_path, monkeypatch):
+    import json
+
+    from kosherd import apply as apply_mod
+
+    monkeypatch.setattr(apply_mod, "MITM_DIR", tmp_path)
+    monkeypatch.setattr(apply_mod, "MITM_RULES_PATH", tmp_path / "rules.json")
+    monkeypatch.setattr(apply_mod.nixdaemon, "build_gid", lambda: None)
+    apply_mod.write_mitm_rules(_modes_policy(), SIGNED_IN_NAMES)
+    doc = json.loads((tmp_path / "rules.json").read_text())
+    assert list(doc) == ["1001"]
+    assert doc["1001"]["system_allowed"] == list(SIGNED_IN_NAMES)
+    apply_mod.write_mitm_rules(_modes_policy(), ())
+    assert json.loads((tmp_path / "rules.json").read_text())["1001"]["system_allowed"] == []

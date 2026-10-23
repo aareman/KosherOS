@@ -1739,6 +1739,16 @@ def test_an_answer_the_daemon_could_not_read_is_shown_as_it_came():
     assert sentence == "error: no network" and short == "error: no network"
 
 
+def test_a_check_that_could_not_reach_the_server_never_says_up_to_date():
+    # #207: offline, bootc fails and the registry cannot be asked.
+    sentence, short = computer.check_words(
+        {"ok": False, "available": None, "error": "error: Upgrading: Fetching manifest: no such host",
+         "raw": "error: Upgrading: Fetching manifest: no such host"}, "0.1.0-pre.054")
+    assert short == "Couldn't check"
+    assert sentence.startswith("Couldn't check for updates.")
+    assert "Up to date" not in sentence
+
+
 def test_once_an_update_is_ready_restart_is_one_click_away():
     win = FakeWindow(FakeClient())
     win.policy = {"revision": 1, "users": [], "guardian": {"enabled": False},

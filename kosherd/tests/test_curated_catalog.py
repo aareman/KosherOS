@@ -37,12 +37,13 @@ def test_the_big_dating_and_social_sites_are_covered():
 
 
 def test_every_curated_entry_is_a_bare_host_in_a_known_category():
-    from kosherd.categories import CATEGORY_LABELS
+    from kosherd.categories import CALLS, CATEGORY_LABELS
 
     for category, entries in CURATED.items():
         if category.startswith("_"):
             continue
-        assert category in CATEGORY_LABELS, f"unknown category {category!r}"
+        assert category in CATEGORY_LABELS or category == CALLS, \
+            f"unknown category {category!r}"
         for entry in entries:
             host = entry.split("/", 1)[0]
             assert "." in host and " " not in host and host == host.lower()
@@ -79,3 +80,13 @@ def test_the_source_meta_insert_is_a_parameter_tuple():
         assert m, f"could not find the {key} meta insert"
         assert m.group(1).rstrip().endswith(","), \
             f"the {key} meta insert must bind a tuple (trailing comma)"
+
+
+def test_a_teams_meeting_link_is_a_call_not_social():
+    # #209: UT1 puts Teams and Skype under chat, which is social.
+    calls = sites("calls")
+    assert {"teams.microsoft.com", "teams.live.com", "skype.com",
+            "teams.cdn.office.net", "teams.cdn.live.net"} <= calls
+    for category, entries in CURATED.items():
+        if not category.startswith("_") and category != "calls":
+            assert not calls & sites(category), f"a call service is also {category}"

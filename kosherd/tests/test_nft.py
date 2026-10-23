@@ -108,7 +108,7 @@ def test_inspect_mode_redirects_web_to_mitmproxy():
     # who is connecting.
     ports = nft.mitm_ports(pol)
     for uid in inspected:
-        assert f"meta skuid {uid} tcp dport != {{ 21, 22, 25, 53, 110, 143, 465, 587, 993 }} redirect to :{ports[uid]}" in out
+        assert f"meta skuid {uid} tcp dport != {{ 21, 22, 25, 53, 110, 143, 465, 587, 993, 22000, 22067 }} redirect to :{ports[uid]}" in out
     assert len(set(ports.values())) == len(inspected), "ports must be distinct"
     # inspected users still get the filtered egress policy and evasion block
     for uid in inspected:
@@ -149,7 +149,7 @@ def test_only_filtered_traffic_is_decrypted():
     out = nft.render(policy_of("dnsfilter", "filtered", "unfiltered"),
                      dns_uid=989, mitm_uid=988)
     # uid 1001 is the filtered one; nobody else is redirected to the proxy.
-    assert "meta skuid 1001 tcp dport != { 21, 22, 25, 53, 110, 143, 465, 587, 993 } redirect to :30000" in out
+    assert "meta skuid 1001 tcp dport != { 21, 22, 25, 53, 110, 143, 465, 587, 993, 22000, 22067 } redirect to :30000" in out
 
 
 def test_unfiltered_users_get_the_plain_resolver():
@@ -198,7 +198,7 @@ def test_user_ports_are_deterministic_and_shared_by_every_renderer():
     assert nft.mitm_ports(pol) == ports
     out = nft.render(pol, dns_uid=989, mitm_uid=988)
     for uid, port in ports.items():
-        assert f"meta skuid {uid} tcp dport != {{ 21, 22, 25, 53, 110, 143, 465, 587, 993 }} redirect to :{port}" in out
+        assert f"meta skuid {uid} tcp dport != {{ 21, 22, 25, 53, 110, 143, 465, 587, 993, 22000, 22067 }} redirect to :{port}" in out
 
 
 # -- protocols where the server speaks first (#164) ----------------------------
@@ -307,7 +307,8 @@ def test_dnsfilter_connects_only_to_addresses_its_resolver_handed_out():
     # looked up matches none of them and falls to the final reject.
     for rule in accepts:
         assert any(f"daddr @{s}" in rule for s in
-                   ("dns4", "dns6", "wl4", "wl6", "sys4", "sys6", "git4", "git6")), rule
+                   ("dns4", "dns6", "wl4", "wl6", "sys4", "sys6", "git4", "git6",
+                    "st4", "st6")), rule
     # dnsmasq feeds a name's most specific nftset= line only, so a name on
     # another list lands in that list's set and not in dns4: github.com
     # over HTTPS must still open for the account (#168 put it in git4).

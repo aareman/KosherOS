@@ -153,4 +153,8 @@ section "Captive portal"
 check "a temporary window can be opened" 0 kosherctl captive "$(id -u nokid)" 1
 check "the window lets that user out"    0 fetch_as nokid https://example.com
 
+# Leave wlkid's list as it was found: other suites use example.com as a
+# site that is NOT on it.
+kctl set-whitelist "$(id -u wlkid)" >/dev/null
+
 report

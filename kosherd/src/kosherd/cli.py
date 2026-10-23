@@ -492,6 +492,33 @@ def cmd_apps(args) -> int:
         print("  blocked kinds: " + (", ".join(kinds) if kinds else "none"))
         print("  blocked apps:  " + (", ".join(blocked) if blocked else "none"))
         print("  can install:   " + ("yes" if user.get("can_install_apps", True) else "no"))
+        approved = list(user.get("approved_apps", []))
+        print("  allowed here:  " + (", ".join(approved) if approved else "none"))
+        print("  Syncthing from this network: "
+              + ("on" if user.get("syncthing_lan") else "off"))
+        return 0
+    if args.action in ("approve", "unapprove"):
+        # Per account, for the apps that need it (Syncthing, #213).
+        if len(args.values) != 1:
+            print(f"usage: kosherctl apps {args.action} <uid> <app>", file=sys.stderr)
+            return 2
+        ref = args.values[0]
+        if ref not in appaccess.INDIVIDUAL_APPROVAL:
+            print(f"{ref} is approved for the whole computer, not per account "
+                  "(the admin app's approved list)", file=sys.stderr)
+            return 2
+        c.set_user_app_approval(args.uid, ref, args.action == "approve", _guardian_pw(args))
+        print(f"{user['username']}: {ref} "
+              + ("allowed" if args.action == "approve" else "no longer allowed"))
+        return 0
+    if args.action == "syncthing-lan":
+        if args.values[:1] not in (["on"], ["off"]):
+            print("usage: kosherctl apps syncthing-lan <uid> on|off", file=sys.stderr)
+            return 2
+        on = args.values[0] == "on"
+        c.set_syncthing_lan(args.uid, on, _guardian_pw(args))
+        print(f"{user['username']}: devices on this network "
+              + ("may connect to Syncthing directly" if on else "may not connect to Syncthing"))
         return 0
     if args.action == "access":
         if args.values[:1] not in (["approved"], ["store"]):
@@ -1459,11 +1486,14 @@ def main(argv: list[str] | None = None) -> int:
 
     s = sub.add_parser("apps", help="what the Store offers a user, and what is blocked")
     s.add_argument("action", choices=["show", "access", "block-kind", "unblock-kind",
-                                      "block", "unblock", "kinds", "install"])
+                                      "block", "unblock", "kinds", "install",
+                                      "approve", "unapprove", "syncthing-lan"])
     s.add_argument("uid", type=int, nargs="?", default=0)
     s.add_argument("values", nargs="*", default=[],
-                   help="approved|store, kinds (see 'kinds'), app ids, or "
-                        "for 'install' the app to install for that account")
+                   help="approved|store, kinds (see 'kinds'), app ids, "
+                        "for 'install' the app to install for that account, "
+                        "for 'approve'/'unapprove' the app to allow for that account "
+                        "alone (nixpkgs#syncthing), for 'syncthing-lan' on|off")
     s.add_argument("--guardian-password")
     s.set_defaults(func=cmd_apps)
 

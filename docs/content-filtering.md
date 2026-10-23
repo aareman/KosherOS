@@ -54,7 +54,8 @@ proxy could not read them:
 - **Mail.** IMAPS, SMTPS and submission are allowed directly.
 - **Extra ports** an administrator grants one account, under *Beyond the
   web* on the account's page, for a program that is neither web nor mail.
-  The filter's own ports can never be granted this way. Empty by default.
+  The filter's own ports, and Syncthing's (see [Syncthing](#syncthing)), can
+  never be granted this way. Empty by default.
 - **Video calls.** Zoom, Meet and school calls send picture and sound over
   UDP to high ports, which cannot be inspected. That is allowed by default
   so calls work without a visit to the admin app. The switch on the
@@ -128,6 +129,34 @@ used only in this case. The built-in part is in `kosherd/buildsources.py`.
 
 When the proxy refuses a build's download, the build log names the host and
 the account whose setting refused it.
+
+### Syncthing
+
+Syncthing keeps folders the same on a person's computers and phone. The filter
+cannot read what it sends: paired devices talk to each other over encrypted
+connections that only they can open, so files that arrive from a paired device
+are not checked by the filter at all. What can be controlled is who has it and
+where it may connect.
+
+An administrator's account and an unfiltered one can install Syncthing from the
+Store like any other app. Any other account needs an administrator to allow it
+for that account, on the account's Apps tab, even when the account may use the
+whole store. Once it is allowed, Syncthing runs for that account in the
+background, and the Syncthing icon opens its page in the browser.
+
+Only Syncthing itself gets its ports. It runs as a system service for the
+account, and the firewall lets ports 22000 and 22067 (and UDP 22000 and 21027)
+out only for that service. Any other program on the account, including a copy
+of Syncthing started from a terminal, is refused on those ports. To find the
+person's other devices, the service also reaches Syncthing's discovery servers
+and relay list directly. Taking the permission away stops the service and
+closes the ports; the synced folders stay where they are.
+
+Devices on the same home network cannot connect to it unless an administrator
+switches on **Let devices on this network connect directly** for the account.
+With it on, the computer accepts Syncthing's connections from addresses on the
+local network only, never from the internet. Approving Syncthing, taking it
+away, and that switch are all recorded in the activity log.
 
 ## The category database
 

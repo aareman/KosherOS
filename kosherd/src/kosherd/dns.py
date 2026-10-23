@@ -35,6 +35,12 @@ TAILNET_OPEN_CONF = "/etc/kosher/dnsmasq-open.d/tailnet.conf"
 # dnsmasq, a system user, so the per-account rules never see the query.
 TAILNET_RESOLVER = "100.100.100.100"
 
+# Never blocked at the resolver, whatever category lists them.
+# syncthing.net is where an approved Syncthing finds a person's other
+# devices and its relays (#213): a category that listed it would leave it
+# unable to find anything.
+RESOLVER_NEVER_BLOCKED = ("syncthing.net",)
+
 # Search engines publish hostnames that always answer with safe search on.
 # Pointing the normal hostname at them is how safe search is enforced for
 # users whose traffic we do NOT read (dnsfilter mode); verified against a
@@ -123,6 +129,10 @@ def render(policy: Policy, tailnet: tuple[str, ...] = ()) -> str:
     # The git hosts developer accounts may reach over SSH (nft.py, #164).
     from .nft import GIT_SSH_HOSTS
     git_domains = sorted(GIT_SSH_HOSTS)
+    # Syncthing's discovery servers and relay list, which its service
+    # reaches on 443 without the proxy (nft.py, syncthing.py, #213).
+    from .syncthing import HOSTS as SYNCTHING_HOSTS
+    syncthing_domains = sorted(SYNCTHING_HOSTS)
 
     # One directive per name, naming every set the name belongs in. dnsmasq
     # uses only the single nftset= line with the longest matching domain, so
@@ -135,6 +145,7 @@ def render(policy: Policy, tailnet: tuple[str, ...] = ()) -> str:
          ("sys4", "sys6"), system_domains),
         ("# User whitelists -> wl4/wl6", ("wl4", "wl6"), user_domains),
         ("# Git over SSH for developer accounts -> git4/git6", ("git4", "git6"), git_domains),
+        ("# Syncthing's discovery and relay list -> st4/st6", ("st4", "st6"), syncthing_domains),
     )
     lines = [
         f"# Rendered by kosherd from policy revision {policy.revision}. DO NOT EDIT.",
@@ -236,7 +247,7 @@ def render_category_blocks(policy: Policy, bundle, tailnet: tuple[str, ...] = ()
         lines.append(f"# Blocking {', '.join(sorted(rendered))} for users "
                      "the proxy does not see.")
     for domain in bundle.domains_in(rendered):
-        if _never_blocked(domain, tailnet):
+        if _never_blocked(domain, (*tailnet, *RESOLVER_NEVER_BLOCKED)):
             continue
         # 0.0.0.0 rather than NXDOMAIN: a browser shows a connection error
         # instead of retrying elsewhere.

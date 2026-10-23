@@ -16,7 +16,7 @@ import tempfile
 from pathlib import Path
 
 from . import categories as categories_mod
-from . import buildsources, containers, dns, mitmca, nft, nixdaemon, tailnet
+from . import buildsources, containers, dns, mitmca, nft, nixdaemon, syncthing, tailnet
 from . import search as search_mod
 from .policy import INSPECTED_MODES, SAFESEARCH_MODES, UNFILTERED_MODES, Policy
 
@@ -214,7 +214,7 @@ def apply_policy(policy: Policy) -> None:
         subids = {}
     ruleset = nft.render(policy, dns_uid=dnsmasq_uid(), mitm_uid=mitm_uid(),
                          search_uid=search_uid(), build_gid=nixdaemon.build_gid(),
-                         subids=subids)
+                         subids=subids, syncthing=syncthing.nft_inputs())
 
     # Syntax-check before touching the live ruleset or the boot file.
     with tempfile.NamedTemporaryFile("w", suffix=".nft") as check:
@@ -228,6 +228,12 @@ def apply_policy(policy: Policy) -> None:
     res = subprocess.run(["nft", "-f", str(NFT_RULESET_PATH)], capture_output=True, text=True)
     if res.returncode != 0:
         raise ApplyError(f"nft load failed: {res.stderr}")
+    # The load emptied the Syncthing sets; put the running services back,
+    # and start or stop each one as the policy now says (syncthing.py).
+    try:
+        syncthing.apply(policy)
+    except Exception:  # noqa: BLE001 - never leave the rest unapplied
+        log.exception("could not bring the Syncthing services in line")
 
     write_mitm_rules(policy, allowed)
     # The proxy runs for a filtered account — and wherever Nix is installed,

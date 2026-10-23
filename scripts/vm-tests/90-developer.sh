@@ -8,6 +8,12 @@ set -uo pipefail
 . "$(dirname "$0")/lib.sh"
 
 ensure_test_users
+# This suite's "off the list" checks use example.com, and 20-enforcement
+# puts example.com on wlkid's list. When the two shared a machine, the
+# container and the build checks reached example.com because it WAS on
+# the list. Start from an empty list, whatever ran before.
+kctl set-mode "$(id -u wlkid)" whitelist >/dev/null
+kctl set-whitelist "$(id -u wlkid)" >/dev/null
 # Developer tools are a per-account switch (#123): without it the daemon
 # refuses the account and its filter keeps it off the registries. The
 # whitelist account is the one this suite builds as, so it gets them.

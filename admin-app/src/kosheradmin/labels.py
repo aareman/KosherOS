@@ -97,6 +97,22 @@ APP_ACCESS_SHORT = {
 }
 
 
+# Syncthing for one account (#213): what the admin is told before allowing it.
+SYNCTHING_REF = "nixpkgs#syncthing"
+
+
+def syncthing_approval(username: str) -> tuple[str, str]:
+    """The heading and body of the dialog that allows Syncthing."""
+    return (f"Allow Syncthing for {username}?",
+            "Files that arrive from devices paired with Syncthing aren't checked by the "
+            f"filter. Only allow it if you trust every device {username} will pair with.")
+
+
+SYNCTHING_LAN_TITLE = "Let devices on this network connect directly"
+SYNCTHING_LAN_HINT = ("Off, Syncthing only connects out. On, devices on your home network "
+                      "can connect to it too. Nothing from the internet can.")
+
+
 def app_name(ref: str) -> str:
     """'org.gnome.Chess' -> 'Chess': what to call an app when only its id
     is known, rather than showing a person a ref."""
@@ -471,6 +487,13 @@ def change_sentence(event: dict, users_by_uid: dict | None = None) -> tuple[str,
     elif method == "SetUserBlockedApps":
         refs = arg(1) or []
         what = f"{who}: {plural(len(refs), 'app')} blocked by name"
+    elif method == "SetUserAppApproval":
+        name = "Syncthing" if arg(1) == SYNCTHING_REF else app_name(str(arg(1)))
+        what = f"{who}: {name} " + ("allowed" if arg(2) else "no longer allowed")
+    elif method == "SetSyncthingLan":
+        what = (f"{who}: devices on this network "
+                + ("may now connect to Syncthing directly" if arg(1)
+                   else "can no longer connect to Syncthing directly"))
     elif method == "RemoveApp":
         what = f"App uninstalled for everyone ({arg(0)})"
     elif method == "ApproveApp":

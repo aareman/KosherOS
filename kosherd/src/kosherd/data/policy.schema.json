@@ -287,6 +287,28 @@
           "description": "Block advertising and tracker domains at the machine's resolvers for every account, like a Pi-hole. Reaches every browser and app because all DNS is forced through the local resolvers. Absent means on."
         }
       }
+    },
+    "updates": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "auto": {
+          "enum": [
+            "off",
+            "daily",
+            "weekly",
+            "biweekly",
+            "monthly"
+          ],
+          "default": "weekly",
+          "description": "How often this computer looks for a new KosherOS version on its own and downloads it, ready for the next restart. It never restarts by itself. off = only when an administrator checks. Absent means weekly."
+        },
+        "notify": {
+          "type": "boolean",
+          "default": true,
+          "description": "Tell the people signed in, once per version, when a downloaded update is ready for a restart. Absent means on."
+        }
+      }
     }
   },
   "$defs": {

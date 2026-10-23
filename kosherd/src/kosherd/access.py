@@ -227,6 +227,18 @@ ACTIONS = {
     # The Restart button after an update. Same action as applying it: a
     # restart is the second half of the same job.
     "Reboot": ACTION_APPLY_UPDATES,
+    # Automatic updates (#19). The schedule is a system setting like the
+    # channel, but not guardian-gated: it only decides when updates the
+    # administrator could fetch anyway are fetched, and "off" leaves the
+    # Check button working. The run is the timer's (root) or an
+    # administrator's "check now".
+    "SetAutoUpdates": ACTION_APPLY_UPDATES,
+    "AutoUpdateStatus": ACTION_READ_CONFIG,
+    "RunAutoUpdate": ACTION_APPLY_UPDATES,
+    # Whether an update waits for a restart, for the mark in every
+    # person's panel. Says nothing about anybody's filter, and is answered
+    # from kosherd's own note, so any account may ask without a password.
+    "PendingUpdate": ACTION_READ_OWN,
     "SetCaptiveMode": ACTION_MANAGE_NETWORK,
     # Tailscale (#30). Reading whether this computer is on a tailnet is a
     # read. Signing it in puts it on a network with other people's
@@ -298,6 +310,8 @@ CHANGES = frozenset({
     # And which stream of builds it follows from now on, which is the
     # longest-lived of the three.
     "SetChannel",
+    # And how often it fetches updates on its own.
+    "SetAutoUpdates",
     # A test build put on the machine, and the return from it.
     "TryImage", "ReturnToKept",
     # Joining a tailnet and leaving it.

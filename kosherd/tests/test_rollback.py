@@ -136,7 +136,10 @@ def test_rollback_calls_bootc_rollback(monkeypatch):
     seen: list = []
     daemon = _daemon(monkeypatch, record=seen)
     assert daemon.impl_Rollback() is None
-    assert [argv for argv in seen if argv[0] == "bootc"] == [["bootc", "rollback"]]
+    # Then only a read of the status, for the mark in the panel (#19).
+    bootc = [argv for argv in seen if argv[0] == "bootc"]
+    assert bootc[0] == ["bootc", "rollback"]
+    assert all(argv[1] == "status" for argv in bootc[1:])
 
 
 def test_a_failed_rollback_is_reported_not_swallowed(monkeypatch):

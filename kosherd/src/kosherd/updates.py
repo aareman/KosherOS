@@ -546,3 +546,209 @@ def return_plan(deps: list[dict]) -> dict:
     undeploy = [d["key"] for d in _stale_trials(deps, keep_staged=back)
                 if d["key"] and d is not kept]
     return {"kept": kept, "undeploy": undeploy, "rollback": back, "unpin": kept["key"]}
+
+
+# -- automatic updates (#19) -------------------------------------------------
+#
+# Like a phone: the computer looks for a new version on a schedule the
+# administrator picks, downloads it in the background, and leaves it
+# staged for the next restart. It never restarts on its own. The people
+# signed in get one notice per version (when the administrator has not
+# turned that off), and a small mark in the panel for as long as the
+# update waits.
+#
+# A systemd timer (kosher-auto-update.timer) fires once a day, at a random
+# time that stays the same for each machine, and runs
+# `kosherctl updates run`; kosherd decides here whether a check is due.
+# A systemd calendar cannot say "every two weeks", and a daily tick also
+# means a check that failed (no network that day) is tried again the next
+# day rather than a whole period later. Persistent=true makes a machine
+# that was off at the time catch up when it starts. "off" stops the timer
+# altogether, and the run refuses as well.
+
+SCHEDULE_DAYS = {"daily": 1, "weekly": 7, "biweekly": 14, "monthly": 30}
+SCHEDULE_LABELS = {
+    "off": "Off",
+    "daily": "Daily",
+    "weekly": "Weekly",
+    "biweekly": "Every 2 weeks",
+    "monthly": "Monthly",
+}
+# The daily tick wanders by up to the timer's random delay, so a weekly
+# check six days and twenty hours after the last one counts as a week.
+DUE_SLACK = 6 * 3600
+AUTO_TIMER = "kosher-auto-update.timer"
+AUTO_STATE_PATH = "/var/lib/kosher/auto-update.json"
+# Below this, on battery, a download of a few gigabytes waits for the
+# charger. Running flat half-way breaks nothing, but nothing gets done
+# either, and a flat battery is worse than a late update.
+LOW_BATTERY = 40
+BOOT_ID_PATH = "/proc/sys/kernel/random/boot_id"
+
+READY_SUMMARY = "An update is ready"
+READY_BODY = "It'll be used the next time this computer restarts."
+
+
+def next_due(schedule: str, last_success: float | None) -> float | None:
+    """When the next automatic check is due, as a timestamp: None when the
+    schedule is off, 0 when no check has worked yet (due now)."""
+    days = SCHEDULE_DAYS.get(schedule)
+    if days is None:
+        return None
+    if not last_success:
+        return 0.0
+    return float(last_success) + days * 86400 - DUE_SLACK
+
+
+def is_metered(value) -> bool:
+    """NetworkManager's Metered property (NMMetered): 1 is yes, 3 is a
+    guessed yes. Unknown (0) and anything unreadable count as not metered:
+    a machine that cannot say is far more often on home broadband than on
+    a phone's hotspot."""
+    return value in (1, 3)
+
+
+def battery_too_low(on_battery, percent) -> bool:
+    if not on_battery:
+        return False
+    try:
+        return float(percent) < LOW_BATTERY
+    except (TypeError, ValueError):
+        return False
+
+
+def skip_reason(schedule: str, state: dict, now: float, *, force: bool = False,
+                metered: bool = False, on_battery: bool = False,
+                battery=None, busy: bool = False) -> str | None:
+    """Why an automatic run should not check now, in a few words for the
+    journal, or None to go ahead. `force` (kosherctl updates run --now)
+    skips only "not due yet": off is off, and the network and battery
+    rules stand."""
+    if schedule not in SCHEDULE_DAYS:
+        return "automatic updates are off"
+    if not force:
+        due = next_due(schedule, (state or {}).get("last_success"))
+        if due and now < due:
+            return "not due yet"
+    if busy:
+        return "an update is already downloading"
+    if metered:
+        return "the network is metered"
+    if battery_too_low(on_battery, battery):
+        return f"the battery is below {LOW_BATTERY}%"
+    return None
+
+
+def after_check(info: dict) -> str:
+    """What an automatic run does with a CheckUpdate-shaped answer:
+    "none" (up to date), "download", "staged" (already downloaded), or
+    "left": the newest is the version this machine went back from, which
+    somebody chose to leave, so it is not fetched again unasked."""
+    if not info.get("available"):
+        return "none"
+    on_disk = info.get("on_disk")
+    if on_disk == "staged":
+        return "staged"
+    if on_disk == "rollback":
+        return "left"
+    return "download"
+
+
+def check_failure(returncode: int, stdout: str, stderr: str) -> str | None:
+    """bootc's check failed: its first line, for the journal and the admin
+    app, or None when it worked. A failed check is never "up to date"
+    (#207): bootc's error has no "Update available" in it, so read the
+    ordinary way it looks like no update."""
+    if returncode == 0:
+        return None
+    return next((line.strip() for line in (stderr or stdout or "").splitlines()
+                 if line.strip()), "the update check failed")
+
+
+def staged_to_discard(before: list[dict], after: list[dict]) -> str | None:
+    """After a failed download: the key of a staged deployment that was not
+    there before it, so the failure leaves the machine as it found it.
+    bootc stages only at the end of a pull that worked, so this is almost
+    always None; it is here for the time it is not."""
+    old = next((d for d in before if d["place"] == "staged"), None)
+    new = next((d for d in after if d["place"] == "staged"), None)
+    if new is None or not new.get("key"):
+        return None
+    if old is not None and old.get("key") == new["key"]:
+        return None
+    return new["key"]
+
+
+def load_state(path: str | None = None) -> dict:
+    # Looked up now, not at import, so a test can point it elsewhere.
+    path = path or AUTO_STATE_PATH
+    try:
+        with open(path, encoding="utf-8") as f:
+            doc = json.load(f)
+    except (OSError, ValueError):
+        return {}
+    return doc if isinstance(doc, dict) else {}
+
+
+def save_state(state: dict, path: str | None = None) -> None:
+    path = path or AUTO_STATE_PATH
+    directory = os.path.dirname(path) or "."
+    os.makedirs(directory, exist_ok=True)
+    tmp = f"{path}.tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(state, f, indent=2)
+        f.write("\n")
+    os.replace(tmp, path)
+
+
+def boot_id(path: str | None = None) -> str:
+    path = path or BOOT_ID_PATH
+    try:
+        with open(path, encoding="utf-8") as f:
+            return f.read().strip()
+    except OSError:
+        return ""
+
+
+def record_staged(state: dict, version: str | None, digest: str | None, boot: str,
+                  *, announce: bool) -> bool:
+    """Note the update waiting for a restart in `state`. Returns whether the
+    people signed in get the pop-up: only when `announce` (an automatic
+    download, with notices on) and only the first time this version is
+    seen, so a daily check that keeps finding the same download says so
+    once."""
+    state["staged_version"] = version or ""
+    state["staged_digest"] = digest or ""
+    state["staged_boot"] = boot
+    if not announce or not digest or state.get("announced_digest") == digest:
+        return False
+    state["announced_digest"] = digest
+    return True
+
+
+def clear_staged(state: dict) -> bool:
+    """Nothing waits for a restart any more. Returns whether something did."""
+    had = bool(state.get("staged_digest"))
+    for key in ("staged_version", "staged_digest", "staged_boot"):
+        state.pop(key, None)
+    return had
+
+
+# libostree writes this while a deployment is staged for the next boot and
+# finalizes it at shutdown; it is gone once nothing is staged.
+STAGED_MARK = "/run/ostree/staged-deployment"
+
+
+def staged_on_disk(path: str | None = None) -> bool:
+    return os.path.exists(path or STAGED_MARK)
+
+
+def pending_update(state: dict, boot: str) -> dict | None:
+    """The update downloaded and waiting: {"version", "digest"}, or None
+    once the computer has restarted (the update is in use then) or when
+    nothing waits. Read from kosherd's own note, so any account may ask
+    without bootc being run for it."""
+    digest = state.get("staged_digest")
+    if not digest or not boot or state.get("staged_boot") != boot:
+        return None
+    return {"version": state.get("staged_version") or "", "digest": digest}

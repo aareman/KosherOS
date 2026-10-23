@@ -138,6 +138,15 @@ DEFAULT_LAYOUT = "classic"
 COMPOSITORS = ("niri", "hyprland", "umbriel")
 DEFAULT_COMPOSITOR = "niri"
 
+# How often the computer fetches a new KosherOS version on its own (#19).
+# The download is staged for the next restart; nothing restarts by itself.
+#   off       only when an administrator presses Check
+#   daily … monthly   that often, counted from the last check that worked
+# Weekly by default: a family gets fixes within a week, and a notice at
+# most once a week is not nagging (see updates.py).
+AUTO_UPDATE_SCHEDULES = ("off", "daily", "weekly", "biweekly", "monthly")
+DEFAULT_AUTO_UPDATES = "weekly"
+
 # What earlier policies called these modes.
 LEGACY_MODES = {"inspect": "filtered"}
 
@@ -412,6 +421,10 @@ class Policy:
     # by default; not content filtering, so it applies to unfiltered
     # accounts too, and turning it off is the guardian-gated act.
     adblock: bool = True
+    # Automatic updates (#19): the schedule, and whether the people signed
+    # in are told once when a downloaded update waits for a restart.
+    auto_updates: str = DEFAULT_AUTO_UPDATES
+    update_notify: bool = True
     system_whitelist: list[str] = field(default_factory=list)
     guest: GuestPolicy = field(default_factory=GuestPolicy)
     # A family's own presets, saved from a tuned account (see profiles.py).
@@ -476,6 +489,7 @@ class Policy:
             "users": [u.to_dict() for u in self.users],
             "guardian": {"enabled": self.guardian_enabled},
             "adblock": {"enabled": self.adblock},
+            "updates": {"auto": self.auto_updates, "notify": self.update_notify},
             **({"custom_profiles": list(self.custom_profiles)}
                if self.custom_profiles else {}),
             "system_whitelist": self.system_whitelist,
@@ -521,6 +535,8 @@ class Policy:
             ],
             guardian_enabled=doc["guardian"]["enabled"],
             adblock=bool(doc.get("adblock", {}).get("enabled", True)),
+            auto_updates=(doc.get("updates") or {}).get("auto", DEFAULT_AUTO_UPDATES),
+            update_notify=bool((doc.get("updates") or {}).get("notify", True)),
             custom_profiles=list(doc.get("custom_profiles") or []),
             system_whitelist=list(doc.get("system_whitelist", [])),
             guest=GuestPolicy(

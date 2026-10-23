@@ -374,6 +374,25 @@ INTROSPECTION_XML = """
     </method>
     <method name="ReturnToKept"/>
     <method name="Reboot"/>
+    <method name="SetAutoUpdates">
+      <arg direction="in" type="s" name="schedule"/>
+      <arg direction="in" type="b" name="notify"/>
+    </method>
+    <method name="AutoUpdateStatus">
+      <arg direction="out" type="s" name="status_json"/>
+    </method>
+    <method name="RunAutoUpdate">
+      <arg direction="in" type="b" name="now"/>
+      <arg direction="out" type="s" name="result_json"/>
+    </method>
+    <method name="PendingUpdate">
+      <arg direction="out" type="s" name="pending_json"/>
+    </method>
+    <signal name="UpdateReady">
+      <arg type="s" name="version"/>
+      <arg type="s" name="digest"/>
+      <arg type="b" name="announce"/>
+    </signal>
     <signal name="UpdateProgress">
       <arg type="i" name="percent"/>
       <arg type="s" name="status"/>
@@ -492,6 +511,7 @@ UID_AWARE = access.UID_AWARE
 # Tailscale's calls wait on its control server the same way.
 IN_BACKGROUND = frozenset({"CheckUpdate", "DeploymentStatus", "ListChannels",
                            "SetChannel", "Rollback", "TryImage", "ReturnToKept",
+                           "RunAutoUpdate",
                            "SearchYouTubeChannels",
                            "TailscaleStatus", "TailscaleSignIn", "TailscaleSignOut"})
 
@@ -722,6 +742,14 @@ class Daemon:
         except Exception:
             log.exception("could not apply the flatpak remote filter")
         self._warm_app_index()
+        # The automatic-update timer follows the policy's schedule, and
+        # what waits for a restart is read once now that one has happened.
+        try:
+            self._apply_auto_timer(self.policy.auto_updates)
+        except PolicyError:
+            log.exception("could not set the automatic update timer")
+        threading.Thread(target=self._sync_pending, name="pending-update",
+                         daemon=True).start()
         # The tailnet forward follows tailscaled, not the policy, so it is
         # checked once tailscaled has had time to come up after a boot.
         from . import tailnet
@@ -2552,7 +2580,10 @@ class Daemon:
         """Is a download holding bootc's lock: an update or channel switch
         this daemon started, or Fedora's timer doing its own?"""
         thread = getattr(self, "_update_thread", None)
-        if thread is not None and thread.is_alive():
+        # The download's own thread, once bootc has finished, reads the
+        # status to see what it staged; it is not waiting on itself.
+        if (thread is not None and thread.is_alive()
+                and thread is not threading.current_thread()):
             return True
         try:
             res = subprocess.run(["systemctl", "is-active", BOOTC_TIMER_SERVICE],
@@ -2596,7 +2627,257 @@ class Daemon:
     def _on_update_finished(self, ok: bool, error: str) -> None:
         if not ok:
             log.error("update failed: %s", error)
+        else:
+            # Downloaded by hand (or a channel switch): the mark in the
+            # panel shows for everyone, without the pop-up.
+            self._sync_pending()
         self._emit_system_signal("UpdateFinished", "(bs)", (bool(ok), str(error)))
+
+    # ---- automatic updates (#19, updates.py) -----------------------------
+
+    def impl_SetAutoUpdates(self, schedule: str, notify: bool):
+        """How often this computer fetches updates on its own, and whether
+        the people signed in get a notice when one is ready.
+
+        The timer is changed first and the policy saved after; a save that
+        fails puts the timer back, so a refused change leaves nothing
+        behind (the dispatcher puts the in-memory policy back)."""
+        from .policy import AUTO_UPDATE_SCHEDULES
+
+        schedule = str(schedule or "").strip().lower()
+        if schedule == "every-2-weeks":
+            schedule = "biweekly"
+        if schedule not in AUTO_UPDATE_SCHEDULES:
+            raise PolicyError(f"unknown schedule: {schedule!r} (one of "
+                              f"{', '.join(AUTO_UPDATE_SCHEDULES)})")
+        before = self.policy.auto_updates
+        self._apply_auto_timer(schedule)
+        self.policy.auto_updates = schedule
+        self.policy.update_notify = bool(notify)
+        try:
+            policy_mod.save(self.policy)
+        except Exception:
+            try:
+                self._apply_auto_timer(before)
+            except PolicyError:
+                log.exception("could not put the automatic update timer back")
+            raise
+        if self.connection:
+            self.connection.emit_signal(
+                None, OBJECT_PATH, "org.kosherlinux.Daemon1.Profiles", "PolicyChanged",
+                GLib.Variant("(i)", (self.policy.revision,)))
+        log.info("automatic updates: %s, notices %s", schedule, "on" if notify else "off")
+        return None
+
+    def _apply_auto_timer(self, schedule: str) -> None:
+        """Start or stop kosher-auto-update.timer to match the schedule."""
+        from . import updates
+
+        on = schedule in updates.SCHEDULE_DAYS
+        argv = ["systemctl", "enable" if on else "disable", "--now", updates.AUTO_TIMER]
+        try:
+            res = subprocess.run(argv, capture_output=True, text=True, timeout=60)
+        except (OSError, subprocess.SubprocessError) as e:
+            raise PolicyError(f"could not {argv[1]} the update timer: {e}") from e
+        if res.returncode != 0:
+            raise PolicyError(f"could not {argv[1]} the update timer: "
+                              f"{(res.stderr or res.stdout).strip()}")
+
+    def impl_AutoUpdateStatus(self):
+        """The schedule, the notice switch, and how the last automatic run
+        went: `last_success`, `last_attempt`, `last_error`, `next_due`."""
+        from . import updates
+
+        state = updates.load_state()
+        schedule = self.policy.auto_updates
+        return GLib.Variant("(s)", (json.dumps({
+            "schedule": schedule,
+            "notify": self.policy.update_notify,
+            "last_success": state.get("last_success"),
+            "last_attempt": state.get("last_attempt"),
+            "last_error": state.get("last_error"),
+            "next_due": updates.next_due(schedule, state.get("last_success")),
+            "pending": (updates.pending_update(state, updates.boot_id())
+                        if updates.staged_on_disk() else None),
+        }),))
+
+    def impl_PendingUpdate(self):
+        """The update waiting for a restart, for the mark in every
+        person's panel: {"version", "digest", "announce"} or {}. Any
+        account may ask; it is answered from kosherd's own note, so nobody
+        runs bootc for it."""
+        from . import updates
+
+        state = updates.load_state()
+        pending = updates.pending_update(state, updates.boot_id())
+        # The note can outlive the update when something other than kosherd
+        # discarded it; ostree's own marker for a staged deployment says,
+        # without running anything.
+        if pending and not updates.staged_on_disk():
+            updates.clear_staged(state)
+            updates.save_state(state)
+            self._emit_system_signal("UpdateReady", "(ssb)", ("", "", False))
+            pending = None
+        return GLib.Variant("(s)", (json.dumps(pending or {}),))
+
+    def impl_RunAutoUpdate(self, now: bool = False):
+        """One automatic run, what the timer starts: check when due, and
+        when there is a newer version, start downloading it and return.
+        `now` skips only "not due yet". Never restarts the computer."""
+        import time as _time
+
+        return GLib.Variant("(s)", (json.dumps(self._auto_update(_time.time(), bool(now))),))
+
+    def _auto_update(self, now: float, force: bool = False) -> dict:
+        from . import updates
+
+        state = updates.load_state()
+        on_battery, battery = self._power()
+        skip = updates.skip_reason(self.policy.auto_updates, state, now, force=force,
+                                   metered=updates.is_metered(self._metered()),
+                                   on_battery=on_battery, battery=battery,
+                                   busy=self._updating())
+        if skip:
+            log.info("automatic update: skipped, %s", skip)
+            return {"result": "skipped", "reason": skip}
+        state["last_attempt"] = now
+        try:
+            deployment = self._deployment()
+            if deployment.get("error"):
+                raise PolicyError(deployment["error"])
+            if deployment.get("kept"):
+                log.info("automatic update: skipped, a test build is being tried")
+                return {"result": "skipped", "reason": "a test build is being tried"}
+            res = self._bootc("upgrade", "--check")
+        except PolicyError as e:
+            return self._auto_failed(state, str(e))
+        failure = updates.check_failure(res.returncode, res.stdout, res.stderr)
+        if failure:
+            return self._auto_failed(state, failure)
+        info = updates.parse_check(res.stdout or res.stderr)
+        image = ((deployment.get("staged") or {}).get("image")
+                 or (deployment.get("booted") or {}).get("image"))
+        info = updates.reconcile(info, deployment, updates.inspect_registry(image))
+        action = updates.after_check(info)
+        if action != "download":
+            state["last_success"] = now
+            state.pop("last_error", None)
+            updates.save_state(state)
+            if action == "staged":
+                self._sync_pending(announce=True)
+            log.info("automatic update: %s", {
+                "none": "up to date", "staged": "already downloaded",
+                "left": "the newest is the version this computer went back from"}[action])
+            return {"result": action, "version": info.get("version")}
+
+        booted = deployment.get("booted") or {}
+        argv = updates.upgrade_argv(booted.get("image"), bool(booted.get("verified")))
+        try:
+            before = updates.deployments(self._bootc_status())
+        except PolicyError as e:
+            return self._auto_failed(state, str(e))
+        updates.save_state(state)
+        log.info("automatic update: downloading %s (%s)", info.get("version") or "a new version",
+                 " ".join(argv))
+
+        def finished(ok: bool, error: str) -> None:
+            self._auto_finished(ok, error, before, now)
+
+        self._update_thread = updates.run_upgrade(self._on_update_progress, finished,
+                                                  argv=argv)
+        return {"result": "downloading", "version": info.get("version")}
+
+    def _auto_failed(self, state: dict, error: str) -> dict:
+        """A check or download that did not work: logged, kept for the
+        admin app, and tried again at the next run. The time of the last
+        check that worked stays as it was, which is what makes it due."""
+        from . import updates
+
+        log.warning("automatic update failed, trying again at the next run: %s", error)
+        state["last_error"] = error
+        try:
+            updates.save_state(state)
+        except OSError:
+            log.exception("could not note the failed update")
+        return {"result": "failed", "error": error}
+
+    def _auto_finished(self, ok: bool, error: str, before: list, started: float) -> None:
+        """The automatic download ended: on success, tell people once; on
+        failure, take away anything it staged and note the error."""
+        from . import updates
+
+        self._emit_system_signal("UpdateFinished", "(bs)", (bool(ok), str(error)))
+        state = updates.load_state()
+        if not ok:
+            try:
+                key = updates.staged_to_discard(before, updates.deployments(self._bootc_status()))
+                if key:
+                    log.warning("automatic update: removing what the failed download staged")
+                    self._undeploy([key])
+            except PolicyError:
+                log.exception("could not check what the failed download left")
+            self._auto_failed(state, error or "the download did not finish")
+            return
+        state["last_success"] = started
+        state.pop("last_error", None)
+        updates.save_state(state)
+        self._sync_pending(announce=True)
+
+    def _sync_pending(self, announce: bool = False) -> None:
+        """Note what waits for the next restart, from bootc's status, and
+        tell the sessions: UpdateReady(version, digest, announce) with an
+        empty digest when nothing waits any more. `announce` asks for the
+        pop-up; it is given once per version, and only with notices on."""
+        from . import updates
+
+        try:
+            deployment = self._deployment()
+            if deployment.get("error"):
+                return
+            staged = deployment.get("staged") or {}
+            state = updates.load_state()
+            if staged:
+                digest = staged.get("digest") or staged.get("version") or staged.get("image") or "staged"
+                pop = updates.record_staged(state, staged.get("version"), digest,
+                                            updates.boot_id(),
+                                            announce=announce and self.policy.update_notify)
+                updates.save_state(state)
+                self._emit_system_signal("UpdateReady", "(ssb)",
+                                         (staged.get("version") or "", digest, pop))
+            elif updates.clear_staged(state):
+                updates.save_state(state)
+                self._emit_system_signal("UpdateReady", "(ssb)", ("", "", False))
+        except Exception:  # noqa: BLE001 - the panel mark is not worth failing an update over
+            log.exception("could not note the update waiting for a restart")
+
+    def _metered(self):
+        """NetworkManager's Metered value, or None when it cannot say."""
+        return self._system_property("org.freedesktop.NetworkManager",
+                                     "/org/freedesktop/NetworkManager",
+                                     "org.freedesktop.NetworkManager", "Metered")
+
+    def _power(self) -> tuple[bool, float | None]:
+        """(on battery, percent) from UPower; (False, None) without it."""
+        on_battery = self._system_property("org.freedesktop.UPower", "/org/freedesktop/UPower",
+                                           "org.freedesktop.UPower", "OnBattery")
+        if not on_battery:
+            return False, None
+        percent = self._system_property("org.freedesktop.UPower",
+                                        "/org/freedesktop/UPower/devices/DisplayDevice",
+                                        "org.freedesktop.UPower.Device", "Percentage")
+        return True, percent
+
+    def _system_property(self, name: str, path: str, iface: str, prop: str):
+        if getattr(self, "connection", None) is None:
+            return None
+        try:
+            result = self.connection.call_sync(
+                name, path, "org.freedesktop.DBus.Properties", "Get",
+                GLib.Variant("(ss)", (iface, prop)), GLib.VariantType("(v)"),
+                Gio.DBusCallFlags.NONE, 5000, None)
+            return result.unpack()[0]
+        except GLib.Error:
+            return None
 
     def impl_Reboot(self):
         """Restart the computer, for the Restart button after an update.
@@ -2780,6 +3061,7 @@ class Daemon:
         if index is not None:
             self._ostree_admin("pin", "--unpin", str(index))
         log.info("back to the kept deployment %s", plan["kept"].get("image"))
+        self._sync_pending()
         return None
 
     def impl_Rollback(self, _guardian_pw: str = ""):
@@ -2800,6 +3082,8 @@ class Daemon:
         res = self._bootc("rollback")
         if res.returncode != 0:
             raise PolicyError(f"bootc rollback failed: {res.stderr.strip()}")
+        # A rollback discards a staged update; the mark in the panel goes.
+        self._sync_pending()
         # The dispatcher writes the activity entry, because Rollback is in
         # access.CHANGES — "who put this machine back?" deserves an answer
         # in the same log as every other change.

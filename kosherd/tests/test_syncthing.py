@@ -475,3 +475,49 @@ def test_the_changes_are_logged_against_the_account():
     for method in ("SetUserAppApproval", "SetSyncthingLan"):
         assert method in access.CHANGES and method in access.PER_USER
         assert method in access.GUARDIAN_GATED
+
+
+# ---- firewalld, which also has to let the home network in ----------------------------
+
+def test_firewalld_gets_the_lan_ranges_only_and_only_with_the_switch_on():
+    assert st.firewalld_rules([]) == []
+    rules = st.firewalld_rules([22001])
+    assert ('rule family="ipv4" source address="192.168.0.0/16" port port="22001" '
+            'protocol="tcp" accept') in rules
+    assert ('rule family="ipv6" source address="fe80::/10" port port="21027" '
+            'protocol="udp" accept') in rules
+    sources = {re.search(r'source address="([^"]+)"', r).group(1) for r in rules}
+    assert sources == {"10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "169.254.0.0/16",
+                       "fc00::/7", "fe80::/10"}
+
+
+def test_firewalld_rules_are_added_and_taken_back(machine, monkeypatch):
+    monkeypatch.setattr(st, "FIREWALLD_STATE", st.STATE_DIR / "firewalld.json")
+    monkeypatch.setattr(st.shutil, "which", lambda name: "/usr/bin/" + name)
+    st.sync_firewalld(st.firewalld_rules([22000]))
+    adds = [c for c in machine.calls if c[0] == "firewall-cmd"]
+    assert len(adds) == 2 and "--permanent" in adds[1]
+    assert any(a.startswith("--add-rich-rule=") for a in adds[0])
+    machine.calls.clear()
+    st.sync_firewalld(st.firewalld_rules([22000]))       # nothing changed: nothing run
+    assert machine.calls == []
+    st.sync_firewalld([])
+    removes = [c for c in machine.calls if c[0] == "firewall-cmd"]
+    assert len(removes) == 2
+    assert all(a.startswith("--remove-rich-rule=") for c in removes
+               for a in c[2:] if a != "--permanent")
+
+
+def test_the_ruleset_is_refreshed_before_the_service_starts(machine, monkeypatch):
+    order = []
+    monkeypatch.setattr(st, "firewall_refresh", lambda: order.append("refresh"))
+    real = st._run
+
+    def run(argv, **kw):
+        if argv[:2] == ["systemctl", "start"]:
+            order.append("start")
+        return real(argv, **kw)
+
+    monkeypatch.setattr(st, "_run", run)
+    st.install(REF, 1001, progress)
+    assert order == ["refresh", "start"]

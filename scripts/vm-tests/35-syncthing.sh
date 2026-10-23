@@ -227,6 +227,10 @@ check "off: a device on the home network cannot connect" 1 connect_from stlan 19
 check "kosherctl turns it on" 0 kctl apps syncthing-lan "$uid" on
 check_contains "the activity log records it" "SetSyncthingLan" kosherctl activity --user "$A"
 sleep 2
+if systemctl is-active --quiet firewalld; then
+    check_contains "firewalld lets the home network's Syncthing port in" "port=\"$listen\"" \
+        firewall-cmd --list-rich-rules
+fi
 check "on: a device on the home network connects" 0 connect_from stlan 192.168.77.1 "$listen"
 check "and nothing from the internet does" 1 connect_from stwan 203.0.113.1 "$listen"
 check "off again" 0 kctl apps syncthing-lan "$uid" off
@@ -240,7 +244,7 @@ check "the service stops" 1 systemctl is-active --quiet "syncthing@$A.service"
 check "and its cgroup is out of the set" 1 in_set syncthing_out
 python3 -c 'from kosherd.client import DaemonClient; DaemonClient().remove_app("nixpkgs#syncthing")' >/dev/null 2>&1
 for _ in $(seq 1 30); do
-    [ -e "$dropin" ] || break
+    [ -e "$dropin" ] || [ -e "$launcher" ] || break
     sleep 2
 done
 check "uninstalling removes the unit's drop-in" 1 test -e "$dropin"

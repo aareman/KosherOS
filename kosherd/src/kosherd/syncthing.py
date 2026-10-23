@@ -429,6 +429,69 @@ def apply(policy) -> None:
             log.warning("syncthing: %s", e)
         if want:
             add_to_sets(username, run_state_of(username))
+    lan_ports = sorted({int(reg[n].get("listen", LISTEN_PORT_BASE))
+                        for n in state["lan"] if n in reg})
+    try:
+        sync_firewalld(firewalld_rules(lan_ports))
+    except Exception:  # noqa: BLE001 - the kosher table still decides
+        log.exception("syncthing: could not update firewalld")
+
+
+# -- firewalld ---------------------------------------------------------------
+#
+# Fedora's firewalld runs beside the kosher table, and a packet must be
+# accepted by both: its zone refuses anything inbound it has no service
+# for, Syncthing included. With an account's home-network switch on, it
+# is told to accept Syncthing's ports from the LAN ranges. That alone lets
+# nothing in: the kosher input chain still takes only what goes into an
+# allowed Syncthing service's socket (nft.py).
+
+FIREWALLD_STATE = STATE_DIR / "firewalld.json"
+LAN_SOURCES = (("ipv4", "10.0.0.0/8"), ("ipv4", "172.16.0.0/12"),
+               ("ipv4", "192.168.0.0/16"), ("ipv4", "169.254.0.0/16"),
+               ("ipv6", "fc00::/7"), ("ipv6", "fe80::/10"))
+
+
+def firewalld_rules(listen_ports: list[int]) -> list[str]:
+    """firewalld rich rules for the home network's way in, or none."""
+    if not listen_ports:
+        return []
+    ports = [(p, "tcp") for p in sorted(set(listen_ports))]
+    ports += [(p, "udp") for p in sorted(set(listen_ports) | {DISCOVERY_PORT})]
+    return [f'rule family="{family}" source address="{source}" '
+            f'port port="{port}" protocol="{proto}" accept'
+            for family, source in LAN_SOURCES for port, proto in ports]
+
+
+def sync_firewalld(wanted: list[str]) -> None:
+    """Make the rules kosherd added to firewalld exactly `wanted`, now and
+    after a reload. Nothing to do where firewalld is not running."""
+    try:
+        had = json.loads(FIREWALLD_STATE.read_text())
+    except (OSError, ValueError):
+        had = []
+    if set(had) == set(wanted):
+        return
+    if shutil.which("firewall-cmd") is None or \
+            _systemctl("is-active", "--quiet", "firewalld.service").returncode != 0:
+        return
+    gone = [r for r in had if r not in wanted]
+    new = [r for r in wanted if r not in had]
+    for scope in ([], ["--permanent"]):
+        if gone:
+            _run(["firewall-cmd", "-q", *scope, *[f"--remove-rich-rule={r}" for r in gone]])
+        if new:
+            res = _run(["firewall-cmd", "-q", *scope, *[f"--add-rich-rule={r}" for r in new]])
+            if res.returncode != 0:
+                raise SyncthingError(f"firewalld refused the rules: {(res.stderr or '').strip()}")
+    FIREWALLD_STATE.parent.mkdir(parents=True, exist_ok=True)
+    FIREWALLD_STATE.write_text(json.dumps(sorted(wanted)) + "\n")
+
+
+# Set by the daemon: re-render the ruleset, so a new account's GUI port is
+# closed to the others before its service starts. Called from the app
+# worker thread, never the main loop.
+firewall_refresh: Callable[[], None] | None = None
 
 
 # -- the Store's side: install, upgrade, remove ---------------------------------
@@ -493,6 +556,10 @@ def install(ref: str, uid: int, on_progress, as_root: bool = False) -> None:
 
         on_progress(ref, 0, "Starting…")
         undo.append(lambda: stop(username))
+        # The ruleset again, now that the registry has this account's
+        # ports: its page is closed to every other account before it runs.
+        if firewall_refresh is not None:
+            firewall_refresh()
         start(username)
     except Exception:
         for step in reversed(undo):
@@ -550,6 +617,11 @@ def remove(ref: str, uid: int, on_progress, as_root: bool = False) -> None:
     pw = pwd.getpwuid(uid)
     on_progress(ref, 0, "Removing…")
     forget(pw.pw_name, home=Path(pw.pw_dir))
+    if firewall_refresh is not None:
+        try:
+            firewall_refresh()
+        except Exception:  # noqa: BLE001 - removed; the next apply catches up
+            log.exception("syncthing: the ruleset was not refreshed after removal")
 
 
 def forget(username: str, home: Path | None = None) -> None:

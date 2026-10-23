@@ -707,6 +707,32 @@ class Daemon:
             terminate=self._terminate_uid)
         # Whose keyd config is in force: the active session's (keyboard.py).
         self.keyboards = keyboard.Keyboards()
+        # A Syncthing install re-renders the ruleset before its service
+        # starts, so the new GUI port is closed to other accounts (#213).
+        syncthing.firewall_refresh = self._refresh_firewall_from_worker
+
+    def _refresh_firewall_from_worker(self) -> None:
+        """apply_policy on the main loop, waited for from a worker thread."""
+        if threading.current_thread() is threading.main_thread():
+            apply_policy(self.policy)
+            return
+        done = threading.Event()
+        failed: list[Exception] = []
+
+        def work():
+            try:
+                apply_policy(self.policy)
+            except Exception as e:  # noqa: BLE001 - handed back to the worker
+                failed.append(e)
+            finally:
+                done.set()
+            return False
+
+        GLib.idle_add(work)
+        if not done.wait(180):
+            raise syncthing.SyncthingError("the firewall was not refreshed in time")
+        if failed:
+            raise syncthing.SyncthingError(f"the firewall could not be refreshed: {failed[0]}")
 
     # ---- lifecycle -------------------------------------------------------
 

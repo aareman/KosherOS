@@ -86,6 +86,12 @@ def test_the_store_and_the_daemons_socket_carry_labels_init_may_use():
         ("var_lib_t", "/nix(/.*)?"),
         ("var_run_t", "/nix/var/nix/daemon-socket(/.*)?"),
         ("var_run_t", "/var/lib/nix/var/nix/daemon-socket(/.*)?"),
+        # Syncthing's service (#213): its binary, and the loader init opens
+        # before the service's domain changes.
+        ("bin_t", "/nix/store/[^/]+-syncthing-[0-9][^/]*/bin/syncthing"),
+        ("bin_t", "/var/lib/nix/store/[^/]+-syncthing-[0-9][^/]*/bin/syncthing"),
+        ("ld_so_t", "/nix/store/[^/]+-glibc-[0-9][^/]*/lib/ld-linux[^/]*"),
+        ("ld_so_t", "/var/lib/nix/store/[^/]+-glibc-[0-9][^/]*/lib/ld-linux[^/]*"),
     ], "the socket rules must come after the general one: the last match wins"
     assert "restorecon -R /nix" in CONTAINERFILE
     assert "matchpathcon -n /nix/var/nix/daemon-socket/socket" in CONTAINERFILE

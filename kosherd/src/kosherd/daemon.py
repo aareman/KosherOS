@@ -2474,15 +2474,14 @@ class Daemon:
         from . import updates
 
         res = self._bootc("upgrade", "--check")
-        info = updates.parse_check(res.stdout or res.stderr)
-        info["ok"] = res.returncode == 0
         # bootc says "no changes" for an image it already holds, which after
         # a rollback is the newest one (#112): judge against what is
         # running, and say where an already-downloaded newest version sits.
         deployment = self._deployment()
         image = ((deployment.get("staged") or {}).get("image")
                  or (deployment.get("booted") or {}).get("image"))
-        info = updates.reconcile(info, deployment, updates.inspect_registry(image))
+        info = updates.judge_check(res.returncode, res.stdout, res.stderr, deployment,
+                                   updates.inspect_registry(image))
         return GLib.Variant("(s)", (json.dumps(info),))
 
     def impl_ApplyUpdate(self):

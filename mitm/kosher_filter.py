@@ -1579,13 +1579,10 @@ class KosherFilter:
         if nonce:
             attrs += f' nonce="{nonce.group(1)}"'
         tag = f"<script {attrs}></script>"
-        for marker in ("</head>", "</body>", "</html>"):
-            at = body.lower().rfind(marker)
-            if at != -1:
-                body = body[:at] + tag + body[at:]
-                break
-        else:
-            body = body + tag
+        at = _injection_point(body)
+        if at is None:
+            return  # the page ends inside a script; nowhere safe to put it
+        body = body[:at] + tag + body[at:]
         flow.response.text = body
         flow.response.headers["x-kosheros-page"] = "filter-script"
 
@@ -2168,6 +2165,53 @@ class KosherFilter:
                               message=message).encode(),
             {"Content-Type": "text/html; charset=utf-8",
              "Cache-Control": "no-store"})
+
+
+# Elements whose content the HTML parser reads as text up to their own end
+# tag, not as markup: a "</head>" inside one is not the end of the head.
+_RAW_TEXT_ELEMENTS = ("script", "style", "textarea", "title", "xmp",
+                      "noscript", "iframe", "noembed", "noframes")
+_MARKUP_RE = re.compile(
+    r"<!--|<(?P<raw>" + "|".join(_RAW_TEXT_ELEMENTS) + r")(?=[\s>/])"
+    r"|</(?P<end>head|body|html)\s*>", re.IGNORECASE)
+
+
+def _injection_point(body: str) -> int | None:
+    """Where the page filter's tag can go: before the page's real </head>,
+    else its real </body> or </html>, else the end of the page.
+
+    "Real" means in markup, not inside a script, a style or a comment.
+    Teams' app shell (#209) carries its own HTML template in a script, so
+    the LAST "</head>" in its page is inside that script: a tag put there
+    closed the script half way, the page threw "Unexpected end of input"
+    and showed its own source instead of the meeting. None when the page
+    ends inside a script or a comment, where nothing can go safely.
+    """
+    found: dict[str, int] = {}
+    pos = 0
+    while True:
+        match = _MARKUP_RE.search(body, pos)
+        if match is None:
+            break
+        if match.group(0) == "<!--":
+            close = body.find("-->", match.end())
+            if close == -1:
+                return None
+            pos = close + 3
+        elif match.group("raw"):
+            name = match.group("raw").lower()
+            close = re.compile(r"</" + name + r"[\s>/]", re.IGNORECASE).search(
+                body, match.end())
+            if close is None:
+                return None
+            pos = close.end()
+        else:
+            found.setdefault(match.group("end").lower(), match.start())
+            pos = match.end()
+    for name in ("head", "body", "html"):
+        if name in found:
+            return found[name]
+    return len(body)
 
 
 def _body(message) -> bytes:

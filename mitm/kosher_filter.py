@@ -1531,6 +1531,12 @@ class KosherFilter:
         body = flow.response.get_text(strict=False) or ""
         if not body or SCRIPT_PATH in body:
             return
+        if not _is_markup(body):
+            # Labelled text/html but not a page: Cloudflare's bot check
+            # answers its own requests with base64 under that label, and
+            # a tag added to the end broke its decoding, so the check
+            # failed and Linear said it could not verify the account (#215).
+            return
         uid = (getattr(flow, "metadata", None) or {}).get("kosher_uid")
         token = self._page_token(uid, flow.request.pretty_host)
         attrs = (f'src="{SCRIPT_PATH}" data-kosheros-language="{language_filter}" '
@@ -2142,6 +2148,13 @@ def _body(message) -> bytes:
     if body is None:
         body = getattr(message, "content", None)
     return body if isinstance(body, bytes) else b""
+
+
+def _is_markup(body: str) -> bool:
+    """Whether a body labelled text/html really is a page: one that starts,
+    past a byte-order mark and white space, with a tag, a comment or a
+    doctype. Script calls often send data under that label."""
+    return body.lstrip("\ufeff \t\r\n\f").startswith("<")
 
 
 def _escape(text: str) -> str:

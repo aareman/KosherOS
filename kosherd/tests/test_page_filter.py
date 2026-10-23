@@ -179,6 +179,28 @@ def test_injection_is_idempotent_and_only_for_html(addon):
     assert "__kosheros__" not in flow.response.text
 
 
+def test_data_sent_as_html_is_left_as_it_came(addon):
+    # Cloudflare's bot check answers its own POSTs with base64 labelled
+    # text/html; a tag on the end broke its atob() and Linear's sign-in
+    # said it could not verify the account (#215).
+    filt = _filter(addon, language="substitute", media="immodest")
+    for data in ("TFyFcm1vS1CQg5dwcGSGmJigoIqSdmR1WJx/lIqWamybl56ffKKkkZa0p7WC5Q==", "ok"):
+        flow = _flow(url="https://challenges.cloudflare.com/cdn-cgi/challenge-platform/h/b/fo/x",
+                     method="POST", html=data)
+        filt._filter_page(flow, 1001)
+        assert flow.response.text == data
+        assert "x-kosheros-page" not in flow.response.headers
+
+
+def test_a_page_after_a_byte_order_mark_or_white_space_still_gets_the_script(addon):
+    filt = _filter(addon, language="substitute", media="immodest")
+    for page in ("\ufeff<!DOCTYPE html><html><body>Socks.</body></html>",
+                 "\n\n  <!-- built --><html><body>Socks.</body></html>"):
+        flow = _flow(html=page)
+        filt._filter_page(flow, 1001)
+        assert "__kosheros__/filter.js" in flow.response.text
+
+
 # -- what the page shows later is judged by the same rules ------------------------
 
 def _judge(filt, body: dict, url="https://example.test/page", headers=None, status=200):

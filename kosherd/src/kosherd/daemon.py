@@ -2753,13 +2753,14 @@ class Daemon:
             res = self._bootc("upgrade", "--check")
         except PolicyError as e:
             return self._auto_failed(state, str(e))
-        failure = updates.check_failure(res.returncode, res.stdout, res.stderr)
-        if failure:
-            return self._auto_failed(state, failure)
-        info = updates.parse_check(res.stdout or res.stderr)
         image = ((deployment.get("staged") or {}).get("image")
                  or (deployment.get("booted") or {}).get("image"))
-        info = updates.reconcile(info, deployment, updates.inspect_registry(image))
+        # The same judgement as the Check button's (#207): a check that
+        # could not reach the registry is "couldn't check", never up to date.
+        info = updates.judge_check(res.returncode, res.stdout, res.stderr, deployment,
+                                   updates.inspect_registry(image))
+        if not info.get("ok"):
+            return self._auto_failed(state, info.get("error") or "the update check failed")
         action = updates.after_check(info)
         if action != "download":
             state["last_success"] = now

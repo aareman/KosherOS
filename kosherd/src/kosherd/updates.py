@@ -684,17 +684,6 @@ def after_check(info: dict) -> str:
     return "download"
 
 
-def check_failure(returncode: int, stdout: str, stderr: str) -> str | None:
-    """bootc's check failed: its first line, for the journal and the admin
-    app, or None when it worked. A failed check is never "up to date"
-    (#207): bootc's error has no "Update available" in it, so read the
-    ordinary way it looks like no update."""
-    if returncode == 0:
-        return None
-    return next((line.strip() for line in (stderr or stdout or "").splitlines()
-                 if line.strip()), "the update check failed")
-
-
 def staged_to_discard(before: list[dict], after: list[dict]) -> str | None:
     """After a failed download: the key of a staged deployment that was not
     there before it, so the failure leaves the machine as it found it.

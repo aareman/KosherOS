@@ -260,6 +260,20 @@ def test_offline_is_a_failure_tried_again_never_up_to_date(daemon, monkeypatch):
     assert not [s for s in daemon.signals if s[0] == "UpdateReady"]
 
 
+def test_the_run_judges_a_check_as_the_check_button_does(daemon, monkeypatch):
+    # One definition of "couldn't check" (updates.judge_check, #207): bootc
+    # failed but the registry answered with a newer digest, so it is real.
+    _bootc(monkeypatch, check_rc=1, check_err="error: something transient\n")
+    monkeypatch.setattr(updates, "inspect_registry",
+                        lambda image: {"digest": "sha256:new", "version": "0.21.0"})
+    started = []
+    monkeypatch.setattr(updates, "run_upgrade",
+                        lambda progress, finished, argv: started.append(argv)
+                        or type("T", (), {"is_alive": lambda self: False})())
+    assert daemon._auto_update(NOW)["result"] == "downloading"
+    assert started == [("bootc", "upgrade")]
+
+
 def test_a_signature_failure_leaves_nothing_staged_and_is_tried_again(daemon, monkeypatch):
     bootc = _bootc(monkeypatch, check=AVAILABLE)
     started = []

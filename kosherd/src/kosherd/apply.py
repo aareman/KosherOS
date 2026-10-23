@@ -143,6 +143,9 @@ def write_nix_users(policy: Policy) -> bool:
     path = NIX_USERS_PATH
     if not path.parent.is_dir():
         return False
+    # And who may run nix at all (#214): without the daemon, an account
+    # can still build into a store of its own.
+    nixdaemon.sync_cli_group(policy)
     content = nixdaemon.render(policy)
     try:
         if path.read_text() == content:

@@ -56,6 +56,78 @@ def test_only_developer_accounts_may_use_the_daemon():
     assert "allowed-users = root dev\n" in nixdaemon.render(policy)
 
 
+ROOT = Path(__file__).parents[2]
+
+
+class _Group:
+    def __init__(self, members):
+        self.gr_mem = list(members)
+
+
+def _fake_group(monkeypatch, members):
+    import grp
+
+    def getgrnam(name):
+        if name == nixdaemon.CLI_GROUP and members is not None:
+            return _Group(members)
+        raise KeyError(name)
+    monkeypatch.setattr(grp, "getgrnam", getgrnam)
+
+
+def _ran(calls):
+    import subprocess
+
+    def run(argv, **kw):
+        calls.append(list(argv))
+        return subprocess.CompletedProcess(argv, 0, "", "")
+    return run
+
+
+def test_only_developer_accounts_may_run_nix_at_all(monkeypatch):
+    # The daemon's list is not enough: nix builds into a store under ~
+    # without the daemon (#214). The nix program is for this group only.
+    policy = _policy(
+        UserPolicy(uid=1002, username="dev", mode="filtered", developer_tools=True),
+        UserPolicy(uid=1001, username="kid", mode="filtered"),
+        UserPolicy(uid=1003, username="off", mode="none", developer_tools=True),
+    )
+    assert nixdaemon.cli_members(policy) == ["dev"]
+    calls = []
+    _fake_group(monkeypatch, ["kid", "stale"])
+    assert nixdaemon.sync_cli_group(policy, run=_ran(calls)) is True
+    assert calls == [["gpasswd", "-M", "dev", "kosher-nix"]]
+
+
+def test_switching_the_last_developer_off_empties_the_group(monkeypatch):
+    calls = []
+    _fake_group(monkeypatch, ["dev"])
+    policy = _policy(UserPolicy(uid=1002, username="dev", mode="filtered"))
+    assert nixdaemon.sync_cli_group(policy, run=_ran(calls)) is True
+    assert calls == [["gpasswd", "-M", "", "kosher-nix"]]
+
+
+def test_an_unchanged_group_is_left_alone_and_a_missing_one_ignored(monkeypatch):
+    calls = []
+    policy = _policy(UserPolicy(uid=1002, username="dev", mode="filtered", developer_tools=True))
+    _fake_group(monkeypatch, ["dev"])
+    assert nixdaemon.sync_cli_group(policy, run=_ran(calls)) is False
+    _fake_group(monkeypatch, None)
+    assert nixdaemon.sync_cli_group(policy, run=_ran(calls)) is False
+    assert calls == []
+
+
+def test_the_image_lets_only_root_and_the_group_run_nix():
+    containerfile = (ROOT / "os-image/Containerfile").read_text()
+    sysusers = (ROOT / "os-image/files/usr/lib/sysusers.d/kosher-nix.conf").read_text()
+    # A fixed gid: /usr carries it in the file's owner, and an upgraded
+    # machine's /etc/group gets the group from sysusers at boot.
+    line = next(l for l in sysusers.splitlines() if l.startswith("g "))
+    _, name, gid = line.split()[:3]
+    assert name == nixdaemon.CLI_GROUP and gid.isdigit()
+    assert f"chown root:{gid} /usr/bin/nix /usr/libexec/nix-nswrapper /usr/lib64/libnix" in containerfile
+    assert "chmod 0750 /usr/bin/nix /usr/libexec/nix-nswrapper /usr/lib64/libnix" in containerfile
+
+
 def test_the_switch_is_a_filter_change():
     assert access.ACTIONS["SetDeveloperTools"] == access.ACTION_MANAGE_FILTER
     assert "SetDeveloperTools" in access.GUARDIAN_GATED

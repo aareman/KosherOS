@@ -45,6 +45,9 @@ kosher-nix-desktop = "kosherd.nixdesktop:main"
 # Run as the account to fetch, check and unpack a developer's own signed
 # build (kitty) into its home: kosherd/upstreamapps.py.
 kosher-upstream-app = "kosherd.upstreamapps:main"
+# Run as root by syncthing@<user>.service once Syncthing is up: puts the
+# unit's cgroup in the firewall sets that let its ports out (syncthing.py).
+kosher-syncthing-net = "kosherd.syncthing:net_main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/kosherd"]

@@ -680,6 +680,8 @@ RUN for f in gdm-password gdm-autologin login; do \
     && test -x /usr/bin/kosher-time-refused \
     && test -x /usr/bin/kosher-time-notify \
     && test -x /usr/bin/kosher-nix-desktop \
+    && test -x /usr/bin/kosher-syncthing-net \
+    && test -f /usr/lib/systemd/system/syncthing@.service \
     && test -x /usr/bin/kosher
 
 # The identity has to survive the build, not just be written during it.

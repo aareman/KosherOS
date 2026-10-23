@@ -291,6 +291,16 @@ class UserPolicy:
     # everyone through kosherd, and an account that only browses never
     # needs a build daemon that fetches as a system user.
     developer_tools: bool = False
+    # Apps an administrator approved for this account alone (#213). Most
+    # apps are approved for the whole computer in catalog.json; the few in
+    # appaccess.INDIVIDUAL_APPROVAL (Syncthing) need it per account on a
+    # supervised one, whatever its app access, because what they bring in
+    # never passes the filter.
+    approved_apps: list[str] = field(default_factory=list)
+    # May devices on the home network connect to this account's Syncthing
+    # directly (syncthing.py)? Off by default: with it off, Syncthing only
+    # dials out, and nothing on the LAN reaches in.
+    syncthing_lan: bool = False
     # The group this account is in (a key in Policy.custom_profiles), or
     # None. Explicit, never inferred from matching settings: an account may
     # differ from its group and still belong to it, and a change to the
@@ -341,6 +351,10 @@ class UserPolicy:
             d["extra_ports"] = sorted(set(int(p) for p in self.extra_ports))
         if self.developer_tools:
             d["developer_tools"] = True
+        if self.approved_apps:
+            d["approved_apps"] = sorted(set(self.approved_apps))
+        if self.syncthing_lan:
+            d["syncthing_lan"] = True
         return d
 
 
@@ -515,6 +529,8 @@ class Policy:
                     video_calls=bool(u.get("video_calls", True)),
                     extra_ports=[int(p) for p in u.get("extra_ports", [])],
                     developer_tools=bool(u.get("developer_tools", False)),
+                    approved_apps=list(u.get("approved_apps", [])),
+                    syncthing_lan=bool(u.get("syncthing_lan", False)),
                     profile=u.get("profile") or None,
                 )
                 for u in doc["users"]

@@ -89,6 +89,7 @@
     { "ref": "org.gnome.clocks", "name": "Clocks", "summary": "Alarms, timers and world clocks", "categories": ["Utility"] },
     { "ref": "org.gnome.FileRoller", "name": "Archive Manager", "summary": "Open and make archives", "categories": ["Utility", "Archiving"] },
     { "ref": "org.gnome.baobab", "name": "Disk Usage Analyzer", "summary": "See what is filling the disk", "categories": ["Utility", "FileTools"] },
+    { "ref": "nixpkgs#syncthing", "name": "Syncthing", "summary": "Keep folders the same on your computers and phone", "categories": ["Utility", "FileTools"] },
     { "ref": "com.github.tchx84.Flatseal", "name": "Flatseal", "summary": "Review what each app is allowed to do", "categories": ["Utility", "Security"] },
     { "ref": "org.gnome.Characters", "name": "Characters", "summary": "Find a letter or symbol", "categories": ["Utility"] },
 

@@ -185,6 +185,10 @@ def test_the_guardian_gate_covers_every_filter_weakening_method():
                 # Opening an account to the whole store, or lifting an app
                 # block, widens what it can reach.
                 "SetUserAppAccess", "SetUserBlockedAppKinds", "SetUserBlockedApps",
+                # Syncthing for one account (#213): files from paired devices
+                # are not filtered, and its ports go out directly; letting
+                # the home network reach it opens the input side.
+                "SetUserAppApproval", "SetSyncthingLan",
                 # Joining a tailnet puts the computer on a network with
                 # other people's machines, reachable by every account.
                 "TailscaleSignIn"}

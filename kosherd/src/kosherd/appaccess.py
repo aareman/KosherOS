@@ -116,12 +116,36 @@ CIRCUMVENTION = frozenset({
     "com.windscribe.Windscribe",
 })
 
+# Apps that a supervised account may have only with an administrator's
+# approval for THAT account, even when it is open to the whole store and
+# even though the computer's approved list carries them. Syncthing (#213):
+# its files come from the account's own paired devices over end-to-end
+# TLS, so nothing it brings in passes the filter, and the firewall lets it
+# out directly (nft.py) only while it is approved. An administrator's own
+# account, and an unfiltered one, have it like any app.
+INDIVIDUAL_APPROVAL = frozenset({"nixpkgs#syncthing"})
+
+
+def needs_individual_approval(account) -> bool:
+    """Is `account` one whose INDIVIDUAL_APPROVAL apps need approving?"""
+    return not (_get(account, "admin", False) or _get(account, "mode") == "unfiltered")
+
+
+def individually_approved(account, ref: str) -> bool:
+    """May `account` have `ref` as far as the per-account approval goes:
+    an app that needs none, an account that needs none, or an approval."""
+    if ref not in INDIVIDUAL_APPROVAL or not needs_individual_approval(account):
+        return True
+    return ref in set(_get(account, "approved_apps") or ())
+
+
 # Why an app is not available to an account. Keys the Store and the admin
 # app turn into a sentence; the values are those sentences.
 REASONS = {
     "blocked": "blocked for this account",
     "kind": "its kind of app is blocked for this account",
     "not-approved": "not on the approved list",
+    "needs-approval": "waiting for an administrator to allow it for this account",
     "content": "rated above what this computer allows",
     "circumvention": "a tool for getting around the filter",
     "unknown": "not in the app list this computer has downloaded",
@@ -187,6 +211,8 @@ def decide(account, app: dict, approved: Iterable[str]) -> str | None:
     kinds = set(_get(account, "blocked_app_kinds") or ())
     if kinds and appkinds.kind_of(app) in kinds:
         return "kind"
+    if not individually_approved(account, ref):
+        return "needs-approval"
     if ref in set(approved):
         return None
     if access_of(account) != "store":

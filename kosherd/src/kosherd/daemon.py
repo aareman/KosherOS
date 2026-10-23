@@ -25,7 +25,7 @@ gi.require_version("Gio", "2.0")
 from gi.repository import Gio, GLib
 
 from . import (BUS_NAME, OBJECT_PATH, access, appaccess, appkinds, apps, auth,
-               keyboard, policy as policy_mod, ytsearch)
+               keyboard, policy as policy_mod, syncthing, ytsearch)
 from .apply import apply_policy
 from .apps import AppError
 from .guardian import Guardian, GuardianError
@@ -276,6 +276,17 @@ INTROSPECTION_XML = """
     <method name="SetUserBlockedApps">
       <arg direction="in" type="i" name="uid"/>
       <arg direction="in" type="as" name="refs"/>
+      <arg direction="in" type="s" name="guardian_password"/>
+    </method>
+    <method name="SetUserAppApproval">
+      <arg direction="in" type="i" name="uid"/>
+      <arg direction="in" type="s" name="ref"/>
+      <arg direction="in" type="b" name="approved"/>
+      <arg direction="in" type="s" name="guardian_password"/>
+    </method>
+    <method name="SetSyncthingLan">
+      <arg direction="in" type="i" name="uid"/>
+      <arg direction="in" type="b" name="enabled"/>
       <arg direction="in" type="s" name="guardian_password"/>
     </method>
     <method name="ListInstalled">
@@ -1592,6 +1603,9 @@ class Daemon:
                 raise PolicyError(f"{port} is not a port")
             if port in (53, 80, 443):
                 raise PolicyError(f"port {port} is the filter's own and cannot be opened directly")
+            if port in syncthing.OUT_TCP:
+                raise PolicyError(f"port {port} is only for Syncthing; allow Syncthing "
+                                  "for this account instead")
         user = self._managed(uid)
         user.video_calls = bool(video_calls)
         user.extra_ports = sorted(set(ports))
@@ -2075,6 +2089,12 @@ class Daemon:
             raise PolicyError(
                 "this is the only administrator; the computer would have "
                 "nobody who could change anything")
+        # Its Syncthing service runs as the account: stopped, and its unit
+        # and launcher taken away, before the account goes.
+        try:
+            syncthing.forget(user.username)
+        except syncthing.SyncthingError as e:
+            raise PolicyError(f"could not stop {user.username}'s Syncthing: {e}") from e
         self._accounts_delete_user(uid)
         self.policy.users.remove(user)
         self._save_and_apply()
@@ -2412,6 +2432,36 @@ class Daemon:
 
     def impl_UnapproveApp(self, ref: str):
         apps.unapprove(ref)
+        return None
+
+    def impl_SetUserAppApproval(self, uid: int, ref: str, approved: bool, _guardian_pw: str):
+        """Approve an app for one account (#213): the apps in
+        appaccess.INDIVIDUAL_APPROVAL, which a supervised account may have
+        only this way. Guardian-gated like a filter change: Syncthing
+        approved is files from paired devices that never pass the filter,
+        and ports let out for its service. Taking the approval away stops
+        the service (apply) and closes the ports; the app and its folders
+        stay until someone removes it."""
+        if ref not in appaccess.INDIVIDUAL_APPROVAL:
+            raise PolicyError(f"{ref} is approved for the whole computer, not per account")
+        user = self.policy.user(uid)
+        if user is None:
+            raise PolicyError(f"uid {uid} is not managed")
+        refs = set(user.approved_apps)
+        (refs.add if approved else refs.discard)(ref)
+        user.approved_apps = sorted(refs)
+        self._save_and_apply()
+        return None
+
+    def impl_SetSyncthingLan(self, uid: int, enabled: bool, _guardian_pw: str):
+        """May devices on the home network connect to this account's
+        Syncthing directly? Off by default. On, the firewall accepts
+        Syncthing's ports from the LAN ranges, into its service only."""
+        user = self.policy.user(uid)
+        if user is None:
+            raise PolicyError(f"uid {uid} is not managed")
+        user.syncthing_lan = bool(enabled)
+        self._save_and_apply()
         return None
 
     def impl_SetUserCanInstall(self, uid: int, can_install: bool):

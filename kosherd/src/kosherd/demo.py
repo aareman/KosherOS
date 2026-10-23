@@ -606,6 +606,17 @@ class DemoClient:
         self._user(uid)["blocked_apps"] = sorted(refs)
         self._change(uid, "SetUserBlockedApps", [uid, sorted(refs)])
 
+    def set_user_app_approval(self, uid, ref, approved, guardian_password=""):
+        u = self._user(uid)
+        refs = set(u.get("approved_apps") or [])
+        (refs.add if approved else refs.discard)(ref)
+        u["approved_apps"] = sorted(refs)
+        self._change(uid, "SetUserAppApproval", [uid, ref, bool(approved)])
+
+    def set_syncthing_lan(self, uid, enabled, guardian_password=""):
+        self._user(uid)["syncthing_lan"] = bool(enabled)
+        self._change(uid, "SetSyncthingLan", [uid, bool(enabled)])
+
     def list_installed(self): return [a["ref"] for a in self.installed]
     def list_installed_details(self): return list(self.installed)
     def list_my_installed_details(self):

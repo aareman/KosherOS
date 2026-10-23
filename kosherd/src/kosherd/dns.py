@@ -42,7 +42,10 @@ TAILNET_RESOLVER = "100.100.100.100"
 # default, and tailscaled cannot sign in or find its relays without it.
 # The proxy still blocks the site for a filtered account that blocks the
 # category, and nobody but kosherd can drive tailscaled anyway.
-RESOLVER_NEVER_BLOCKED = ("tailscale.com",)
+# syncthing.net is where Syncthing finds a person's other devices and its
+# relays (#213): a category that listed it would leave an approved
+# Syncthing unable to find anything.
+RESOLVER_NEVER_BLOCKED = ("tailscale.com", "syncthing.net")
 
 # Search engines publish hostnames that always answer with safe search on.
 # Pointing the normal hostname at them is how safe search is enforced for
@@ -128,6 +131,10 @@ def render(policy: Policy) -> str:
     # The git hosts developer accounts may reach over SSH (nft.py, #164).
     from .nft import GIT_SSH_HOSTS
     git_domains = sorted(GIT_SSH_HOSTS)
+    # Syncthing's discovery servers and relay list, which its service
+    # reaches on 443 without the proxy (nft.py, syncthing.py, #213).
+    from .syncthing import HOSTS as SYNCTHING_HOSTS
+    syncthing_domains = sorted(SYNCTHING_HOSTS)
 
     # One directive per name, naming every set the name belongs in. dnsmasq
     # uses only the single nftset= line with the longest matching domain, so
@@ -140,6 +147,7 @@ def render(policy: Policy) -> str:
          ("sys4", "sys6"), system_domains),
         ("# User whitelists -> wl4/wl6", ("wl4", "wl6"), user_domains),
         ("# Git over SSH for developer accounts -> git4/git6", ("git4", "git6"), git_domains),
+        ("# Syncthing's discovery and relay list -> st4/st6", ("st4", "st6"), syncthing_domains),
     )
     lines = [
         f"# Rendered by kosherd from policy revision {policy.revision}. DO NOT EDIT.",

@@ -48,7 +48,8 @@ def test_the_ai_tools_and_editors_come_from_nixpkgs():
     # Learning (ArtificialIntelligence is a Learning category).
     for app in APPS:
         if (app["ref"] in nix and "TerminalEmulator" not in app["categories"]
-                and "Font" not in app["categories"]):
+                and "Font" not in app["categories"]
+                and app["ref"] != "nixpkgs#syncthing"):  # a service, on Utilities (#213)
             assert appkinds.kind_of(app) == "develop", app["ref"]
 
 

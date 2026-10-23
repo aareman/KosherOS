@@ -198,6 +198,11 @@ ACTIONS = {
     "SetUserAppAccess": ACTION_INSTALL_APPS,
     "SetUserBlockedAppKinds": ACTION_INSTALL_APPS,
     "SetUserBlockedApps": ACTION_INSTALL_APPS,
+    # Syncthing for one account (#213): files from its paired devices
+    # never pass the filter, and its ports go out directly. Approving it,
+    # and letting the home network reach it, are guardian-gated.
+    "SetUserAppApproval": ACTION_INSTALL_APPS,
+    "SetSyncthingLan": ACTION_MANAGE_FILTER,
     "SearchApps": ACTION_READ_CONFIG,
     "ApproveApp": ACTION_INSTALL_APPS,
     "UnapproveApp": ACTION_INSTALL_APPS,
@@ -252,6 +257,7 @@ GUARDIAN_GATED = frozenset({
     "SetDeveloperTools",
     "SetBootMenuPassword",
     "SetUserAppAccess", "SetUserBlockedAppKinds", "SetUserBlockedApps",
+    "SetUserAppApproval", "SetSyncthingLan",
     "TailscaleSignIn",
 })
 
@@ -288,6 +294,7 @@ CHANGES = frozenset({
     "InstallAppFor", "ApproveApp",
     "UnapproveApp", "SetUserCanInstall", "SetUserAppAccess",
     "SetUserBlockedAppKinds", "SetUserBlockedApps", "SetCaptiveMode",
+    "SetUserAppApproval", "SetSyncthingLan",
     "SetGuardianPassword", "DisableGuardian", "Enrol", "Unenrol",
     # Moving the system in either direction. The log answers "who changed
     # this machine, and when", and changing which OS image it runs is
@@ -312,7 +319,7 @@ PER_USER = frozenset({
     "SetCoverStyle", "SetTimeLimits", "SetNetworkAccess", "SetDeveloperTools", "InstallAppFor",
     "RemoveUser", "ResetPassword", "SetUserApps",
     "SetUserCanInstall", "SetUserAppAccess", "SetUserBlockedAppKinds",
-    "SetUserBlockedApps", "SetCaptiveMode",
+    "SetUserBlockedApps", "SetCaptiveMode", "SetUserAppApproval", "SetSyncthingLan",
 })
 # Changes whose arguments are secrets or too big to be worth keeping.
 NO_ARGS_LOGGED = frozenset({"SetGuardianPassword", "DisableGuardian", "SetBootMenuPassword",

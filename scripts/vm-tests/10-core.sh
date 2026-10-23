@@ -167,11 +167,45 @@ check_contains "kosherd answers any account about a waiting update without bootc
 
 # Staging, without a restart. The harness's registry (10.0.2.2) is trusted
 # again for this alone, and the image this machine runs is pushed to its
-# own tag once more in the other manifest format: a new digest with the
-# same layers, which is what a new build looks like to bootc. The run
-# removes this machine's image tag when it ends, and no other machine
-# checks it again. The automatic run must find the newer digest, download
-# it, leave it staged, not restart, and announce it once.
+# own tag once more with one label added: a new image with the same
+# layers, which is what a new build looks like to bootc, and a download of
+# almost nothing. The run removes this machine's image tag when it ends,
+# and no other machine checks it again. The automatic run must find it,
+# download it, leave it staged, not restart, and announce it once.
+relabel() {
+    python3 - "$1" <<'PY'
+import hashlib, json, sys, time, urllib.request
+ref = sys.argv[1]
+host, rest = ref.split("/", 1)
+repo, tag = rest.rsplit(":", 1)
+base = f"http://{host}/v2/{repo}"
+kinds = ("application/vnd.oci.image.manifest.v1+json,"
+         "application/vnd.docker.distribution.manifest.v2+json")
+with urllib.request.urlopen(urllib.request.Request(f"{base}/manifests/{tag}",
+                                                   headers={"Accept": kinds})) as r:
+    kind = r.headers["Content-Type"].split(";")[0]
+    manifest = json.load(r)
+if "config" not in manifest:
+    sys.exit("not a single-image manifest")
+with urllib.request.urlopen(f"{base}/blobs/{manifest['config']['digest']}") as r:
+    config = json.load(r)
+config.setdefault("config", {}).setdefault("Labels", {})["org.kosherlinux.test.auto19"] = str(time.time())
+blob = json.dumps(config).encode()
+digest = "sha256:" + hashlib.sha256(blob).hexdigest()
+start = urllib.request.urlopen(urllib.request.Request(f"{base}/blobs/uploads/", method="POST"))
+where = start.headers["Location"]
+if where.startswith("/"):
+    where = f"http://{host}{where}"
+where += ("&" if "?" in where else "?") + "digest=" + digest
+urllib.request.urlopen(urllib.request.Request(where, data=blob, method="PUT",
+                       headers={"Content-Type": "application/octet-stream"}))
+manifest["config"]["digest"], manifest["config"]["size"] = digest, len(blob)
+body = json.dumps(manifest).encode()
+urllib.request.urlopen(urllib.request.Request(f"{base}/manifests/{tag}", data=body, method="PUT",
+                       headers={"Content-Type": kind}))
+print("sha256:" + hashlib.sha256(body).hexdigest())
+PY
+}
 booted_ref=$(bootc status --format json 2>/dev/null | python3 -c 'import json,sys; print(json.load(sys.stdin)["status"]["booted"]["image"]["image"]["image"])' 2>/dev/null)
 case "$booted_ref" in
 10.0.2.2:*/*:*)
@@ -186,15 +220,9 @@ case "$booted_ref" in
     printf '[[registry]]\nlocation = "%s"\ninsecure = true\n' "$registry" \
         > /etc/containers/registries.conf.d/50-pr-test-auto.conf
     python3 -c 'import json, sys; p = "/etc/containers/policy.json"; d = json.load(open(p)); d.setdefault("transports", {}).setdefault("docker", {})[sys.argv[1]] = [{"type": "insecureAcceptAnything"}]; json.dump(d, open(p, "w"), indent=4)' "$registry"
-    digest() { skopeo inspect --tls-verify=false --format '{{.Digest}}' "docker://$booted_ref"; }
-    repush() { skopeo copy --quiet --src-tls-verify=false --dest-tls-verify=false --format "$1" \
-        "docker://$booted_ref" "docker://$booted_ref"; }
-    booted_digest=$(bootc status --format json | python3 -c 'import json,sys; print(json.load(sys.stdin)["status"]["booted"]["image"]["imageDigest"])')
-    repush oci >/dev/null 2>&1
-    [ "$(digest)" = "$booted_digest" ] && repush v2s2 >/dev/null 2>&1
-    newer=$(digest)
-    if [ -n "$newer" ] && [ "$newer" != "$booted_digest" ]; then
-        ok "the running image is pushed again with a newer digest"
+    newer=$(relabel "$booted_ref" 2>/run/pr-test-relabel.err)
+    if [ -n "$newer" ]; then
+        ok "the running image is pushed again with a label added ($newer)"
         boot_before=$(cat /proc/sys/kernel/random/boot_id)
         rm -f /run/pr-test-update-ready.log
         busctl --system monitor --match \
@@ -209,9 +237,14 @@ case "$booted_ref" in
             for _ in $(seq 1 200); do
                 staged=$(bootc status --format json 2>/dev/null | python3 -c 'import json,sys; s = json.load(sys.stdin)["status"].get("staged") or {}; print((s.get("image") or {}).get("imageDigest") or "")' 2>/dev/null)
                 [ "$staged" = "$newer" ] && grep -q "$newer" /run/pr-test-update-ready.log && break
+                kosherctl updates 2>/dev/null | grep -q 'last try failed' && break
                 sleep 3
             done
-            assert_that "it is staged for the next restart" test "$staged" = "$newer"
+            if [ "$staged" = "$newer" ]; then
+                ok "it is staged for the next restart"
+            else
+                bad "it is not staged (staged: ${staged:-nothing}); kosherd: $(journalctl -u kosherd --no-pager -o cat -n 400 | grep -i -E 'automatic|update' | tail -6 | tr '\n' ' ' | head -c 900)"
+            fi
             assert_that "and the computer did not restart" \
                 test "$(cat /proc/sys/kernel/random/boot_id)" = "$boot_before"
             check_contains "kosherctl says it waits for a restart" "waiting for a restart" kosherctl updates
@@ -233,11 +266,11 @@ case "$booted_ref" in
             check_contains "and once it is gone, nothing waits" "{}" \
                 python3 -c 'from kosherd.client import DaemonClient; import json; print(json.dumps(DaemonClient().pending_update()))'
         else
-            bad "the automatic run did not start a download: $run; kosherd: $(journalctl -u kosherd --no-pager -o cat -n 400 | grep -i -E 'automatic|update' | tail -5 | tr '\n' ' ' | head -c 900); check: $(kosherctl system check 2>&1 | head -c 300)"
+            bad "the automatic run did not start a download: $run; kosherd: $(journalctl -u kosherd --no-pager -o cat -n 400 | grep -i -E 'automatic|update' | tail -5 | tr '\n' ' ' | head -c 900)"
         fi
         kill "$monitor" 2>/dev/null
     else
-        skip "could not push the running image again with a new digest: staging not checked"
+        skip "could not push the running image again with a label added: $(head -c 300 /run/pr-test-relabel.err)"
     fi
     restore_trust
     trap - EXIT

@@ -1,0 +1,18 @@
+[Unit]
+Description=Look for a new KosherOS version on the administrator's schedule
+# kosherd enables or stops this to match the schedule in the policy
+# (updates.auto); "off" stops it. It fires once a day and kosherd decides
+# whether a check is due (kosherd/updates.py), because "every two weeks"
+# is not a calendar systemd can write and a failed check should be tried
+# again the next day, not a whole period later.
+
+[Timer]
+OnCalendar=daily
+# A different time on each machine, the same time every day on one.
+RandomizedDelaySec=4h
+FixedRandomDelay=true
+# A computer that was off at the time catches up when it starts.
+Persistent=true
+
+[Install]
+WantedBy=timers.target

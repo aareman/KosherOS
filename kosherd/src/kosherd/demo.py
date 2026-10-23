@@ -789,6 +789,26 @@ class DemoClient:
     def reboot(self):
         self._change(None, "Reboot", [])
 
+    def set_auto_updates(self, schedule, notify):
+        self.policy["updates"] = {"auto": schedule, "notify": bool(notify)}
+        self._change(None, "SetAutoUpdates", [schedule, bool(notify)])
+
+    def auto_update_status(self):
+        updates = self.policy.get("updates") or {}
+        return {"schedule": updates.get("auto", "weekly"),
+                "notify": updates.get("notify", True),
+                "last_success": now - 2 * 86400, "last_attempt": now - 2 * 86400,
+                "last_error": None, "next_due": now + 5 * 86400, "pending": None}
+
+    def run_auto_update(self, now=False):
+        return {"result": "none"}
+
+    def pending_update(self):
+        return {}
+
+    def connect_update_ready(self, on_ready):
+        return 3
+
     def deployment_status(self):
         channel = getattr(self, "_demo_channel", "edge")
         image = f"ghcr.io/aareman/kosher-linux:{channel}"

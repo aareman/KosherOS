@@ -1,9 +1,10 @@
 # Updates and channels
 
-KosherOS is a container image. When a parent applies an update from the
-Updates page in KosherOS Admin, the machine pulls the newest version of
-the image it follows and restarts into it atomically, with the previous
-version kept to go back to. Updates are not applied on their own today. This page describes how a build gets
+KosherOS is a container image. The machine downloads the newest version
+of the image it follows, in the background on a schedule or when a parent
+presses Check and Download on the Updates page in KosherOS Admin, and
+starts using it at the next restart, with the previous version kept to go
+back to. It never restarts on its own. This page describes how a build gets
 from a merge to a family's machine, what a machine does when an update goes
 wrong, and what is still to be done before the first family installs it.
 
@@ -11,7 +12,7 @@ wrong, and what is still to be done before the first family installs it.
 
 | What | How it ships | Size |
 |---|---|---|
-| the OS | a container registry; a parent applies updates from the admin app | a few GB on first pull, small differences after |
+| the OS | a container registry; downloaded in the background or from the admin app, used at the next restart | a few GB on first pull, small differences after |
 | the category database | a signed manifest and a hash-verified download | about 190 MB, pulled on refresh |
 | word lists, site rules, search terms | inside the signed portal bundle | kilobytes |
 | the installer ISO | a file, for the first install only | GBs, pulled once |
@@ -75,6 +76,25 @@ built image switches within itself and can never be pointed somewhere else.
 A machine on no channel at all, a pinned version or anything installed
 before channels existed, is shown as exactly that, with the note that it
 will not update on its own.
+
+**Updates download on their own.** Once a week by default, the computer
+looks for a newer version on its channel, downloads it in the background
+and leaves it for the next restart. The admin app's Updates page sets how
+often under Automatic updates: daily, weekly, every 2 weeks, monthly, or
+off, and `kosherctl updates auto` does the same. Off means no checks at all
+until somebody presses Check. A timer runs once a day at a time picked for
+each machine, catches up after the machine was off, and checks only when
+the last check that worked is a full period old, so a check that failed
+(no network, the registry down, a bad signature) is tried again the next
+day and never reads as up to date. It waits on a metered network and on a
+battery below 40%. The download is the same one the Download button
+starts, signature checks included, and a failed one leaves nothing
+staged. The version a machine went back from is not downloaded again
+unless somebody asks for it. When an update is ready, everyone signed in
+sees a small mark in the panel until the restart, and gets one notice
+for that version, which `kosherctl updates notify off` or the switch on
+the Updates page turns off. Restart on the mark asks for an
+administrator's password on any other account.
 
 ## Installing
 
@@ -220,12 +240,7 @@ In the order it blocks a family installing KosherOS.
    publish it as a release asset, and publish the signed manifest; the
    image then carries the last good snapshot and machines pull newer on
    their own.
-3. **Updates in the background.** Today a parent checks for and applies
-   updates from the Updates page. Fetching them in the background, and
-   whether a fetched update should wait for the next natural restart
-   rather than interrupt anyone, is
-   [issue #19](https://github.com/aareman/KosherOS/issues/19).
-4. **Downloads.** A download page with the ISO, its SHA-256, its signature
+3. **Downloads.** A download page with the ISO, its SHA-256, its signature
    and instructions for checking them.
 
 ## Costs

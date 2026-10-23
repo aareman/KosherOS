@@ -1,11 +1,14 @@
-"""A Nix build downloads only from known source hosts (#199).
+"""What a Nix build may download (#199).
 
 Once the build users could resolve names (#190), a fixed-output build
 fetched through the builders' proxy listener as a supervised identity
-judged by the default categories alone, and example.com is in none of
-them. Now the builders' entry in the proxy's rules file carries the hosts
-a build may fetch from, and the proxy refuses the rest in plain text that
-the build log shows.
+judged by the default categories alone, so a developer account's own,
+stricter filter did not reach its builds. Now the builders' entry in the
+proxy's rules file carries each developer account's filter and the proxy
+holds a build to all of them: the strictest wins, an account on approved
+sites only holds builds to the known source hosts, and with no developer
+account a build fetches nothing. A refusal is plain text the build log
+shows.
 """
 
 import importlib.util
@@ -92,16 +95,40 @@ def test_the_schema_refuses_something_that_is_not_a_host():
         Policy.from_dict(doc)
 
 
-def test_the_proxy_rules_carry_the_hosts(monkeypatch, tmp_path):
+def _rules_file(monkeypatch, tmp_path, policy) -> dict:
     monkeypatch.setattr(apply, "MITM_DIR", tmp_path)
     monkeypatch.setattr(apply, "MITM_RULES_PATH", tmp_path / "rules.json")
     monkeypatch.setattr(nixdaemon, "build_gid", lambda: 999)
-    apply.write_mitm_rules(_policy(build_sources_extra=["mirror.example.org"]))
-    builder = json.loads((tmp_path / "rules.json").read_text())["builder"]
+    apply.write_mitm_rules(policy)
+    return json.loads((tmp_path / "rules.json").read_text())["builder"]
+
+
+def test_the_proxy_rules_carry_each_developer_filter(monkeypatch, tmp_path):
+    policy = Policy(revision=1, build_sources_extra=["mirror.example.org"], users=[
+        UserPolicy(uid=1001, username="dev", mode="filtered", developer_tools=True,
+                   rules=[{"action": "block", "pattern": "example.org"}],
+                   blocked_categories=["adult"]),
+        UserPolicy(uid=1002, username="wl", mode="whitelist", developer_tools=True,
+                   whitelist=["torah.example.net"]),
+        UserPolicy(uid=1003, username="kid", mode="filtered"),
+        UserPolicy(uid=1004, username="off", mode="none", developer_tools=True),
+    ])
+    builder = _rules_file(monkeypatch, tmp_path, policy)
     assert builder["port"] == nft.BUILDER_PORT
-    assert "github.com" in builder["allowed_hosts"]
-    assert "mirror.example.org" in builder["allowed_hosts"]
-    assert "example.com" not in builder["allowed_hosts"]
+    assert builder["rules"] == [] and builder["blocked_categories"] == []
+    devs = {d["username"]: d for d in builder["developers"]}
+    assert set(devs) == {"dev", "wl"}
+    assert devs["dev"]["rules"] == [{"action": "block", "pattern": "example.org"}]
+    assert devs["dev"]["blocked_categories"] == ["adult"]
+    assert "allowed_hosts" not in devs["dev"]
+    hosts = devs["wl"]["allowed_hosts"]
+    assert "github.com" in hosts and "mirror.example.org" in hosts
+    assert "*.torah.example.net" in hosts
+    assert "example.com" not in hosts
+
+
+def test_no_developer_account_writes_an_empty_list(monkeypatch, tmp_path):
+    assert _rules_file(monkeypatch, tmp_path, _policy())["developers"] == []
 
 
 # ---- the daemon call ----------------------------------------------------------
@@ -166,14 +193,14 @@ def _filter(addon, tmp_path, builder_entry):
     rules.write_text(json.dumps({
         "1001": {"port": 30001, "rules": [], "blocked_categories": []},
         "builder": {"port": nft.BUILDER_PORT, "rules": [],
-                    "blocked_categories": ["adult"], **builder_entry},
+                    "blocked_categories": [], **builder_entry},
     }))
     filt = addon.KosherFilter.__new__(addon.KosherFilter)
     filt.policy = addon.PolicyCache(rules)
     filt.uids = type("U", (), {"uid_for_connection": staticmethod(lambda *a, **k: None)})()
     filt.categories = type("C", (), {
         "blocked_categories_of": staticmethod(
-            lambda host, blocked: {"adult"} if host == "adult.github.com" and "adult" in blocked
+            lambda host, blocked: {"adult"} if host.startswith("adult.") and "adult" in blocked
             else set()),
         "categories_of": staticmethod(lambda host: set()),
     })()
@@ -200,53 +227,133 @@ def _flow(url, port):
     })()
 
 
-def test_a_build_is_refused_a_host_that_is_not_a_source(addon, tmp_path):
-    filt = _filter(addon, tmp_path, {"allowed_hosts": list(buildsources.DEFAULT_BUILD_SOURCES)})
-    flow = _flow("https://example.com/", nft.BUILDER_PORT)
+def _build(addon, tmp_path, developers, url):
+    """A build's download of `url`, with these developer accounts (as
+    developer_filters writes them). Returns the response, or None."""
+    filt = _filter(addon, tmp_path, {"developers": developers})
+    flow = _flow(url, nft.BUILDER_PORT)
     filt.request(flow)
-    assert flow.response.status_code == 403
-    assert flow.response.headers["Content-Type"].startswith("text/plain")
-    body = flow.response.content.decode()
-    assert "example.com is not a source Nix builds may fetch from" in body
-    assert "kosherctl build-sources add example.com" in body
-    assert addon.noted and addon.noted[0][1]["why"] == "build-source"
+    return flow.response
 
 
-def test_a_build_fetches_from_github(addon, tmp_path):
-    filt = _filter(addon, tmp_path, {"allowed_hosts": list(buildsources.DEFAULT_BUILD_SOURCES)})
-    flow = _flow("https://raw.githubusercontent.com/NixOS/nixpkgs/master/README.md",
-                 nft.BUILDER_PORT)
-    filt.request(flow)
-    assert flow.response is None
+def _refused(response, *words):
+    assert response is not None and response.status_code == 403
+    assert response.headers["Content-Type"].startswith("text/plain")
+    body = response.content.decode()
+    for word in words:
+        assert word in body, body
+    return body
+
+
+def _dev(name, mode, rules=(), categories=()):
+    return {"username": name, "mode": mode, "rules": list(rules),
+            "blocked_categories": list(categories)}
+
+
+DEFAULT_CATEGORIES = ["adult"]
+BLOCK_EXAMPLE_ORG = [{"action": "block", "pattern": "example.org"}]
+
+
+def _whitelist_dev(name="wl", extra=(), whitelist=()):
+    policy = Policy(revision=1, build_sources_extra=list(extra), users=[
+        UserPolicy(uid=1002, username=name, mode="whitelist", developer_tools=True,
+                   whitelist=list(whitelist), blocked_categories=DEFAULT_CATEGORIES)])
+    return buildsources.developer_filters(policy)[0]
+
+
+# One filtered developer: its own filter, nothing more and nothing less.
+
+def test_a_filtered_developer_rule_reaches_its_builds(addon, tmp_path):
+    dev = _dev("avi", "filtered", BLOCK_EXAMPLE_ORG, DEFAULT_CATEGORIES)
+    body = _refused(_build(addon, tmp_path, [dev], "https://example.org/x.tar.gz"),
+                    "example.org", "avi's account", "rule")
+    assert "build-sources" not in body
+    assert addon.noted[-1][1]["why"] == "rule:example.org"
+    assert _build(addon, tmp_path, [dev], "https://example.com/x.tar.gz") is None
+
+
+def test_a_filtered_developer_categories_reach_its_builds(addon, tmp_path):
+    dev = _dev("avi", "filtered", categories=DEFAULT_CATEGORIES)
+    _refused(_build(addon, tmp_path, [dev], "https://adult.example.com/"),
+             "adult.example.com", "avi's account", "adult")
+    assert addon.noted[-1][1]["why"] == "category:adult"
+
+
+def test_an_allow_rule_beats_that_account_categories(addon, tmp_path):
+    dev = _dev("avi", "filtered", [{"action": "allow", "pattern": "adult.example.com"}],
+               DEFAULT_CATEGORIES)
+    assert _build(addon, tmp_path, [dev], "https://adult.example.com/") is None
+
+
+def test_a_dnsfilter_developer(addon, tmp_path):
+    dev = _dev("dina", "dnsfilter", BLOCK_EXAMPLE_ORG, DEFAULT_CATEGORIES)
+    _refused(_build(addon, tmp_path, [dev], "https://example.org/"), "dina's account")
+    _refused(_build(addon, tmp_path, [dev], "https://adult.example.com/"), "dina's account")
+    assert _build(addon, tmp_path, [dev], "https://example.com/") is None
+
+
+# A developer on approved sites only: the source hosts and its own list.
+
+def test_a_whitelist_developer_holds_builds_to_the_sources(addon, tmp_path):
+    dev = _whitelist_dev()
+    body = _refused(_build(addon, tmp_path, [dev], "https://example.com/"),
+                    "example.com is not a source Nix builds may fetch from",
+                    "wl's account is on approved sites only",
+                    "kosherctl build-sources add example.com")
+    assert "wl's approved sites" in body
+    assert addon.noted[-1][1]["why"] == "build-source"
+    assert _build(addon, tmp_path, [dev],
+                  "https://raw.githubusercontent.com/NixOS/nixpkgs/master/README.md") is None
+
+
+def test_a_host_on_its_own_whitelist_is_allowed(addon, tmp_path):
+    dev = _whitelist_dev(whitelist=["torah.example.net"])
+    assert _build(addon, tmp_path, [dev], "https://torah.example.net/a.tar.gz") is None
+    assert _build(addon, tmp_path, [dev], "https://dl.torah.example.net/a.tar.gz") is None
+
+
+def test_an_admin_added_host_is_allowed(addon, tmp_path):
+    dev = _whitelist_dev(extra=["mirror.example.org"])
+    assert _build(addon, tmp_path, [dev], "https://mirror.example.org/pub/x.tar.gz") is None
 
 
 def test_the_categories_still_apply_to_a_source_host(addon, tmp_path):
-    filt = _filter(addon, tmp_path, {"allowed_hosts": ["*.github.com"]})
-    flow = _flow("https://adult.github.com/x", nft.BUILDER_PORT)
-    filt.request(flow)
-    assert flow.response.status_code == 403
-    assert "adult" in flow.response.content.decode()
+    dev = _whitelist_dev(extra=["*.example.org"])
+    _refused(_build(addon, tmp_path, [dev], "https://adult.example.org/x"), "adult")
 
 
-def test_an_added_host_is_allowed(addon, tmp_path):
-    filt = _filter(addon, tmp_path, {"allowed_hosts": ["github.com", "mirror.example.org"]})
-    flow = _flow("https://mirror.example.org/pub/x.tar.gz", nft.BUILDER_PORT)
-    filt.request(flow)
-    assert flow.response is None
+# Two developers: a build must pass both.
+
+def test_two_developers_the_strictest_wins(addon, tmp_path):
+    open_dev = _dev("avi", "filtered", categories=DEFAULT_CATEGORIES)
+    strict = _dev("dina", "filtered", BLOCK_EXAMPLE_ORG, DEFAULT_CATEGORIES)
+    devs = [open_dev, strict]
+    _refused(_build(addon, tmp_path, devs, "https://example.org/"), "dina's account")
+    assert _build(addon, tmp_path, devs, "https://example.com/") is None
+    devs = [open_dev, _whitelist_dev()]
+    _refused(_build(addon, tmp_path, devs, "https://example.com/"), "wl's account")
+    assert _build(addon, tmp_path, devs, "https://github.com/NixOS/nixpkgs") is None
+
+
+# No developers: nothing.
+
+def test_no_developer_account_fetches_nothing(addon, tmp_path):
+    for url in ("https://example.com/", "https://github.com/NixOS/nixpkgs"):
+        _refused(_build(addon, tmp_path, [], url), "no account", "developer tools")
 
 
 def test_an_older_rules_file_gets_the_built_in_list_not_the_web(addon, tmp_path):
     filt = _filter(addon, tmp_path, {})
     refused = _flow("https://example.com/", nft.BUILDER_PORT)
     filt.request(refused)
-    assert refused.response.status_code == 403
+    _refused(refused.response, "example.com is not a source")
     allowed = _flow("https://github.com/NixOS/nixpkgs", nft.BUILDER_PORT)
     filt.request(allowed)
     assert allowed.response is None
 
 
 def test_an_account_is_not_held_to_the_build_sources(addon, tmp_path):
-    filt = _filter(addon, tmp_path, {"allowed_hosts": ["github.com"]})
+    filt = _filter(addon, tmp_path, {"developers": []})
     flow = _flow("https://example.com/", 30001)
     filt.request(flow)
     assert flow.response is None

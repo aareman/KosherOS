@@ -207,7 +207,7 @@ class PolicyCache:
         self._cover: dict[int, str] = {}
         self._language: dict[int, str] = {}
         self._youtube: dict[int, dict] = {}
-        self._build_sources: list[str] | None = None
+        self._build_developers: list[dict] | None = None
         self._fallback = _fail_closed_entry()
 
     def uid_for_listener_port(self, port: int | None) -> int | None:
@@ -258,14 +258,12 @@ class PolicyCache:
             return dict(self._fallback["youtube"])
         return self._youtube.get(uid, {})
 
-    def build_sources(self) -> list[str]:
-        """Where a Nix build may download from (#199). A rules file with
-        no list for the builders (written by an older kosherd) gets the
-        built-in one, never the open web."""
+    def build_developers(self) -> list[dict] | None:
+        """The developer accounts' filters a Nix build is held to (#199,
+        buildsources.judge), or None for a rules file written before
+        there were any: that one gets the built-in source hosts."""
         self._refresh()
-        if self._build_sources is None:
-            return list(buildsources_mod.DEFAULT_BUILD_SOURCES)
-        return self._build_sources
+        return self._build_developers
 
     def _refresh(self) -> None:
         try:
@@ -287,7 +285,7 @@ class PolicyCache:
         language: dict[int, str] = {}
         youtube: dict[int, dict] = {}
         by_port: dict[int, int] = {}
-        build_sources: list[str] | None = None
+        build_developers: list[dict] | None = None
         for uid_text, raw in doc.items():
             try:
                 uid = BUILDER_UID if uid_text == "builder" else int(uid_text)
@@ -302,8 +300,8 @@ class PolicyCache:
                 cover[uid] = entry.get("cover_style", "frost")
                 language[uid] = entry.get("language_filter", "off")
                 youtube[uid] = dict(entry.get("youtube", {}))
-                if uid == BUILDER_UID and entry.get("allowed_hosts") is not None:
-                    build_sources = [str(h) for h in entry["allowed_hosts"]]
+                if uid == BUILDER_UID and entry.get("developers") is not None:
+                    build_developers = buildsources_mod.load_developers(entry["developers"])
             except Exception as e:  # noqa: BLE001 - one bad entry must not break all
                 log.error("bad entry for uid %s: %s", uid_text, e)
         self._rules = rules
@@ -312,7 +310,7 @@ class PolicyCache:
         self._cover = cover
         self._language = language
         self._youtube = youtube
-        self._build_sources = build_sources
+        self._build_developers = build_developers
         self._known = set(rules)
         self._by_port = by_port
         self._mtime = mtime
@@ -1021,8 +1019,8 @@ class KosherFilter:
         uid = self._uid_of(flow)
         flow.metadata["kosher_uid"] = uid
 
-        # A Nix build fetches source, and only from the known source hosts
-        # (#199); the categories below still apply to those.
+        # A Nix build is held to the strictest developer account's filter
+        # (#199); bare addresses are refused below as for everyone.
         if uid == BUILDER_UID and self._refuse_build_source(flow):
             return
 
@@ -2104,19 +2102,30 @@ class KosherFilter:
         self._note(activity_mod.BLOCK, flow, url=url, why=why)
 
     def _refuse_build_source(self, flow: http.HTTPFlow) -> bool:
-        """Refuse a build's download from a host that is not a known
-        source. Plain text, not the block page: nobody reads it in a
-        browser, and Nix prints an error's body in the build log."""
+        """Refuse a build's download that the strictest developer
+        account's filter would refuse (#199). Plain text, not the block
+        page: nobody reads it in a browser, and Nix prints an error's body
+        in the build log."""
         host = (flow.request.pretty_host or "").lower().rstrip(".")
-        if buildsources_mod.allows(host, self.policy.build_sources()):
-            return False
         url = flow.request.pretty_url
-        log.info("blocked a Nix build's download %s (not a build source)", url)
+        developers = self.policy.build_developers()
+        if developers is None:
+            # Written by an older kosherd: the source hosts, not the web.
+            if buildsources_mod.allows(host, buildsources_mod.DEFAULT_BUILD_SOURCES):
+                return False
+            refused = (buildsources_mod.refusal(host or "this address"), "build-source")
+        else:
+            refused = buildsources_mod.judge(
+                host, url, developers, self.categories.blocked_categories_of)
+            if refused is None:
+                return False
+        text, why = refused
+        log.info("blocked a Nix build's download %s (%s)", url, why)
         flow.response = http.Response.make(
-            403, buildsources_mod.refusal(host or "this address").encode(),
+            403, text.encode(),
             {"Content-Type": "text/plain; charset=utf-8",
              "Cache-Control": "no-store"})
-        self._note(activity_mod.BLOCK, flow, url=url, why="build-source")
+        self._note(activity_mod.BLOCK, flow, url=url, why=why)
         return True
 
     def _note(self, kind: str, flow: http.HTTPFlow, **fields) -> None:

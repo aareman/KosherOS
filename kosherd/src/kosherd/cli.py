@@ -195,14 +195,17 @@ def cmd_developer_tools(args) -> int:
 def cmd_build_sources(args) -> int:
     """kosherctl build-sources [list | add HOST... | remove HOST...]
 
-    Where a Nix build may download from (#199): the built-in hosts, which
-    always apply, and the ones an administrator added.
+    Where a Nix build may download from while an account with developer
+    tools on is on approved sites only (#199): the built-in hosts and the
+    ones an administrator added. Otherwise a build gets the strictest
+    developer account's filter, and this list does not apply.
     """
     from . import buildsources
 
     c = _client()
     extra = list((c.get_policy().get("developer") or {}).get("build_sources_extra", []))
     if args.action == "list":
+        print("Used only while an account with developer tools on is on approved sites only.")
         print("Built in:")
         for host in buildsources.DEFAULT_BUILD_SOURCES:
             print(f"  {host}")
@@ -1221,7 +1224,8 @@ def main(argv: list[str] | None = None) -> int:
     s.set_defaults(func=cmd_developer_tools)
 
     s = sub.add_parser("build-sources",
-                       help="where a Nix build may download from, beyond the built-in hosts")
+                       help="where a Nix build may download from while a developer account "
+                            "is on approved sites only")
     s.add_argument("action", nargs="?", default="list", choices=["list", "add", "remove"])
     s.add_argument("hosts", nargs="*")
     s.add_argument("--guardian-password")

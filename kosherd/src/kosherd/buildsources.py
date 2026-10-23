@@ -1,23 +1,34 @@
-"""Where a Nix build may download from (#199).
+"""What a Nix build may download (#199).
 
 A fixed-output Nix build runs as a nixbld user with the network, and the
 firewall sends its web to the builders' own proxy listener (BUILDER_PORT,
-#123). The proxy used to judge it by the default categories alone, so a
-build could fetch any site those allow. Now a build fetches only from the
-hosts below: the code forges, language registries, the GNU, kernel and
-SourceForge mirrors, and NixOS's own servers, taken from what nixpkgs'
-fetchers and pkgs/build-support/fetchurl/mirrors.nix actually use. The
-proxy refuses everything else with a sentence the build log shows, and an
-administrator can add a host (`kosherctl build-sources add HOST`). The
-default categories still apply on top.
+#123). A build is nobody's in particular, so the proxy holds it to the
+strictest filter among the accounts that have developer tools on, the only
+accounts that can start one:
+
+- every one of their own rules and blocked categories applies, so with one
+  developer account a build gets exactly that account's filter;
+- if any of them is on approved sites only (whitelist), a build fetches
+  only from the hosts below (the code forges, language registries, the
+  GNU, kernel and SourceForge mirrors and NixOS's own servers, taken from
+  what nixpkgs' fetchers and pkgs/build-support/fetchurl/mirrors.nix use),
+  that account's approved sites, and what an administrator added with
+  `kosherctl build-sources add HOST`;
+- with no developer account, a build fetches nothing. kosherd's own
+  installs use the daemon too, and they come from the binary caches,
+  which the daemon reaches as root, not through this listener.
+
+A refusal is a sentence in the build log naming the host and whose setting
+refused it.
 
 An entry is a host, or `*.host` for the host and everything under it, the
 same as a whitelist entry.
 """
-
 from __future__ import annotations
 
 import re
+
+from . import urlrules, whitelists
 
 DEFAULT_BUILD_SOURCES = (
     # Code forges: fetchFromGitHub, fetchFromGitLab, fetchgit and friends.
@@ -126,8 +137,81 @@ def allows(host: str | None, sources) -> bool:
     return False
 
 
-def refusal(host: str) -> str:
-    """What the build log shows when a download is refused."""
-    return (f"KosherOS refused this download: {host} is not a source Nix "
-            f"builds may fetch from.\n"
+def refusal(host: str, username: str | None = None) -> str:
+    """What the build log shows when a host is not on the list."""
+    because = (f" while {username}'s account is on approved sites only"
+               if username else "")
+    text = (f"KosherOS refused this download: {host} is not a source Nix "
+            f"builds may fetch from{because}.\n"
             f"An administrator can add it with: kosherctl build-sources add {host}\n")
+    if username:
+        text += f"or add it to {username}'s approved sites.\n"
+    return text
+
+
+def developer_filters(policy) -> list[dict]:
+    """The builders' share of each developer account's filter, for the
+    proxy's rules file: its rules and blocked categories, and for an
+    account on approved sites only, the hosts a build may fetch from."""
+    out = []
+    for user in policy.developer_accounts():
+        entry = {"username": user.username, "mode": user.mode,
+                 "rules": [], "blocked_categories": []}
+        if user.mode in ("filtered", "dnsfilter", "whitelist"):
+            entry["rules"] = list(user.rules)
+            entry["blocked_categories"] = list(user.blocked_categories)
+        if user.mode == "whitelist":
+            # The account's approved sites as it reaches them: an entry
+            # covers its subdomains (dns.py), and a developer account on
+            # approved sites reaches the package registries too.
+            from .policy import DEVELOPER_REGISTRIES
+
+            own = ["*." + d.removeprefix("*.")
+                   for d in [*whitelists.effective(user), *DEVELOPER_REGISTRIES]]
+            entry["allowed_hosts"] = list(dict.fromkeys([*policy.build_sources(), *own]))
+        out.append(entry)
+    return out
+
+
+def load_developers(raw) -> list[dict]:
+    """developer_filters() as the proxy reads it back, rules parsed."""
+    out = []
+    for entry in raw or []:
+        hosts = entry.get("allowed_hosts")
+        out.append({
+            "username": str(entry.get("username") or "an account"),
+            "rules": urlrules.parse_rules(entry.get("rules") or []),
+            "blocked_categories": list(entry.get("blocked_categories") or []),
+            "allowed_hosts": None if hosts is None else [str(h) for h in hosts],
+        })
+    return out
+
+
+def judge(host: str, url: str, developers, blocked_categories_of) -> tuple[str, str] | None:
+    """Refuse a build's download, or not: (what the build log shows, the
+    activity log's reason), or None to let it through. `developers` is
+    load_developers()' list; each must allow the download, so the
+    strictest wins. `blocked_categories_of(host, blocked)` is the
+    category database's question."""
+    name = host or "this address"
+    if not developers:
+        return (f"KosherOS refused this download from {name}: no account on "
+                f"this computer has developer tools on, so Nix builds may not "
+                f"download anything.\n", "build-source")
+    for dev in developers:
+        who = dev["username"]
+        if dev.get("allowed_hosts") is not None and not allows(host, dev["allowed_hosts"]):
+            return refusal(name, who), "build-source"
+        action, pattern = urlrules.decide(dev["rules"], url)
+        if action == urlrules.BLOCK:
+            return (f"KosherOS refused this download: {name} is blocked by a "
+                    f"rule on {who}'s account ({pattern}).\n", f"rule:{pattern}")
+        if pattern is not None:
+            continue  # an allow rule beats that account's categories
+        hit = blocked_categories_of(host or "", dev["blocked_categories"])
+        if hit:
+            names = ", ".join(sorted(hit))
+            return (f"KosherOS refused this download: {name} is in a category "
+                    f"{who}'s account blocks ({names}).\n",
+                    "category:" + ",".join(sorted(hit)))
+    return None

@@ -1,6 +1,6 @@
 # shellcheck shell=bash
 # The "update ready" mark in the panel (#19), for the desktop scripts:
-# sourced by update-indicator.sh and compositors.sh, not run on its own
+# sourced by indicator.sh and compositors.sh, not run on its own
 # (the desktop stage runs *.sh only).
 #
 # Needs $u (the account at the screen) and lib.sh's ok/bad. The mark is
@@ -9,7 +9,7 @@
 # org.kde.StatusNotifierWatcher and lists the items it shows.
 
 AUTO_STATE=/var/lib/kosher/auto-update.json
-: "${u:?indicator.bash needs u, the account at the screen}"
+: "${u:?indicator-lib.bash needs u, the account at the screen}"
 
 indicator_busctl() { busctl --user --machine="$u@.host" "$@"; }
 

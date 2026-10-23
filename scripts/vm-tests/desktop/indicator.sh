@@ -9,9 +9,15 @@ here="$(cd "$(dirname "$0")" && pwd)"
 . "$here/../lib.sh"
 
 u="${PR_USER:?PR_USER is the account signed in at the screen}"
-. "$here/indicator.bash"
+. "$here/indicator-lib.bash"
 
+# Named to run before keyd.sh, which ends with the account signed out.
 section "The update mark on the desktop"
+if ! loginctl list-sessions --no-legend | awk -v u="$u" '$3 == u && $4 == "seat0"' | grep -q .; then
+    bad "$u is not signed in at the screen, so there is no panel to look in"
+    report
+    exit $?
+fi
 desktop=$(systemctl --machine="$u@.host" --user show-environment 2>/dev/null \
     | sed -n 's/^XDG_CURRENT_DESKTOP=//p')
 indicator_check "${desktop:-the desktop}"

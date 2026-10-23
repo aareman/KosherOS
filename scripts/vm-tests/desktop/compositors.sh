@@ -11,7 +11,7 @@ here="$(cd "$(dirname "$0")" && pwd)"
 . "$here/../lib.sh"
 
 u="${PR_USER:?PR_USER is the account signed in at the screen}"
-. "$here/indicator.bash"
+. "$here/indicator-lib.bash"
 uid=$(id -u "$u")
 # A command inside the account's own service manager, so it has the
 # session's bus and polkit counts it as the person at the screen.

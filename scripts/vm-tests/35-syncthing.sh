@@ -120,6 +120,19 @@ if systemctl is-active --quiet "syncthing@$A.service"; then
 else
     bad "the service is not running"
     journalctl -u kosherd -u "syncthing@$A.service" -n 40 --no-pager 2>&1 | sed 's/^/    /'
+    # What stops it, one sandboxing setting at a time.
+    sbin=$(find /nix/store -maxdepth 3 -path "/nix/store/*-syncthing-[0-9]*/bin/syncthing" 2>/dev/null | head -1)
+    stat -c "%n %U %a %C" "$sbin" 2>&1 | sed 's/^/    /'
+    for props in "" "-p PrivateUsers=true" "-p NoExecPaths=/ -p ExecPaths=/nix/store" \
+                 "-p ProtectSystem=full" "-p MemoryDenyWriteExecute=true" \
+                 "-p SystemCallFilter=@system-service" "-p PrivateDevices=true" \
+                 "-p RestrictNamespaces=true" "-p NoNewPrivileges=true"; do
+        # shellcheck disable=SC2086
+        r=$(systemd-run --quiet --wait --pipe -p User="$A" $props "$sbin" --version 2>&1 | tail -1)
+        printf '    [%s] %s\n' "${props:-plain}" "$r"
+    done
+    ausearch -m avc -ts recent 2>/dev/null | tail -8 | sed 's/^/    /'
+    journalctl -t audit -t kernel --since -5min --no-pager 2>/dev/null | grep -i avc | tail -8 | sed 's/^/    /'
 fi
 dropin=/etc/systemd/system/syncthing@$A.service.d/50-kosheros.conf
 check_contains "a system unit, run as the account" "User=%i" systemctl cat "syncthing@$A.service"

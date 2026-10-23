@@ -312,6 +312,12 @@ def build(username: str) -> tuple[str, list[str]]:
     store = os.path.realpath(gcroot(username))
     if not store.startswith("/nix/store/") or not os.access(f"{store}/bin/syncthing", os.X_OK):
         raise SyncthingError(f"the build of {REF} has no bin/syncthing ({store})")
+    # The store is var_lib_t, which a system service may not execute; the
+    # image labels Syncthing's binary bin_t (Containerfile), and a path
+    # the daemon just wrote has its parent's label until it is restored.
+    res = _run(["restorecon", f"{store}/bin/syncthing"])
+    if res.returncode != 0:
+        log.warning("syncthing: could not label %s: %s", store, (res.stderr or "").strip())
     res = _run(["nix", "path-info", "--recursive", store])
     closure = [p for p in (res.stdout or "").split() if p.startswith("/nix/store/")]
     if res.returncode != 0 or not closure:

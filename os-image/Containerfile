@@ -424,7 +424,14 @@ RUN true && \
     semanage fcontext -a -t var_lib_t '/nix(/.*)?' && \
     semanage fcontext -a -t var_run_t '/nix/var/nix/daemon-socket(/.*)?' && \
     semanage fcontext -a -t var_run_t '/var/lib/nix/var/nix/daemon-socket(/.*)?' && \
+    # Syncthing's binary, which kosherd builds and runs as a system service
+    # per account (#213): init may not execute var_lib_t, so the binary
+    # alone is bin_t. kosherd restores the label after each build.
+    semanage fcontext -a -t bin_t '/nix/store/[^/]+-syncthing-[0-9][^/]*/bin/syncthing' && \
+    semanage fcontext -a -t bin_t '/var/lib/nix/store/[^/]+-syncthing-[0-9][^/]*/bin/syncthing' && \
     restorecon -R /nix && \
+    test "$(matchpathcon -n /nix/store/abc-syncthing-2.1.3/bin/syncthing)" = system_u:object_r:bin_t:s0 && \
+    test "$(matchpathcon -n /nix/store/abc-syncthing-2.1.3/lib/x)" = system_u:object_r:var_lib_t:s0 && \
     test "$(matchpathcon -n /nix/var/nix/daemon-socket/socket)" = system_u:object_r:var_run_t:s0 && \
     test "$(matchpathcon -n /nix/store)" = system_u:object_r:var_lib_t:s0 && \
     test "$(matchpathcon -n /var/lib/nix/var/nix/daemon-socket)" = system_u:object_r:var_run_t:s0

@@ -184,6 +184,10 @@ INTROSPECTION_XML = """
       <arg direction="in" type="b" name="enabled"/>
       <arg direction="in" type="s" name="guardian_password"/>
     </method>
+    <method name="SetBuildSources">
+      <arg direction="in" type="as" name="hosts"/>
+      <arg direction="in" type="s" name="guardian_password"/>
+    </method>
     <method name="SetBootMenuPassword">
       <arg direction="in" type="s" name="password"/>
       <arg direction="in" type="s" name="guardian_password"/>
@@ -1550,6 +1554,27 @@ class Daemon:
                         shutil.chown(path, uid, pwd.getpwuid(uid).pw_gid)
             except (KeyError, OSError) as e:
                 log.warning("could not hand uid %d its nix profile: %s", uid, e)
+        self._save_and_apply()
+        return None
+
+    def impl_SetBuildSources(self, hosts: list[str], _guardian_pw: str):
+        """The hosts an administrator adds to where a Nix build may
+        download from (#199), replacing the previous additions. The
+        built-in list is not part of this and cannot be shortened here.
+
+        Guardian-gated: another host is more of the web a build reaches.
+        Every entry is checked before anything changes, so a bad one
+        leaves the list as it was.
+        """
+        from . import buildsources
+
+        try:
+            extra = [buildsources.normalize(h) for h in hosts]
+        except ValueError as e:
+            raise PolicyError(str(e)) from None
+        builtin = set(buildsources.DEFAULT_BUILD_SOURCES)
+        self.policy.build_sources_extra = sorted(
+            {h for h in extra if h not in builtin})
         self._save_and_apply()
         return None
 

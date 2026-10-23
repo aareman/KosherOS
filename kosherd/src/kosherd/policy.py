@@ -416,6 +416,9 @@ class Policy:
     guest: GuestPolicy = field(default_factory=GuestPolicy)
     # A family's own presets, saved from a tuned account (see profiles.py).
     custom_profiles: list[dict] = field(default_factory=list)
+    # Hosts an administrator added to where a Nix build may download from
+    # (#199); the built-in list is buildsources.DEFAULT_BUILD_SOURCES.
+    build_sources_extra: list[str] = field(default_factory=list)
 
     def user(self, uid: int) -> UserPolicy | None:
         return next((u for u in self.users if u.uid == uid), None)
@@ -468,6 +471,13 @@ class Policy:
     def developer_accounts(self) -> list["UserPolicy"]:
         return [u for u in self.effective_users() if u.developer_tools and u.mode != "none"]
 
+    def build_sources(self) -> list[str]:
+        """Every host a Nix build may download from: the built-in list and
+        the administrator's additions (#199)."""
+        from . import buildsources
+
+        return buildsources.combined(self.build_sources_extra)
+
     def to_dict(self) -> dict:
         return {
             "schema_version": 1,
@@ -479,6 +489,8 @@ class Policy:
             **({"custom_profiles": list(self.custom_profiles)}
                if self.custom_profiles else {}),
             "system_whitelist": self.system_whitelist,
+            **({"developer": {"build_sources_extra": list(self.build_sources_extra)}}
+               if self.build_sources_extra else {}),
             "guest": self.guest.to_dict(),
         }
 
@@ -523,6 +535,7 @@ class Policy:
             adblock=bool(doc.get("adblock", {}).get("enabled", True)),
             custom_profiles=list(doc.get("custom_profiles") or []),
             system_whitelist=list(doc.get("system_whitelist", [])),
+            build_sources_extra=list((doc.get("developer") or {}).get("build_sources_extra", [])),
             guest=GuestPolicy(
                 enabled=guest_doc["enabled"],
                 uid=guest_doc.get("uid"),

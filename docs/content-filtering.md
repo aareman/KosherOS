@@ -103,12 +103,31 @@ through the account's own filter.
 
 A build's own downloads — `fetchurl`, `fetchFromGitHub` — run as the Nix build
 users, which belong to no account. Their web goes through the proxy on a
-listener of their own, judged like the strictest account: the default
-categories, bare addresses and encrypted-DNS tricks refused, no picture scoring
-(a build fetches tarballs, not pages). Everything else of theirs is refused,
-including loopback, so a build can never be a relay for the account that
-started it. The daemon's own fetches from the binary cache run as root, from
-caches only root can name.
+listener of their own, with bare addresses and encrypted-DNS tricks refused and
+no picture scoring (a build fetches tarballs, not pages). Everything else of
+theirs is refused, including loopback, so a build can never be a relay for the
+account that started it. The daemon's own fetches from the binary cache run as
+root, from caches only root can name.
+
+What a build may download is the strictest filter among the accounts that have
+developer tools on, since only they can start one. Every one of their own
+rules and blocked categories applies, so on a machine with one developer
+account a build gets exactly that account's filter, and any site that filter
+allows is fine. If no account has developer tools on, a build downloads
+nothing; the Store's own installs come from the binary cache.
+
+If one of the developer accounts is on approved sites only, a build may
+download only from known source hosts: GitHub and its download hosts, GitLab,
+Codeberg, Bitbucket and SourceHut, the SourceForge, GNU and kernel.org mirrors,
+the project download servers nixpkgs names in its mirror list, the language
+registries (PyPI, crates.io, npm, Go's module proxy, RubyGems, Hackage, Maven
+Central), NixOS's own servers, and that account's own approved sites. An
+administrator can add a host to this list with `kosherctl build-sources add
+HOST` (guardian-gated), and `kosherctl build-sources` shows it. The list is
+used only in this case. The built-in part is in `kosherd/buildsources.py`.
+
+When the proxy refuses a build's download, the build log names the host and
+the account whose setting refused it.
 
 ## The category database
 

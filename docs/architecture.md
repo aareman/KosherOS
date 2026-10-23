@@ -176,9 +176,11 @@ whose ref is `nixpkgs#<package>` is installed by the daemon into the asking
 account's own Nix profile, as that account. The same rule decides it, and
 because the profile is that account's alone there is no second gate to run
 it. Each card in the Store says which source it is from. The Nix daemon
-refuses an account on "No internet" outright, a build's downloads are held
-to the registries by the firewall, and a terminal tool installed this way
-gets a launcher in the app grid that opens a terminal running it.
+refuses an account on "No internet" outright, a build's downloads get the
+strictest filter among the accounts with developer tools on (and only the
+known source hosts nixpkgs fetches from, plus any an administrator added,
+when one of those accounts is on approved sites only), and a terminal tool installed this way gets a launcher in the app grid that
+opens a terminal running it.
 
 A Nix app that draws with OpenGL or Vulkan brings its own graphics loader,
 which looks for the drivers in `/run/opengl-driver`, as on NixOS. KosherOS
@@ -354,7 +356,9 @@ whether KosherOS is filtering.
 ## Updates
 
 The OS is a container image built on Fedora bootc. CI builds it, signs it
-and publishes it. A parent applies an update from the Updates page in
-KosherOS Admin; the machine restarts into it atomically and keeps the
-previous version to go back to. Updates are not applied on their own.
+and publishes it. The machine downloads a new version in the background
+on the schedule set on the Updates page in KosherOS Admin (weekly unless
+changed), or when a parent downloads it there, and starts it at the next
+restart, keeping the previous version to go back to. It never restarts on
+its own.
 [Updates and channels](deployment.md) has the detail.

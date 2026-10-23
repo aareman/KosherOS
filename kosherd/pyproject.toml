@@ -28,6 +28,9 @@ kosher-layout = "kosherd.layout:main"
 # Also in the person's session: turns the daemon's TimeWarning signal into
 # a desktop notification before their time runs out.
 kosher-time-notify = "kosherd.timenotify:main"
+# And shows that a downloaded update waits for a restart: a mark in the
+# panel, and one notice when an automatic download finishes.
+kosher-update-notify = "kosherd.updatenotify:main"
 # In the person's session too: sends their own keyd file
 # (~/.config/keyd/default.conf) to kosherd at sign-in and on every save.
 kosher-keyboard = "kosherd.keyboard:main"

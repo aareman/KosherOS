@@ -224,29 +224,88 @@ fi
 check "a no-internet account cannot pull" 1 pod nokid timeout 120 podman pull -q "$img"
 
 section "What a build may fetch"
-# A fixed-output build runs as a nixbld user with the network. The wrong
-# hash is deliberate: "hash mismatch" means the fetch SUCCEEDED (the
-# firewall let it through); a connection failure means it was refused.
+# A fixed-output build runs as a nixbld user with the network, and its web
+# goes through the builders' proxy, which holds it to the strictest filter
+# among the accounts with developer tools on (#199). The wrong hash is
+# deliberate: "hash mismatch" means the fetch SUCCEEDED. curl fails on a
+# refusal and prints the proxy's reason into the build log (with bash
+# builtins: the sandbox has no cat), which is what a person building would
+# read. probe ACCOUNT URL.
 probe() {
-    as wlkid timeout 300 nix build --impure --no-link --expr "
+    local u="$1"
+    shift
+    as "$u" timeout 600 nix build --impure --no-link --expr "
         with import <nixpkgs> {}; derivation {
           name = \"kosher-probe\"; system = builtins.currentSystem;
           builder = \"\${bash}/bin/bash\";
-          args = [ \"-c\" \"\${curl}/bin/curl -sS --max-time 20 -o \$out $1\" ];
+          args = [ \"-c\" \"\${curl}/bin/curl -sS --max-time 20 --fail-with-body -o \$out $1 || { while read -r l; do echo \$l; done < \$out; exit 1; }\" ];
           outputHashMode = \"flat\"; outputHashAlgo = \"sha256\";
           outputHash = \"0000000000000000000000000000000000000000000000000000000000000000\";
         }" 2>&1
 }
-out=$(probe https://raw.githubusercontent.com/NixOS/nixpkgs/master/README.md)
+why() { printf '%s' "$1" | tail -3 | head -c 300; }
+
+# The only developer account is on approved sites only (wlkid), so a build
+# gets the known source hosts and nothing else.
+out=$(probe wlkid https://raw.githubusercontent.com/NixOS/nixpkgs/master/README.md)
 case "$out" in
     *"hash mismatch"*) ok "a build fetches from a registry (GitHub)" ;;
     *) bad "a build could not fetch from GitHub: $(printf '%s' "$out" | tail -3 | head -c 300)" ;;
 esac
-out=$(probe https://example.com/)
+out=$(probe wlkid https://example.com/)
 case "$out" in
     *"hash mismatch"*) bad "a build fetched a page that is not a registry (example.com)" ;;
-    *"curl"*|*"builder"*|*"failed"*) ok "a build cannot fetch a page (example.com refused)" ;;
+    *"not a source Nix builds may fetch from while wlkid"*)
+        ok "a build cannot fetch a page (example.com refused, and the log says why)" ;;
     *) bad "unexpected result for example.com: $(printf '%s' "$out" | tail -3 | head -c 300)" ;;
 esac
+# An administrator can add a host, and take it away again.
+check_contains "an administrator adds a build source" "example.com" \
+    kctl build-sources add example.com
+sleep 2   # the proxy reads its rules file again when it changes
+out=$(probe wlkid https://example.com/)
+case "$out" in
+    *"hash mismatch"*) ok "a build fetches from a host the administrator added" ;;
+    *) bad "an added host was still refused: $(printf '%s' "$out" | tail -3 | head -c 300)" ;;
+esac
+check_contains "and removes it" "nothing else" kctl build-sources remove example.com
+
+# A filtered developer account with the default categories and a rule of
+# its own blocking example.org.
+id devkid >/dev/null 2>&1 || useradd -m devkid
+kosherctl get-policy 2>/dev/null | grep -q '"devkid"' \
+    || kosherctl adopt devkid filtered >/dev/null 2>&1
+dev=$(id -u devkid)
+kctl set-mode "$dev" filtered >/dev/null
+kctl rules "$dev" clear >/dev/null
+kctl rules "$dev" block example.org >/dev/null
+kctl developer-tools "$dev" on >/dev/null
+wait_for_dns >/dev/null 2>&1 || true
+sleep 2
+# Two developer accounts: the one on approved sites only is the stricter.
+out=$(probe devkid https://example.com/)
+case "$out" in
+    *"not a source Nix builds may fetch from while wlkid"*)
+        ok "with two developer accounts the stricter wins (example.com refused for wlkid)" ;;
+    *) bad "with two developer accounts example.com was not refused for wlkid: $(why "$out")" ;;
+esac
+# The filtered one alone: exactly its filter.
+kctl developer-tools "$(id -u wlkid)" off >/dev/null
+sleep 2
+out=$(probe devkid https://example.com/)
+case "$out" in
+    *"hash mismatch"*) ok "a filtered developer's build fetches what its categories allow (example.com)" ;;
+    *) bad "a filtered developer's build could not fetch example.com: $(why "$out")" ;;
+esac
+out=$(probe devkid https://example.org/)
+case "$out" in
+    *"hash mismatch"*) bad "a build fetched example.org past devkid's own rule" ;;
+    *"blocked by a rule on devkid's account"*)
+        ok "a filtered developer's own rule reaches its builds (example.org refused)" ;;
+    *) bad "unexpected result for example.org: $(why "$out")" ;;
+esac
+kctl developer-tools "$dev" off >/dev/null
+kctl rules "$dev" clear >/dev/null
+kctl developer-tools "$(id -u wlkid)" on >/dev/null
 
 report

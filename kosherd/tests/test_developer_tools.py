@@ -207,7 +207,9 @@ def test_the_proxy_gets_a_builder_identity(monkeypatch, tmp_path):
     doc = json.loads((tmp_path / "rules.json").read_text())
     builder = doc["builder"]
     assert builder["port"] == nft.BUILDER_PORT
-    assert "proxy" in builder["blocked_categories"] and "adult" in builder["blocked_categories"]
+    # Judged per developer account (#199, test_build_sources.py); with
+    # none on this machine, a build fetches nothing.
+    assert builder["developers"] == []
     assert builder["media_level"] == "none"       # tarballs, not pages
     assert builder["rules"] == []
     modes = (tmp_path / "listen.env").read_text()

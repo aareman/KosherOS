@@ -195,6 +195,11 @@ class DaemonClient:
         itself (nix, devbox, devenv from a shell)?"""
         self._call("Profiles", "SetDeveloperTools", "(ibs)", uid, bool(enabled), guardian_password)
 
+    def set_build_sources(self, hosts: list[str], guardian_password: str = "") -> None:
+        """The hosts added to where a Nix build may download from; the
+        built-in ones always apply."""
+        self._call("Profiles", "SetBuildSources", "(ass)", list(hosts), guardian_password)
+
     def set_boot_menu_password(self, password: str, guardian_password: str = "") -> None:
         """Password-protect the boot menu (or change the password)."""
         self._call("Profiles", "SetBootMenuPassword", "(ss)", password, guardian_password)
@@ -471,6 +476,37 @@ class DaemonClient:
     def reboot(self) -> None:
         """Restart the computer (after an update is staged)."""
         self._call("System", "Reboot")
+
+    # Automatic updates (#19)
+    def set_auto_updates(self, schedule: str, notify: bool) -> None:
+        """off, daily, weekly, biweekly or monthly, and the notice switch."""
+        self._call("System", "SetAutoUpdates", "(sb)", schedule, bool(notify))
+
+    def auto_update_status(self) -> dict:
+        """`schedule`, `notify`, `last_success`, `last_attempt`,
+        `last_error`, `next_due`, `pending`."""
+        return json.loads(self._call("System", "AutoUpdateStatus")[0])
+
+    def run_auto_update(self, now: bool = False) -> dict:
+        """One automatic run (the timer's); `now` skips "not due yet"."""
+        return json.loads(self._call("System", "RunAutoUpdate", "(b)", bool(now))[0])
+
+    def pending_update(self) -> dict:
+        """The update waiting for a restart, {} when none. Any account."""
+        return json.loads(self._call("System", "PendingUpdate")[0])
+
+    def connect_update_ready(self, on_ready) -> int:
+        """Subscribe to UpdateReady(version, digest, announce); an empty
+        digest means nothing waits for a restart any more."""
+
+        def handler(_conn, _sender, _path, _iface, signal, params):
+            if signal == "UpdateReady":
+                on_ready(*params.unpack())
+
+        return self._conn.signal_subscribe(
+            BUS_NAME, "org.kosherlinux.Daemon1.System", "UpdateReady", OBJECT_PATH,
+            None, Gio.DBusSignalFlags.NONE, handler,
+        )
 
     # Network
     def set_captive_mode(self, uid: int, minutes: int) -> None:

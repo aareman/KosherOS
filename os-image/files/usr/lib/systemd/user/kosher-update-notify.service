@@ -1,0 +1,18 @@
+[Unit]
+Description=KosherOS: show that an update is waiting for a restart
+# Runs for the whole graphical session, as the person signed in. kosherd
+# says on the system bus when a downloaded update waits for a restart;
+# this shows a mark in the panel until then, and one notice when an
+# automatic download finishes (see kosherd/updatenotify.py).
+PartOf=graphical-session.target
+After=graphical-session.target
+ConditionUser=!@system
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/kosher-update-notify
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=graphical-session.target

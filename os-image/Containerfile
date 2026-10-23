@@ -666,6 +666,9 @@ RUN python3 -m pip install --prefix=/usr --no-deps \
     # ...and listens for kosherd's time warnings, so "5 minutes left" is a
     # notification on the person's screen, not a line in a log.
     && systemctl --global enable kosher-time-notify.service \
+    # ...and shows a mark in the panel while a downloaded update waits for
+    # a restart, with one notice when an automatic download finishes.
+    && systemctl --global enable kosher-update-notify.service \
     # ...and sends the person's own keyd files to kosherd (keyboard.py),
     # and runs the per-app key mapper for people with an app.conf.
     && systemctl --global enable kosher-keyboard.service kosher-keyd-apps.service \
@@ -674,7 +677,14 @@ RUN python3 -m pip install --prefix=/usr --no-deps \
         kosher-search.service \
     # Portal sync is inert until the device enrols (the unit and timer
     # both carry ConditionPathExists on the enrolment file).
-    && systemctl enable kosher-sync.timer
+    && systemctl enable kosher-sync.timer \
+    # Automatic updates (#19): a daily tick, and kosherd decides whether a
+    # check is due on the schedule in the policy, downloads the update and
+    # leaves it for the next restart. kosherd stops the timer when the
+    # schedule is off. Not Fedora's own update timer, which restarts the
+    # computer and is disabled above.
+    && systemctl enable kosher-auto-update.timer \
+    && systemctl is-enabled kosher-auto-update.timer
 
 # Time limits at the door. kosherd renders /etc/security/time.conf from
 # the policy (when each account may sign in; an account whose daily time
@@ -706,6 +716,7 @@ RUN for f in gdm-password gdm-autologin login; do \
     && grep -q 'ingroup kosher-admin' /etc/pam.d/login \
     && test -x /usr/bin/kosher-time-refused \
     && test -x /usr/bin/kosher-time-notify \
+    && test -x /usr/bin/kosher-update-notify \
     && test -x /usr/bin/kosher-nix-desktop \
     && test -x /usr/bin/kosher-syncthing-net \
     && test -f /usr/lib/systemd/system/syncthing@.service \

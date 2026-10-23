@@ -101,8 +101,12 @@ reachable from every account like the other registries.
 **Nix.** Every KosherOS machine has Nix, with flakes on, the way Fedora
 packages it. The store is on `/var` (the rest of the system is read-only).
 Builds run in the sandbox as the build users, and a build that fetches its
-source reaches the registries above and nothing else: a build is nobody's
-in particular, so it does not get anybody's list of sites. An account whose
+source gets the strictest filter among the accounts with developer tools on:
+with one such account, exactly that account's filter. If one of them is on
+approved sites only, a build may fetch only from the code forges, mirrors and
+registries nixpkgs fetches from, that account's approved sites, and hosts an
+administrator added with `kosherctl build-sources add`. A build refused a host
+says so in its log, with the account whose setting refused it. An account whose
 kind of internet is "No internet" cannot use the daemon at all. `devbox`
 is in the image; `devenv` installs itself into your profile the first time
 you run it, from nixpkgs, with devenv's own cache already trusted.

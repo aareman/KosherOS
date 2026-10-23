@@ -192,6 +192,49 @@ def cmd_developer_tools(args) -> int:
     return 0
 
 
+def cmd_build_sources(args) -> int:
+    """kosherctl build-sources [list | add HOST... | remove HOST...]
+
+    Where a Nix build may download from while an account with developer
+    tools on is on approved sites only (#199): the built-in hosts and the
+    ones an administrator added. Otherwise a build gets the strictest
+    developer account's filter, and this list does not apply.
+    """
+    from . import buildsources
+
+    c = _client()
+    extra = list((c.get_policy().get("developer") or {}).get("build_sources_extra", []))
+    if args.action == "list":
+        print("Used only while an account with developer tools on is on approved sites only.")
+        print("Built in:")
+        for host in buildsources.DEFAULT_BUILD_SOURCES:
+            print(f"  {host}")
+        print("Added:" if extra else "Added: none")
+        for host in extra:
+            print(f"  {host}")
+        return 0
+    if not args.hosts:
+        print(f"name at least one host to {args.action}", file=sys.stderr)
+        return 2
+    try:
+        hosts = [buildsources.normalize(h) for h in args.hosts]
+    except ValueError as e:
+        print(e, file=sys.stderr)
+        return 2
+    if args.action == "add":
+        wanted = list(dict.fromkeys([*extra, *hosts]))
+    else:
+        builtin = [h for h in hosts if h in buildsources.DEFAULT_BUILD_SOURCES]
+        if builtin:
+            print(f"{', '.join(builtin)} is built in and cannot be removed",
+                  file=sys.stderr)
+            return 2
+        wanted = [h for h in extra if h not in hosts]
+    c.set_build_sources(wanted, _guardian_pw(args))
+    print("Nix builds may also download from: " + (", ".join(wanted) or "nothing else"))
+    return 0
+
+
 def cmd_network(args) -> int:
     """kosherctl network UID [--video-calls on|off] [--extra-ports 22,2222|none]"""
     c = _client()
@@ -1131,6 +1174,88 @@ def cmd_guardian(args) -> int:
     return 0
 
 
+AUTO_WORDS = {"off": "off", "daily": "every day", "weekly": "every week",
+              "biweekly": "every 2 weeks", "monthly": "every month"}
+
+
+def _when(stamp) -> str:
+    import time as _time
+
+    if not stamp:
+        return "never"
+    return _time.strftime("%a %d %b %H:%M", _time.localtime(float(stamp)))
+
+
+def cmd_updates(args) -> int:
+    """Automatic updates (#19): the schedule, the notice, and the run the
+    timer starts."""
+    c = _client()
+    value = (args.value or "").strip().lower()
+    if args.action == "run":
+        try:
+            result = c.run_auto_update(now=args.now)
+        except Exception:  # noqa: BLE001 - kosherd logs it; the timer tries again
+            if args.quiet:
+                return 0
+            raise
+        if not args.quiet:
+            print(auto_run_sentence(result))
+        return 1 if result.get("result") == "failed" and not args.quiet else 0
+    st = c.auto_update_status()
+    if args.action == "auto" and value:
+        if value in ("every-2-weeks", "fortnightly"):
+            value = "biweekly"
+        if value not in AUTO_WORDS:
+            print(f"unknown schedule: {args.value} (off, daily, weekly, biweekly or monthly)",
+                  file=sys.stderr)
+            return 2
+        c.set_auto_updates(value, bool(st.get("notify", True)))
+        print("automatic updates are off; 'kosherctl system check' still checks by hand"
+              if value == "off" else
+              f"this computer looks for updates {AUTO_WORDS[value]} and downloads them; "
+              "it never restarts on its own")
+        return 0
+    if args.action == "notify" and value:
+        if value not in ("on", "off"):
+            print("say on or off", file=sys.stderr)
+            return 2
+        c.set_auto_updates(st.get("schedule") or "weekly", value == "on")
+        print("people are told once when an update is ready" if value == "on"
+              else "no pop-up when an update is ready; the mark in the panel still shows")
+        return 0
+    schedule = st.get("schedule") or "weekly"
+    print(f"automatic updates: {AUTO_WORDS.get(schedule, schedule)}")
+    print(f"notice when ready: {'on' if st.get('notify', True) else 'off'}")
+    print(f"last check that worked: {_when(st.get('last_success'))}")
+    if st.get("last_error") and (st.get("last_attempt") or 0) >= (st.get("last_success") or 0):
+        print(f"last try failed ({_when(st.get('last_attempt'))}): {st['last_error']}")
+    if schedule != "off":
+        due = st.get("next_due")
+        print("next check: " + ("at the next daily run" if not due else f"from {_when(due)}"))
+    pending = st.get("pending")
+    if pending:
+        print(f"waiting for a restart: {pending.get('version') or 'an update'}")
+    return 0
+
+
+def auto_run_sentence(result: dict) -> str:
+    """One line from a RunAutoUpdate answer."""
+    what = result.get("result")
+    version = result.get("version") or "a new version"
+    if what == "skipped":
+        return f"not checking: {result.get('reason')}"
+    if what == "failed":
+        return f"could not check for updates, will try again at the next run: {result.get('error')}"
+    if what == "downloading":
+        return f"downloading {version} in the background; it is used from the next restart"
+    if what == "staged":
+        return f"{version} is already downloaded; restart to use it"
+    if what == "left":
+        return (f"the newest is {version}, the version this computer went back from; "
+                "it is not downloaded again on its own")
+    return "up to date"
+
+
 def cmd_update(args) -> int:
     c = _client()
     if args.apply:
@@ -1210,6 +1335,14 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("state", choices=["on", "off"])
     s.add_argument("--guardian-password")
     s.set_defaults(func=cmd_developer_tools)
+
+    s = sub.add_parser("build-sources",
+                       help="where a Nix build may download from while a developer account "
+                            "is on approved sites only")
+    s.add_argument("action", nargs="?", default="list", choices=["list", "add", "remove"])
+    s.add_argument("hosts", nargs="*")
+    s.add_argument("--guardian-password")
+    s.set_defaults(func=cmd_build_sources)
 
     s = sub.add_parser("network",
                        help="what an account may reach beyond the web: video calls, extra ports")
@@ -1432,6 +1565,18 @@ def main(argv: list[str] | None = None) -> int:
     s = sub.add_parser("guardian", help="manage the guardian password")
     s.add_argument("action", choices=["enable", "set-password", "disable"])
     s.set_defaults(func=cmd_guardian)
+
+    s = sub.add_parser("updates", help="automatic OS updates: how often, and the notice")
+    s.add_argument("action", nargs="?", default="status",
+                   choices=["status", "auto", "notify", "run"])
+    s.add_argument("value", nargs="?", default="",
+                   help="with 'auto': off, daily, weekly, biweekly or monthly; "
+                        "with 'notify': on or off")
+    s.add_argument("--now", action="store_true",
+                   help="with 'run': check even when the next check is not due yet")
+    s.add_argument("--quiet", action="store_true",
+                   help="with 'run': say nothing (the timer's way)")
+    s.set_defaults(func=cmd_updates)
 
     s = sub.add_parser("update", help="check for or apply OS updates")
     s.add_argument("--apply", action="store_true")

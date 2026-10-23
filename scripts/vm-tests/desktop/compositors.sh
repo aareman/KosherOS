@@ -11,6 +11,7 @@ here="$(cd "$(dirname "$0")" && pwd)"
 . "$here/../lib.sh"
 
 u="${PR_USER:?PR_USER is the account signed in at the screen}"
+. "$here/indicator-lib.bash"
 uid=$(id -u "$u")
 # A command inside the account's own service manager, so it has the
 # session's bus and polkit counts it as the person at the screen.
@@ -127,6 +128,8 @@ for c in hyprland umbriel niri; do
     else
         bad "$c: kosher-layout did not run"
     fi
+    # The update mark (#19) in Noctalia's tray, as on GNOME.
+    indicator_check "$c"
     failed=$(user_systemctl list-units --failed --no-legend --plain 2>/dev/null)
     if [ -z "$failed" ]; then
         ok "$c: none of the account's user services failed"

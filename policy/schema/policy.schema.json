@@ -54,6 +54,21 @@
       "description": "Domains reachable in whitelist mode for every user (OS update host, flatpak remote, connectivity check, portal). Merged with built-in defaults.",
       "default": []
     },
+    "developer": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Machine-wide settings for developer tools (#123).",
+      "properties": {
+        "build_sources_extra": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/domain"
+          },
+          "default": [],
+          "description": "Hosts a Nix build may download from, added by an administrator to the built-in list (kosherd.buildsources). The builders' proxy refuses a build's download from any other host (#199)."
+        }
+      }
+    },
     "guest": {
       "type": "object",
       "additionalProperties": false,
@@ -285,6 +300,28 @@
           "type": "boolean",
           "default": true,
           "description": "Block advertising and tracker domains at the machine's resolvers for every account, like a Pi-hole. Reaches every browser and app because all DNS is forced through the local resolvers. Absent means on."
+        }
+      }
+    },
+    "updates": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "auto": {
+          "enum": [
+            "off",
+            "daily",
+            "weekly",
+            "biweekly",
+            "monthly"
+          ],
+          "default": "weekly",
+          "description": "How often this computer looks for a new KosherOS version on its own and downloads it, ready for the next restart. It never restarts by itself. off = only when an administrator checks. Absent means weekly."
+        },
+        "notify": {
+          "type": "boolean",
+          "default": true,
+          "description": "Tell the people signed in, once per version, when a downloaded update is ready for a restart. Absent means on."
         }
       }
     }

@@ -221,4 +221,142 @@ DaemonClient().disable_guardian(sys.argv[1])' "$gpw" >/dev/null 2>&1
     skip "a real tailnet sign-in needs a person at the login page: names on the tailnet, the 100.100.100.100 forward, a filtered account reaching a tailnet host through its proxy"
 fi
 
+section "Automatic updates (#19)"
+timer=kosher-auto-update.timer
+schedule() { kosherctl get-policy | python3 -c 'import json,sys; print((json.load(sys.stdin).get("updates") or {}).get("auto", "weekly"))'; }
+check "the timer is enabled" 0 systemctl is-enabled --quiet "$timer"
+check "and running, on the default weekly schedule" 0 systemctl is-active --quiet "$timer"
+check_contains "the policy says weekly" "weekly" schedule
+check_contains "the timer has a next run" "$timer" systemctl list-timers --all --no-legend "$timer"
+check_contains "Fedora's own timer, which restarts the computer, stays off" "disabled" \
+    systemctl is-enabled bootc-fetch-apply-updates.timer
+kosherctl updates auto off >/dev/null
+check "off stops the timer" 1 systemctl is-active --quiet "$timer"
+check_contains "and the run does not check at all" "automatic updates are off" \
+    kosherctl updates run --now
+kosherctl updates auto biweekly >/dev/null
+check "every 2 weeks starts it again" 0 systemctl is-active --quiet "$timer"
+check_contains "and the policy says so" "biweekly" schedule
+kosherctl updates notify off >/dev/null
+check_contains "the notice can be turned off" "notice when ready: off" kosherctl updates
+kosherctl updates notify on >/dev/null
+kosherctl updates auto weekly >/dev/null
+check_contains "kosherd answers any account about a waiting update without bootc" "{" \
+    python3 -c 'from kosherd.client import DaemonClient; import json; print(json.dumps(DaemonClient().pending_update()))'
+
+# Staging, without a restart. The harness's registry (10.0.2.2) is trusted
+# again for this alone, and the image this machine runs is pushed to its
+# own tag once more with one label added: a new image with the same
+# layers, which is what a new build looks like to bootc, and a download of
+# almost nothing. The run removes this machine's image tag when it ends,
+# and no other machine checks it again. The automatic run must find it,
+# download it, leave it staged, not restart, and announce it once.
+relabel() {
+    python3 - "$1" <<'PY'
+import hashlib, json, sys, time, urllib.request
+ref = sys.argv[1]
+host, rest = ref.split("/", 1)
+repo, tag = rest.rsplit(":", 1)
+base = f"http://{host}/v2/{repo}"
+kinds = ("application/vnd.oci.image.manifest.v1+json,"
+         "application/vnd.docker.distribution.manifest.v2+json")
+with urllib.request.urlopen(urllib.request.Request(f"{base}/manifests/{tag}",
+                                                   headers={"Accept": kinds})) as r:
+    kind = r.headers["Content-Type"].split(";")[0]
+    manifest = json.load(r)
+if "config" not in manifest:
+    sys.exit("not a single-image manifest")
+with urllib.request.urlopen(f"{base}/blobs/{manifest['config']['digest']}") as r:
+    config = json.load(r)
+config.setdefault("config", {}).setdefault("Labels", {})["org.kosherlinux.test.auto19"] = str(time.time())
+blob = json.dumps(config).encode()
+digest = "sha256:" + hashlib.sha256(blob).hexdigest()
+start = urllib.request.urlopen(urllib.request.Request(f"{base}/blobs/uploads/", method="POST"))
+where = start.headers["Location"]
+if where.startswith("/"):
+    where = f"http://{host}{where}"
+where += ("&" if "?" in where else "?") + "digest=" + digest
+urllib.request.urlopen(urllib.request.Request(where, data=blob, method="PUT",
+                       headers={"Content-Type": "application/octet-stream"}))
+manifest["config"]["digest"], manifest["config"]["size"] = digest, len(blob)
+body = json.dumps(manifest).encode()
+urllib.request.urlopen(urllib.request.Request(f"{base}/manifests/{tag}", data=body, method="PUT",
+                       headers={"Content-Type": kind}))
+print("sha256:" + hashlib.sha256(body).hexdigest())
+PY
+}
+booted_ref=$(bootc status --format json 2>/dev/null | python3 -c 'import json,sys; print(json.load(sys.stdin)["status"]["booted"]["image"]["image"]["image"])' 2>/dev/null)
+case "$booted_ref" in
+10.0.2.2:*/*:*)
+    registry=${booted_ref%%/*}
+    cp -a /etc/containers/policy.json /run/pr-test-policy.json
+    restore_trust() {
+        cp -a /run/pr-test-policy.json /etc/containers/policy.json
+        rm -f /etc/containers/registries.conf.d/50-pr-test-auto.conf
+    }
+    trap restore_trust EXIT
+    mkdir -p /etc/containers/registries.conf.d
+    printf '[[registry]]\nlocation = "%s"\ninsecure = true\n' "$registry" \
+        > /etc/containers/registries.conf.d/50-pr-test-auto.conf
+    python3 -c 'import json, sys; p = "/etc/containers/policy.json"; d = json.load(open(p)); d.setdefault("transports", {}).setdefault("docker", {})[sys.argv[1]] = [{"type": "insecureAcceptAnything"}]; json.dump(d, open(p, "w"), indent=4)' "$registry"
+    newer=$(relabel "$booted_ref" 2>/run/pr-test-relabel.err)
+    if [ -n "$newer" ]; then
+        ok "the running image is pushed again with a label added ($newer)"
+        boot_before=$(cat /proc/sys/kernel/random/boot_id)
+        rm -f /run/pr-test-update-ready.log
+        busctl --system monitor --match \
+            "type='signal',interface='org.kosherlinux.Daemon1.System',member='UpdateReady'" \
+            > /run/pr-test-update-ready.log 2>&1 &
+        monitor=$!
+        sleep 1
+        run=$(kosherctl updates run --now 2>&1)
+        if printf '%s' "$run" | grep -q downloading; then
+            ok "the automatic run finds it and starts downloading"
+            staged=""
+            for _ in $(seq 1 200); do
+                staged=$(bootc status --format json 2>/dev/null | python3 -c 'import json,sys; s = json.load(sys.stdin)["status"].get("staged") or {}; print((s.get("image") or {}).get("imageDigest") or "")' 2>/dev/null)
+                [ "$staged" = "$newer" ] && grep -q "$newer" /run/pr-test-update-ready.log && break
+                kosherctl updates 2>/dev/null | grep -q 'last try failed' && break
+                sleep 3
+            done
+            if [ "$staged" = "$newer" ]; then
+                ok "it is staged for the next restart"
+            else
+                bad "it is not staged (staged: ${staged:-nothing}); kosherd: $(journalctl -u kosherd --no-pager -o cat -n 400 | grep -i -E 'automatic|update' | tail -6 | tr '\n' ' ' | head -c 900)"
+            fi
+            assert_that "and the computer did not restart" \
+                test "$(cat /proc/sys/kernel/random/boot_id)" = "$boot_before"
+            check_contains "kosherctl says it waits for a restart" "waiting for a restart" kosherctl updates
+            check_contains "any account can see it waits" "$newer" \
+                python3 -c 'from kosherd.client import DaemonClient; print(DaemonClient().pending_update())'
+            # A second run finds the same download and must not announce again.
+            check_contains "a second run sees it is already downloaded" "already downloaded" \
+                kosherctl updates run --now
+            sleep 3
+            announced=$(grep -c 'BOOLEAN true' /run/pr-test-update-ready.log)
+            assert_that "the notice was sent once ($announced)" test "$announced" = 1
+            # Put the machine back: the staged copy is discarded.
+            out=$(ostree admin undeploy 0 2>&1)
+            if [ ! -e /run/ostree/staged-deployment ]; then
+                ok "the staged copy is discarded again"
+            else
+                bad "could not discard the staged copy: $out"
+            fi
+            check_contains "and once it is gone, nothing waits" "{}" \
+                python3 -c 'from kosherd.client import DaemonClient; import json; print(json.dumps(DaemonClient().pending_update()))'
+        else
+            bad "the automatic run did not start a download: $run; kosherd: $(journalctl -u kosherd --no-pager -o cat -n 400 | grep -i -E 'automatic|update' | tail -5 | tr '\n' ' ' | head -c 900)"
+        fi
+        kill "$monitor" 2>/dev/null
+    else
+        skip "could not push the running image again with a label added: $(head -c 300 /run/pr-test-relabel.err)"
+    fi
+    restore_trust
+    trap - EXIT
+    ;;
+*)
+    skip "this machine does not run an image from the harness registry ($booted_ref): staging not checked"
+    ;;
+esac
+
 report

@@ -41,6 +41,7 @@ try:
     from kosherd import imageedit as imageedit_mod
     from kosherd import language as language_mod
     from kosherd import accessreq as accessreq_mod
+    from kosherd import buildsources as buildsources_mod
     from kosherd import activity as activity_mod
     from kosherd import search as search_mod
     from kosherd import siterules as siterules_mod
@@ -64,6 +65,7 @@ except ImportError:  # pragma: no cover - only when interpreters differ
     from kosherd import imageedit as imageedit_mod
     from kosherd import language as language_mod
     from kosherd import accessreq as accessreq_mod
+    from kosherd import buildsources as buildsources_mod
     from kosherd import activity as activity_mod
     from kosherd import search as search_mod
     from kosherd import siterules as siterules_mod
@@ -222,6 +224,7 @@ class PolicyCache:
         self._language: dict[int, str] = {}
         self._youtube: dict[int, dict] = {}
         self._system_allowed: dict[int, tuple] = {}
+        self._build_developers: list[dict] | None = None
         self._fallback = _fail_closed_entry()
 
     def uid_for_listener_port(self, port: int | None) -> int | None:
@@ -280,6 +283,13 @@ class PolicyCache:
             return dict(self._fallback["youtube"])
         return self._youtube.get(uid, {})
 
+    def build_developers(self) -> list[dict] | None:
+        """The developer accounts' filters a Nix build is held to (#199,
+        buildsources.judge), or None for a rules file written before
+        there were any: that one gets the built-in source hosts."""
+        self._refresh()
+        return self._build_developers
+
     def _refresh(self) -> None:
         try:
             mtime = self.path.stat().st_mtime
@@ -301,6 +311,7 @@ class PolicyCache:
         youtube: dict[int, dict] = {}
         system_allowed: dict[int, tuple] = {}
         by_port: dict[int, int] = {}
+        build_developers: list[dict] | None = None
         for uid_text, raw in doc.items():
             try:
                 uid = BUILDER_UID if uid_text == "builder" else int(uid_text)
@@ -317,6 +328,8 @@ class PolicyCache:
                 youtube[uid] = dict(entry.get("youtube", {}))
                 system_allowed[uid] = tuple(str(n).lower()
                                             for n in entry.get("system_allowed", []))
+                if uid == BUILDER_UID and entry.get("developers") is not None:
+                    build_developers = buildsources_mod.load_developers(entry["developers"])
             except Exception as e:  # noqa: BLE001 - one bad entry must not break all
                 log.error("bad entry for uid %s: %s", uid_text, e)
         self._rules = rules
@@ -326,6 +339,7 @@ class PolicyCache:
         self._language = language
         self._youtube = youtube
         self._system_allowed = system_allowed
+        self._build_developers = build_developers
         self._known = set(rules)
         self._by_port = by_port
         self._mtime = mtime
@@ -1044,6 +1058,11 @@ class KosherFilter:
         uid = self._uid_of(flow)
         flow.metadata["kosher_uid"] = uid
 
+        # A Nix build is held to the strictest developer account's filter
+        # (#199); bare addresses are refused below as for everyone.
+        if uid == BUILDER_UID and self._refuse_build_source(flow):
+            return
+
         # Reserved on every host, because the form is posted to the
         # blocked site's own origin (see REQUEST_PATH). The site never
         # sees it.
@@ -1568,6 +1587,12 @@ class KosherFilter:
             return
         body = flow.response.get_text(strict=False) or ""
         if not body or SCRIPT_PATH in body:
+            return
+        if not _is_markup(body):
+            # Labelled text/html but not a page: Cloudflare's bot check
+            # answers its own requests with base64 under that label, and
+            # a tag added to the end broke its decoding, so the check
+            # failed and Linear said it could not verify the account (#215).
             return
         uid = (getattr(flow, "metadata", None) or {}).get("kosher_uid")
         token = self._page_token(uid, flow.request.pretty_host)
@@ -2113,6 +2138,33 @@ class KosherFilter:
         )
         self._note(activity_mod.BLOCK, flow, url=url, why=why)
 
+    def _refuse_build_source(self, flow: http.HTTPFlow) -> bool:
+        """Refuse a build's download that the strictest developer
+        account's filter would refuse (#199). Plain text, not the block
+        page: nobody reads it in a browser, and Nix prints an error's body
+        in the build log."""
+        host = (flow.request.pretty_host or "").lower().rstrip(".")
+        url = flow.request.pretty_url
+        developers = self.policy.build_developers()
+        if developers is None:
+            # Written by an older kosherd: the source hosts, not the web.
+            if buildsources_mod.allows(host, buildsources_mod.DEFAULT_BUILD_SOURCES):
+                return False
+            refused = (buildsources_mod.refusal(host or "this address"), "build-source")
+        else:
+            refused = buildsources_mod.judge(
+                host, url, developers, self.categories.blocked_categories_of)
+            if refused is None:
+                return False
+        text, why = refused
+        log.info("blocked a Nix build's download %s (%s)", url, why)
+        flow.response = http.Response.make(
+            403, text.encode(),
+            {"Content-Type": "text/plain; charset=utf-8",
+             "Cache-Control": "no-store"})
+        self._note(activity_mod.BLOCK, flow, url=url, why=why)
+        return True
+
     def _note(self, kind: str, flow: http.HTTPFlow, **fields) -> None:
         """One line in the activity log. Never lets a logging problem
         become a filtering problem."""
@@ -2220,6 +2272,13 @@ def _body(message) -> bytes:
     if body is None:
         body = getattr(message, "content", None)
     return body if isinstance(body, bytes) else b""
+
+
+def _is_markup(body: str) -> bool:
+    """Whether a body labelled text/html really is a page: one that starts,
+    past a byte-order mark and white space, with a tag, a comment or a
+    doctype. Script calls often send data under that label."""
+    return body.lstrip("\ufeff \t\r\n\f").startswith("<")
 
 
 def _escape(text: str) -> str:

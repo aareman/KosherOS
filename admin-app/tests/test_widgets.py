@@ -150,6 +150,16 @@ class FakeClient:
     def reboot(self):
         self.rebooted += 1
 
+    def auto_update_status(self):
+        return self._overrides.get("auto_status", {
+            "schedule": "weekly", "notify": True, "last_success": time.time() - 86400 * 3,
+            "last_attempt": time.time() - 86400 * 3, "last_error": None})
+
+    def set_auto_updates(self, schedule, notify):
+        if self._overrides.get("auto_refuse"):
+            raise RuntimeError(self._overrides["auto_refuse"])
+        self.calls.append(("set_auto_updates", schedule, notify))
+
     def disconnect_signals(self, subscription):
         self.disconnected = subscription
 
@@ -3091,3 +3101,69 @@ def test_an_administrator_needs_no_approval_for_syncthing():
     titles = {r.get_title() for r in _rows(page)}
     assert "Allow Syncthing" not in titles
     assert "Allowed for this account" in titles
+
+
+# -- automatic updates (#19) -------------------------------------------------------
+
+def test_the_updates_page_shows_the_schedule_and_the_notice_from_the_policy():
+    win = FakeWindow()
+    win.policy["updates"] = {"auto": "biweekly", "notify": False}
+    page = computer.UpdatesPage(win)
+    drain()
+    group = page.auto_group
+    assert group.get_title() == "Automatic updates"
+    assert "never restarts on its own" in group.get_description()
+    assert computer.AUTO_SCHEDULES[group.schedule_row.get_selected()] == "biweekly"
+    assert not group.notify_row.get_active()
+    assert group.schedule_row.get_subtitle() == "Last checked 3 days ago."
+
+
+def test_a_policy_without_the_setting_shows_weekly_with_the_notice_on():
+    page = computer.UpdatesPage(FakeWindow())
+    drain()
+    group = page.auto_group
+    assert computer.AUTO_SCHEDULES[group.schedule_row.get_selected()] == "weekly"
+    assert group.notify_row.get_active()
+
+
+def test_picking_a_schedule_saves_it_and_keeps_the_notice():
+    win = FakeWindow()
+    page = computer.UpdatesPage(win)
+    drain()
+    group = page.auto_group
+    group.schedule_row.set_selected(computer.AUTO_SCHEDULES.index("off"))
+    drain()
+    assert ("set_auto_updates", "off", True) in win.client.calls
+    assert win.policy["updates"] == {"auto": "off", "notify": True}
+    assert group.schedule_row.get_subtitle() == "Only when you press Check above."
+    assert "Automatic updates are off" in win.toasts
+    group.notify_row.set_active(False)
+    drain()
+    assert ("set_auto_updates", "off", False) in win.client.calls
+
+
+def test_a_refused_change_puts_the_rows_back_and_says_why():
+    win = FakeWindow(FakeClient(auto_refuse="not authorized"))
+    page = computer.UpdatesPage(win)
+    drain()
+    group = page.auto_group
+    group.schedule_row.set_selected(computer.AUTO_SCHEDULES.index("daily"))
+    drain()
+    assert computer.AUTO_SCHEDULES[group.schedule_row.get_selected()] == "weekly"
+    assert group.schedule_row.get_sensitive()
+    assert any("not authorized" in t for t in win.toasts)
+
+
+def test_a_failed_check_is_never_shown_as_up_to_date():
+    now = 1_800_000_000
+    words = computer.auto_words
+    assert words({"schedule": "weekly", "last_success": now - 86400 * 9,
+                  "last_attempt": now - 3600, "last_error": "no such host"}, now) == \
+        "The last check did not work. It tries again tomorrow."
+    assert words({"schedule": "weekly", "last_success": now - 3600,
+                  "last_attempt": now - 3600}, now) == "Last checked today."
+    assert words({"schedule": "daily", "last_success": now - 86400 - 60}, now) == \
+        "Last checked yesterday."
+    assert words({"schedule": "monthly"}, now).startswith("Has not checked yet")
+    assert words({"schedule": "off", "last_error": "x"}, now) == \
+        "Only when you press Check above."

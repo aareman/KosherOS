@@ -16,7 +16,7 @@ import tempfile
 from pathlib import Path
 
 from . import categories as categories_mod
-from . import containers, dns, mitmca, nft, nixdaemon, syncthing, tailnet
+from . import buildsources, containers, dns, mitmca, nft, nixdaemon, syncthing, tailnet
 from . import search as search_mod
 from .policy import INSPECTED_MODES, SAFESEARCH_MODES, UNFILTERED_MODES, Policy
 
@@ -101,13 +101,17 @@ def write_mitm_rules(policy: Policy, tailnet_allowed: tuple[str, ...] | None = N
     listen_ports = sorted(ports.values())
     if nixdaemon.build_gid() is not None:
         # The Nix build users (#123): a supervised identity of their own,
-        # judged like the strictest account — the default categories, bare
-        # addresses and DoH refused — and no picture or text scoring, since
-        # what a build fetches is a tarball, not a page.
+        # with bare addresses and DoH refused and no picture or text
+        # scoring, since what a build fetches is a tarball, not a page.
+        # What else it may fetch is the strictest filter among the
+        # developer accounts, the only ones that can start a build (#199,
+        # buildsources.py); with none, nothing.
         per_user["builder"] = {
             "port": nft.BUILDER_PORT,
+            "developers": buildsources.developer_filters(policy),
+            # Judged per developer account above, not here.
             "rules": [],
-            "blocked_categories": list(categories_mod.DEFAULT_BLOCKED),
+            "blocked_categories": [],
             "media_level": "none",
             "cover_style": "frost",
             "language_filter": "off",

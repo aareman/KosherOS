@@ -579,8 +579,7 @@ class UpdatesPage(_Page):
         group.add(Adw.ActionRow(title="Operating system", subtitle=pretty))
         self.status_row = Adw.ActionRow(
             title="Updates",
-            subtitle=win.update_state or "Not checked yet. KosherOS also "
-                                        "checks on its own in the background.")
+            subtitle=win.update_state or "Not checked yet.")
         check = Gtk.Button(label="Check", valign=Gtk.Align.CENTER)
         check.connect("clicked", self._check)
         apply_btn = Gtk.Button(label="Download Update", valign=Gtk.Align.CENTER)
@@ -606,6 +605,8 @@ class UpdatesPage(_Page):
                                         margin_top=8, margin_start=12, margin_end=12)
         group.add(self.progress)
         self.prefs.add(group)
+        self.auto_group = AutoUpdatesGroup(win)
+        self.prefs.add(self.auto_group)
         self._subscription: int | None = None
         self.connect("shown", lambda _p: self._listen())
         self.connect("hidden", lambda _p: self._stop_listening())
@@ -859,6 +860,111 @@ class UpdatesPage(_Page):
         else:
             self.status_row.set_subtitle(error or "The update did not finish.")
             self.win.toast(error or "The update did not finish")
+
+
+AUTO_INTRO = ("New versions download in the background and are used the next time "
+              "the computer restarts. It never restarts on its own.")
+AUTO_SCHEDULES = ("off", "daily", "weekly", "biweekly", "monthly")
+AUTO_LABELS = {"off": "Off", "daily": "Daily", "weekly": "Weekly",
+               "biweekly": "Every 2 weeks", "monthly": "Monthly"}
+
+
+def auto_words(status: dict | None, now: float | None = None) -> str:
+    """The line under the schedule: when it last checked, or that the last
+    try did not work. A failed check is never shown as up to date."""
+    status = status or {}
+    if status.get("schedule") == "off":
+        return "Only when you press Check above."
+    now = time.time() if now is None else now
+    ok, tried = status.get("last_success") or 0, status.get("last_attempt") or 0
+    if status.get("last_error") and tried >= ok:
+        return "The last check did not work. It tries again tomorrow."
+    if not ok:
+        return "Has not checked yet. The first check is within a day."
+    days = int((now - ok) // 86400)
+    when = ("today" if days < 1 else "yesterday" if days < 2
+            else f"{days} days ago")
+    return f"Last checked {when}."
+
+
+class AutoUpdatesGroup(Adw.PreferencesGroup):
+    """How often the computer fetches updates on its own (#19), and whether
+    the people signed in are told once when one is ready."""
+
+    def __init__(self, win):
+        super().__init__(title="Automatic updates", description=AUTO_INTRO)
+        self.win = win
+        settings = win.policy.get("updates") or {}
+        self.schedule = settings.get("auto", "weekly")
+        if self.schedule not in AUTO_SCHEDULES:
+            self.schedule = "weekly"
+        self.notify = bool(settings.get("notify", True))
+        self.status: dict | None = None
+
+        self.schedule_row = Adw.ComboRow(
+            title="Download updates",
+            model=Gtk.StringList.new([AUTO_LABELS[s] for s in AUTO_SCHEDULES]),
+            selected=AUTO_SCHEDULES.index(self.schedule), subtitle_lines=2)
+        self.schedule_row.connect("notify::selected", self._on_schedule)
+        self.add(self.schedule_row)
+        self.notify_row = Adw.SwitchRow(
+            title="Tell people when an update is ready",
+            subtitle=("One notice for each update. A small mark stays in the panel "
+                      "until the computer restarts either way."),
+            subtitle_lines=3, active=self.notify)
+        self.notify_row.connect("notify::active", self._on_notify)
+        self.add(self.notify_row)
+        self.schedule_row.set_subtitle("Checking…")
+        run_async(self.win.client.auto_update_status, self._loaded,
+                  lambda e: self.schedule_row.set_subtitle(
+                      f"Could not read when it last checked: {error_text(e)}"))
+
+    def _loaded(self, status: dict) -> None:
+        self.status = status
+        self.schedule_row.set_subtitle(auto_words({**status, "schedule": self.schedule}))
+
+    def _on_schedule(self, row, _param) -> None:
+        wanted = AUTO_SCHEDULES[row.get_selected()]
+        if wanted != self.schedule:
+            self._save(wanted, self.notify)
+
+    def _on_notify(self, row, _param) -> None:
+        wanted = row.get_active()
+        if wanted != self.notify:
+            self._save(self.schedule, wanted)
+
+    def _save(self, schedule: str, notify: bool) -> None:
+        before = (self.schedule, self.notify)
+        self.schedule_row.set_sensitive(False)
+        self.notify_row.set_sensitive(False)
+        self.schedule_row.set_subtitle("Saving…")
+
+        def done(_r) -> None:
+            self.schedule, self.notify = schedule, notify
+            self.win.policy["updates"] = {"auto": schedule, "notify": notify}
+            self._settle()
+            self.win.toast("Automatic updates are off" if schedule == "off" else
+                           f"Updates download {AUTO_LABELS[schedule].lower()}")
+
+        def failed(e) -> None:
+            self.schedule, self.notify = before
+            self._settle()
+            self.win.toast(error_text(e))
+
+        run_async(lambda: self.win.client.set_auto_updates(schedule, notify), done, failed)
+
+    def _settle(self) -> None:
+        """Put the rows back to what is saved, without saving again."""
+        self.schedule_row.handler_block_by_func(self._on_schedule)
+        self.notify_row.handler_block_by_func(self._on_notify)
+        self.schedule_row.set_selected(AUTO_SCHEDULES.index(self.schedule))
+        self.notify_row.set_active(self.notify)
+        self.schedule_row.handler_unblock_by_func(self._on_schedule)
+        self.notify_row.handler_unblock_by_func(self._on_notify)
+        self.schedule_row.set_sensitive(True)
+        self.notify_row.set_sensitive(True)
+        self.schedule_row.set_subtitle(auto_words({**(self.status or {}),
+                                                   "schedule": self.schedule}))
 
 
 CHANNEL_INTRO = "Stable is recommended for everyday use."

@@ -113,6 +113,9 @@ case "$out" in
 esac
 for _ in $(seq 1 180); do
     systemctl is-active --quiet "syncthing@$A.service" && break
+    # A failed install says so in kosherd's log; no point waiting it out.
+    journalctl -u kosherd --since "-15min" --no-pager 2>/dev/null \
+        | grep -q "nixpkgs#syncthing failed" && break
     sleep 5
 done
 if systemctl is-active --quiet "syncthing@$A.service"; then

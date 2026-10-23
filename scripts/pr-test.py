@@ -41,16 +41,23 @@ checked beforehand (scripts/check-no-sudo.py).
 from __future__ import annotations
 
 import argparse
+import atexit
+import base64
+import contextlib
 import fcntl
+import hashlib
 import json
 import os
 import re
 import shlex
 import shutil
+import signal
 import socket
+import stat
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -95,18 +102,236 @@ def run_logged(cmd: list[str], log: Path, env: dict, cwd: Path | None = None,
     with log.open("a") as fh:
         fh.write(f"$ {shlex.join(cmd)}\n")
         fh.flush()
-        proc = subprocess.Popen(cmd, cwd=cwd, env=env, stdout=subprocess.PIPE,
-                                stderr=subprocess.STDOUT, text=True, errors="replace", bufsize=1)
-        deadline = time.monotonic() + timeout if timeout else None
-        assert proc.stdout is not None
-        for line in proc.stdout:
-            fh.write(line)
-            sys.stdout.write("    " + line)
-            if deadline and time.monotonic() > deadline:
-                proc.kill()
-                fh.write(f"pr-test: timed out after {timeout}s\n")
-                break
-        return proc.wait()
+        proc = LEFTOVERS.start(cmd, cwd=cwd, env=env, stdout=subprocess.PIPE,
+                               stderr=subprocess.STDOUT, text=True, errors="replace", bufsize=1)
+        try:
+            deadline = time.monotonic() + timeout if timeout else None
+            assert proc.stdout is not None
+            for line in proc.stdout:
+                fh.write(line)
+                sys.stdout.write("    " + line)
+                if deadline and time.monotonic() > deadline:
+                    LEFTOVERS.stop(proc)
+                    fh.write(f"pr-test: timed out after {timeout}s\n")
+                    break
+            return proc.wait()
+        finally:
+            LEFTOVERS.stop(proc)
+
+
+# --- what a run leaves behind -----------------------------------------------------
+
+# bcvk makes its 40 GiB sparse install disk as /var/tmp/.tmpXXXXXX (the one
+# host directory its container sees) and removes it only when it exits
+# cleanly. A run that is killed, or a bcvk that crashes, leaves it there.
+BCVK_TMP = Path("/var/tmp")
+BCVK_TMP_NAME = re.compile(r"^\.tmp[A-Za-z0-9]{6}$")
+
+
+def bcvk_temps(root: Path = BCVK_TMP) -> set[tuple[str, int]]:
+    """The temp disks in ROOT that look like bcvk's and are ours: (name, inode)."""
+    found = set()
+    try:
+        entries = list(os.scandir(root))
+    except OSError:
+        return found
+    for e in entries:
+        if not BCVK_TMP_NAME.match(e.name):
+            continue
+        try:
+            st = e.stat(follow_symlinks=False)
+        except OSError:
+            continue
+        if stat.S_ISREG(st.st_mode) and st.st_uid == os.getuid():
+            found.add((e.name, st.st_ino))
+    return found
+
+
+def open_files() -> set[str]:
+    """Every path a process we can see holds open."""
+    held = set()
+    for fd_dir in Path("/proc").glob("[0-9]*/fd"):
+        try:
+            fds = list(fd_dir.iterdir())
+        except OSError:
+            continue
+        for fd in fds:
+            try:
+                held.add(os.readlink(fd))
+            except OSError:
+                pass
+    return held
+
+
+class Leftovers:
+    """What a run makes that must not outlive it, and the processes it runs.
+
+    The run's machines and disks, its image tag, and any temp disk bcvk
+    made while the run was making a disk are recorded here as they are
+    made, and clean() removes them however the run ends: at the end of
+    main(), on SIGTERM or SIGINT, or at exit. clean() runs once.
+    """
+
+    def __init__(self, tmp_root: Path = BCVK_TMP):
+        self.tmp_root = tmp_root
+        self.paths: list[Path] = []
+        self.images: list[str] = []      # build tags, folded into CACHE_TAG
+        self.worktrees: list[Path] = []
+        self.windows: list[dict] = []    # times a disk was being made
+        self.label = f"kosher.pr-test.run={os.getpid()}-{int(time.time())}"
+        self.keep = False
+        self.done = False
+        self._procs: set = set()
+        self._lock = threading.RLock()  # the signal handler may take it again
+
+    # the processes a run starts, each in its own process group so that
+    # stopping it stops what it started too (bcvk, podman, QEMU)
+    def start(self, cmd: list[str], **kw) -> subprocess.Popen:
+        proc = subprocess.Popen(cmd, start_new_session=True, **kw)
+        with self._lock:
+            self._procs.add(proc)
+        return proc
+
+    def stop(self, proc: subprocess.Popen, grace: float = 10) -> None:
+        if proc.poll() is None:
+            for sig, wait in ((signal.SIGTERM, grace), (signal.SIGKILL, 5)):
+                with contextlib.suppress(OSError):
+                    os.killpg(proc.pid, sig)
+                try:
+                    proc.wait(timeout=wait)
+                    break
+                except subprocess.TimeoutExpired:
+                    continue
+        with self._lock:
+            self._procs.discard(proc)
+
+    def stop_all(self) -> None:
+        with self._lock:
+            procs = list(self._procs)
+        for p in procs:
+            self.stop(p)
+
+    def path(self, p: Path) -> Path:
+        self.paths.append(p)
+        return p
+
+    def image(self, ref: str) -> str:
+        if ref not in self.images:
+            self.images.append(ref)
+        return ref
+
+    @contextlib.contextmanager
+    def making_disk(self):
+        """Around a run of rootless-disk.sh: every bcvk temp disk that
+        appears meanwhile is this run's."""
+        window = {"before": bcvk_temps(self.tmp_root), "after": None}
+        self.windows.append(window)
+        try:
+            yield
+        finally:
+            window["after"] = bcvk_temps(self.tmp_root)
+
+    def stray_temps(self) -> list[Path]:
+        """bcvk temp disks that appeared while this run was making a disk
+        and are still there."""
+        now = None
+        found: set[tuple[str, int]] = set()
+        for w in self.windows:
+            after = w["after"]
+            if after is None:  # the run ended while a disk was being made
+                now = now if now is not None else bcvk_temps(self.tmp_root)
+                after = now
+            found |= after - w["before"]
+        here = bcvk_temps(self.tmp_root)
+        return sorted(self.tmp_root / name for name, ino in found & here)
+
+    def clean(self) -> list[str]:
+        """Remove what the run made; what it removed, for the log."""
+        if self.done:
+            return []
+        self.done = True
+        self.stop_all()
+        if self.keep:
+            return []
+        removed = []
+        # bcvk's container, if bcvk was killed before it could stop it.
+        ids = subprocess.run(["podman", "ps", "-aq", "--filter", f"label={self.label}"],
+                             capture_output=True, text=True).stdout.split()
+        if ids:
+            subprocess.run(["podman", "rm", "-f", *ids], capture_output=True)
+            removed += [f"container {i}" for i in ids]
+        held = open_files()
+        for temp in self.stray_temps():
+            if str(temp) in held:  # someone else's bcvk, still at work
+                continue
+            temp.unlink(missing_ok=True)
+            removed.append(str(temp))
+        for p in self.paths:
+            if p.is_dir() and not p.is_symlink():
+                shutil.rmtree(p, ignore_errors=True)
+                removed.append(str(p))
+            elif p.exists() or p.is_symlink():
+                p.unlink(missing_ok=True)
+                removed.append(str(p))
+        for tree in self.worktrees:
+            subprocess.run(["git", "-C", str(REPO), "worktree", "remove", "--force", str(tree)],
+                           capture_output=True)
+        for ref in self.images:
+            if image_id(ref):
+                keep_build_cache(ref)
+                removed.append(ref)
+        return removed
+
+
+LEFTOVERS = Leftovers()
+# Set when the run is told to stop: the machines' threads stop waiting.
+STOPPING = threading.Event()
+
+
+def dangling_to_prune(images: list[dict], in_use: set[str], now: float,
+                      max_age: float = 86400) -> list[str]:
+    """Of the dangling images (each {"id", "added"}), the ones older than
+    MAX_AGE seconds that no container, buildah's included, uses."""
+    return [im["id"] for im in images
+            if im["id"] not in in_use and im.get("added") is not None
+            and now - im["added"] > max_age]
+
+
+def prune_dangling(max_age: float = 86400) -> list[str]:
+    """Remove dangling images a day old that nothing uses.
+
+    An image's created time is no use for this: the images here are built
+    with a fixed timestamp. When it was added to storage is the time its
+    directory in container storage was written. An image with children is
+    not dangling, so the layers under CACHE_TAG are never touched, and an
+    image any container (or a build in progress) uses is left alone; rmi
+    without --force refuses those as well.
+    """
+    ids = subprocess.run(["podman", "images", "-q", "--no-trunc", "--filter", "dangling=true"],
+                         capture_output=True, text=True).stdout.split()
+    if not ids:
+        return []
+    root = subprocess.run(["podman", "info", "--format", "{{.Store.GraphRoot}}"],
+                          capture_output=True, text=True).stdout.strip()
+    driver = subprocess.run(["podman", "info", "--format", "{{.Store.GraphDriverName}}"],
+                            capture_output=True, text=True).stdout.strip() or "overlay"
+    used = subprocess.run(["podman", "ps", "-a", "--external", "--no-trunc",
+                           "--format", "{{.ImageID}}"],
+                          capture_output=True, text=True).stdout.split()
+    images = []
+    for i in ids:
+        i = i.removeprefix("sha256:")
+        try:
+            added = (Path(root) / f"{driver}-images" / i).stat().st_mtime
+        except OSError:
+            added = None
+        images.append({"id": i, "added": added})
+    gone = []
+    for i in dangling_to_prune(images, {u.removeprefix("sha256:") for u in used}, time.time(),
+                               max_age):
+        if subprocess.run(["podman", "rmi", i], capture_output=True).returncode == 0:
+            gone.append(i[:12])
+    return gone
 
 
 class Stage:
@@ -235,7 +460,7 @@ class Machine:
         self.key = key
         self.port = free_port()
         # Unix socket paths are limited to 108 bytes; the run directory is deeper.
-        self.sockdir = Path(tempfile.mkdtemp(prefix="kpt-"))
+        self.sockdir = LEFTOVERS.path(Path(tempfile.mkdtemp(prefix="kpt-")))
         self.qmp_path = self.sockdir / "qmp.sock"
         self.qmp_path.unlink(missing_ok=True)
         pub = key.with_suffix(".pub").read_text().strip()
@@ -257,8 +482,8 @@ class Machine:
             # tmpfiles write it to /root/.ssh/authorized_keys at boot.
             "-smbios", f"type=11,value=io.systemd.credential:ssh.authorized_keys.root={pub}",
         ]
-        self.proc = subprocess.Popen(cmd, stdout=(outdir / "qemu.log").open("w"),
-                                     stderr=subprocess.STDOUT)
+        self.proc = LEFTOVERS.start(cmd, stdout=(outdir / "qemu.log").open("w"),
+                                    stderr=subprocess.STDOUT)
         self.qmp = QMP(self.qmp_path)
 
     def ssh_cmd(self) -> list[str]:
@@ -269,6 +494,8 @@ class Machine:
 
     def sh(self, script: str, timeout: int = 120, input: str | None = None) -> tuple[int, str]:
         """Run a shell script as root in the machine; (status, output)."""
+        if STOPPING.is_set():
+            raise StageError("the run was stopped")
         try:
             p = subprocess.run(self.ssh_cmd() + [script], input=input, text=True,
                                errors="replace", capture_output=True, timeout=timeout)
@@ -331,6 +558,7 @@ class Machine:
         try:
             self._stop()
         finally:
+            LEFTOVERS.stop(self.proc)
             shutil.rmtree(self.sockdir, ignore_errors=True)
 
     def _stop(self) -> None:
@@ -382,8 +610,12 @@ def stage_build(st: Stage, tree: Path, image: str, env: dict) -> None:
 
 
 def stage_disk(st: Stage, image: str, disk: Path, env: dict) -> None:
-    rc = run_logged([str(REPO / "scripts/rootless-disk.sh"), image, str(disk)],
-                    st.log, env, timeout=3600)
+    # bcvk's container carries the run's label, so a run that is stopped
+    # half way can remove it; its temp disk is found by when it appeared.
+    e = dict(env, KOSHER_DISK_LABEL=LEFTOVERS.label)
+    with LEFTOVERS.making_disk():
+        rc = run_logged([str(REPO / "scripts/rootless-disk.sh"), image, str(disk)],
+                        st.log, e, timeout=3600)
     ok = rc == 0 and disk.exists()
     st.check("a bootable disk is made without root", ok, f"exit {rc}; see {st.log}")
     if not ok:
@@ -476,6 +708,29 @@ def session_of(vm: Machine, user: str) -> dict:
     return {}
 
 
+KOSHERD_PING = ("busctl --system --timeout=10 call org.kosherlinux.Daemon1 "
+                "/org/kosherlinux/Daemon1 org.freedesktop.DBus.Peer Ping")
+KOSHERD_WAIT = 60
+# GDM's greeter is up when its session is on seat0 and its shell runs.
+GREETER_UP = ("loginctl list-sessions --no-legend | grep -w greeter | grep -qw seat0 && "
+              "ps -eo user:32=,comm= | awk -v u=" + USER + " '$2==\"gnome-shell\" && $1!=u' "
+              "| grep -q .")
+
+
+def no_session_reason(greeter: bool, journal: str, ci: bool) -> str:
+    """What to say when the account never got a graphical session."""
+    broken = not greeter or "Session never registered" in journal
+    if broken and ci:
+        return ("no graphical session: this runner has no working graphical session "
+                "for the VM (GDM's login screen did not stay up), so the desktop "
+                "checks cannot run here")
+    if broken:
+        return ("no graphical session: GDM's login screen did not stay up "
+                "(see the gdm journal below and the screenshots)")
+    return ("no graphical session: the login screen was up, but signing in with the "
+            "test account's name and password did not start a session")
+
+
 def stage_desktop(st: Stage, machine: Path, outdir: Path, key: Path, gl: bool,
                   tree: Path = REPO, parts: set = frozenset({"session", "filter"})) -> None:
     vm = Machine(machine, outdir, key, gl)
@@ -495,6 +750,13 @@ def stage_desktop(st: Stage, machine: Path, outdir: Path, key: Path, gl: bool,
         if not st.check("the machine is set up", sh("test -e /var/lib/kosher/setup-complete")[0] == 0):
             raise StageError("setup was never finished on this machine")
 
+        # kosherd may still be starting when ssh answers, and the first
+        # create-user would then time out on D-Bus.
+        up = wait_for(lambda: sh(KOSHERD_PING, timeout=20)[0] == 0, KOSHERD_WAIT, step=3)
+        if not st.check("kosherd answers on D-Bus", up,
+                        sh("systemctl status kosherd --no-pager | tail -20")[1]):
+            raise StageError(f"kosherd did not answer on D-Bus within {KOSHERD_WAIT}s")
+
         # The fixture: a filtered account with a password, and a login
         # screen that asks for a name rather than showing a list, so the
         # keys typed below land in a known field.
@@ -507,23 +769,36 @@ def stage_desktop(st: Stage, machine: Path, outdir: Path, key: Path, gl: bool,
             systemctl restart gdm""", timeout=180)
         st.check(f"a filtered test account ({USER}) is made", rc == 0, out)
 
-        greeter = wait_for(lambda: sh(
-            "loginctl list-sessions --no-legend | grep -w greeter | grep -qw seat0")[0] == 0, 120)
+        props: dict = {}
+        greeter = False
+        for attempt in (1, 2):
+            if attempt == 2:
+                # Once more from a fresh login screen: on a slow machine
+                # the greeter can fail to start the first time, and the
+                # keys typed into it are lost.
+                log.write("# no session after the first try; GDM is restarted\n")
+                sh("systemctl restart gdm")
+            up = wait_for(lambda: sh(GREETER_UP)[0] == 0, 180)
+            greeter = greeter or up
+            # The greeter's session exists before its window does.
+            time.sleep(8 if attempt == 1 else 20)
+            vm.shoot(f"02-login-screen-{attempt}")
+            vm.qmp.type(USER + "\n")
+            time.sleep(3 if attempt == 1 else 6)
+            vm.shoot(f"03-password-{attempt}")
+            vm.qmp.type(USER_PASSWORD + "\n")
+            props = wait_for(lambda: session_of(vm, USER), 240)
+            if props:
+                break
         st.check("the login screen is up on seat0", greeter)
-        time.sleep(8)  # the greeter's session exists before its window does
-        vm.shoot("02-login-screen")
-
-        vm.qmp.type(USER + "\n")
-        time.sleep(3)
-        vm.shoot("03-password")
-        vm.qmp.type(USER_PASSWORD + "\n")
-
-        props = wait_for(lambda: session_of(vm, USER), 120)
         vm.shoot("04-signed-in")
         log.write(f"# session: {props}\n")
-        if not st.check("the account signs in through GDM", bool(props),
-                        sh("loginctl list-sessions; journalctl -b -u gdm --no-pager | tail -30")[1]):
-            raise StageError("no graphical session")
+        if not props:
+            _, journal = sh("loginctl list-sessions; journalctl -b -u gdm --no-pager | tail -30")
+            reason = no_session_reason(greeter, journal, bool(os.environ.get("CI")))
+            st.check("the account signs in through GDM", False, f"{reason}\n{journal}")
+            raise StageError(reason)
+        st.check("the account signs in through GDM", True)
         st.check("the session has a seat (seat0)", props.get("Seat") == "seat0", str(props))
         st.check("the session is active and local",
                  props.get("Active") == "yes" and props.get("Remote") == "no", str(props))
@@ -875,16 +1150,44 @@ def switch_machine(st: Stage, machine: Path, workdir: Path, key: Path, tag: str,
         vm.stop()
 
 
-def find_base(master: str) -> tuple[Path | None, str]:
-    """A cached set-up base for master's commit, or a recent one."""
+def key_fingerprint(pub: str) -> str:
+    """An ssh public key's SHA256 fingerprint, as ssh-keygen -l prints it."""
+    blob = base64.b64decode(pub.split()[1])
+    return "SHA256:" + base64.b64encode(hashlib.sha256(blob).digest()).decode().rstrip("=")
+
+
+def base_key_problem(meta: dict, fingerprint: str) -> str:
+    """Why a base cannot be signed in to with the cache's key, or "".
+
+    The image writes root's authorized_keys from the boot's credential
+    only when the file is missing, so a set-up base keeps the key it was
+    first booted with. A base made with another key would only time out
+    on ssh."""
+    had = meta.get("ssh_key")
+    if had == fingerprint:
+        return ""
+    if not had:
+        return "its ssh key was not recorded when it was made, so it may not let this run in"
+    return f"it was set up with another ssh key ({had}; the cache's key is {fingerprint})"
+
+
+def find_base(master: str, fingerprint: str) -> tuple[Path | None, str]:
+    """A cached set-up base for master's commit, or a recent one, that
+    takes the cache's ssh key."""
     bases = []
     for meta in CACHE.glob("base-*/meta.json"):
         try:
             m = json.loads(meta.read_text())
         except ValueError:
             continue
-        if (meta.parent / "setup.qcow2").exists():
-            bases.append((m.get("created", 0), m, meta.parent))
+        if not (meta.parent / "setup.qcow2").exists():
+            continue
+        problem = base_key_problem(m, fingerprint)
+        if problem:
+            print(f"  not using the cached base {meta.parent.name}: {problem}; "
+                  "a fresh base is made instead", flush=True)
+            continue
+        bases.append((m.get("created", 0), m, meta.parent))
     bases.sort(key=lambda b: b[0], reverse=True)
     for _created, m, d in bases:
         if m.get("master") == master:
@@ -910,7 +1213,9 @@ def make_base(st: Stage, master: str, sha: str, image: str, key: Path, env: dict
     itself through the registry, so later switches pull only the layers a
     change makes. Once per master commit (or week)."""
     base_image = image if master == sha else "localhost/kosher-linux:pr-test-base"
+    fingerprint = key_fingerprint(key.with_suffix(".pub").read_text())
     if base_image != image:
+        LEFTOVERS.image(base_image)
         btree = CACHE / "base-src"
         subprocess.run(["git", "-C", str(REPO), "worktree", "remove", "--force", str(btree)],
                        capture_output=True)
@@ -936,6 +1241,14 @@ def make_base(st: Stage, master: str, sha: str, image: str, key: Path, env: dict
         stage_disk(st, base_image, base / "disk.qcow2", env)
     else:
         st.check("a bootable disk is made without root (kept from an earlier run)", True)
+    # The disk holds no key, but a set-up machine keeps the first key it
+    # was booted with: one made with another key is set up again.
+    key_file = base / "ssh-key"
+    if (setup.exists() and (not key_file.exists()
+                            or key_file.read_text().strip() != fingerprint)):
+        for f in ("setup.qcow2", "boot.log", "boot-console.log", "meta.json"):
+            (base / f).unlink(missing_ok=True)
+    key_file.write_text(fingerprint + "\n")
     boot_log = base / "boot.log"
     if not (setup.exists() and boot_log.exists()):
         e = dict(env, KOSHER_IMAGE=base_image, PYTHONUNBUFFERED="1")
@@ -958,7 +1271,8 @@ def make_base(st: Stage, master: str, sha: str, image: str, key: Path, env: dict
     digest = push(base_image, "base", env, st.log)
     switch_machine(st, setup, base, key, "base", digest)
     (base / "meta.json").write_text(json.dumps(
-        {"master": master, "image_id": stamp.read_text().strip(), "created": time.time()}))
+        {"master": master, "image_id": stamp.read_text().strip(), "created": time.time(),
+         "ssh_key": fingerprint}))
     if base_image != image:
         keep_build_cache(base_image)
     return base
@@ -1107,9 +1421,28 @@ class Done(Exception):
     """Nothing more to run."""
 
 
-def main() -> int:
-    import threading
+class Stopped(KeyboardInterrupt):
+    """SIGTERM or SIGINT: the run stops, and cleans up after itself."""
 
+    def __init__(self, signum: int):
+        super().__init__(signal.Signals(signum).name)
+        self.signum = signum
+
+
+def on_signal(signum, _frame) -> None:
+    if LEFTOVERS.done or getattr(on_signal, "seen", None):
+        print(f"\npr-test: {signal.Signals(signum).name} again; already stopping", flush=True)
+        return
+    on_signal.seen = signum
+    print(f"\npr-test: {signal.Signals(signum).name}; stopping and cleaning up", flush=True)
+    # The machines and builds stop first, so the threads waiting on them
+    # end and nothing holds the disks open.
+    STOPPING.set()
+    LEFTOVERS.stop_all()
+    raise Stopped(signum)
+
+
+def main() -> int:
     from pr_test_select import select
 
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0],
@@ -1132,10 +1465,15 @@ def main() -> int:
                              "or KOSHER_PR_TEST_VMS)")
     parser.add_argument("--image", help="test this already-built image; skips the build")
     parser.add_argument("--keep", action="store_true",
-                        help="keep the machine, the worktree and the image tag")
+                        help="keep everything the run made: the machines, the disks, bcvk's "
+                             "temp disk, the worktree and the image tag")
     parser.add_argument("--gl", action="store_true", default=bool(os.environ.get("KOSHER_GL")),
                         help="a virgl GPU for the desktop stage (KOSHER_GL=1); needs the host's QEMU")
     args = parser.parse_args()
+    LEFTOVERS.keep = args.keep
+    signal.signal(signal.SIGTERM, on_signal)
+    signal.signal(signal.SIGINT, on_signal)
+    atexit.register(LEFTOVERS.clean)
 
     run_id = args.id or (f"pr-{args.target}" if args.target.isdigit()
                          else re.sub(r"[^A-Za-z0-9_.-]", "-", args.target))
@@ -1152,10 +1490,19 @@ def main() -> int:
     except BlockingIOError:
         print(f"Another pr-test is using {CACHE}; waiting for it to finish.", flush=True)
         fcntl.flock(lock_file, fcntl.LOCK_EX)
+    pruned = prune_dangling()
+    if pruned:
+        print(f"Removed {len(pruned)} dangling images over a day old: {' '.join(pruned)}",
+              flush=True)
     env = sudo_trap(outdir)
     image = args.image or f"localhost/kosher-linux:pr-test-{run_id.lower()}"
+    if not args.image:
+        LEFTOVERS.image(image)
     disk = outdir / "disk" / "disk.qcow2"
     machine = outdir / "machine.qcow2"
+    for p in (machine, outdir / "desktop.qcow2", disk.parent, outdir / "qmp.sock",
+              outdir / "vnc.sock"):
+        LEFTOVERS.path(p)
     key = CACHE / "id_ed25519"  # one key for the runs and the cached bases they boot
     if not key.exists():
         subprocess.run(["ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-C", "pr-test",
@@ -1169,6 +1516,8 @@ def main() -> int:
     stages: list[Stage] = []
     lock = threading.Lock()
     tree = REPO
+    workers: list[threading.Thread] = []
+    stopped = 0
 
     def stage(name: str) -> Stage:
         s = Stage(name, outdir)
@@ -1195,6 +1544,8 @@ def main() -> int:
             if rc.returncode != 0:
                 raise StageError("a recipe would need sudo")
             tree, sha = resolve_target(args.target, outdir, env, pre.log)
+            if tree != REPO:
+                LEFTOVERS.worktrees.append(tree)
             summary["commit"] = sha
             pre.check(f"the target is {sha[:9]}", True)
             changed, cf_diff, master = changes_against_master(sha, env, pre.log)
@@ -1229,7 +1580,8 @@ def main() -> int:
                     stage_setup_over_ssh(st, disk, machine, outdir, key)
             summary["base"] = "a fresh install of this change's image"
         else:
-            base, why = (None, "") if args.fresh_base else find_base(master)
+            fingerprint = key_fingerprint(key.with_suffix(".pub").read_text())
+            base, why = (None, "") if args.fresh_base else find_base(master, fingerprint)
             if base is None:
                 with stage("base") as st:
                     base = make_base(st, master, sha, image, key, env)
@@ -1256,7 +1608,6 @@ def main() -> int:
             raise Done
 
         # From here on, every machine is an overlay of the set-up one, all at once.
-        workers = []
         if sel.desktop:
             def desktop():
                 with stage("desktop") as st:
@@ -1283,9 +1634,18 @@ def main() -> int:
             capture_output=True, text=True).stdout.strip()
     except Done:
         pass
+    except Stopped as e:
+        stopped = e.signum
+        print(f"\nstopped by {signal.Signals(e.signum).name}")
     except KeyboardInterrupt:
+        stopped = signal.SIGINT
         print("\ninterrupted")
     finally:
+        # Threads whose machines were stopped end on their own; their
+        # files are removed only once they have.
+        for w in workers:
+            if w.is_alive():
+                w.join(timeout=180)
         sudo_log = outdir / "sudo-attempts.log"
         if sudo_log.exists():
             s = Stage("no-sudo", outdir)
@@ -1303,22 +1663,20 @@ def main() -> int:
         summary["result"] = "passed" if ran and not verdict["new"] else "failed"
         summary["seconds"] = round(time.monotonic() - started)
         write_report(outdir, summary)
-        if not args.keep:
-            for f in (machine, outdir / "desktop.qcow2"):
-                f.unlink(missing_ok=True)
-            shutil.rmtree(disk.parent, ignore_errors=True)
-            if tree != REPO:
-                subprocess.run(["git", "-C", str(REPO), "worktree", "remove", "--force", str(tree)],
-                               capture_output=True)
-            if not args.image:
-                keep_build_cache(image)
-            for sock in ("qmp.sock", "vnc.sock"):
-                (outdir / sock).unlink(missing_ok=True)
+        removed = LEFTOVERS.clean()
+        if removed:
+            print("\nremoved what the run made: " + ", ".join(
+                str(r).replace(str(outdir) + "/", "") for r in removed), flush=True)
 
     print("\n" + (outdir / "report.md").read_text())
+    if stopped:
+        return 128 + stopped
     return 0 if summary["result"] == "passed" else 1
 
 
 if __name__ == "__main__":
     sys.path.insert(0, str(Path(__file__).resolve().parent))
-    sys.exit(main())
+    try:
+        sys.exit(main())
+    except Stopped as stop:  # before the run had started; atexit cleans up
+        sys.exit(128 + stop.signum)

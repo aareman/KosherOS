@@ -170,6 +170,22 @@ def is_bare_address(host: str | None) -> bool:
     return True
 
 
+def host_in(host: str | None, names) -> bool:
+    """Whether `host` is one of `names`: "example.org" is that host only,
+    "*.example.org" the domain and every host under it."""
+    host = (host or "").lower().rstrip(".")
+    if not host:
+        return False
+    for name in names:
+        if name.startswith("*."):
+            base = name[2:]
+            if host == base or host.endswith("." + base):
+                return True
+        elif host == name:
+            return True
+    return False
+
+
 # The Nix build users' entry in the rules file is keyed "builder", not by a
 # uid: the firewall sends their web to their own listener (#123), and the
 # proxy judges it as this one identity.
@@ -205,6 +221,7 @@ class PolicyCache:
         self._cover: dict[int, str] = {}
         self._language: dict[int, str] = {}
         self._youtube: dict[int, dict] = {}
+        self._system_allowed: dict[int, tuple] = {}
         self._fallback = _fail_closed_entry()
 
     def uid_for_listener_port(self, port: int | None) -> int | None:
@@ -234,6 +251,14 @@ class PolicyCache:
         if not self._is_known(uid):
             return list(self._fallback["blocked_categories"])
         return self._blocked.get(uid, [])
+
+    def system_allowed_for(self, uid: int | None) -> tuple:
+        """Names no category blocks for this account: Tailscale's sites
+        and the tailnet's own while Tailscale is set up (#211). Nothing
+        for an account the floor applies to."""
+        if not self._is_known(uid):
+            return ()
+        return self._system_allowed.get(uid, ())
 
     def media_level_for(self, uid: int | None) -> str:
         if not self._is_known(uid):
@@ -274,6 +299,7 @@ class PolicyCache:
         cover: dict[int, str] = {}
         language: dict[int, str] = {}
         youtube: dict[int, dict] = {}
+        system_allowed: dict[int, tuple] = {}
         by_port: dict[int, int] = {}
         for uid_text, raw in doc.items():
             try:
@@ -289,6 +315,8 @@ class PolicyCache:
                 cover[uid] = entry.get("cover_style", "frost")
                 language[uid] = entry.get("language_filter", "off")
                 youtube[uid] = dict(entry.get("youtube", {}))
+                system_allowed[uid] = tuple(str(n).lower()
+                                            for n in entry.get("system_allowed", []))
             except Exception as e:  # noqa: BLE001 - one bad entry must not break all
                 log.error("bad entry for uid %s: %s", uid_text, e)
         self._rules = rules
@@ -297,6 +325,7 @@ class PolicyCache:
         self._cover = cover
         self._language = language
         self._youtube = youtube
+        self._system_allowed = system_allowed
         self._known = set(rules)
         self._by_port = by_port
         self._mtime = mtime
@@ -865,6 +894,16 @@ class KosherFilter:
         self.usage = usage_mod.Tally("proxy")
         self._flusher = None
 
+    def _blocked_categories_of(self, host: str, uid) -> set:
+        """The categories this account blocks that `host` is in; none for
+        a name Tailscale needs while it is set up (#211). Only the
+        category lists step aside: the page is still read and scored."""
+        allowed = getattr(self.policy, "system_allowed_for", None)
+        if allowed is not None and host_in(host, allowed(uid)):
+            return set()
+        return self.categories.blocked_categories_of(
+            host, self.policy.blocked_categories_for(uid))
+
     def _uid_of(self, flow) -> int | None:
         """Who made this connection: the LISTENER PORT it arrived on.
 
@@ -1051,8 +1090,7 @@ class KosherFilter:
                             "than a site", why="address")
                 return
             blocked = self.policy.blocked_categories_for(uid)
-            hit = self.categories.blocked_categories_of(
-                flow.request.pretty_host or "", blocked)
+            hit = self._blocked_categories_of(flow.request.pretty_host or "", uid)
             if hit:
                 names = ", ".join(sorted(hit))
                 log.info("blocked uid=%s %s (category: %s)", uid, url, names)
@@ -1592,8 +1630,7 @@ class KosherFilter:
         # its imagery goes too — no model needed and no chance of a model
         # being wrong.
         host = flow.request.pretty_host or ""
-        if self.categories.blocked_categories_of(
-                host, self.policy.blocked_categories_for(uid)):
+        if self._blocked_categories_of(host, uid):
             self._blank_image(flow)
             return True
 
@@ -1743,8 +1780,7 @@ class KosherFilter:
         if level == "none":
             return "stream"
         host = flow.request.pretty_host or ""
-        if self.categories.blocked_categories_of(
-                host, self.policy.blocked_categories_for(uid)):
+        if self._blocked_categories_of(host, uid):
             return "refuse"  # a clip from a site this account blocks
         if level not in VIDEO_CHECKED_LEVELS:
             return "refuse"  # "all": no video, as no pictures
@@ -1813,9 +1849,7 @@ class KosherFilter:
         level = self.policy.media_level_for(uid)
         if level == "none":
             return False
-        if self.categories.blocked_categories_of(
-                flow.request.pretty_host or "",
-                self.policy.blocked_categories_for(uid)):
+        if self._blocked_categories_of(flow.request.pretty_host or "", uid):
             return True
         return level not in VIDEO_CHECKED_LEVELS
 

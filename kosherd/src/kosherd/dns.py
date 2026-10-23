@@ -35,15 +35,6 @@ TAILNET_OPEN_CONF = "/etc/kosher/dnsmasq-open.d/tailnet.conf"
 # dnsmasq, a system user, so the per-account rules never see the query.
 TAILNET_RESOLVER = "100.100.100.100"
 
-# Never blocked at the resolver, whatever category lists them. The resolver
-# answers root as well as the accounts, so a block here would stop the
-# machine's own services, not only the person who chose it. tailscale.com
-# is in the "proxy" list, which every supervised account blocks by
-# default, and tailscaled cannot sign in or find its relays without it.
-# The proxy still blocks the site for a filtered account that blocks the
-# category, and nobody but kosherd can drive tailscaled anyway.
-RESOLVER_NEVER_BLOCKED = ("tailscale.com",)
-
 # Search engines publish hostnames that always answer with safe search on.
 # Pointing the normal hostname at them is how safe search is enforced for
 # users whose traffic we do NOT read (dnsfilter mode); verified against a
@@ -105,7 +96,7 @@ def _covers(pattern: str, name: str) -> bool:
     return name == pattern or name.endswith("." + pattern)
 
 
-def render(policy: Policy) -> str:
+def render(policy: Policy, tailnet: tuple[str, ...] = ()) -> str:
     # Dedupe on the stripped name: "example.org" and "*.example.org" render
     # to the same dnsmasq pattern.
     # The account's own list PLUS any ready-made bundles switched on for it
@@ -123,7 +114,11 @@ def render(policy: Policy) -> str:
          for d in [*whitelists.effective(u),
                    *(DEVELOPER_REGISTRIES if getattr(u, "developer_tools", False) else ())]}
     )
-    system_domains = sorted({d.removeprefix("*.") for d in policy.effective_system_whitelist()})
+    # `tailnet`: Tailscale's own sites and the tailnet's names while it
+    # is set up (tailnet.allowance, #211), in the system set like the
+    # machine's other needs, so whitelist and dnsfilter accounts reach them.
+    system_domains = sorted({d.removeprefix("*.")
+                             for d in [*policy.effective_system_whitelist(), *tailnet]})
 
     # The git hosts developer accounts may reach over SSH (nft.py, #164).
     from .nft import GIT_SSH_HOSTS
@@ -189,7 +184,7 @@ def render_safesearch(policy: Policy) -> str:
     return "\n".join(lines) + "\n"
 
 
-def render_category_blocks(policy: Policy, bundle) -> str:
+def render_category_blocks(policy: Policy, bundle, tailnet: tuple[str, ...] = ()) -> str:
     """dnsmasq entries blocking categorised domains at the DNS layer.
 
     Filtered users are handled precisely in the proxy, which knows who is
@@ -198,6 +193,10 @@ def render_category_blocks(policy: Policy, bundle) -> str:
     resolver cannot answer differently per user, so this blocks the UNION
     of what the dnsfilter accounts block. That is a deliberate over-block
     among them: the stricter one wins, which is the safe direction to err.
+
+    `tailnet` is what tailnet.allowance() allows while Tailscale is set up
+    (#211). An address= line here would beat the system list's nftset=
+    line, so a name it covers is left out.
     """
     wanted: set[str] = set()
     for user in policy.effective_users():
@@ -237,7 +236,7 @@ def render_category_blocks(policy: Policy, bundle) -> str:
         lines.append(f"# Blocking {', '.join(sorted(rendered))} for users "
                      "the proxy does not see.")
     for domain in bundle.domains_in(rendered):
-        if _never_blocked(domain):
+        if _never_blocked(domain, tailnet):
             continue
         # 0.0.0.0 rather than NXDOMAIN: a browser shows a connection error
         # instead of retrying elsewhere.
@@ -246,9 +245,8 @@ def render_category_blocks(policy: Policy, bundle) -> str:
     return "\n".join(lines) + "\n"
 
 
-def _never_blocked(domain: str) -> bool:
-    return any(domain == name or domain.endswith("." + name)
-               for name in RESOLVER_NEVER_BLOCKED)
+def _never_blocked(domain: str, allowed) -> bool:
+    return any(_covers(name.removeprefix("*."), domain) for name in allowed)
 
 
 # -- the tailnet --------------------------------------------------------------
@@ -257,6 +255,17 @@ def _never_blocked(domain: str) -> bool:
 # line between slashes, so a slash, a space or a newline in it would be a
 # second directive.
 _SUFFIX = re.compile(r"^(?=.{1,253}$)([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$")
+
+
+def tailnet_name(suffix: str | None) -> str | None:
+    """The MagicDNS suffix as a checked, lower-case DNS name, or None."""
+    name = (suffix or "").strip().rstrip(".").lower()
+    if not name:
+        return None
+    if not _SUFFIX.match(name):
+        log.error("ignoring a tailnet name that is not a DNS name: %r", suffix)
+        return None
+    return name
 
 
 def render_tailnet(suffix: str | None) -> str:

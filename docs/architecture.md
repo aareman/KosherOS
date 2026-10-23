@@ -261,11 +261,26 @@ resolves for every account and every other name goes where it always did.
 Only that one tailnet is forwarded, not all of `ts.net`: tailscaled hands
 a name it does not own back to the system resolver, and that would be a
 loop. The forward is written when the daemon sees the computer signed in
-and removed when it signs out. `tailscale.com` is in the category list of
-proxies and VPNs, which supervised accounts block by default, so it is
-left out of the resolver's blocks. The resolver answers the machine's own
-services too, and tailscaled cannot sign in without it. The proxy still
-blocks the site itself for a filtered account.
+and removed when it signs out.
+
+**Tailscale's sites and the tailnet's names.** While the computer is
+signed in, or a sign-in has started and is waiting, every account with
+the internet may
+reach `tailscale.com` and the hosts under it (the sign-in page and admin
+console at `login.tailscale.com`, the downloads at `pkgs.tailscale.com`)
+and the names of the one tailnet it is signed in to (`*.tail230de1.ts.net`
+in the example). `tailscale.com` is in the category list of proxies and
+VPNs, which supervised accounts block by default, and without this the
+tailnet's names would be reachable from an approved-sites account only
+if an administrator listed each one. The names join the system list, so
+approved-sites and basic-protection accounts reach them, and the proxy
+does not block them by category for a filtered account. That is all
+"allowed" means: the proxy still reads and scores those pages and their
+pictures like any other, and a block rule an administrator wrote still
+wins. When the computer signs out, the names are taken away
+again and the firewall's address sets are emptied. The daemon checks
+after a sign-in, after a sign-out, whenever the admin app reads the
+status, and shortly after it starts.
 
 **Filtering.** tailscaled runs as root, so its own traffic is let out like
 every system service's. An account's traffic is matched by its owner in

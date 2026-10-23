@@ -179,6 +179,60 @@ def test_injection_is_idempotent_and_only_for_html(addon):
     assert "__kosheros__" not in flow.response.text
 
 
+# The shape of Teams' app shell (#209): its own HTML template sits in an
+# inline script, so the LAST "</head>" in the page is inside that script.
+TEAMS_SHELL = (
+    "<!DOCTYPE html><html><head><title>Microsoft Teams</title>"
+    "<script>var boot = 1;</script></head><body><div id=app></div>"
+    "<script>var r=`\n<!DOCTYPE html>\n<html>\n<head>\n</head>\n\n<body>\n`;"
+    "r+=`</body>\n</html>`;window.shell=r;</script>"
+    "</body></html>")
+
+
+def _scripts(html: str) -> list[str]:
+    return re.findall(r"<script[^>]*>(.*?)</script>", html, re.S)
+
+
+def test_the_tag_goes_before_the_real_head_not_one_inside_a_script(addon):
+    filt = _filter(addon, language="substitute", media="immodest")
+    flow = _flow("https://teams.live.com/v2/", html=TEAMS_SHELL)
+    filt._filter_page(flow, 1001)
+    text = flow.response.text
+    assert flow.response.status_code == 200
+    tag = re.search(r"<script src=\"/__kosheros__/filter.js\"[^>]*></script>", text).group(0)
+    # Right before the page's own </head>, after its first script...
+    assert text.index(tag) + len(tag) == text.index("</head>")
+    # ...and the app's template script comes through byte for byte.
+    assert "var r=`\n<!DOCTYPE html>\n<html>\n<head>\n</head>\n\n<body>\n`;" \
+           "r+=`</body>\n</html>`;window.shell=r;" in _scripts(text)
+
+
+def test_markup_in_comments_styles_and_scripts_is_not_the_page_end(addon):
+    point = addon._injection_point
+    page = ("<html><head><!-- </head> --><style>a:after{content:'</head>'}</style>"
+            "<SCRIPT type=module>let s='</body></html>'</SCRIPT></head><body></body></html>")
+    assert page[point(page):].startswith("</head><body>")
+    # No head: the real </body>, past a script that names one.
+    page = "<body><script>x='</body>'</script><p>hi</p></body>"
+    assert page[point(page):] == "</body>"
+    # Neither: the end of the page.
+    assert point("<p>fragment</p>") == len("<p>fragment</p>")
+    # A page that ends inside a script or a comment has no safe place at all.
+    assert point("<html><head><script>let t='</head>'") is None
+    assert point("<html><head><!-- </head>") is None
+    # A tag name that only starts like a raw-text element is ordinary markup.
+    page = "<head><scripted-el></scripted-el><titles></titles></head>"
+    assert page[point(page):] == "</head>"
+
+
+def test_a_page_that_ends_inside_a_script_is_left_alone(addon):
+    filt = _filter(addon, language="substitute", media="none")
+    html = "<html><head><script>var t = '</head>';"
+    flow = _flow(html=html)
+    filt._filter_page(flow, 1001)
+    assert flow.response.text == html
+
+
 # -- what the page shows later is judged by the same rules ------------------------
 
 def _judge(filt, body: dict, url="https://example.test/page", headers=None, status=200):

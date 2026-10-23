@@ -231,8 +231,8 @@ def test_dnsmasq_fills_the_discovery_sets():
 
 
 def test_no_category_can_block_where_syncthing_finds_devices():
-    assert dns._never_blocked("discovery.syncthing.net")
-    assert dns._never_blocked("relays.syncthing.net")
+    assert dns._never_blocked("discovery.syncthing.net", dns.RESOLVER_NEVER_BLOCKED)
+    assert dns._never_blocked("relays.syncthing.net", dns.RESOLVER_NEVER_BLOCKED)
 
 
 # ---- the unit and the drop-in ------------------------------------------------------

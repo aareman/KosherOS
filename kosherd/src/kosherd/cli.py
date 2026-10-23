@@ -1050,6 +1050,10 @@ def check_sentence(info: dict) -> str:
                 else f"update available{where}")
     if info.get("available") is False:
         return "up to date"
+    if info.get("ok") is False:
+        # Not "up to date": nothing was learned (#207).
+        reason = info.get("error") or "the update check failed"
+        return f"could not check for updates: {reason}"
     return (info.get("raw") or "").strip() or "no update information"
 
 

@@ -76,7 +76,12 @@ Nix, devbox and devenv are on every KosherOS machine, but an account may use
 them itself only when an administrator switches **Developer tools** on for it
 (the account's Apps tab; guardian-gated). Off — the default — the Store is the
 only way to install: kosherd runs catalogue installs as root into the account's
-own profile, and the Nix daemon refuses the account directly. On, the account
+own profile, and the account cannot run Nix at all. The `nix` program and its
+libraries can be read only by root and the group `kosher-nix`, which kosherd
+keeps to the accounts with the switch on. The Nix daemon refuses everyone
+else too, but that alone is not enough: Nix can download and build into a
+store in the account's home without the daemon. Turning the switch on or off
+reaches a terminal the next time the person signs in. On, the account
 can build anything from nixpkgs from a terminal and reaches the package
 registries (npm, PyPI, crates.io, GitHub and the rest) through its own filter
 mode. Those registries are no longer in the set every account reaches: a
@@ -88,6 +93,14 @@ work. Port 22 is open to those four hosts only, and SSH to any other server is
 refused, because an SSH connection can carry a tunnel around the filter. For a
 git server of the family's own, an administrator can add port 22 under *Extra
 ports*, which opens SSH to every server for that account.
+
+What the switch cannot stop is a copy of Nix the account downloads itself.
+nix-portable, for one, is a single file on GitHub that brings its own Nix
+and needs no user namespaces, and the binary cache it fetches from
+(cache.nixos.org and its mirrors) is an ordinary site to the filter. That is
+the same as any other program downloaded and run from the home folder, which
+KosherOS does not prevent today. Everything such a program fetches still goes
+through the account's own filter.
 
 A build's own downloads — `fetchurl`, `fetchFromGitHub` — run as the Nix build
 users, which belong to no account. Their web goes through the proxy on a
@@ -146,6 +159,13 @@ sefaria.org, hebrewbooks.org and several government and medical sites must
 come back clean, while the adult, dating, gambling and VPN sites in the
 check must be caught. A list that blocked chinuch.org would be worse than no
 list.
+
+Video-call services are in no category a parent can switch off. The Toulouse
+lists file Microsoft Teams and Skype as chat, which would make a meeting link
+open on the block page for any account that blocks social networks. Teams,
+Skype, Zoom and Google Meet are listed as calls instead, so a meeting link
+opens for a filtered account. Their pages and pictures are still read and
+judged like any other site's.
 
 ## Page rules
 

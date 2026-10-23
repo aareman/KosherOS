@@ -223,10 +223,10 @@ def test_only_inspected_users_rules_reach_the_proxy(tmp_path, monkeypatch):
     assert rules_written(tmp_path) == {
         "1001": {"port": 30000, "rules": block, "blocked_categories": [],
                  "media_level": "none", "cover_style": "frost", "language_filter": "off",
-                 "youtube": {}},
+                 "youtube": {}, "system_allowed": []},
         "1003": {"port": 30001, "rules": [], "blocked_categories": [],
                  "media_level": "none", "cover_style": "frost", "language_filter": "off",
-                 "youtube": {}}}
+                 "youtube": {}, "system_allowed": []}}
     listen = (tmp_path / "mitm" / "listen.env").read_text()
     assert listen == ("MITM_MODES=--mode transparent@127.0.0.1:30000 "
                       "--mode transparent@127.0.0.1:30001\n")
@@ -300,7 +300,7 @@ def test_categories_alone_are_enough_to_reach_the_proxy(tmp_path, monkeypatch):
     assert rules_written(tmp_path) == {
         "1001": {"port": 30000, "rules": [], "blocked_categories": ["adult"],
                  "media_level": "none", "cover_style": "frost", "language_filter": "off",
-                 "youtube": {}}}
+                 "youtube": {}, "system_allowed": []}}
 
 
 def test_a_media_level_alone_reaches_the_proxy(tmp_path, monkeypatch):

@@ -761,7 +761,10 @@ class Daemon:
         self._warm_app_index()
         # The tailnet forward follows tailscaled, not the policy, so it is
         # checked once tailscaled has had time to come up after a boot.
+        # So do the names every account may reach while it is set up
+        # (#211), which go into enforcement through a fresh apply.
         from . import tailnet
+        tailnet.on_allowed_change = self._tailnet_allowed_changed
         tailnet.refresh_dns_later()
         GLib.timeout_add_seconds(APP_INDEX_REFRESH_SECONDS,
                                  lambda: (self._warm_app_index(), True)[1])
@@ -2547,15 +2550,14 @@ class Daemon:
         from . import updates
 
         res = self._bootc("upgrade", "--check")
-        info = updates.parse_check(res.stdout or res.stderr)
-        info["ok"] = res.returncode == 0
         # bootc says "no changes" for an image it already holds, which after
         # a rollback is the newest one (#112): judge against what is
         # running, and say where an already-downloaded newest version sits.
         deployment = self._deployment()
         image = ((deployment.get("staged") or {}).get("image")
                  or (deployment.get("booted") or {}).get("image"))
-        info = updates.reconcile(info, deployment, updates.inspect_registry(image))
+        info = updates.judge_check(res.returncode, res.stdout, res.stderr, deployment,
+                                   updates.inspect_registry(image))
         return GLib.Variant("(s)", (json.dumps(info),))
 
     def impl_ApplyUpdate(self):
@@ -2899,6 +2901,28 @@ class Daemon:
 
     # ---- Tailscale (tailnet.py) ------------------------------------------
 
+    def _tailnet_allowed_changed(self) -> None:
+        """Tailscale's sites and the tailnet's names were allowed or taken
+        away (#211): apply the policy again, on the main loop like every
+        other apply. The nft reload empties the address sets, so a name
+        allowed a moment ago stops opening anything at once. From a
+        worker thread this waits, so a sign-in returns its address only
+        once a filtered account can open it."""
+        done = threading.Event()
+
+        def work():
+            try:
+                apply_policy(self.policy)
+            except Exception:  # noqa: BLE001 - the last good rules stay loaded
+                log.exception("could not apply the Tailscale names")
+            finally:
+                done.set()
+            return False
+
+        GLib.idle_add(work)
+        if threading.current_thread() is not threading.main_thread():
+            done.wait(120)
+
     def impl_TailscaleStatus(self):
         """Who this computer is signed in to Tailscale as, and whether it is
         connected. Reading it also brings the resolvers' tailnet forward in
@@ -2923,13 +2947,18 @@ class Daemon:
         from . import tailnet
 
         def finished(ok: bool) -> None:
-            if ok:
-                tailnet.refresh_dns()
+            # Either way: a sign-in that gave up takes Tailscale's sites
+            # away again (#211).
+            tailnet.refresh_dns()
 
         try:
-            return GLib.Variant("(s)", (tailnet.sign_in(on_finished=finished),))
+            url = tailnet.sign_in(on_finished=finished)
         except tailnet.TailnetError as e:
+            tailnet.refresh_dns()
             raise PolicyError(str(e)) from None
+        # The sign-in page must open for whoever is at the computer.
+        tailnet.refresh_dns()
+        return GLib.Variant("(s)", (url,))
 
     def impl_TailscaleSignOut(self):
         """Not guardian-gated: leaving the tailnet takes a way out of the
@@ -2942,7 +2971,7 @@ class Daemon:
         except tailnet.TailnetError as e:
             raise PolicyError(str(e)) from None
         finally:
-            tailnet.sync_dns(None)
+            tailnet.forget()
         return None
 
     def setup_complete(self) -> bool:

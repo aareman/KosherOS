@@ -224,3 +224,38 @@ def test_kosherctl_says_where_an_already_downloaded_newest_version_sits():
     assert "went back from" in left and "0.13.0" in left
     assert check_sentence({"available": True, "version": "0.13.1", "channel": "edge"}) == \
         "update available: 0.13.1 on the edge channel"
+
+
+# -- #207: a check that could not reach the registry is not "up to date" -----
+
+OFFLINE = ("error: Upgrading: Fetching manifest: failed to invoke method OpenImage: "
+           "pinging container registry ghcr.io: dial tcp: lookup ghcr.io: no such host\n")
+
+
+def test_an_offline_check_is_unknown_not_up_to_date():
+    info = updates.judge_check(1, "", OFFLINE, DEPLOYMENT, None)
+    assert info["ok"] is False
+    assert info["available"] is None
+    assert info["error"].startswith("error: Upgrading: Fetching manifest")
+    assert info["booted_version"] == "0.12.0"
+
+
+def test_a_failed_bootc_check_is_settled_by_the_registry_when_it_answers():
+    newer = updates.judge_check(1, "", OFFLINE, DEPLOYMENT, {"digest": "sha256:ccc", "version": "0.13.1"})
+    assert newer["available"] is True and newer["version"] == "0.13.1" and newer["ok"] is True
+    same = updates.judge_check(1, "", OFFLINE, DEPLOYMENT, {"digest": "sha256:aaa", "version": "0.12.0"})
+    assert same["available"] is False and same["ok"] is True
+
+
+def test_a_good_check_is_unchanged():
+    info = updates.judge_check(0, "No changes in: ghcr.io/aareman/kosher-linux:edge\n", "",
+                               DEPLOYMENT, {"digest": "sha256:aaa", "version": "0.12.0"})
+    assert info["ok"] is True and info["available"] is False and "error" not in info
+
+
+def test_kosherctl_says_it_could_not_check_rather_than_up_to_date():
+    from kosherd.cli import check_sentence
+
+    line = check_sentence(updates.judge_check(1, "", OFFLINE, DEPLOYMENT, None))
+    assert line.startswith("could not check for updates:")
+    assert "up to date" not in line

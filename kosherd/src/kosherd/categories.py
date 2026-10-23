@@ -60,6 +60,13 @@ CATEGORY_LABELS = {
 # catalogue-internal bucket, never shown as a filter toggle.
 USER_FACING_CATEGORIES = tuple(CATEGORY_LABELS)
 
+# Video-call services (Teams, Skype, Zoom, Meet), filed here by the curated
+# supplement in place of what UT1 says (it puts Teams and Skype under chat,
+# which is social). Not a toggle: calls are a supported use, controlled by
+# the account's video-calls switch, and a meeting link must not open on the
+# block page (#209). Their pages and pictures are still read and judged.
+CALLS = "calls"
+
 # Blocked by default for a newly filtered account. Deliberately narrow:
 # categories that are about danger or immodesty rather than taste, so the
 # default is defensible without an admin having to reason about it.

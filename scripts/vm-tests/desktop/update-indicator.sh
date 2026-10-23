@@ -7,9 +7,9 @@
 set -uo pipefail
 here="$(cd "$(dirname "$0")" && pwd)"
 . "$here/../lib.sh"
-. "$here/indicator.bash"
 
 u="${PR_USER:?PR_USER is the account signed in at the screen}"
+. "$here/indicator.bash"
 
 section "The update mark on the desktop"
 desktop=$(systemctl --machine="$u@.host" --user show-environment 2>/dev/null \

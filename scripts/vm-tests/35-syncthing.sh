@@ -47,7 +47,33 @@ except Exception as e:  # noqa: BLE001 - the message is the assertion
 PY
 }
 registry() { python3 -c "import json,sys; e=json.load(open('/var/lib/kosher/syncthing/accounts.json')).get('$A',{}); print(e.get(sys.argv[1],''))" "$1" 2>/dev/null; }
-in_set() { nft list set inet kosher "$1" 2>/dev/null | grep -q "syncthing@$A.service"; }
+in_set_now() { nft list set inet kosher "$1" 2>/dev/null | grep -q "syncthing@$A.service"; }
+# in_set <set>: the running service's cgroup is in the set (given a few
+# seconds: a service restarting is briefly without a cgroup). When it is
+# not, says what the service and the set looked like.
+in_set() {
+    local i
+    for i in $(seq 1 20); do
+        if in_set_now "$1"; then
+            [ "$i" = 1 ] || echo "    (in $1 after ${i}s; NRestarts=$(systemctl show -p NRestarts --value "syncthing@$A.service"))"
+            return 0
+        fi
+        sleep 1
+    done
+    {
+        echo "    -- $1 does not hold syncthing@$A.service:"
+        nft list set inet kosher "$1" 2>&1 | sed 's/^/    /'
+        systemctl show -p ActiveState -p SubState -p NRestarts -p ExecMainStartTimestamp \
+            "syncthing@$A.service" | sed 's/^/    /'
+        cg="/sys/fs/cgroup/system.slice/system-syncthing.slice/syncthing@$A.service"
+        if [ -d "$cg" ]; then echo "    cgroup present: $cg"; else echo "    no cgroup at $cg"; fi
+        journalctl -u kosherd --since -3min --no-pager 2>/dev/null | grep -i syncthing | tail -8 | sed 's/^/    /'
+        journalctl -u "syncthing@$A.service" --since -3min --no-pager 2>/dev/null | tail -12 | sed 's/^/    /'
+    } >&2
+    return 1
+}
+# The opposite, at once: "out of the set" is checked after a stop.
+not_in_set() { ! in_set_now "$1"; }
 # connect_as <user> <host> <port>: 0 when a TCP connection was made.
 connect_as() {
     as "$1" python3 -c 'import socket,sys; socket.create_connection((sys.argv[1], int(sys.argv[2])), 4)' "$2" "$3" >/dev/null 2>&1
@@ -162,7 +188,7 @@ case "$label" in
     *init_t*|"") bad "the service runs in SELinux domain '${label:-none}'" ;;
     *) ok "the service runs as an ordinary service ($label)" ;;
 esac
-check "its cgroup is in the set that lets its ports out" 0 in_set syncthing_out
+assert_that "its cgroup is in the set that lets its ports out" in_set syncthing_out
 
 section "Port 22000 is Syncthing's alone"
 before=$(wc -l < "$WANLOG")
@@ -216,11 +242,11 @@ if [ "$(wc -l < "$WANLOG")" -gt "$before" ]; then ok "the Syncthing service conn
 section "The service keeps its ports through a restart and a reload"
 systemctl restart "syncthing@$A.service"
 sleep 3
-check "after a restart its new cgroup is in the set" 0 in_set syncthing_out
+assert_that "after a restart its new cgroup is in the set" in_set syncthing_out
 kctl network "$uid" --video-calls off >/dev/null
 kctl network "$uid" --video-calls on >/dev/null
 wait_for_dns >/dev/null 2>&1 || true
-check "after the ruleset is replaced it is in the set again" 0 in_set syncthing_out
+assert_that "after the ruleset is replaced it is in the set again" in_set syncthing_out
 
 section "The home network, only with the switch on"
 check "off: a device on the home network cannot connect" 1 connect_from stlan 192.168.77.1 "$listen"
@@ -241,7 +267,7 @@ section "Taking the permission away, and removing it"
 check "an administrator takes the permission away" 0 kctl apps unapprove "$uid" "$REF"
 sleep 2
 check "the service stops" 1 systemctl is-active --quiet "syncthing@$A.service"
-check "and its cgroup is out of the set" 1 in_set syncthing_out
+check "and its cgroup is out of the set" 0 not_in_set syncthing_out
 python3 -c 'from kosherd.client import DaemonClient; DaemonClient().remove_app("nixpkgs#syncthing")' >/dev/null 2>&1
 for _ in $(seq 1 30); do
     [ -e "$dropin" ] || [ -e "$launcher" ] || break

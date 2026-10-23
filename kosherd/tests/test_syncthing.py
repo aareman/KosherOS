@@ -222,6 +222,44 @@ def test_the_ruleset_with_syncthing_loads(tmp_path):
     assert res.returncode == 0, res.stderr
 
 
+# ---- other accounts are untouched -------------------------------------------------
+
+def test_a_whitelist_account_is_not_opened_by_anothers_syncthing():
+    wl = user(1001, "wlkid", mode="whitelist", whitelist=["example.org"], developer_tools=True)
+    out = render(wl, user(1004, "stkid", approved_apps=[REF], syncthing_lan=True),
+                 gui={1004: 8384}, listen={1004: 22000})
+    # The approved account's service is the only one let out on its ports.
+    for rule in chain(out, "output") + chain(out, "dns_redirect"):
+        if st.SET_OUT in rule:
+            assert rule.startswith("meta skuid { 1004 } "), rule
+        if rule.endswith(("accept", "return")) and re.search(r"\b1001\b", rule):
+            # What wlkid had before: its developer git SSH, nothing new.
+            assert "@git4" in rule or "@git6" in rule, rule
+    # Its own chain is unchanged: only its list and the system list.
+    assert chain(out, "mode_whitelist") == [
+        "jump evasion_block",
+        "ip daddr @wl4 tcp dport { 80, 443 } accept",
+        "ip6 daddr @wl6 tcp dport { 80, 443 } accept",
+        "ip daddr @sys4 tcp dport { 80, 443 } accept",
+        "ip6 daddr @sys6 tcp dport { 80, 443 } accept",
+        "reject",
+    ]
+
+
+def test_the_syncthing_sets_catch_its_own_names_and_nothing_else():
+    wl = user(1001, "wlkid", mode="whitelist", whitelist=["example.com", "syncthing.net"])
+    conf = dns.render(Policy(revision=1, users=[wl, user(1004, approved_apps=[REF])]))
+    st_lines = [l for l in conf.splitlines() if "#st4" in l or "#st6" in l]
+    names = {l.split("/")[1] for l in st_lines}
+    assert names == set(st.HOSTS)
+    # A whitelisted name keeps its own set; the discovery hosts land in
+    # theirs as well as the whitelist that covers them, never instead.
+    assert "nftset=/example.com/4#inet#kosher#wl4,6#inet#kosher#wl6" in conf
+    for host in st.HOSTS:
+        line = next(l for l in conf.splitlines() if l.startswith(f"nftset=/{host}/"))
+        assert "#wl4" in line and "#st4" in line, line
+
+
 # ---- DNS -------------------------------------------------------------------------
 
 def test_dnsmasq_fills_the_discovery_sets():

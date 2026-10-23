@@ -339,7 +339,9 @@ whether KosherOS is filtering.
 ## Updates
 
 The OS is a container image built on Fedora bootc. CI builds it, signs it
-and publishes it. A parent applies an update from the Updates page in
-KosherOS Admin; the machine restarts into it atomically and keeps the
-previous version to go back to. Updates are not applied on their own.
+and publishes it. The machine downloads a new version in the background
+on the schedule set on the Updates page in KosherOS Admin (weekly unless
+changed), or when a parent downloads it there, and starts it at the next
+restart, keeping the previous version to go back to. It never restarts on
+its own.
 [Updates and channels](deployment.md) has the detail.

@@ -142,4 +142,109 @@ DaemonClient().disable_guardian(sys.argv[1])' "$gpw" >/dev/null 2>&1
     skip "a real tailnet sign-in needs a person at the login page: names on the tailnet, the 100.100.100.100 forward, a filtered account reaching a tailnet host through its proxy"
 fi
 
+section "Automatic updates (#19)"
+timer=kosher-auto-update.timer
+schedule() { kosherctl get-policy | python3 -c 'import json,sys; print((json.load(sys.stdin).get("updates") or {}).get("auto", "weekly"))'; }
+check "the timer is enabled" 0 systemctl is-enabled --quiet "$timer"
+check "and running, on the default weekly schedule" 0 systemctl is-active --quiet "$timer"
+check_contains "the policy says weekly" "weekly" schedule
+check_contains "the timer has a next run" "$timer" systemctl list-timers --all --no-legend "$timer"
+check_contains "Fedora's own timer, which restarts the computer, stays off" "disabled" \
+    systemctl is-enabled bootc-fetch-apply-updates.timer
+kosherctl updates auto off >/dev/null
+check "off stops the timer" 1 systemctl is-active --quiet "$timer"
+check_contains "and the run does not check at all" "automatic updates are off" \
+    kosherctl updates run --now
+kosherctl updates auto biweekly >/dev/null
+check "every 2 weeks starts it again" 0 systemctl is-active --quiet "$timer"
+check_contains "and the policy says so" "biweekly" schedule
+kosherctl updates notify off >/dev/null
+check_contains "the notice can be turned off" "notice when ready: off" kosherctl updates
+kosherctl updates notify on >/dev/null
+kosherctl updates auto weekly >/dev/null
+check_contains "kosherd answers any account about a waiting update without bootc" "{" \
+    python3 -c 'from kosherd.client import DaemonClient; import json; print(json.dumps(DaemonClient().pending_update()))'
+
+# Staging, without a restart. The harness's registry (10.0.2.2) is trusted
+# again for this alone, a copy of the running image is pushed under a tag
+# of its own in another manifest format (a new digest, the same layers),
+# the machine is pointed at that tag, and the tag is pushed once more in
+# the first format: the automatic run must find that newer digest,
+# download it, leave it staged, not restart, and announce it once.
+booted_ref=$(bootc status --format json 2>/dev/null | python3 -c 'import json,sys; print(json.load(sys.stdin)["status"]["booted"]["image"]["image"]["image"])' 2>/dev/null)
+case "$booted_ref" in
+10.0.2.2:*/*:*)
+    registry=${booted_ref%%/*}
+    repo=${booted_ref%:*}
+    tag="${booted_ref##*:}-auto19"
+    target="$repo:$tag"
+    cp -a /etc/containers/policy.json /run/pr-test-policy.json
+    restore_trust() {
+        cp -a /run/pr-test-policy.json /etc/containers/policy.json
+        rm -f /etc/containers/registries.conf.d/50-pr-test-auto.conf
+    }
+    trap restore_trust EXIT
+    mkdir -p /etc/containers/registries.conf.d
+    printf '[[registry]]\nlocation = "%s"\ninsecure = true\n' "$registry" \
+        > /etc/containers/registries.conf.d/50-pr-test-auto.conf
+    python3 -c 'import json, sys; p = "/etc/containers/policy.json"; d = json.load(open(p)); d.setdefault("transports", {}).setdefault("docker", {})[sys.argv[1]] = [{"type": "insecureAcceptAnything"}]; json.dump(d, open(p, "w"), indent=4)' "$registry"
+    copy() { skopeo copy --quiet --src-tls-verify=false --dest-tls-verify=false --format "$1" \
+        "docker://$booted_ref" "docker://$target"; }
+    digest() { skopeo inspect --tls-verify=false --format '{{.Digest}}' "docker://$target"; }
+    booted_digest=$(bootc status --format json | python3 -c 'import json,sys; print(json.load(sys.stdin)["status"]["booted"]["image"]["imageDigest"])')
+    if copy oci && [ "$(digest)" = "$booted_digest" ]; then copy v2s2; fi
+    first=$(digest)
+    if [ -n "$first" ] && bootc switch "$target" >/dev/null 2>&1; then
+        ok "the machine is pointed at a copy of its own image ($tag)"
+        if [ "$first" = "$(digest)" ] && copy v2s2 && [ "$(digest)" = "$first" ]; then copy oci; fi
+        newer=$(digest)
+        assert_that "the copy is pushed again with a newer digest" test "$newer" != "$first"
+        boot_before=$(cat /proc/sys/kernel/random/boot_id)
+        rm -f /run/pr-test-update-ready.log
+        busctl --system monitor --match \
+            "type='signal',interface='org.kosherlinux.Daemon1.System',member='UpdateReady'" \
+            > /run/pr-test-update-ready.log 2>&1 &
+        monitor=$!
+        sleep 1
+        check_contains "the automatic run finds it and starts downloading" "downloading" \
+            kosherctl updates run --now
+        staged=""
+        for _ in $(seq 1 300); do
+            staged=$(bootc status --format json 2>/dev/null | python3 -c 'import json,sys; s = json.load(sys.stdin)["status"].get("staged") or {}; print((s.get("image") or {}).get("imageDigest") or "")' 2>/dev/null)
+            [ "$staged" = "$newer" ] && grep -q "$newer" /run/pr-test-update-ready.log && break
+            sleep 3
+        done
+        assert_that "it is staged for the next restart" test "$staged" = "$newer"
+        assert_that "and the computer did not restart" test "$(cat /proc/sys/kernel/random/boot_id)" = "$boot_before"
+        check_contains "kosherctl says it waits for a restart" "waiting for a restart" kosherctl updates
+        check_contains "any account can see it waits" "$newer" \
+            python3 -c 'from kosherd.client import DaemonClient; print(DaemonClient().pending_update())'
+        # A second run finds the same download and must not announce again.
+        check_contains "a second run sees it is already downloaded" "already downloaded" \
+            kosherctl updates run --now
+        sleep 3
+        kill "$monitor" 2>/dev/null
+        announced=$(grep -c 'BOOLEAN true' /run/pr-test-update-ready.log)
+        assert_that "the notice was sent once ($announced)" test "$announced" = 1
+        # Put the machine back: the staged copy is discarded.
+        index=$(ostree admin status | awk '/\(staged\)/ {print n} /^[* ] / {n++}' | head -1)
+        if [ -n "$index" ] && ostree admin undeploy "$index" >/dev/null 2>&1; then
+            ok "the staged copy is discarded again"
+        else
+            bad "could not discard the staged copy (ostree admin status: $(ostree admin status | head -c 300))"
+        fi
+        sleep 2
+        check_contains "and once it is gone, nothing waits" "{}" \
+            python3 -c 'from kosherd.client import DaemonClient; import json; print(json.dumps(DaemonClient().pending_update()) if DaemonClient().pending_update() else "{}")'
+    else
+        skip "could not push a copy of the running image to $registry: staging not checked"
+    fi
+    restore_trust
+    trap - EXIT
+    ;;
+*)
+    skip "this machine does not run an image from the harness registry ($booted_ref): staging not checked"
+    ;;
+esac
+
 report

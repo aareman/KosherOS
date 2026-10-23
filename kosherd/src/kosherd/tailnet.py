@@ -28,6 +28,13 @@ How the filter survives a tailnet, in one place:
   used. `--netfilter-mode=off` leaves the firewall to KosherOS's one
   table: tailscaled would otherwise add rules of its own that accept
   anything arriving on tailscale0.
+- **Tailscale's own sites and the tailnet's names are allowed (#211)**
+  while the computer is signed in or a sign-in is waiting:
+  TAILSCALE_HOSTS plus `*.<tailnet>.ts.net` for the one tailnet it is
+  signed in to (allowance()). They join the system list for whitelist and
+  dnsfilter accounts and are exempt from category blocks in the proxy;
+  pages from them are still read like any other page. Signed out, the
+  list is empty again.
 """
 
 from __future__ import annotations
@@ -223,6 +230,87 @@ def sign_out() -> None:
         raise TailnetError(_message(res))
 
 
+# -- what every account may reach while Tailscale is set up (#211) ----------
+
+# Tailscale's own sites, the ones a person opens: the sign-in page and
+# the admin console (login.tailscale.com), the downloads
+# (pkgs.tailscale.com) and the documentation (tailscale.com). The
+# catalogue files tailscale.com under "proxy", which every supervised
+# account blocks by default. tailscaled itself is root and was never
+# filtered, so the hosts only it talks to (controlplane, the DERP relays,
+# log.tailscale.io) are not what this is for; *.tailscale.com covers the
+# first two anyway. Nothing broader than tailscale.com.
+TAILSCALE_HOSTS = ("tailscale.com", "*.tailscale.com")
+
+_allowed_lock = threading.Lock()
+# One status read and its outcome at a time. A read that began before a
+# sign-out (the killed `tailscale up`'s own last refresh, or the admin
+# app's poll) must not land after it and allow the names again.
+_refresh_lock = threading.RLock()
+_allowed: tuple[str, ...] = ()
+# Set by the daemon: called (from whatever thread noticed) when the list
+# changes, to put the new list into enforcement.
+on_allowed_change = None
+
+
+def allowance(now: dict | None, *, waiting: bool = False) -> tuple[str, ...]:
+    """The names every account may reach, from a status() reading.
+
+    Tailscale's hosts while the computer is signed in or a sign-in is
+    waiting; and, once signed in, `*.<tailnet>` for that one tailnet's
+    MagicDNS suffix, never all of ts.net. Nothing otherwise.
+
+    "Waiting" is kosherd's own `tailscale up` still running, and nothing
+    else. Not the AuthURL in the status: tailscaled can keep reporting
+    the last sign-in address after a sign-out, and the names stayed
+    allowed with nobody signing in.
+    """
+    if not now or not now.get("installed"):
+        return ()
+    signed_in = bool(now.get("signed_in"))
+    if not (signed_in or waiting):
+        return ()
+    names = list(TAILSCALE_HOSTS)
+    suffix = dns.tailnet_name(now.get("dns_suffix")) if signed_in else None
+    if suffix:
+        names.append("*." + suffix)
+    return tuple(names)
+
+
+def allowed() -> tuple[str, ...]:
+    """What allowance() last said; empty until the first status read."""
+    return _allowed
+
+
+def set_allowed(names) -> bool:
+    """Record a new list; tell the daemon if it changed. Returns that."""
+    global _allowed
+    names = tuple(names)
+    with _allowed_lock:
+        if names == _allowed:
+            return False
+        _allowed = names
+    log.info("tailscale: allowed for every account: %s", ", ".join(names) or "nothing")
+    if on_allowed_change is not None:
+        try:
+            on_allowed_change()
+        except Exception:  # noqa: BLE001 - the caller's status read must still answer
+            log.exception("tailscale: applying the allowed names")
+    return True
+
+
+def _sign_in_waiting() -> bool:
+    with _login_lock:
+        return _login is not None and _login.poll() is None
+
+
+def forget() -> None:
+    """After a sign-out: no forward, nothing allowed."""
+    with _refresh_lock:
+        sync_dns(None)
+        set_allowed(())
+
+
 # -- the resolvers ------------------------------------------------------------
 
 DNS_SERVICE = "kosher-dns.service"
@@ -270,17 +358,20 @@ def _restart(service: str) -> None:
 
 
 def refresh_dns() -> dict | None:
-    """Read the status and bring the resolvers in line with it."""
-    try:
-        now = status()
-    except TailnetError as e:
-        log.info("tailscale: %s", e)
-        return None
-    if now.get("state") == "Unavailable":
-        # tailscaled is starting or stopped; what it last said stands.
+    """Read the status and bring the resolvers, and the names every
+    account may reach, in line with it."""
+    with _refresh_lock:
+        try:
+            now = status()
+        except TailnetError as e:
+            log.info("tailscale: %s", e)
+            return None
+        if now.get("state") == "Unavailable":
+            # tailscaled is starting or stopped; what it last said stands.
+            return now
+        sync_dns(now.get("dns_suffix") if now.get("signed_in") else None)
+        set_allowed(allowance(now, waiting=_sign_in_waiting()))
         return now
-    sync_dns(now.get("dns_suffix") if now.get("signed_in") else None)
-    return now
 
 
 def refresh_dns_later(delay: int = 20) -> None:

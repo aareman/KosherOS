@@ -239,3 +239,41 @@ def test_ci_checks_the_built_images_lists_before_pushing_it(workflow, tag):
     check = text.index(f'fetch-categories.py --check-image "{tag}"')
     assert text.index("podman build") < check < text.index("podman push"), \
         "the check sits between the build and the push"
+
+
+# -- video-call services are in no category a family switches off (#209) --------
+
+
+def test_call_services_leave_social_and_keep_what_marks_danger(monkeypatch, tmp_path):
+    # UT1 files Teams and Skype under chat, which feeds social: a Teams
+    # meeting link opened on the block page for every account that blocks
+    # social, which is the default.
+    chat = ["teams.microsoft.com", "go.trouter.teams.microsoft.com", "skype.com",
+            "teams.live.com", "chat.example"]
+    web = Web({mirror("chat"): ("\n".join(chat) + "\n").encode(),
+               mirror("publicite"): b"click.zoom.us\nads.skype.com\n",
+               mirror("social_networks"): b"lookalike-skype.com\n"})
+    monkeypatch.setattr(fetch, "get", web)
+    out = tmp_path / "categories.sqlite"
+    fetch.build(out, {"social", "ads"}, REF)
+
+    social = rows(out, "social")
+    assert not social & {"teams.microsoft.com", "go.trouter.teams.microsoft.com",
+                         "skype.com", "teams.live.com"}
+    # Only the call services: a chat site, and a name that merely ends
+    # like one, are still social.
+    assert {"chat.example", "lookalike-skype.com", "facebook.com"} <= social
+    calls = rows(out, fetch.CALLS)
+    assert {"teams.microsoft.com", "teams.live.com", "skype.com",
+            "meet.google.com"} <= calls
+    assert {"click.zoom.us", "ads.skype.com"} <= rows(out, "ads"), \
+        "an ad host under a call service is still an ad host"
+
+
+def test_the_calls_bucket_is_never_a_filter_toggle():
+    from kosherd import categories
+
+    assert fetch.CALLS == categories.CALLS
+    assert categories.CALLS not in categories.CATEGORY_LABELS
+    assert categories.CALLS not in categories.DEFAULT_BLOCKED
+    assert set(fetch.CALLS_KEEP) <= set(categories.CATEGORY_LABELS)

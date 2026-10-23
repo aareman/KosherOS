@@ -245,6 +245,36 @@ def inspect_registry(image: str, run=subprocess.run) -> dict | None:
     return {"digest": parts[0], "version": parts[1] if len(parts) > 1 else None}
 
 
+def judge_check(returncode: int, stdout: str, stderr: str, deployment: dict,
+                registry: dict | None) -> dict:
+    """The CheckUpdate answer from bootc's check and the registry's (#207).
+
+    A check that could not reach the registry is not "up to date". bootc's
+    error text has no "Update available" in it, so parse_check reads it as
+    available=False, and with no network the registry lookup that would
+    correct it fails too. When bootc failed and the registry did not
+    answer, `available` is None (unknown) and `error` carries bootc's first
+    line, so the pages say they could not check instead of "up to date".
+    When bootc failed but the registry answered, the registry's digest
+    decides, as it does after a rollback.
+    """
+    info = parse_check(stdout or stderr)
+    info["ok"] = returncode == 0
+    if not info["ok"] and registry is None:
+        info["available"] = None
+        info["error"] = next((line.strip() for line in (stderr or stdout or "").splitlines()
+                              if line.strip()), "the update check failed")
+        booted = deployment.get("booted") or {}
+        info["booted_version"] = booted.get("version")
+        info["on_disk"] = None
+        return info
+    out = reconcile(info, deployment, registry)
+    if not info["ok"]:
+        # The registry answered for bootc: the result is real.
+        out["ok"] = True
+    return out
+
+
 def reconcile(info: dict, deployment: dict, registry: dict | None) -> dict:
     """bootc's answer (parse_check), corrected by the deployments' digests
     and the registry's: `available` is "newer than what is running",

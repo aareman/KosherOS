@@ -118,6 +118,13 @@ come back clean, while the adult, dating, gambling and VPN sites in the
 check must be caught. A list that blocked chinuch.org would be worse than no
 list.
 
+Video-call services are in no category a parent can switch off. The Toulouse
+lists file Microsoft Teams and Skype as chat, which would make a meeting link
+open on the block page for any account that blocks social networks. Teams,
+Skype, Zoom and Google Meet are listed as calls instead, so a meeting link
+opens for a filtered account. Their pages and pictures are still read and
+judged like any other site's.
+
 ## Page rules
 
 A page rule is the one thing a parent writes by hand, and most families

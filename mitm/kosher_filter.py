@@ -170,6 +170,22 @@ def is_bare_address(host: str | None) -> bool:
     return True
 
 
+def host_in(host: str | None, names) -> bool:
+    """Whether `host` is one of `names`: "example.org" is that host only,
+    "*.example.org" the domain and every host under it."""
+    host = (host or "").lower().rstrip(".")
+    if not host:
+        return False
+    for name in names:
+        if name.startswith("*."):
+            base = name[2:]
+            if host == base or host.endswith("." + base):
+                return True
+        elif host == name:
+            return True
+    return False
+
+
 # The Nix build users' entry in the rules file is keyed "builder", not by a
 # uid: the firewall sends their web to their own listener (#123), and the
 # proxy judges it as this one identity.
@@ -205,6 +221,7 @@ class PolicyCache:
         self._cover: dict[int, str] = {}
         self._language: dict[int, str] = {}
         self._youtube: dict[int, dict] = {}
+        self._system_allowed: dict[int, tuple] = {}
         self._fallback = _fail_closed_entry()
 
     def uid_for_listener_port(self, port: int | None) -> int | None:
@@ -234,6 +251,14 @@ class PolicyCache:
         if not self._is_known(uid):
             return list(self._fallback["blocked_categories"])
         return self._blocked.get(uid, [])
+
+    def system_allowed_for(self, uid: int | None) -> tuple:
+        """Names no category blocks for this account: Tailscale's sites
+        and the tailnet's own while Tailscale is set up (#211). Nothing
+        for an account the floor applies to."""
+        if not self._is_known(uid):
+            return ()
+        return self._system_allowed.get(uid, ())
 
     def media_level_for(self, uid: int | None) -> str:
         if not self._is_known(uid):
@@ -274,6 +299,7 @@ class PolicyCache:
         cover: dict[int, str] = {}
         language: dict[int, str] = {}
         youtube: dict[int, dict] = {}
+        system_allowed: dict[int, tuple] = {}
         by_port: dict[int, int] = {}
         for uid_text, raw in doc.items():
             try:
@@ -289,6 +315,8 @@ class PolicyCache:
                 cover[uid] = entry.get("cover_style", "frost")
                 language[uid] = entry.get("language_filter", "off")
                 youtube[uid] = dict(entry.get("youtube", {}))
+                system_allowed[uid] = tuple(str(n).lower()
+                                            for n in entry.get("system_allowed", []))
             except Exception as e:  # noqa: BLE001 - one bad entry must not break all
                 log.error("bad entry for uid %s: %s", uid_text, e)
         self._rules = rules
@@ -297,6 +325,7 @@ class PolicyCache:
         self._cover = cover
         self._language = language
         self._youtube = youtube
+        self._system_allowed = system_allowed
         self._known = set(rules)
         self._by_port = by_port
         self._mtime = mtime
@@ -865,6 +894,16 @@ class KosherFilter:
         self.usage = usage_mod.Tally("proxy")
         self._flusher = None
 
+    def _blocked_categories_of(self, host: str, uid) -> set:
+        """The categories this account blocks that `host` is in; none for
+        a name Tailscale needs while it is set up (#211). Only the
+        category lists step aside: the page is still read and scored."""
+        allowed = getattr(self.policy, "system_allowed_for", None)
+        if allowed is not None and host_in(host, allowed(uid)):
+            return set()
+        return self.categories.blocked_categories_of(
+            host, self.policy.blocked_categories_for(uid))
+
     def _uid_of(self, flow) -> int | None:
         """Who made this connection: the LISTENER PORT it arrived on.
 
@@ -1051,8 +1090,7 @@ class KosherFilter:
                             "than a site", why="address")
                 return
             blocked = self.policy.blocked_categories_for(uid)
-            hit = self.categories.blocked_categories_of(
-                flow.request.pretty_host or "", blocked)
+            hit = self._blocked_categories_of(flow.request.pretty_host or "", uid)
             if hit:
                 names = ", ".join(sorted(hit))
                 log.info("blocked uid=%s %s (category: %s)", uid, url, names)
@@ -1541,13 +1579,10 @@ class KosherFilter:
         if nonce:
             attrs += f' nonce="{nonce.group(1)}"'
         tag = f"<script {attrs}></script>"
-        for marker in ("</head>", "</body>", "</html>"):
-            at = body.lower().rfind(marker)
-            if at != -1:
-                body = body[:at] + tag + body[at:]
-                break
-        else:
-            body = body + tag
+        at = _injection_point(body)
+        if at is None:
+            return  # the page ends inside a script; nowhere safe to put it
+        body = body[:at] + tag + body[at:]
         flow.response.text = body
         flow.response.headers["x-kosheros-page"] = "filter-script"
 
@@ -1592,8 +1627,7 @@ class KosherFilter:
         # its imagery goes too — no model needed and no chance of a model
         # being wrong.
         host = flow.request.pretty_host or ""
-        if self.categories.blocked_categories_of(
-                host, self.policy.blocked_categories_for(uid)):
+        if self._blocked_categories_of(host, uid):
             self._blank_image(flow)
             return True
 
@@ -1743,8 +1777,7 @@ class KosherFilter:
         if level == "none":
             return "stream"
         host = flow.request.pretty_host or ""
-        if self.categories.blocked_categories_of(
-                host, self.policy.blocked_categories_for(uid)):
+        if self._blocked_categories_of(host, uid):
             return "refuse"  # a clip from a site this account blocks
         if level not in VIDEO_CHECKED_LEVELS:
             return "refuse"  # "all": no video, as no pictures
@@ -1813,9 +1846,7 @@ class KosherFilter:
         level = self.policy.media_level_for(uid)
         if level == "none":
             return False
-        if self.categories.blocked_categories_of(
-                flow.request.pretty_host or "",
-                self.policy.blocked_categories_for(uid)):
+        if self._blocked_categories_of(flow.request.pretty_host or "", uid):
             return True
         return level not in VIDEO_CHECKED_LEVELS
 
@@ -2134,6 +2165,53 @@ class KosherFilter:
                               message=message).encode(),
             {"Content-Type": "text/html; charset=utf-8",
              "Cache-Control": "no-store"})
+
+
+# Elements whose content the HTML parser reads as text up to their own end
+# tag, not as markup: a "</head>" inside one is not the end of the head.
+_RAW_TEXT_ELEMENTS = ("script", "style", "textarea", "title", "xmp",
+                      "noscript", "iframe", "noembed", "noframes")
+_MARKUP_RE = re.compile(
+    r"<!--|<(?P<raw>" + "|".join(_RAW_TEXT_ELEMENTS) + r")(?=[\s>/])"
+    r"|</(?P<end>head|body|html)\s*>", re.IGNORECASE)
+
+
+def _injection_point(body: str) -> int | None:
+    """Where the page filter's tag can go: before the page's real </head>,
+    else its real </body> or </html>, else the end of the page.
+
+    "Real" means in markup, not inside a script, a style or a comment.
+    Teams' app shell (#209) carries its own HTML template in a script, so
+    the LAST "</head>" in its page is inside that script: a tag put there
+    closed the script half way, the page threw "Unexpected end of input"
+    and showed its own source instead of the meeting. None when the page
+    ends inside a script or a comment, where nothing can go safely.
+    """
+    found: dict[str, int] = {}
+    pos = 0
+    while True:
+        match = _MARKUP_RE.search(body, pos)
+        if match is None:
+            break
+        if match.group(0) == "<!--":
+            close = body.find("-->", match.end())
+            if close == -1:
+                return None
+            pos = close + 3
+        elif match.group("raw"):
+            name = match.group("raw").lower()
+            close = re.compile(r"</" + name + r"[\s>/]", re.IGNORECASE).search(
+                body, match.end())
+            if close is None:
+                return None
+            pos = close.end()
+        else:
+            found.setdefault(match.group("end").lower(), match.start())
+            pos = match.end()
+    for name in ("head", "body", "html"):
+        if name in found:
+            return found[name]
+    return len(body)
 
 
 def _body(message) -> bytes:

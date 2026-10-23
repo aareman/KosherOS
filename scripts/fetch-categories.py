@@ -355,6 +355,12 @@ def domains_in(archive: Path, name: str) -> list[str]:
 
 CURATED_PATH = Path(__file__).with_name("curated-sites.json")
 
+# Video-call services (kosherd.categories.CALLS): a catalogue bucket, never
+# a toggle. The curated hosts in it lose every other classification but
+# these, the ones that say a host is dangerous rather than what it is for.
+CALLS = "calls"
+CALLS_KEEP = ("ads", "malware", "adult", "proxy")
+
 
 def curated_rows(only: set[str] | None) -> list[tuple[str, str]]:
     """Mainstream sites the UT1 lists miss, so a family's real categories are
@@ -423,6 +429,24 @@ def build(out: Path, only: set[str] | None, mirror_ref: str = MIRROR_REF) -> int
             print(f"    {len(rows):,}")
 
     curated = curated_rows(only)
+    # Whatever --only says: a partial build of social must not put the
+    # call services back in it.
+    calls = sorted({host for host, category in curated_rows(None)
+                    if category == CALLS})
+    curated += [(host, CALLS) for host in calls if (host, CALLS) not in curated]
+    if calls:
+        # A call service is in no category a family switches off (#209):
+        # its taste rows go, for it and its subdomains, before it is filed
+        # under calls. What marks a host as dangerous stays.
+        where = " OR ".join("domain = ? OR domain LIKE ?" for _ in calls)
+        params = [p for host in calls for p in (host, "%." + host)]
+        kept = ", ".join("?" for _ in CALLS_KEEP)
+        removed = db.execute(
+            f"DELETE FROM domains WHERE ({where}) AND category NOT IN ({kept})",
+            params + list(CALLS_KEEP)).rowcount
+        db.commit()
+        print(f"  call services -> {len(calls)} hosts, {removed} rows "
+              "reclassified", flush=True)
     if curated:
         # OR REPLACE, not OR IGNORE: a curated classification is deliberate
         # and should win over a UT1 row that put the same domain elsewhere.

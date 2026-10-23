@@ -1,0 +1,12 @@
+[Unit]
+Description=Download a new KosherOS version for the next restart, when one is due
+After=kosherd.service network-online.target
+Wants=network-online.target
+Requires=kosherd.service
+
+[Service]
+Type=oneshot
+# kosherd checks, and starts the download in the background when there is
+# a newer version; this returns as soon as it knows which. It never
+# restarts the computer.
+ExecStart=/usr/bin/kosherctl updates run --quiet

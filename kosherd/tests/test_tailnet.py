@@ -263,11 +263,65 @@ def test_a_waiting_sign_in_allows_tailscales_sites_but_no_tailnet():
     waiting = tailnet.describe({"BackendState": "NeedsLogin",
                                 "AuthURL": "https://login.tailscale.com/a/abc123",
                                 "CurrentTailnet": None, "Self": {}})
-    assert tailnet.allowance(waiting) == WAITING_NAMES
-    # kosherd's own `tailscale up` still running counts even before the
-    # status shows the address.
+    # Waiting means kosherd's own `tailscale up` is still running...
+    assert tailnet.allowance(waiting, waiting=True) == WAITING_NAMES
     plain = tailnet.describe({"BackendState": "NeedsLogin", "CurrentTailnet": None})
     assert tailnet.allowance(plain, waiting=True) == WAITING_NAMES
+    # ...and an address in the status is not enough on its own:
+    # tailscaled can keep reporting it after the sign-out.
+    assert tailnet.allowance(waiting) == ()
+
+
+STALE_AFTER_SIGN_OUT = {"BackendState": "NeedsLogin",
+                        "AuthURL": "https://login.tailscale.com/a/abc123",
+                        "CurrentTailnet": None, "Self": {}}
+
+
+def test_after_a_sign_out_a_lingering_sign_in_address_allows_nothing(monkeypatch):
+    # The batch VM run: a sign-in started, then a sign-out. The status read
+    # after it (kosherctl tailscale status, and the killed `tailscale up`'s
+    # own last refresh) still carried the AuthURL, and the names were
+    # allowed again with nobody signing in.
+    calls = []
+    monkeypatch.setattr(tailnet, "_allowed", WAITING_NAMES)
+    monkeypatch.setattr(tailnet, "_login", None)
+    monkeypatch.setattr(tailnet, "on_allowed_change", lambda: calls.append(tailnet.allowed()))
+    monkeypatch.setattr(tailnet, "sync_dns", lambda suffix, **k: False)
+    monkeypatch.setattr(tailnet, "status", lambda: tailnet.describe(STALE_AFTER_SIGN_OUT))
+    tailnet.forget()
+    tailnet.refresh_dns()
+    assert tailnet.allowed() == ()
+    assert calls == [()]
+
+
+def test_a_status_read_begun_before_the_sign_out_cannot_land_after_it(monkeypatch):
+    # A poll that read "signed in" just before the sign-out must finish
+    # before forget() clears the names, not after it.
+    import threading
+
+    calls = []
+    reading = threading.Event()
+    release = threading.Event()
+    monkeypatch.setattr(tailnet, "_allowed", ())
+    monkeypatch.setattr(tailnet, "on_allowed_change", lambda: calls.append(tailnet.allowed()))
+    monkeypatch.setattr(tailnet, "sync_dns", lambda suffix, **k: False)
+
+    def slow_status():
+        reading.set()
+        release.wait(5)
+        return tailnet.describe(SIGNED_IN)
+
+    monkeypatch.setattr(tailnet, "status", slow_status)
+    poll = threading.Thread(target=tailnet.refresh_dns)
+    poll.start()
+    reading.wait(5)
+    out = threading.Thread(target=tailnet.forget)
+    out.start()
+    release.set()
+    poll.join(5)
+    out.join(5)
+    assert tailnet.allowed() == ()
+    assert calls == [SIGNED_IN_NAMES, ()]
 
 
 @pytest.mark.parametrize("now", [

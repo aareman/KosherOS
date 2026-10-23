@@ -243,6 +243,10 @@ def sign_out() -> None:
 TAILSCALE_HOSTS = ("tailscale.com", "*.tailscale.com")
 
 _allowed_lock = threading.Lock()
+# One status read and its outcome at a time. A read that began before a
+# sign-out (the killed `tailscale up`'s own last refresh, or the admin
+# app's poll) must not land after it and allow the names again.
+_refresh_lock = threading.RLock()
 _allowed: tuple[str, ...] = ()
 # Set by the daemon: called (from whatever thread noticed) when the list
 # changes, to put the new list into enforcement.
@@ -253,14 +257,18 @@ def allowance(now: dict | None, *, waiting: bool = False) -> tuple[str, ...]:
     """The names every account may reach, from a status() reading.
 
     Tailscale's hosts while the computer is signed in or a sign-in is
-    waiting (an AuthURL in the status, or kosherd's own `tailscale up`
-    still running); and, once signed in, `*.<tailnet>` for that one
-    tailnet's MagicDNS suffix, never all of ts.net. Nothing otherwise.
+    waiting; and, once signed in, `*.<tailnet>` for that one tailnet's
+    MagicDNS suffix, never all of ts.net. Nothing otherwise.
+
+    "Waiting" is kosherd's own `tailscale up` still running, and nothing
+    else. Not the AuthURL in the status: tailscaled can keep reporting
+    the last sign-in address after a sign-out, and the names stayed
+    allowed with nobody signing in.
     """
     if not now or not now.get("installed"):
         return ()
     signed_in = bool(now.get("signed_in"))
-    if not (signed_in or now.get("login_url") or waiting):
+    if not (signed_in or waiting):
         return ()
     names = list(TAILSCALE_HOSTS)
     suffix = dns.tailnet_name(now.get("dns_suffix")) if signed_in else None
@@ -298,8 +306,9 @@ def _sign_in_waiting() -> bool:
 
 def forget() -> None:
     """After a sign-out: no forward, nothing allowed."""
-    sync_dns(None)
-    set_allowed(())
+    with _refresh_lock:
+        sync_dns(None)
+        set_allowed(())
 
 
 # -- the resolvers ------------------------------------------------------------
@@ -351,17 +360,18 @@ def _restart(service: str) -> None:
 def refresh_dns() -> dict | None:
     """Read the status and bring the resolvers, and the names every
     account may reach, in line with it."""
-    try:
-        now = status()
-    except TailnetError as e:
-        log.info("tailscale: %s", e)
-        return None
-    if now.get("state") == "Unavailable":
-        # tailscaled is starting or stopped; what it last said stands.
+    with _refresh_lock:
+        try:
+            now = status()
+        except TailnetError as e:
+            log.info("tailscale: %s", e)
+            return None
+        if now.get("state") == "Unavailable":
+            # tailscaled is starting or stopped; what it last said stands.
+            return now
+        sync_dns(now.get("dns_suffix") if now.get("signed_in") else None)
+        set_allowed(allowance(now, waiting=_sign_in_waiting()))
         return now
-    sync_dns(now.get("dns_suffix") if now.get("signed_in") else None)
-    set_allowed(allowance(now, waiting=_sign_in_waiting()))
-    return now
 
 
 def refresh_dns_later(delay: int = 20) -> None:

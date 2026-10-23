@@ -190,6 +190,11 @@ DaemonClient().set_guardian_password("", sys.argv[1])' "$gpw" >/dev/null 2>&1; t
             grep -q '"\*\.tailscale\.com"' /var/lib/kosher-mitm/rules.json
         check "and they are out of the system set" 1 \
             grep -q "nftset=/tailscale.com/" /etc/kosher/dnsmasq.d/whitelist.conf
+        if grep -q '"\*\.tailscale\.com"' /var/lib/kosher-mitm/rules.json; then
+            # What kosherd saw, for whoever reads the failure.
+            echo "    status after the sign-out: $(kosherctl tailscale status --json 2>&1 | tr -d '\n' | head -c 600)"
+            journalctl -u kosherd -b --no-pager 2>/dev/null | grep -i tailscale | tail -12 | sed 's/^/    /'
+        fi
         got=$(ts_reach wlkid)
         assert_that "after the sign-out a whitelist account cannot reach login.tailscale.com (got $got)" \
             test "$got" = unreachable

@@ -157,6 +157,11 @@ code=$(as "$B" curl -s -o /dev/null -w '%{http_code}' --max-time 5 "http://127.0
 if [ "$code" = 000 ]; then ok "another account cannot open it"; else bad "another account got $code from it"; fi
 pid=$(systemctl show -p MainPID --value "syncthing@$A.service")
 check "the account cannot read into the service's process" 1 as "$A" cat "/proc/$pid/environ"
+label=$(ps -o label= -p "$pid" 2>/dev/null)
+case "$label" in
+    *init_t*|"") bad "the service runs in SELinux domain '${label:-none}'" ;;
+    *) ok "the service runs as an ordinary service ($label)" ;;
+esac
 check "its cgroup is in the set that lets its ports out" 0 in_set syncthing_out
 
 section "Port 22000 is Syncthing's alone"

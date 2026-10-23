@@ -195,6 +195,11 @@ class DaemonClient:
         itself (nix, devbox, devenv from a shell)?"""
         self._call("Profiles", "SetDeveloperTools", "(ibs)", uid, bool(enabled), guardian_password)
 
+    def set_build_sources(self, hosts: list[str], guardian_password: str = "") -> None:
+        """The hosts added to where a Nix build may download from; the
+        built-in ones always apply."""
+        self._call("Profiles", "SetBuildSources", "(ass)", list(hosts), guardian_password)
+
     def set_boot_menu_password(self, password: str, guardian_password: str = "") -> None:
         """Password-protect the boot menu (or change the password)."""
         self._call("Profiles", "SetBootMenuPassword", "(ss)", password, guardian_password)

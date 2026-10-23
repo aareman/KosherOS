@@ -166,18 +166,16 @@ check_contains "kosherd answers any account about a waiting update without bootc
     python3 -c 'from kosherd.client import DaemonClient; import json; print(json.dumps(DaemonClient().pending_update()))'
 
 # Staging, without a restart. The harness's registry (10.0.2.2) is trusted
-# again for this alone, a copy of the running image is pushed under a tag
-# of its own in another manifest format (a new digest, the same layers),
-# the machine is pointed at that tag, and the tag is pushed once more in
-# the first format: the automatic run must find that newer digest,
-# download it, leave it staged, not restart, and announce it once.
+# again for this alone, and the image this machine runs is pushed to its
+# own tag once more in the other manifest format: a new digest with the
+# same layers, which is what a new build looks like to bootc. The run
+# removes this machine's image tag when it ends, and no other machine
+# checks it again. The automatic run must find the newer digest, download
+# it, leave it staged, not restart, and announce it once.
 booted_ref=$(bootc status --format json 2>/dev/null | python3 -c 'import json,sys; print(json.load(sys.stdin)["status"]["booted"]["image"]["image"]["image"])' 2>/dev/null)
 case "$booted_ref" in
 10.0.2.2:*/*:*)
     registry=${booted_ref%%/*}
-    repo=${booted_ref%:*}
-    tag="${booted_ref##*:}-auto19"
-    target="$repo:$tag"
     cp -a /etc/containers/policy.json /run/pr-test-policy.json
     restore_trust() {
         cp -a /run/pr-test-policy.json /etc/containers/policy.json
@@ -188,17 +186,15 @@ case "$booted_ref" in
     printf '[[registry]]\nlocation = "%s"\ninsecure = true\n' "$registry" \
         > /etc/containers/registries.conf.d/50-pr-test-auto.conf
     python3 -c 'import json, sys; p = "/etc/containers/policy.json"; d = json.load(open(p)); d.setdefault("transports", {}).setdefault("docker", {})[sys.argv[1]] = [{"type": "insecureAcceptAnything"}]; json.dump(d, open(p, "w"), indent=4)' "$registry"
-    copy() { skopeo copy --quiet --src-tls-verify=false --dest-tls-verify=false --format "$1" \
-        "docker://$booted_ref" "docker://$target"; }
-    digest() { skopeo inspect --tls-verify=false --format '{{.Digest}}' "docker://$target"; }
+    digest() { skopeo inspect --tls-verify=false --format '{{.Digest}}' "docker://$booted_ref"; }
+    repush() { skopeo copy --quiet --src-tls-verify=false --dest-tls-verify=false --format "$1" \
+        "docker://$booted_ref" "docker://$booted_ref"; }
     booted_digest=$(bootc status --format json | python3 -c 'import json,sys; print(json.load(sys.stdin)["status"]["booted"]["image"]["imageDigest"])')
-    if copy oci && [ "$(digest)" = "$booted_digest" ]; then copy v2s2; fi
-    first=$(digest)
-    if [ -n "$first" ] && bootc switch "$target" >/dev/null 2>&1; then
-        ok "the machine is pointed at a copy of its own image ($tag)"
-        if [ "$first" = "$(digest)" ] && copy v2s2 && [ "$(digest)" = "$first" ]; then copy oci; fi
-        newer=$(digest)
-        assert_that "the copy is pushed again with a newer digest" test "$newer" != "$first"
+    repush oci >/dev/null 2>&1
+    [ "$(digest)" = "$booted_digest" ] && repush v2s2 >/dev/null 2>&1
+    newer=$(digest)
+    if [ -n "$newer" ] && [ "$newer" != "$booted_digest" ]; then
+        ok "the running image is pushed again with a newer digest"
         boot_before=$(cat /proc/sys/kernel/random/boot_id)
         rm -f /run/pr-test-update-ready.log
         busctl --system monitor --match \
@@ -206,38 +202,42 @@ case "$booted_ref" in
             > /run/pr-test-update-ready.log 2>&1 &
         monitor=$!
         sleep 1
-        check_contains "the automatic run finds it and starts downloading" "downloading" \
-            kosherctl updates run --now
-        staged=""
-        for _ in $(seq 1 300); do
-            staged=$(bootc status --format json 2>/dev/null | python3 -c 'import json,sys; s = json.load(sys.stdin)["status"].get("staged") or {}; print((s.get("image") or {}).get("imageDigest") or "")' 2>/dev/null)
-            [ "$staged" = "$newer" ] && grep -q "$newer" /run/pr-test-update-ready.log && break
+        run=$(kosherctl updates run --now 2>&1)
+        if printf '%s' "$run" | grep -q downloading; then
+            ok "the automatic run finds it and starts downloading"
+            staged=""
+            for _ in $(seq 1 200); do
+                staged=$(bootc status --format json 2>/dev/null | python3 -c 'import json,sys; s = json.load(sys.stdin)["status"].get("staged") or {}; print((s.get("image") or {}).get("imageDigest") or "")' 2>/dev/null)
+                [ "$staged" = "$newer" ] && grep -q "$newer" /run/pr-test-update-ready.log && break
+                sleep 3
+            done
+            assert_that "it is staged for the next restart" test "$staged" = "$newer"
+            assert_that "and the computer did not restart" \
+                test "$(cat /proc/sys/kernel/random/boot_id)" = "$boot_before"
+            check_contains "kosherctl says it waits for a restart" "waiting for a restart" kosherctl updates
+            check_contains "any account can see it waits" "$newer" \
+                python3 -c 'from kosherd.client import DaemonClient; print(DaemonClient().pending_update())'
+            # A second run finds the same download and must not announce again.
+            check_contains "a second run sees it is already downloaded" "already downloaded" \
+                kosherctl updates run --now
             sleep 3
-        done
-        assert_that "it is staged for the next restart" test "$staged" = "$newer"
-        assert_that "and the computer did not restart" test "$(cat /proc/sys/kernel/random/boot_id)" = "$boot_before"
-        check_contains "kosherctl says it waits for a restart" "waiting for a restart" kosherctl updates
-        check_contains "any account can see it waits" "$newer" \
-            python3 -c 'from kosherd.client import DaemonClient; print(DaemonClient().pending_update())'
-        # A second run finds the same download and must not announce again.
-        check_contains "a second run sees it is already downloaded" "already downloaded" \
-            kosherctl updates run --now
-        sleep 3
-        kill "$monitor" 2>/dev/null
-        announced=$(grep -c 'BOOLEAN true' /run/pr-test-update-ready.log)
-        assert_that "the notice was sent once ($announced)" test "$announced" = 1
-        # Put the machine back: the staged copy is discarded.
-        index=$(ostree admin status | awk '/\(staged\)/ {print n} /^[* ] / {n++}' | head -1)
-        if [ -n "$index" ] && ostree admin undeploy "$index" >/dev/null 2>&1; then
-            ok "the staged copy is discarded again"
+            announced=$(grep -c 'BOOLEAN true' /run/pr-test-update-ready.log)
+            assert_that "the notice was sent once ($announced)" test "$announced" = 1
+            # Put the machine back: the staged copy is discarded.
+            out=$(ostree admin undeploy 0 2>&1)
+            if [ ! -e /run/ostree/staged-deployment ]; then
+                ok "the staged copy is discarded again"
+            else
+                bad "could not discard the staged copy: $out"
+            fi
+            check_contains "and once it is gone, nothing waits" "{}" \
+                python3 -c 'from kosherd.client import DaemonClient; import json; print(json.dumps(DaemonClient().pending_update()))'
         else
-            bad "could not discard the staged copy (ostree admin status: $(ostree admin status | head -c 300))"
+            bad "the automatic run did not start a download: $run; kosherd: $(journalctl -u kosherd --no-pager -o cat -n 400 | grep -i -E 'automatic|update' | tail -5 | tr '\n' ' ' | head -c 900); check: $(kosherctl system check 2>&1 | head -c 300)"
         fi
-        sleep 2
-        check_contains "and once it is gone, nothing waits" "{}" \
-            python3 -c 'from kosherd.client import DaemonClient; import json; print(json.dumps(DaemonClient().pending_update()) if DaemonClient().pending_update() else "{}")'
+        kill "$monitor" 2>/dev/null
     else
-        skip "could not push a copy of the running image to $registry: staging not checked"
+        skip "could not push the running image again with a new digest: staging not checked"
     fi
     restore_trust
     trap - EXIT

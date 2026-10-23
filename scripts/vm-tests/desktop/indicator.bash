@@ -42,6 +42,11 @@ indicator_owned() {
 
 indicator_gone() { ! indicator_owned; }
 
+indicator_tray() {
+    indicator_busctl call org.freedesktop.DBus /org/freedesktop/DBus org.freedesktop.DBus \
+        NameHasOwner s org.kde.StatusNotifierWatcher 2>/dev/null | grep -q true
+}
+
 # Pretend kosherd noted a staged update this boot, or that none waits.
 # The real note is kept aside and put back by indicator_restore. kosherd
 # also looks for ostree's own marker of a staged deployment, so the check
@@ -95,8 +100,14 @@ indicator_wait() {
 # The whole check, under a label ("GNOME", "niri", ...).
 indicator_check() {
     local where="$1"
-    if ! indicator_busctl status org.kde.StatusNotifierWatcher >/dev/null 2>&1; then
-        bad "$where: no tray (org.kde.StatusNotifierWatcher) on $u's session bus"
+    if ! indicator_wait 30 indicator_tray; then
+        local uid names ext
+        uid=$(id -u "$u")
+        names=$(indicator_busctl list --no-legend 2>&1 | awk '{print $1}' | grep -i -E 'notifier|watcher|^org\.gnome\.Shell' | tr '\n' ' ')
+        ext=$(runuser -u "$u" -- env XDG_RUNTIME_DIR="/run/user/$uid" \
+            DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$uid/bus" \
+            gnome-extensions info appindicatorsupport@rgcjonas.gmail.com 2>&1 | tr '\n' ' ' | head -c 400)
+        bad "$where: no tray (org.kde.StatusNotifierWatcher) on $u's session bus; names: ${names:-none}; appindicator: ${ext:-?}"
         return
     fi
     indicator_clear

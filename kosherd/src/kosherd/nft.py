@@ -30,6 +30,7 @@ Design (see docs/architecture.md):
 
 from __future__ import annotations
 
+from . import syncthing as st
 from .dns import SAFESEARCH_ADDRESSES
 from .policy import INSPECTED_MODES, UNFILTERED_MODES, Policy
 
@@ -149,6 +150,14 @@ GIT_SSH_PORT = 22
 # is a per-account switch (UserPolicy.video_calls), on by default.
 UDP_HIGH = 1024
 UDP_LOW_ALLOWED = (123,)
+# Syncthing's ports (#213; syncthing.py). For every supervised account
+# the only thing that may use them is Syncthing itself: its own system
+# service, matched by cgroup, for an account allowed to have it. They are
+# never redirected into the proxy (Syncthing's TLS is pinned, so it could
+# only fail there) and are refused for everything else the account runs.
+SYNCTHING_TCP = st.OUT_TCP
+SYNCTHING_UDP = st.OUT_UDP
+SYNCTHING_CGROUP = f"socket cgroupv2 level {st.CGROUP_LEVEL}"
 
 
 def _set_block(name: str, addr_type: str, elements: tuple[str, ...] = (), *, interval: bool = False, timeout: bool = False) -> str:
@@ -178,7 +187,8 @@ def _extras(user) -> tuple[int, ...]:
 def render(policy: Policy, *, dns_uid: int, mitm_uid: int | None = None,
            search_uid: int | None = None, build_gid: int | None = None,
            subids: dict[int, list[tuple[int, int]]] | None = None,
-           doh_block4: tuple[str, ...] = DEFAULT_DOH_BLOCK4) -> str:
+           doh_block4: tuple[str, ...] = DEFAULT_DOH_BLOCK4,
+           syncthing: dict | None = None) -> str:
     """Return a complete `nft -f`-loadable ruleset for this policy.
 
     dns_uid: UID dnsmasq runs as — exempt from the port-53 redirect so its
@@ -194,8 +204,12 @@ def render(policy: Policy, *, dns_uid: int, mitm_uid: int | None = None,
     root there runs on the host as one of these ids, so every rule that
     names the account names its blocks too: the container is filtered as
     its owner.
+    syncthing: each account's Syncthing ports ({"gui": {uid: port},
+    "listen": {uid: port}}, syncthing.nft_inputs): the GUI is closed to
+    other accounts, and the listening port is what the LAN may reach.
     """
     subids = subids or {}
+    syncthing = syncthing or {}
 
     def owner(uid: int) -> list[str]:
         """The uid and its blocks, as nft set elements."""
@@ -246,10 +260,11 @@ def render(policy: Policy, *, dns_uid: int, mitm_uid: int | None = None,
         # that is not redirected is a port that is not read. The
         # exceptions are 53 (the resolver's, redirected above), the named
         # non-web protocols, the server-first ones (refused in the mode
-        # chain rather than left to hang in the proxy), and the account's
-        # own extra ports.
+        # chain rather than left to hang in the proxy), Syncthing's (let
+        # out for its own service and refused for everything else in the
+        # output chain) and the account's own extra ports.
         web_redirect = "".join(
-            f"        meta skuid {owner_match(uid)} tcp dport != {{ {_ports(53, *DIRECT_TCP_PORTS, *SERVER_FIRST_TCP_PORTS, *_extras(by_uid.get(uid)))} }} "
+            f"        meta skuid {owner_match(uid)} tcp dport != {{ {_ports(53, *DIRECT_TCP_PORTS, *SERVER_FIRST_TCP_PORTS, *SYNCTHING_TCP, *_extras(by_uid.get(uid)))} }} "
             f"redirect to :{port}\n"
             for uid, port in ports.items())
     else:
@@ -272,6 +287,61 @@ def render(policy: Policy, *, dns_uid: int, mitm_uid: int | None = None,
         per_user += (
             f"        meta skuid {{ {elems} }} ip daddr @git4 tcp dport {GIT_SSH_PORT} accept\n"
             f"        meta skuid {{ {elems} }} ip6 daddr @git6 tcp dport {GIT_SSH_PORT} accept\n")
+    # Syncthing (#213), ahead of everything else per account: its ports
+    # are open to the account's own Syncthing service — the socket's
+    # cgroup is that unit's, which kosherd adds to @syncthing_out while
+    # the service runs — and to nothing else the account runs, extra
+    # ports and video calls included. Global discovery and the relay
+    # list are pinned HTTPS, so the service reaches them on 443 directly,
+    # at the addresses dnsmasq resolved for those names only (@st4/@st6).
+    st_users = [u for u in policy.users if st.allowed(u)]
+    st_uids = ", ".join(str(u.uid) for u in sorted(st_users, key=lambda u: u.uid))
+    st_match = (f"meta skuid {{ {st_uids} }} {SYNCTHING_CGROUP} @{st.SET_OUT}"
+                if st_uids else "")
+    syncthing_rules = (
+        f"        {st_match} tcp dport {{ {_ports(*SYNCTHING_TCP)} }} accept\n"
+        f"        {st_match} udp dport {{ {_ports(*SYNCTHING_UDP)} }} accept\n"
+        f"        {st_match} ip daddr @st4 tcp dport 443 accept\n"
+        f"        {st_match} ip6 daddr @st6 tcp dport 443 accept\n"
+        if st_match else "")
+    held = sorted(u.uid for u in policy.effective_users() if u.mode not in UNFILTERED_MODES)
+    if held:
+        elems = ", ".join(e for uid in held for e in owner(uid))
+        syncthing_rules += (
+            f"        meta skuid {{ {elems} }} tcp dport {{ {_ports(*SYNCTHING_TCP)} }} reject\n"
+            f"        meta skuid {{ {elems} }} udp dport {{ {_ports(*SYNCTHING_UDP)} }} reject\n")
+    per_user = syncthing_rules + per_user
+    # Its discovery on 443 is not redirected into the proxy either.
+    syncthing_nat = (
+        f"        {st_match} ip daddr @st4 tcp dport 443 return\n"
+        f"        {st_match} ip6 daddr @st6 tcp dport 443 return\n"
+        if st_match else "")
+    # Its web page, on loopback, is its owner's: closed to every other
+    # account (loopback is otherwise open to all).
+    gui_ports = syncthing.get("gui", {}) or {}
+    syncthing_gui = "".join(
+        f"        ip daddr 127.0.0.0/8 tcp dport {int(port)} meta skuid != {owner_match(int(uid))} "
+        f"meta skuid >= {UID_MIN} reject\n"
+        for uid, port in sorted(gui_ports.items()))
+    # Devices on the home network reaching the service, for the accounts
+    # whose administrator allowed it: from the LAN ranges only, to the
+    # account's listening port and local discovery, and only into a
+    # socket of an allowed Syncthing service (@syncthing_lan). Nothing
+    # from the internet, ever.
+    listen_ports = syncthing.get("listen", {}) or {}
+    lan_users = [u for u in st_users if u.syncthing_lan]
+    if lan_users:
+        ports_in = sorted({int(listen_ports.get(u.uid, st.LISTEN_PORT_BASE)) for u in lan_users})
+        lan_match = f"{SYNCTHING_CGROUP} @{st.SET_LAN}"
+        lan6 = ", ".join(LAN6)
+        syncthing_in = (
+            "        # Syncthing, from the home network only (#213).\n"
+            f"        ip saddr @lan4 tcp dport {{ {_ports(*ports_in)} }} {lan_match} accept\n"
+            f"        ip saddr @lan4 udp dport {{ {_ports(st.DISCOVERY_PORT, *ports_in)} }} {lan_match} accept\n"
+            f"        ip6 saddr {{ {lan6} }} tcp dport {{ {_ports(*ports_in)} }} {lan_match} accept\n"
+            f"        ip6 saddr {{ {lan6} }} udp dport {{ {_ports(st.DISCOVERY_PORT, *ports_in)} }} {lan_match} accept\n")
+    else:
+        syncthing_in = ""
     no_video = sorted(u.uid for u in supervised if not u.video_calls)
     if no_video:
         elems = [e for uid in no_video for e in owner(uid)]
@@ -342,6 +412,17 @@ table {TABLE} {{
     # The git hosts' addresses (GIT_SSH_HOSTS), filled by dnsmasq.
 {_set_block("git4", "ipv4_addr")}
 {_set_block("git6", "ipv6_addr")}
+    # Syncthing's discovery servers and relay list (syncthing.HOSTS),
+    # filled by dnsmasq, and the cgroups of the Syncthing services that may
+    # use its ports, filled by kosherd once each service runs (syncthing.py).
+{_set_block("st4", "ipv4_addr")}
+{_set_block("st6", "ipv6_addr")}
+    set {st.SET_OUT} {{
+        typeof {SYNCTHING_CGROUP};
+    }}
+    set {st.SET_LAN} {{
+        typeof {SYNCTHING_CGROUP};
+    }}
 {_set_block("doh4", "ipv4_addr", doh_block4, interval=True)}
 {_set_block("lan4", "ipv4_addr", LAN4, interval=True)}
     # Every address the dnsfilter resolver handed out (its nftset=/#/ line),
@@ -364,11 +445,11 @@ table {TABLE} {{
         meta skuid {{ 0, {dns_uid}{mitm_exempt}{search_exempt} }} return
 {build_redirect}{open_dns}        udp dport 53 redirect to :53
         tcp dport 53 redirect to :53
-{web_redirect}    }}
+{syncthing_nat}{web_redirect}    }}
 
     chain output {{
         type filter hook output priority filter; policy accept;
-{build_loopback}{backend_guard}{open_dns_guard}        oif "lo" accept
+{build_loopback}{backend_guard}{open_dns_guard}{syncthing_gui}        oif "lo" accept
         # A packet the nat rules just redirected (DNS to the resolver, web to
         # the proxy) already has a loopback DESTINATION here, but this hook
         # still sees the interface of its original route — so `oif "lo"`
@@ -400,7 +481,7 @@ table {TABLE} {{
         meta l4proto {{ icmp, ipv6-icmp }} accept
         udp dport {{ 68, 546 }} accept
         udp dport 5353 accept
-        # Dev convenience; the production image ships with sshd disabled.
+{syncthing_in}        # Dev convenience; the production image ships with sshd disabled.
         tcp dport 22 accept
     }}
 
@@ -459,6 +540,8 @@ table {TABLE} {{
         ip6 daddr @sys6 tcp dport {{ {dnsfilter_tcp} }} accept
         ip daddr @git4 tcp dport {{ {dnsfilter_tcp} }} accept
         ip6 daddr @git6 tcp dport {{ {dnsfilter_tcp} }} accept
+        ip daddr @st4 tcp dport {{ {dnsfilter_tcp} }} accept
+        ip6 daddr @st6 tcp dport {{ {dnsfilter_tcp} }} accept
         udp dport {{ {_ports(*UDP_LOW_ALLOWED)} }} accept
         udp dport >= {UDP_HIGH} accept
         reject

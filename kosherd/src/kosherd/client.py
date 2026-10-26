@@ -316,6 +316,16 @@ class DaemonClient:
                               guardian_password: str = "") -> None:
         self._call("Apps", "SetUserBlockedApps", "(iass)", uid, refs, guardian_password)
 
+    def set_user_app_approval(self, uid: int, ref: str, approved: bool,
+                              guardian_password: str = "") -> None:
+        """Approve an app for one account (Syncthing: appaccess.INDIVIDUAL_APPROVAL)."""
+        self._call("Apps", "SetUserAppApproval", "(isbs)", uid, ref, bool(approved),
+                   guardian_password)
+
+    def set_syncthing_lan(self, uid: int, enabled: bool, guardian_password: str = "") -> None:
+        """Let devices on the home network connect to this account's Syncthing."""
+        self._call("Apps", "SetSyncthingLan", "(ibs)", uid, bool(enabled), guardian_password)
+
     def list_installed(self) -> list[str]:
         return self._call("Apps", "ListInstalled")[0]
 

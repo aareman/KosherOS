@@ -566,6 +566,18 @@
         "developer_tools": {
           "type": "boolean",
           "description": "May use the Nix daemon and reach the package registries directly (nix, devbox, devenv from a shell). Default false."
+        },
+        "approved_apps": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "uniqueItems": true,
+          "description": "Apps an administrator approved for this account alone, for the apps that need it (appaccess.INDIVIDUAL_APPROVAL: Syncthing, whose files arrive without passing the filter)."
+        },
+        "syncthing_lan": {
+          "type": "boolean",
+          "description": "Devices on the home network may connect to this account's Syncthing directly (TCP 22000, UDP 22000 and 21027, from the LAN ranges only). Default false."
         }
       }
     },

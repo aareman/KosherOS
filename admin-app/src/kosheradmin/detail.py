@@ -1124,6 +1124,64 @@ class UserDetailPage(Adw.NavigationPage):
         group.add(row)
         return group
 
+    def _syncthing_group(self, user: dict) -> Adw.PreferencesGroup:
+        """Syncthing for this account (#213). A supervised account needs it
+        allowed here, one account at a time, whatever its app access: the
+        dialog says what that means. The home-network switch is for any
+        account."""
+        ref = labels.SYNCTHING_REF
+        group = Adw.PreferencesGroup(
+            title="Syncthing",
+            description="Keeps folders the same on this account's computers and phone.")
+        if appaccess.needs_individual_approval(user):
+            approved = ref in (user.get("approved_apps") or [])
+            allow = Adw.SwitchRow(
+                title="Allow Syncthing",
+                subtitle="Files from paired devices aren't checked by the filter.",
+                subtitle_lines=2, active=approved)
+
+            def set_allowed(wanted: bool):
+                self._gated(lambda pw: self.win.client.set_user_app_approval(
+                    user["uid"], ref, wanted, pw),
+                    f"{user['username']}: Syncthing {'allowed' if wanted else 'no longer allowed'}")
+
+            def on_allow(switch, _param):
+                wanted = switch.get_active()
+                if wanted == (ref in (user.get("approved_apps") or [])):
+                    return
+                if not wanted:
+                    set_allowed(False)
+                    return
+                heading, body = labels.syncthing_approval(user["username"])
+                dialog = confirm(self.win, heading, body, "Allow",
+                                 lambda: set_allowed(True), destructive=False)
+                # Cancelled: the switch goes back to off.
+                dialog.connect("response", lambda _d, r: r != "yes" and switch.set_active(False))
+
+            allow.connect("notify::active", on_allow)
+            group.add(allow)
+        else:
+            group.add(Adw.ActionRow(
+                title="Allowed for this account",
+                subtitle="It can be installed from the Store like any other app.",
+                subtitle_lines=2))
+
+        lan = Adw.SwitchRow(title=labels.SYNCTHING_LAN_TITLE,
+                            subtitle=labels.SYNCTHING_LAN_HINT, subtitle_lines=3,
+                            active=bool(user.get("syncthing_lan", False)))
+
+        def on_lan(switch, _param):
+            wanted = switch.get_active()
+            if wanted == bool(user.get("syncthing_lan", False)):
+                return
+            self._gated(lambda pw: self.win.client.set_syncthing_lan(user["uid"], wanted, pw),
+                        f"{user['username']}: Syncthing "
+                        + ("reachable from this network" if wanted else "connects out only"))
+
+        lan.connect("notify::active", on_lan)
+        group.add(lan)
+        return group
+
     def _apps_tab(self, user: dict) -> list[Adw.PreferencesGroup]:
         """Apps on this computer, from one user's point of view.
 
@@ -1207,7 +1265,7 @@ class UserDetailPage(Adw.NavigationPage):
         self.apps_list.append(Adw.ActionRow(title="Loading…"))
         self.apps_group.add(self.apps_list)
         self._load_apps(user)
-        return [installs_group, self._developer_group(user), kinds_group,
+        return [installs_group, self._developer_group(user), self._syncthing_group(user), kinds_group,
                 self.blocked_apps_group, self.apps_group]
 
     # -- kinds --
@@ -1322,6 +1380,7 @@ class UserDetailPage(Adw.NavigationPage):
         if reason and reason != "blocked":
             row.add_suffix(tag({"kind": f"{appkinds.label(app.get('kind', 'other'))} blocked",
                                 "not-approved": "not approved",
+                                "needs-approval": "not allowed for this account",
                                 "content": "content rating restricted",
                                 "circumvention": "can bypass filtering",
                                 "unknown": "not in the app list"}.get(reason, reason)))

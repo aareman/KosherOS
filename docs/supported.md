@@ -11,6 +11,7 @@ behind it in the repository; where a limit is stated, it is a real one.
 | Firefox | supported | The filter's certificate is trusted through the enterprise-roots policy the image ships. |
 | GNOME Web (Epiphany), Chromium and other browsers | supported | They read the system trust store, which holds the filter's certificate. |
 | Any Flatpak app that fetches from the web | supported | Same system trust store; the app must be approved in the KosherOS Store first. |
+| Syncthing | with an administrator's permission | From the Store. Files from paired devices are not filtered; see [content filtering](content-filtering.md#syncthing). |
 | Sites behind a captive portal (hotel, airport Wi‑Fi) | supported | "Allow Wi‑Fi sign‑in" on the person's page opens a ten‑minute window; filtering resumes on its own. |
 | Certificate pinning inside an app | not filtered, not broken | An app that pins its own certificate refuses the filter's; such traffic is blocked rather than passed through. |
 

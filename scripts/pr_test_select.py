@@ -22,9 +22,10 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 
-SUITES = ["10-core", "20-enforcement", "30-apps", "40-guest", "50-inspect",
+SUITES = ["10-core", "20-enforcement", "30-apps", "35-syncthing", "40-guest", "50-inspect",
           "60-persistence", "70-categories", "80-hardening", "90-developer"]
-FILTER_SUITES = ["10-core", "20-enforcement", "50-inspect", "70-categories", "80-hardening"]
+FILTER_SUITES = ["10-core", "20-enforcement", "35-syncthing", "50-inspect", "70-categories",
+                 "80-hardening"]
 DESKTOP_PARTS = {"session", "filter"}
 
 # Lines of os-image/Containerfile that can change power-on to setup.
@@ -146,7 +147,7 @@ def select(changed: list[str], containerfile_diff: str = "", everything: bool = 
             elif what == "policy":
                 sel.add(reason, suites=["10-core", "20-enforcement", "60-persistence", "70-categories"])
             elif what == "store":
-                sel.add(reason, desktop={"session"}, suites=["30-apps", "90-developer"])
+                sel.add(reason, desktop={"session"}, suites=["30-apps", "35-syncthing", "90-developer"])
             elif what == "desktop":
                 sel.add(reason, desktop={"session"})
             break

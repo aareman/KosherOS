@@ -9,12 +9,16 @@ not care which of the two it is.
 
 from __future__ import annotations
 
-from . import nixapps, upstreamapps
+from . import nixapps, syncthing, upstreamapps
 
-ERRORS = (nixapps.NixAppError, upstreamapps.UpstreamAppError)
+ERRORS = (nixapps.NixAppError, upstreamapps.UpstreamAppError, syncthing.SyncthingError)
 
 
 def kind(ref: str):
+    # Before nixapps: Syncthing is a nixpkgs ref, but kosherd builds it
+    # itself and runs it as a system service for the account (#213).
+    if syncthing.is_syncthing(ref):
+        return syncthing
     if nixapps.is_nix(ref):
         return nixapps
     if upstreamapps.is_upstream(ref):
@@ -31,7 +35,9 @@ def package(ref: str) -> str:
 
 
 def installed(uid: int) -> set[str]:
-    return set(nixapps.installed(uid)) | upstreamapps.installed(uid)
+    # A syncthing a developer put in their own profile is not the Store's.
+    return ((set(nixapps.installed(uid)) - {syncthing.REF}) | upstreamapps.installed(uid)
+            | syncthing.installed(uid))
 
 
 def _act(name: str, ref: str, uid: int, on_progress, as_root: bool) -> None:

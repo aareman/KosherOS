@@ -3030,6 +3030,79 @@ def test_usage_numbers_read_as_people_write_them():
     assert usage.millis(usage.usage_mod.SLOWEST_MS) == "over 5 s"
 
 
+# -- Syncthing, one account at a time (#213) ------------------------------------------
+
+class SyncthingClient(FakeClient):
+    def set_user_app_approval(self, uid, ref, approved, pw=""):
+        self.calls.append(("approve", uid, ref, approved))
+
+    def set_syncthing_lan(self, uid, enabled, pw=""):
+        self.calls.append(("lan", uid, enabled))
+
+
+def _syncthing_page(user):
+    win = FakeWindow(SyncthingClient())
+    win.policy = {"revision": 1, "users": [user], "custom_profiles": [],
+                  "guardian": {"enabled": False}, "guest": {"enabled": False}}
+    page = detail.UserDetailPage(win, user)
+    page.stack.set_visible_child_name("apps")
+    drain()
+    return page, win
+
+
+def test_the_syncthing_dialog_says_plainly_that_its_files_are_not_filtered():
+    heading, body = labels.syncthing_approval("yosef")
+    assert heading == "Allow Syncthing for yosef?"
+    assert "aren't checked by the filter" in body
+    # One or two sentences, nothing more.
+    assert body.count(". ") + 1 <= 2 and body.endswith(".")
+
+
+def test_allowing_syncthing_asks_first_and_only_then_approves(monkeypatch):
+    shown = []
+
+    def fake_confirm(parent, heading, body, verb, on_yes, destructive=True):
+        dialog = Adw.AlertDialog(heading=heading, body=body)
+        shown.append((heading, body, verb, on_yes, dialog))
+        return dialog
+
+    monkeypatch.setattr(detail, "confirm", fake_confirm)
+    page, win = _syncthing_page(a_user())
+    row = _row_named(page, "Allow Syncthing")
+    assert not row.get_active()
+    row.set_active(True)
+    drain()
+    assert len(shown) == 1 and shown[0][0] == "Allow Syncthing for yosef?"
+    assert not [c for c in win.client.calls if c[0] == "approve"], "nothing before the answer"
+    # Cancelled: nothing approved, and the switch goes back.
+    shown[0][4].emit("response", "cancel")
+    drain()
+    assert not row.get_active()
+    assert not [c for c in win.client.calls if c[0] == "approve"]
+    # Allowed.
+    row.set_active(True)
+    drain()
+    shown[-1][3]()
+    drain()
+    assert ("approve", 1001, "nixpkgs#syncthing", True) in win.client.calls
+
+
+def test_the_home_network_switch_is_off_by_default_and_saved():
+    page, win = _syncthing_page(a_user(approved_apps=["nixpkgs#syncthing"]))
+    lan = _row_named(page, labels.SYNCTHING_LAN_TITLE)
+    assert not lan.get_active()
+    lan.set_active(True)
+    drain()
+    assert ("lan", 1001, True) in win.client.calls
+
+
+def test_an_administrator_needs_no_approval_for_syncthing():
+    page, _win = _syncthing_page(a_user(admin=True, mode="unfiltered"))
+    titles = {r.get_title() for r in _rows(page)}
+    assert "Allow Syncthing" not in titles
+    assert "Allowed for this account" in titles
+
+
 # -- automatic updates (#19) -------------------------------------------------------
 
 def test_the_updates_page_shows_the_schedule_and_the_notice_from_the_policy():

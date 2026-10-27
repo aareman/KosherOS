@@ -1122,6 +1122,22 @@ def cmd_check_catalog(args) -> int:
     return 1 if missing else 0
 
 
+def cmd_advanced(args) -> int:
+    """kosherctl advanced [tailscale|syncthing [on|off]]"""
+    c = _client()
+    if args.feature and args.value:
+        on = args.value == "on"
+        setter = {"tailscale": c.set_tailscale_enabled,
+                  "syncthing": c.set_syncthing_enabled}[args.feature]
+        setter(on, _guardian_pw(args))
+        print(f"{args.feature}: {'on' if on else 'off'}")
+        return 0
+    advanced = c.get_policy().get("advanced") or {}
+    for feature in ([args.feature] if args.feature else ["tailscale", "syncthing"]):
+        print(f"{feature}: {'on' if advanced.get(feature) else 'off'}")
+    return 0
+
+
 def cmd_captive(args) -> int:
     _client().set_captive_mode(args.uid, args.minutes)
     print(f"captive-portal window open for uid {args.uid} ({args.minutes}m)")
@@ -1145,6 +1161,8 @@ def cmd_tailscale(args) -> int:
         print(json.dumps(now, indent=2))
     elif not now.get("installed", True):
         print("Tailscale is not installed")
+    elif not now.get("enabled", True):
+        print("Tailscale is switched off on this computer (kosherctl advanced tailscale on)")
     elif not now.get("signed_in"):
         print(f"not signed in ({now.get('state')})"
               + (f": {now['error']}" if now.get("error") else ""))
@@ -1561,6 +1579,12 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("--json", action="store_true", help="status as JSON")
     s.add_argument("--guardian-password")
     s.set_defaults(func=cmd_tailscale)
+
+    s = sub.add_parser("advanced", help="Tailscale and Syncthing, off until switched on")
+    s.add_argument("feature", nargs="?", choices=["tailscale", "syncthing"])
+    s.add_argument("value", nargs="?", choices=["on", "off"])
+    s.add_argument("--guardian-password")
+    s.set_defaults(func=cmd_advanced)
 
     s = sub.add_parser("guardian", help="manage the guardian password")
     s.add_argument("action", choices=["enable", "set-password", "disable"])

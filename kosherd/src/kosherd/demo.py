@@ -136,6 +136,9 @@ class DemoClient:
     def __init__(self):
         self.policy = {
             "revision": 3, "guardian": {"enabled": True}, "adblock": {"enabled": True},
+            # On in the demo so every page has something to show; a new
+            # install has both off.
+            "advanced": {"tailscale": True, "syncthing": True},
             "custom_profiles": [profiles.to_dict(g) for g in DEMO_GROUPS],
             "users": [
                 _user(1000, "avi", "grown-up", admin=True),
@@ -380,6 +383,9 @@ class DemoClient:
     # Tailscale: signed out to begin with; signing in "finishes in the
     # browser" on the second look at the status.
     def tailscale_status(self):
+        if not self.policy["advanced"].get("tailscale"):
+            return {"enabled": False, "installed": True, "state": "Off",
+                    "signed_in": False, "connected": False}
         looks = getattr(self, "_tailscale_looks", None)
         if looks is not None:
             self._tailscale_looks = looks + 1
@@ -403,6 +409,14 @@ class DemoClient:
     def tailscale_sign_out(self):
         self._tailscale = False
         self._change(None, "TailscaleSignOut", [])
+
+    def set_tailscale_enabled(self, enabled, guardian_password=""):
+        self.policy["advanced"]["tailscale"] = bool(enabled)
+        self._change(None, "SetTailscaleEnabled", [bool(enabled)])
+
+    def set_syncthing_enabled(self, enabled, guardian_password=""):
+        self.policy["advanced"]["syncthing"] = bool(enabled)
+        self._change(None, "SetSyncthingEnabled", [bool(enabled)])
 
     def set_network_access(self, uid, video_calls, extra_ports, pw=""):
         u = self._user(uid)
@@ -596,7 +610,9 @@ class DemoClient:
             account = next(u for u in self.policy["users"] if u.get("admin"))
         index = [*self.catalog, *DEMO_STORE_APPS]
         return {"access": appaccess.access_of(account), "ready": True,
-                "apps": appaccess.visible(account, index, self.catalog)}
+                "apps": appaccess.visible(account, index, self.catalog,
+                                          () if self.policy["advanced"].get("syncthing")
+                                          else ("nixpkgs#syncthing",))}
 
     def set_user_app_access(self, uid, access, guardian_password=""):
         self._user(uid)["app_access"] = access

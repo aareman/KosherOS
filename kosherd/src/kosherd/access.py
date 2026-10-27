@@ -205,6 +205,10 @@ ACTIONS = {
     # and letting the home network reach it, are guardian-gated.
     "SetUserAppApproval": ACTION_INSTALL_APPS,
     "SetSyncthingLan": ACTION_MANAGE_FILTER,
+    # Syncthing for the whole computer (#220): off, nobody has it and the
+    # Store does not offer it. On, an administrator's account and an
+    # unfiltered one may install it with no approval, so it is gated.
+    "SetSyncthingEnabled": ACTION_MANAGE_FILTER,
     "SearchApps": ACTION_READ_CONFIG,
     "ApproveApp": ACTION_INSTALL_APPS,
     "UnapproveApp": ACTION_INSTALL_APPS,
@@ -255,6 +259,10 @@ ACTIONS = {
     "TailscaleStatus": ACTION_READ_CONFIG,
     "TailscaleSignIn": ACTION_MANAGE_NETWORK,
     "TailscaleSignOut": ACTION_MANAGE_NETWORK,
+    # Whether tailscaled runs at all (#220). Starting it opens nothing
+    # until it is signed in, which is gated on its own; it is gated anyway
+    # so both of the Advanced switches ask the same way.
+    "SetTailscaleEnabled": ACTION_MANAGE_NETWORK,
     "IsEnabled": ACTION_READ_CONFIG,
     "SetGuardianPassword": ACTION_MANAGE_GUARDIAN,
     "DisableGuardian": ACTION_MANAGE_GUARDIAN,
@@ -271,8 +279,8 @@ GUARDIAN_GATED = frozenset({
     "SetDeveloperTools", "SetBuildSources",
     "SetBootMenuPassword",
     "SetUserAppAccess", "SetUserBlockedAppKinds", "SetUserBlockedApps",
-    "SetUserAppApproval", "SetSyncthingLan",
-    "TailscaleSignIn",
+    "SetUserAppApproval", "SetSyncthingLan", "SetSyncthingEnabled",
+    "TailscaleSignIn", "SetTailscaleEnabled",
 })
 
 # First-boot only; closed forever once setup is stamped complete.
@@ -309,7 +317,7 @@ CHANGES = frozenset({
     "InstallAppFor", "ApproveApp",
     "UnapproveApp", "SetUserCanInstall", "SetUserAppAccess",
     "SetUserBlockedAppKinds", "SetUserBlockedApps", "SetCaptiveMode",
-    "SetUserAppApproval", "SetSyncthingLan",
+    "SetUserAppApproval", "SetSyncthingLan", "SetSyncthingEnabled",
     "SetGuardianPassword", "DisableGuardian", "Enrol", "Unenrol",
     # Moving the system in either direction. The log answers "who changed
     # this machine, and when", and changing which OS image it runs is
@@ -325,7 +333,7 @@ CHANGES = frozenset({
     # A test build put on the machine, and the return from it.
     "TryImage", "ReturnToKept",
     # Joining a tailnet and leaving it.
-    "TailscaleSignIn", "TailscaleSignOut",
+    "TailscaleSignIn", "TailscaleSignOut", "SetTailscaleEnabled",
 })
 # Changes whose first argument is the account they are about.
 PER_USER = frozenset({

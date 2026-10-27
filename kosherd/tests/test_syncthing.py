@@ -35,7 +35,7 @@ def user(uid=1001, name="kid", mode="filtered", **kw) -> UserPolicy:
 
 
 def render(*users: UserPolicy, gui=None, listen=None) -> str:
-    return nft.render(Policy(revision=1, users=list(users)), dns_uid=988, mitm_uid=987,
+    return nft.render(Policy(syncthing=True, revision=1, users=list(users)), dns_uid=988, mitm_uid=987,
                       syncthing={"gui": gui or {}, "listen": listen or {}})
 
 
@@ -248,7 +248,7 @@ def test_a_whitelist_account_is_not_opened_by_anothers_syncthing():
 
 def test_the_syncthing_sets_catch_its_own_names_and_nothing_else():
     wl = user(1001, "wlkid", mode="whitelist", whitelist=["example.com", "syncthing.net"])
-    conf = dns.render(Policy(revision=1, users=[wl, user(1004, approved_apps=[REF])]))
+    conf = dns.render(Policy(syncthing=True, revision=1, users=[wl, user(1004, approved_apps=[REF])]))
     st_lines = [l for l in conf.splitlines() if "#st4" in l or "#st6" in l]
     names = {l.split("/")[1] for l in st_lines}
     assert names == set(st.HOSTS)
@@ -263,7 +263,7 @@ def test_the_syncthing_sets_catch_its_own_names_and_nothing_else():
 # ---- DNS -------------------------------------------------------------------------
 
 def test_dnsmasq_fills_the_discovery_sets():
-    conf = dns.render(Policy(revision=1, users=[user()]))
+    conf = dns.render(Policy(syncthing=True, revision=1, users=[user()]))
     for host in st.HOSTS:
         assert f"nftset=/{host}/4#inet#kosher#st4,6#inet#kosher#st6" in conf
 
@@ -327,7 +327,7 @@ def test_a_fresh_config_listens_on_the_accounts_port(tmp_path):
 # ---- the run state and the helper ----------------------------------------------------
 
 def test_the_run_state_names_who_gets_which_set():
-    policy = Policy(revision=1, users=[user(approved_apps=[REF], syncthing_lan=True),
+    policy = Policy(syncthing=True, revision=1, users=[user(approved_apps=[REF], syncthing_lan=True),
                                        user(1002, "b"), user(1003, "admin", admin=True)])
     assert st.run_state(policy) == {"out": ["admin", "kid"], "lan": ["kid"]}
 
@@ -455,12 +455,12 @@ def test_apply_starts_the_allowed_and_stops_the_rest(machine, monkeypatch):
     machine.calls.clear()
     active = {"kid": False}
     monkeypatch.setattr(st, "is_active", lambda name: active[name])
-    st.apply(Policy(revision=2, users=[user(approved_apps=[REF])]))
+    st.apply(Policy(syncthing=True, revision=2, users=[user(approved_apps=[REF])]))
     assert ["systemctl", "start", "syncthing@kid.service"] in machine.calls
     assert json.loads(st.RUN_STATE.read_text()) == {"out": ["kid"], "lan": []}
     machine.calls.clear()
     active["kid"] = True
-    st.apply(Policy(revision=3, users=[user()]))           # approval taken away
+    st.apply(Policy(syncthing=True, revision=3, users=[user()]))           # approval taken away
     assert ["systemctl", "stop", "syncthing@kid.service"] in machine.calls
     assert json.loads(st.RUN_STATE.read_text())["out"] == []
 
@@ -471,7 +471,7 @@ def _daemon(monkeypatch, *users):
     from kosherd.daemon import Daemon
 
     daemon = Daemon.__new__(Daemon)
-    daemon.policy = Policy(revision=1, users=list(users) or [user()])
+    daemon.policy = Policy(syncthing=True, revision=1, users=list(users) or [user()])
     applied = []
     monkeypatch.setattr(Daemon, "_save_and_apply", lambda self: applied.append(True))
     return daemon, applied

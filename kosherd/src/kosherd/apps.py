@@ -468,12 +468,13 @@ def warm_index() -> tuple[int, bool]:
         return 0, False
 
 
-def store_apps(account, approved: list[dict] | None = None) -> dict:
+def store_apps(account, approved: list[dict] | None = None, off=()) -> dict:
     """What the Store shows `account`: {apps, access, ready}.
 
     `ready` says whether the app index has been loaded; a store account on
     a machine that has not downloaded the index yet sees its approved
-    apps and is told the rest is still on its way.
+    apps and is told the rest is still on its way. `off` is what the
+    computer has switched off (Policy.switched_off_apps).
     """
     if approved is None:
         approved = load_catalog().get("apps", [])
@@ -481,7 +482,7 @@ def store_apps(account, approved: list[dict] | None = None) -> dict:
     return {
         "access": appaccess.access_of(account),
         "ready": index is not None,
-        "apps": appaccess.visible(account, index or [], approved),
+        "apps": appaccess.visible(account, index or [], approved, off),
     }
 
 

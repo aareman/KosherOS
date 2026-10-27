@@ -294,7 +294,7 @@ def render(policy: Policy, *, dns_uid: int, mitm_uid: int | None = None,
     # ports and video calls included. Global discovery and the relay
     # list are pinned HTTPS, so the service reaches them on 443 directly,
     # at the addresses dnsmasq resolved for those names only (@st4/@st6).
-    st_users = [u for u in policy.users if st.allowed(u)]
+    st_users = st.users(policy)
     st_uids = ", ".join(str(u.uid) for u in sorted(st_users, key=lambda u: u.uid))
     st_match = (f"meta skuid {{ {st_uids} }} {SYNCTHING_CGROUP} @{st.SET_OUT}"
                 if st_uids else "")

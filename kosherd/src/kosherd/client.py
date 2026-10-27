@@ -326,6 +326,10 @@ class DaemonClient:
         """Let devices on the home network connect to this account's Syncthing."""
         self._call("Apps", "SetSyncthingLan", "(ibs)", uid, bool(enabled), guardian_password)
 
+    def set_syncthing_enabled(self, enabled: bool, guardian_password: str = "") -> None:
+        """Syncthing for the whole computer (#220)."""
+        self._call("Apps", "SetSyncthingEnabled", "(bs)", bool(enabled), guardian_password)
+
     def list_installed(self) -> list[str]:
         return self._call("Apps", "ListInstalled")[0]
 
@@ -522,6 +526,10 @@ class DaemonClient:
 
     def tailscale_sign_out(self) -> None:
         self._call("Network", "TailscaleSignOut")
+
+    def set_tailscale_enabled(self, enabled: bool, guardian_password: str = "") -> None:
+        """Run Tailscale on this computer, or stop it (#220)."""
+        self._call("Network", "SetTailscaleEnabled", "(bs)", bool(enabled), guardian_password)
 
     # Guardian
     def guardian_enabled(self) -> bool:

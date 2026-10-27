@@ -140,10 +140,19 @@ def allowed(user) -> bool:
     return appaccess.individually_approved(user, REF)
 
 
+def users(policy) -> list:
+    """The accounts whose Syncthing may run: none while the computer has
+    Syncthing switched off (#220)."""
+    if not policy.syncthing:
+        return []
+    return [u for u in policy.users if allowed(u)]
+
+
 def run_state(policy) -> dict:
     """Which accounts' services go in which set, by username."""
-    out = sorted(u.username for u in policy.users if allowed(u))
-    lan = sorted(u.username for u in policy.users if allowed(u) and u.syncthing_lan)
+    running = users(policy)
+    out = sorted(u.username for u in running)
+    lan = sorted(u.username for u in running if u.syncthing_lan)
     return {"out": out, "lan": lan}
 
 

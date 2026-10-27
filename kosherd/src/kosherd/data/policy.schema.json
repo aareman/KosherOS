@@ -324,6 +324,21 @@
           "description": "Tell the people signed in, once per version, when a downloaded update is ready for a restart. Absent means on."
         }
       }
+    },
+    "advanced": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Features a family turns on for the whole computer (#220). Off on a new install.",
+      "properties": {
+        "tailscale": {
+          "type": "boolean",
+          "description": "Tailscale's service runs and the computer can be signed in to a tailnet. Absent means kosherd decides once at its next start: on if the computer was already signed in, off otherwise."
+        },
+        "syncthing": {
+          "type": "boolean",
+          "description": "Syncthing can be installed from the Store and allowed for an account. Off, every account's Syncthing is stopped and the Store does not offer it. Absent means kosherd decides once at its next start: on if any account already has it, off otherwise."
+        }
+      }
     }
   },
   "$defs": {

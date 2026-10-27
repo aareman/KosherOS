@@ -66,7 +66,16 @@ section "Without developer tools, no Nix of its own (#214)"
 # kosher-nix's, and kosherd keeps the group to the developer accounts.
 # dnskid is filtered and has no developer tools.
 check_contains "nix is root's and kosher-nix's alone" "root:kosher-nix 750" stat -c '%U:%G %a' /usr/bin/nix
-check_contains "and so are its libraries" "root:kosher-nix 750" stat -c '%U:%G %a' /usr/lib64/libnixstorec.so.2.34.8
+# Found by pattern, as the image sets them (Containerfile: libnix*.so.*):
+# the version in the file name changes with every Fedora Nix update.
+mapfile -t nix_libs < <(compgen -G '/usr/lib64/libnix*.so.*')
+nix_store_lib=$(compgen -G '/usr/lib64/libnixstorec.so.*' | head -1)
+if [ "${#nix_libs[@]}" -eq 0 ] || [ -z "$nix_store_lib" ]; then
+    bad "no Nix libraries found under /usr/lib64 (libnix*.so.*)"
+else
+    others=$(stat -c '%U:%G %a %n' "${nix_libs[@]}" | grep -v '^root:kosher-nix 750 ')
+    assert_that "and so are its ${#nix_libs[@]} libraries${others:+ (not: $others)}" test -z "$others"
+fi
 check_contains "the developer account is in the group" "wlkid" getent group kosher-nix
 check "the account without developer tools is not" 1 sh -c 'getent group kosher-nix | grep -qw dnskid'
 dhome=$(readlink -f "$(getent passwd dnskid | cut -d: -f6)")
@@ -83,7 +92,7 @@ as dnskid rm -f "$dhome/.config/nix/nix.conf"
 check "nor by its other names (nix-shell, nix-env)" 1 as dnskid sh -c 'nix-shell --version || nix-env --version'
 check "nor through the dynamic loader" 1 as dnskid /lib64/ld-linux-x86-64.so.2 /usr/bin/nix --version
 check "nor copy it" 1 as dnskid cp /usr/bin/nix "$dhome/nix"
-check "nor load Nix's C API from Python" 1 as dnskid python3 -I -c 'import ctypes; ctypes.CDLL("/usr/lib64/libnixstorec.so.2.34.8")'
+check "nor load Nix's C API from Python" 1 as dnskid python3 -I -c 'import ctypes, sys; ctypes.CDLL(sys.argv[1])' "${nix_store_lib:-/usr/lib64/libnixstorec.so}"
 check "nothing reached a private store" 1 has_private
 check "a developer account runs nix" 0 as wlkid nix --version
 check "and root does" 0 nix --version

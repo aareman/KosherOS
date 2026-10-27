@@ -134,6 +134,12 @@ class FakeClient:
         return self._overrides.get("tailscale", {"installed": True, "state": "NeedsLogin",
                                                  "signed_in": False, "connected": False})
 
+    def set_tailscale_enabled(self, enabled, guardian_password=""):
+        self.calls.append(("set_tailscale_enabled", enabled))
+
+    def set_syncthing_enabled(self, enabled, guardian_password=""):
+        self.calls.append(("set_syncthing_enabled", enabled))
+
     def tailscale_sign_in(self, guardian_password=""):
         self.calls.append(("tailscale_sign_in", guardian_password))
         return self._overrides.get("login_url", "https://login.tailscale.com/a/abc123")
@@ -198,7 +204,7 @@ class FakeWindow(Gtk.Window):
         if after_reload:
             after_reload()
 
-    def with_guardian(self, then):
+    def with_guardian(self, then, on_cancel=None):
         then("")
 
     def reload(self):
@@ -500,9 +506,9 @@ def test_the_sidebar_holds_the_people_themselves_between_the_two_fixed_groups():
                                   "asked": 0}])
     keys = [row.key for row in _rail_rows(rail)]
     assert keys == ["add", "user-1001", "user-1002", "guest",
-                    "activity", "usage", "protection", "apps", "updates"]
+                    "activity", "usage", "protection", "apps", "updates", "advanced"]
     sections = [row.section for row in _rail_rows(rail)]
-    assert sections == ["Family"] * 4 + ["Administration"] * 5
+    assert sections == ["Family"] * 4 + ["Administration"] * 6
     assert rail.rows["add"].title.get_label() == "Add a person…", "words, not a bare plus"
     # A row says one thing. A person's row is the name, plus a count when
     # somebody is waiting on an answer; the preset is on their page.
@@ -2825,10 +2831,15 @@ SIGNED_IN = {"installed": True, "state": "Running", "signed_in": True, "connecte
              "addresses": ["100.101.102.103"]}
 
 
+def _advanced(win, tailscale=True, syncthing=False):
+    """The Advanced page, with the switches as given (#220)."""
+    win.policy["advanced"] = {"tailscale": tailscale, "syncthing": syncthing}
+    return computer.AdvancedPage(win)
+
+
 def test_a_computer_not_on_a_tailnet_offers_to_sign_in():
     win = FakeWindow(FakeClient())
-    page = computer.ProtectionPage(win)
-    group = page.tailscale
+    group = _advanced(win).tailscale
     assert _until(lambda: "Not signed in" in _titles(group))
     assert group.action.get_visible() and group.action.get_label() == "Sign In…"
     assert "suggested-action" in group.action.get_css_classes()
@@ -2836,7 +2847,7 @@ def test_a_computer_not_on_a_tailnet_offers_to_sign_in():
 
 def test_a_signed_in_computer_shows_who_where_and_its_address():
     win = FakeWindow(FakeClient(tailscale=SIGNED_IN))
-    group = computer.ProtectionPage(win).tailscale
+    group = _advanced(win).tailscale
     assert _until(lambda: "Signed in as" in _titles(group))
     assert _row_named(group, "Signed in as").get_subtitle() == "avi@example.com"
     assert "100.101.102.103" in _row_named(group, "This computer").get_subtitle()
@@ -2854,7 +2865,7 @@ def test_signing_in_goes_through_the_guardian_and_shows_the_address_to_open():
             then("")
 
     win = Guarded(FakeClient())
-    group = computer.ProtectionPage(win).tailscale
+    group = _advanced(win).tailscale
     assert _until(lambda: "Not signed in" in _titles(group))
     group.action.emit("clicked")
     assert _until(lambda: "Open the sign-in page" in _titles(group))
@@ -2873,7 +2884,7 @@ def test_signing_in_goes_through_the_guardian_and_shows_the_address_to_open():
 def test_the_page_notices_when_the_sign_in_is_finished_in_the_browser():
     client = FakeClient()
     win = FakeWindow(client)
-    group = computer.ProtectionPage(win).tailscale
+    group = _advanced(win).tailscale
     assert _until(lambda: "Not signed in" in _titles(group))
     group._sign_in("")
     assert _until(lambda: group.login_url is not None)
@@ -2886,14 +2897,14 @@ def test_the_page_notices_when_the_sign_in_is_finished_in_the_browser():
 
 def test_copying_the_address_does_not_throw():
     win = FakeWindow(FakeClient())
-    group = computer.ProtectionPage(win).tailscale
+    group = _advanced(win).tailscale
     group._copy("https://login.tailscale.com/a/abc123")
     assert win.toasts[-1] == "Address copied"
 
 
 def test_signing_out_asks_first_then_calls_the_daemon():
     win = FakeWindow(FakeClient(tailscale=SIGNED_IN))
-    group = computer.ProtectionPage(win).tailscale
+    group = _advanced(win).tailscale
     assert _until(lambda: "Signed in as" in _titles(group))
     asked = []
     original = computer.confirm
@@ -2912,7 +2923,7 @@ def test_tailscale_that_is_not_running_says_so_and_can_be_checked_again():
     win = FakeWindow(FakeClient(tailscale={"installed": True, "state": "Unavailable",
                                            "signed_in": False, "connected": False,
                                            "error": "failed to connect to local tailscaled"}))
-    group = computer.ProtectionPage(win).tailscale
+    group = _advanced(win).tailscale
     assert _until(lambda: "Tailscale is not running" in _titles(group))
     assert group.action.get_label() == "Check Again"
 
@@ -3040,10 +3051,11 @@ class SyncthingClient(FakeClient):
         self.calls.append(("lan", uid, enabled))
 
 
-def _syncthing_page(user):
+def _syncthing_page(user, on=True):
     win = FakeWindow(SyncthingClient())
     win.policy = {"revision": 1, "users": [user], "custom_profiles": [],
-                  "guardian": {"enabled": False}, "guest": {"enabled": False}}
+                  "guardian": {"enabled": False}, "guest": {"enabled": False},
+                  "advanced": {"syncthing": on}}
     page = detail.UserDetailPage(win, user)
     page.stack.set_visible_child_name("apps")
     drain()
@@ -3101,6 +3113,79 @@ def test_an_administrator_needs_no_approval_for_syncthing():
     titles = {r.get_title() for r in _rows(page)}
     assert "Allow Syncthing" not in titles
     assert "Allowed for this account" in titles
+
+
+def test_with_syncthing_off_the_apps_tab_says_nothing_about_it():
+    page, _win = _syncthing_page(a_user(), on=False)
+    titles = {r.get_title() for r in _rows(page)}
+    assert "Allow Syncthing" not in titles
+    assert labels.SYNCTHING_LAN_TITLE not in titles
+
+
+# -- the Advanced page (#220) ------------------------------------------------------
+
+def test_both_switches_show_what_the_policy_says():
+    page = _advanced(FakeWindow(), tailscale=False, syncthing=True)
+    assert not page.tailscale_row.get_active()
+    assert page.syncthing_row.get_active()
+
+
+def test_tailscales_sign_in_shows_only_while_it_is_on():
+    win = FakeWindow()
+    assert not _advanced(win, tailscale=False).tailscale.get_visible()
+    assert _advanced(win, tailscale=True).tailscale.get_visible()
+
+
+def test_the_protection_page_no_longer_carries_tailscale():
+    page = computer.ProtectionPage(FakeWindow())
+    assert not hasattr(page, "tailscale")
+
+
+def test_turning_a_feature_on_calls_the_daemon_without_asking():
+    win = FakeWindow()
+    page = _advanced(win, tailscale=False, syncthing=False)
+    page.tailscale_row.set_active(True)
+    page.syncthing_row.set_active(True)
+    assert _until(lambda: ("set_syncthing_enabled", True) in win.client.calls)
+    assert ("set_tailscale_enabled", True) in win.client.calls
+
+
+@pytest.mark.parametrize("row, heading, call", [
+    ("tailscale_row", "Turn off Tailscale?", "set_tailscale_enabled"),
+    ("syncthing_row", "Turn off Syncthing?", "set_syncthing_enabled"),
+])
+def test_turning_a_feature_off_asks_first(monkeypatch, row, heading, call):
+    shown = []
+
+    def fake_confirm(parent, heading, body, verb, on_yes, **kw):
+        dialog = Adw.AlertDialog(heading=heading, body=body)
+        shown.append((heading, on_yes, dialog))
+        return dialog
+
+    monkeypatch.setattr(computer, "confirm", fake_confirm)
+    win = FakeWindow()
+    page = _advanced(win, tailscale=True, syncthing=True)
+    getattr(page, row).set_active(False)
+    assert [s[0] for s in shown] == [heading]
+    assert not [c for c in win.client.calls if c[0] == call]
+    # Cancelled: the switch goes back on and nothing is called.
+    shown[0][2].emit("response", "cancel")
+    assert getattr(page, row).get_active()
+    getattr(page, row).set_active(False)
+    shown[-1][1]()
+    assert _until(lambda: (call, False) in win.client.calls)
+
+
+def test_a_cancelled_guardian_prompt_puts_the_switch_back():
+    class Cancelled(FakeWindow):
+        def with_guardian(self, then, on_cancel=None):
+            on_cancel()
+
+    win = Cancelled()
+    page = _advanced(win, tailscale=False, syncthing=False)
+    page.syncthing_row.set_active(True)
+    assert not page.syncthing_row.get_active()
+    assert not win.client.calls or ("set_syncthing_enabled", True) not in win.client.calls
 
 
 # -- automatic updates (#19) -------------------------------------------------------

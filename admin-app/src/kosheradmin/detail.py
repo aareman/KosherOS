@@ -1265,7 +1265,10 @@ class UserDetailPage(Adw.NavigationPage):
         self.apps_list.append(Adw.ActionRow(title="Loading…"))
         self.apps_group.add(self.apps_list)
         self._load_apps(user)
-        return [installs_group, self._developer_group(user), self._syncthing_group(user), kinds_group,
+        # Syncthing's group only while the computer has it switched on (#220).
+        syncthing = ([self._syncthing_group(user)]
+                     if (self.win.policy.get("advanced") or {}).get("syncthing") else [])
+        return [installs_group, self._developer_group(user), *syncthing, kinds_group,
                 self.blocked_apps_group, self.apps_group]
 
     # -- kinds --

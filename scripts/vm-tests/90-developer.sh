@@ -121,7 +121,9 @@ check_contains "the global override shares it" "/var/lib/kosher-ca:ro" \
     cat /var/lib/flatpak/overrides/global
 kctl set-mode "$(id -u dnskid)" filtered >/dev/null
 wait_for_dns >/dev/null 2>&1 || true
-sleep 2
+# The mode change restarts the proxy; outside the sandbox first, so a
+# refusal below is the sandbox's and not a proxy still starting.
+wait_for_proxy_as dnskid
 out=$(as_session dnskid flatpak run --command=sh org.gnome.Calculator -c \
     'echo | openssl s_client -connect example.com:443 -servername example.com 2>/dev/null | grep -E "^issuer=|Verify return"; curl -sS -o /dev/null -w "curl=%{http_code}\n" --max-time 20 https://example.com/' 2>&1)
 case "$out" in

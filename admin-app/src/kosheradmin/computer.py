@@ -1,13 +1,13 @@
 """This computer: the settings that are not about one person.
 
-The sidebar's second section. Three pages, each a real page rather than a
+The sidebar's second section. Four pages, each a real page rather than a
 tile with two words on it:
 
   Protection — is the filter actually working, what it blocks for
-               everyone, the guardian password that guards the answer,
-               and whether this computer is on a tailnet
+               everyone, and the guardian password that guards the answer
   Apps       — which apps this computer may install at all
   Updates    — what version it runs, and the way back if one goes wrong
+  Advanced   — Tailscale and Syncthing, off until someone turns them on
 
 "Applies to everyone" is the honest heading for the middle group. Ad
 blocking is rendered into the machine's own resolvers, the word lists are
@@ -164,9 +164,6 @@ class ProtectionPage(_Page):
         locking.add(self.boot_row)
         self.prefs.add(locking)
 
-        self.tailscale = TailscaleGroup(win)
-        self.prefs.add(self.tailscale)
-
         self.refresh()
 
     def refresh(self) -> None:
@@ -194,7 +191,6 @@ class ProtectionPage(_Page):
 
         run_async(self.win.client.boot_menu_protected, show_boot,
                   lambda e: self.boot_row.set_subtitle(f"Could not read: {error_text(e)}"))
-        self.tailscale.refresh()
 
         on = self.win.policy.get("guardian", {}).get("enabled", False)
         self.guardian_row.set_subtitle(
@@ -218,6 +214,104 @@ class ProtectionPage(_Page):
         self.win.with_guardian(lambda pw: self.win.call(
             lambda: self.win.client.set_adblock(False, pw),
             done_msg="Ad blocking is off"))
+
+
+class AdvancedPage(_Page):
+    """Tailscale and Syncthing, off until an administrator turns them on (#220).
+
+    Most families use neither, so neither runs on a new install. Turning
+    Tailscale on starts its service and shows the sign-in below the
+    switch; turning Syncthing on lets it be installed from the Store and
+    allowed on an account's Apps tab.
+    """
+
+    def __init__(self, win):
+        super().__init__(win, "Advanced", "advanced")
+        switches = Adw.PreferencesGroup(
+            title="Extra features",
+            description="These are off unless you turn them on here.")
+        self.tailscale_row = Adw.SwitchRow(
+            title="Tailscale",
+            subtitle=("Lets this computer join your tailnet, so the people who use it can "
+                      "reach your other machines by name."),
+            subtitle_lines=3)
+        self.tailscale_row.connect("notify::active", self._on_tailscale)
+        switches.add(self.tailscale_row)
+        self.syncthing_row = Adw.SwitchRow(
+            title="Syncthing",
+            subtitle=("Keeps folders the same on a person's computers and phone. Once it is "
+                      "on, you allow it for each account on that account's Apps tab."),
+            subtitle_lines=3)
+        self.syncthing_row.connect("notify::active", self._on_syncthing)
+        switches.add(self.syncthing_row)
+        self.prefs.add(switches)
+
+        self.tailscale = TailscaleGroup(win)
+        self.prefs.add(self.tailscale)
+        self.refresh()
+
+    def _advanced(self) -> dict:
+        return self.win.policy.get("advanced") or {}
+
+    def _set_row(self, row: Adw.SwitchRow, handler, wanted: bool) -> None:
+        if row.get_active() != wanted:
+            row.handler_block_by_func(handler)
+            row.set_active(wanted)
+            row.handler_unblock_by_func(handler)
+
+    def refresh(self) -> None:
+        on = self._advanced()
+        self._set_row(self.tailscale_row, self._on_tailscale, bool(on.get("tailscale")))
+        self._set_row(self.syncthing_row, self._on_syncthing, bool(on.get("syncthing")))
+        self.tailscale.set_visible(bool(on.get("tailscale")))
+        if on.get("tailscale"):
+            self.tailscale.refresh()
+
+    def _on_tailscale(self, row, _param) -> None:
+        wanted = row.get_active()
+        if wanted == bool(self._advanced().get("tailscale")):
+            return
+        if wanted:
+            self._switch(lambda pw: self.win.client.set_tailscale_enabled(True, pw),
+                         "Tailscale is on. Sign in below.")
+            return
+        dialog = confirm(self.win, "Turn off Tailscale?",
+                         "This computer leaves your tailnet until Tailscale is turned on "
+                         "again. It stays signed in, so turning it back on reconnects.",
+                         "Turn Off",
+                         lambda: self._switch(
+                             lambda pw: self.win.client.set_tailscale_enabled(False, pw),
+                             "Tailscale is off"))
+        dialog.connect("response", lambda _d, r: r != "yes" and self.refresh())
+
+    def _on_syncthing(self, row, _param) -> None:
+        wanted = row.get_active()
+        if wanted == bool(self._advanced().get("syncthing")):
+            return
+        if wanted:
+            self._switch(lambda pw: self.win.client.set_syncthing_enabled(True, pw),
+                         "Syncthing is on")
+            return
+        dialog = confirm(self.win, "Turn off Syncthing?",
+                         "Syncthing stops for every account, and the Store stops offering it. "
+                         "Synced folders stay where they are.",
+                         "Turn Off",
+                         lambda: self._switch(
+                             lambda pw: self.win.client.set_syncthing_enabled(False, pw),
+                             "Syncthing is off"))
+        dialog.connect("response", lambda _d, r: r != "yes" and self.refresh())
+
+    def _switch(self, work, done_msg: str) -> None:
+        # Refused or cancelled, the policy is as it was: the switch goes
+        # back to match it.
+        def failed(e) -> None:
+            self.win.toast(error_text(e))
+            self.refresh()
+
+        self.win.with_guardian(lambda pw: run_async(
+            lambda: work(pw),
+            lambda _r: (self.win.toast(done_msg), self.win.reload()),
+            failed), on_cancel=self.refresh)
 
 
 class TailscaleGroup(Adw.PreferencesGroup):

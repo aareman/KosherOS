@@ -36,6 +36,7 @@ ADMIN = (
     ("protection", "Protection", "security-high-symbolic"),
     ("apps", "Apps", "view-grid-symbolic"),
     ("updates", "Updates", "software-update-available-symbolic"),
+    ("advanced", "Advanced", "preferences-other-symbolic"),
 )
 FAMILY_SECTION = "Family"
 ADMIN_SECTION = "Administration"

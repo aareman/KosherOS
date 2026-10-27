@@ -273,6 +273,8 @@ RUN dnf -y install nix nix-daemon nix-legacy && dnf clean all \
 # bootc machine never runs dnf, and the next image brings the next
 # Tailscale. Only kosherd drives it (kosherd/tailnet.py). No operator is
 # ever set, so an account can read its status but only root can change it.
+# The service is left disabled (#220): kosherd starts it once an
+# administrator turns Tailscale on under Advanced.
 RUN printf '%s\n' '[tailscale-stable]' 'name=Tailscale stable' \
         'baseurl=https://pkgs.tailscale.com/stable/fedora/$basearch' \
         'enabled=1' 'type=rpm' 'gpgcheck=1' 'repo_gpgcheck=1' \
@@ -280,8 +282,8 @@ RUN printf '%s\n' '[tailscale-stable]' 'name=Tailscale stable' \
         > /etc/yum.repos.d/tailscale.repo \
     && dnf -y install tailscale && dnf clean all \
     && rm -f /etc/yum.repos.d/tailscale.repo \
-    && systemctl enable tailscaled.service \
-    && systemctl is-enabled tailscaled.service
+    && systemctl disable tailscaled.service \
+    && test "$(systemctl is-enabled tailscaled.service)" = disabled
 # devbox is a static Go binary released on GitHub; pinned by hash like the
 # person model. It uses the Nix above (it only installs Nix when none is
 # found) and its package search at search.devbox.sh, which is reachable

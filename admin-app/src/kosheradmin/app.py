@@ -22,7 +22,7 @@ from kosherd.client import DaemonClient  # noqa: E402
 
 from . import labels  # noqa: E402
 from .common import banner_slot, error_text, load_css, run_async, submit_on_enter  # noqa: E402
-from .computer import AppsPage, ProtectionPage, UpdatesPage, health_rows  # noqa: E402
+from .computer import AdvancedPage, AppsPage, ProtectionPage, UpdatesPage, health_rows  # noqa: E402
 from .detail import UserDetailPage  # noqa: E402
 from .dialogs import RequestsDialog, add_person_dialog  # noqa: E402
 from .feed import ActivityPage  # noqa: E402
@@ -208,7 +208,7 @@ class Window(Adw.ApplicationWindow):
             page = self.open_computer_page = UsagePage(self)
             return page
         page = {"protection": ProtectionPage, "apps": AppsPage,
-                "updates": UpdatesPage}[key](self)
+                "updates": UpdatesPage, "advanced": AdvancedPage}[key](self)
         self.open_computer_page = page
         return page
 
@@ -346,8 +346,9 @@ class Window(Adw.ApplicationWindow):
 
         run_async(load, on_done, lambda e: self.toast(error_text(e)))
 
-    def with_guardian(self, then) -> None:
-        """Ask for the guardian password once per session, then call `then(pw)`."""
+    def with_guardian(self, then, on_cancel=None) -> None:
+        """Ask for the guardian password once per session, then call `then(pw)`.
+        `on_cancel` runs if the prompt is closed or the password is wrong."""
         if not self.policy["guardian"]["enabled"] or self.guardian_ok:
             then("")
             return
@@ -357,8 +358,12 @@ class Window(Adw.ApplicationWindow):
                 self.guardian_ok = True
                 then("")
 
-            run_async(lambda: self.client.verify_guardian(pw), on_verified,
-                      lambda e: self.toast(error_text(e)))
+            def refused(e):
+                self.toast(error_text(e))
+                if on_cancel:
+                    on_cancel()
+
+            run_async(lambda: self.client.verify_guardian(pw), on_verified, refused)
 
         dialog = Adw.AlertDialog(
             heading="Guardian password",
@@ -375,6 +380,8 @@ class Window(Adw.ApplicationWindow):
         def on_response(_d, response):
             if response == "ok":
                 proceed(entry.get_text())
+            elif on_cancel:
+                on_cancel()
 
         dialog.connect("response", on_response)
         dialog.present(self)

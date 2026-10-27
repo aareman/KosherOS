@@ -439,6 +439,11 @@ class Policy:
     # in are told once when a downloaded update waits for a restart.
     auto_updates: str = DEFAULT_AUTO_UPDATES
     update_notify: bool = True
+    # Features the administrator turns on for the whole computer (#220),
+    # off on a new install. None until kosherd's start decides for a
+    # computer that had them before there was a switch (daemon.py).
+    tailscale: bool | None = None
+    syncthing: bool | None = None
     system_whitelist: list[str] = field(default_factory=list)
     guest: GuestPolicy = field(default_factory=GuestPolicy)
     # A family's own presets, saved from a tuned account (see profiles.py).
@@ -495,6 +500,10 @@ class Policy:
         them through its own mode (whitelists.effective adds them)."""
         return list(dict.fromkeys([*BUILTIN_SYSTEM_WHITELIST, *self.system_whitelist]))
 
+    def switched_off_apps(self) -> frozenset[str]:
+        """Store apps this computer does not offer while their switch is off."""
+        return frozenset() if self.syncthing else frozenset({"nixpkgs#syncthing"})
+
     def developer_accounts(self) -> list["UserPolicy"]:
         return [u for u in self.effective_users() if u.developer_tools and u.mode != "none"]
 
@@ -505,6 +514,11 @@ class Policy:
 
         return buildsources.combined(self.build_sources_extra)
 
+    def advanced(self) -> dict:
+        """The switches that have been decided, as the policy file keeps them."""
+        return {name: on for name, on in (("tailscale", self.tailscale),
+                                          ("syncthing", self.syncthing)) if on is not None}
+
     def to_dict(self) -> dict:
         return {
             "schema_version": 1,
@@ -514,6 +528,7 @@ class Policy:
             "guardian": {"enabled": self.guardian_enabled},
             "adblock": {"enabled": self.adblock},
             "updates": {"auto": self.auto_updates, "notify": self.update_notify},
+            **({"advanced": self.advanced()} if self.advanced() else {}),
             **({"custom_profiles": list(self.custom_profiles)}
                if self.custom_profiles else {}),
             "system_whitelist": self.system_whitelist,
@@ -565,6 +580,8 @@ class Policy:
             adblock=bool(doc.get("adblock", {}).get("enabled", True)),
             auto_updates=(doc.get("updates") or {}).get("auto", DEFAULT_AUTO_UPDATES),
             update_notify=bool((doc.get("updates") or {}).get("notify", True)),
+            tailscale=(doc.get("advanced") or {}).get("tailscale"),
+            syncthing=(doc.get("advanced") or {}).get("syncthing"),
             custom_profiles=list(doc.get("custom_profiles") or []),
             system_whitelist=list(doc.get("system_whitelist", [])),
             build_sources_extra=list((doc.get("developer") or {}).get("build_sources_extra", [])),

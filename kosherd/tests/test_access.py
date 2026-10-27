@@ -193,7 +193,11 @@ def test_the_guardian_gate_covers_every_filter_weakening_method():
                 "SetUserAppApproval", "SetSyncthingLan",
                 # Joining a tailnet puts the computer on a network with
                 # other people's machines, reachable by every account.
-                "TailscaleSignIn"}
+                "TailscaleSignIn",
+                # The Advanced switches (#220): Syncthing on lets an
+                # administrator's or unfiltered account have it unapproved;
+                # Tailscale on is the first step to a sign-in.
+                "SetSyncthingEnabled", "SetTailscaleEnabled"}
     assert GUARDIAN_GATED == expected
     filter_actions = {m for m, a in ACTIONS.items()
                       if a == access.ACTION_MANAGE_FILTER}

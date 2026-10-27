@@ -6,6 +6,11 @@ same polkit actions and guardian password as every other machine-wide
 setting. This module is the part that talks to the `tailscale` command
 and keeps the resolvers in step with it; daemon.py holds the D-Bus side.
 
+The image carries Tailscale but does not start it (#220): tailscaled
+runs only while the policy's `advanced.tailscale` is on, which kosherd
+keeps the service in step with (set_running). Switched off, the service
+is stopped and its sign-in kept, so switching it on again reconnects.
+
 How the filter survives a tailnet, in one place:
 
 - **Accounts are still filtered.** The output rules (nft.py) match a
@@ -90,6 +95,47 @@ class TailnetError(Exception):
 
 def installed() -> bool:
     return os.access(TAILSCALE, os.X_OK)
+
+
+# -- the switch (#220) ---------------------------------------------------------
+
+SERVICE = "tailscaled.service"
+STATE_FILE = Path("/var/lib/tailscale/tailscaled.state")
+
+
+def set_running(on: bool, *, wait: bool = True) -> None:
+    """Enable and start tailscaled, or stop and disable it. `wait=False`
+    queues the job and returns, for the daemon's start, which must not sit
+    behind tailscaled coming up."""
+    argv = ["systemctl", "enable" if on else "disable", "--now"]
+    if not wait:
+        argv.append("--no-block")
+    argv.append(SERVICE)
+    try:
+        res = subprocess.run(argv, capture_output=True, text=True, timeout=90)
+    except (OSError, subprocess.SubprocessError) as e:
+        raise TailnetError(f"could not {'start' if on else 'stop'} Tailscale: {e}") from None
+    if res.returncode != 0:
+        raise TailnetError(f"could not {'start' if on else 'stop'} Tailscale: "
+                           f"{_message(res)}")
+
+
+def signed_in_before(path: Path | None = None) -> bool:
+    """Does tailscaled's state hold a sign-in? For a computer that had
+    Tailscale before the switch existed: kosherd keeps it on if so.
+
+    The state file is JSON whose values are base64; `_profiles` is the
+    list of signed-in profiles, emptied by a sign-out. Anything unreadable
+    counts as no.
+    """
+    import base64
+
+    try:
+        doc = json.loads((path or STATE_FILE).read_text())
+        profiles = json.loads(base64.b64decode(doc.get("_profiles") or "e30="))
+    except (OSError, ValueError, TypeError, AttributeError):
+        return False
+    return bool(profiles)
 
 
 def _run(*args: str, timeout: int = COMMAND_TIMEOUT) -> subprocess.CompletedProcess:

@@ -293,6 +293,10 @@ INTROSPECTION_XML = """
       <arg direction="in" type="b" name="enabled"/>
       <arg direction="in" type="s" name="guardian_password"/>
     </method>
+    <method name="SetSyncthingEnabled">
+      <arg direction="in" type="b" name="enabled"/>
+      <arg direction="in" type="s" name="guardian_password"/>
+    </method>
     <method name="ListInstalled">
       <arg direction="out" type="as" name="refs"/>
     </method>
@@ -430,6 +434,10 @@ INTROSPECTION_XML = """
       <arg direction="out" type="s" name="login_url"/>
     </method>
     <method name="TailscaleSignOut"/>
+    <method name="SetTailscaleEnabled">
+      <arg direction="in" type="b" name="enabled"/>
+      <arg direction="in" type="s" name="guardian_password"/>
+    </method>
   </interface>
   <interface name="org.kosherlinux.Daemon1.Portal">
     <method name="Enrol">
@@ -529,6 +537,8 @@ IN_BACKGROUND = frozenset({"CheckUpdate", "DeploymentStatus", "ListChannels",
                            "RunAutoUpdate",
                            "SearchYouTubeChannels",
                            "TailscaleStatus", "TailscaleSignIn", "TailscaleSignOut"})
+# SetTailscaleEnabled is not here although it waits on systemctl: it
+# changes the policy, which only the main loop may do.
 
 # Seconds to wait on each short bootc command before saying so. A check
 # goes to the registry, so it gets longer than reading local status. A pull
@@ -771,6 +781,7 @@ class Daemon:
             None,
             lambda conn, name: (log.error("lost bus name %s", name), loop.quit()),
         )
+        self._settle_advanced()
         try:
             apply_policy(self.policy)
         except Exception:
@@ -797,7 +808,12 @@ class Daemon:
         # (#211), which go into enforcement through a fresh apply.
         from . import tailnet
         tailnet.on_allowed_change = self._tailnet_allowed_changed
-        tailnet.refresh_dns_later()
+        if self.policy.tailscale:
+            tailnet.refresh_dns_later()
+        else:
+            # Switched off: no forward left behind from when it ran.
+            threading.Thread(target=tailnet.forget, name="tailscale-dns",
+                             daemon=True).start()
         GLib.timeout_add_seconds(APP_INDEX_REFRESH_SECONDS,
                                  lambda: (self._warm_app_index(), True)[1])
         GLib.timeout_add_seconds(TICK_SECONDS, self._time_tick)
@@ -2333,7 +2349,8 @@ class Daemon:
         """What the Store shows the caller — decided here, for the uid on
         the connection, so an account sees exactly what kosherd would
         install for it and nothing it would refuse."""
-        store = apps.store_apps(self._account_for(_uid))
+        store = apps.store_apps(self._account_for(_uid),
+                                off=self.policy.switched_off_apps())
         if not store["ready"]:
             # Somebody has the Store open and there is nothing to show
             # them yet: go and look now rather than at the next tick.
@@ -2402,7 +2419,8 @@ class Daemon:
         approved_refs = {a["ref"] for a in approved}
 
         def permit(r: str) -> str | None:
-            reason = appaccess.decide(account, self._app_entry(r, approved), approved_refs)
+            reason = appaccess.decide(account, self._app_entry(r, approved), approved_refs,
+                                      self.policy.switched_off_apps())
             return None if reason is None else appaccess.REASONS[reason]
 
         self.app_manager.install(ref, permit=permit, uid=uid,
@@ -2529,6 +2547,9 @@ class Daemon:
         user = self.policy.user(uid)
         if user is None:
             raise PolicyError(f"uid {uid} is not managed")
+        if approved and ref in self.policy.switched_off_apps():
+            raise PolicyError("Syncthing is switched off on this computer; turn it on "
+                              "under Advanced first")
         refs = set(user.approved_apps)
         (refs.add if approved else refs.discard)(ref)
         user.approved_apps = sorted(refs)
@@ -2543,6 +2564,16 @@ class Daemon:
         if user is None:
             raise PolicyError(f"uid {uid} is not managed")
         user.syncthing_lan = bool(enabled)
+        self._save_and_apply()
+        return None
+
+    def impl_SetSyncthingEnabled(self, enabled: bool, _guardian_pw: str):
+        """Syncthing for the whole computer (#220). Off, the Store does not
+        offer it, nobody can be allowed it, and apply stops every account's
+        service and closes its ports. The installs, the approvals and the
+        accounts' folders stay, so switching it on again starts them where
+        they were."""
+        self.policy.syncthing = bool(enabled)
         self._save_and_apply()
         return None
 
@@ -3240,11 +3271,16 @@ class Daemon:
         admin app's next look even if the daemon missed the moment."""
         from . import tailnet
 
+        if not self.policy.tailscale:
+            # tailscaled is not running; asking it would only say so.
+            return GLib.Variant("(s)", (json.dumps({
+                "enabled": False, "installed": tailnet.installed(), "state": "Off",
+                "signed_in": False, "connected": False}),))
         try:
             now = tailnet.refresh_dns() or tailnet.status()
         except tailnet.TailnetError as e:
             raise PolicyError(str(e)) from None
-        return GLib.Variant("(s)", (json.dumps(now),))
+        return GLib.Variant("(s)", (json.dumps({**now, "enabled": True}),))
 
     def impl_TailscaleSignIn(self, _guardian_pw: str):
         """Start signing in; return the address the administrator opens.
@@ -3261,6 +3297,9 @@ class Daemon:
             # away again (#211).
             tailnet.refresh_dns()
 
+        if not self.policy.tailscale:
+            raise PolicyError("Tailscale is switched off on this computer; turn it on "
+                              "under Advanced first")
         try:
             url = tailnet.sign_in(on_finished=finished)
         except tailnet.TailnetError as e:
@@ -3283,6 +3322,71 @@ class Daemon:
         finally:
             tailnet.forget()
         return None
+
+    def impl_SetTailscaleEnabled(self, enabled: bool, _guardian_pw: str):
+        """Run tailscaled, or stop it (#220). The service changes first and
+        the policy is saved after; a save that fails puts the service back.
+
+        Off keeps the sign-in: the computer drops off the tailnet and its
+        names stop resolving, and switching it on again reconnects without
+        a new sign-in. Signing out is its own button."""
+        from . import tailnet
+
+        on = bool(enabled)
+        before = bool(self.policy.tailscale)
+        if on and not tailnet.installed():
+            raise PolicyError("Tailscale is not installed on this computer")
+        try:
+            tailnet.set_running(on)
+        except tailnet.TailnetError as e:
+            raise PolicyError(str(e)) from None
+        self.policy.tailscale = on
+        try:
+            policy_mod.save(self.policy)
+        except Exception:
+            try:
+                tailnet.set_running(before)
+            except tailnet.TailnetError:
+                log.exception("could not put Tailscale back")
+            raise
+        if on:
+            tailnet.refresh_dns_later(delay=3)
+        else:
+            tailnet.forget()
+        if self.connection:
+            self.connection.emit_signal(
+                None, OBJECT_PATH, "org.kosherlinux.Daemon1.Profiles", "PolicyChanged",
+                GLib.Variant("(i)", (self.policy.revision,)))
+        log.info("tailscale: switched %s", "on" if on else "off")
+        return None
+
+    def _settle_advanced(self) -> None:
+        """At start: decide the Advanced switches for a computer that had
+        Tailscale and Syncthing before there were switches (#220) — each
+        stays on if it was in use — then put tailscaled in step."""
+        from . import tailnet
+
+        settled = False
+        if self.policy.tailscale is None:
+            self.policy.tailscale = tailnet.signed_in_before()
+            settled = True
+        if self.policy.syncthing is None:
+            self.policy.syncthing = bool(syncthing.load_registry()) or any(
+                syncthing.REF in u.approved_apps for u in self.policy.users)
+            settled = True
+        if settled:
+            log.info("advanced: tailscale %s, syncthing %s",
+                     "on" if self.policy.tailscale else "off",
+                     "on" if self.policy.syncthing else "off")
+            try:
+                policy_mod.save(self.policy)
+            except Exception:  # noqa: BLE001 - decided again at the next start
+                log.exception("could not save the Advanced switches")
+        if tailnet.installed():
+            try:
+                tailnet.set_running(self.policy.tailscale, wait=False)
+            except tailnet.TailnetError:
+                log.exception("could not put tailscaled in step with the policy")
 
     def setup_complete(self) -> bool:
         """Setup is finished only when FinishSetup has stamped it.

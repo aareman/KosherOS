@@ -231,14 +231,19 @@ being enforced.
 
 ## Tailscale
 
-Tailscale is in the image, from Tailscale's own signed repository, and
-`tailscaled` starts at boot. It does nothing until an administrator signs
-the computer in from **Admin → Protection → Tailscale**. The daemon starts
-the sign-in and the page shows the address to open, on this computer or a
-phone. Signing in takes the guardian password, because it puts the
+Tailscale is in the image, from Tailscale's own signed repository, but
+`tailscaled` does not run until an administrator turns Tailscale on in
+**Admin → Advanced**. kosherd then starts the service and keeps it
+starting at boot; turning it off stops it and leaves the sign-in in place,
+so turning it on again reconnects. A computer that was already signed in
+before this switch existed keeps Tailscale on.
+
+Once it is on, the administrator signs the computer in on the same page.
+The daemon starts the sign-in and the page shows the address to open, on
+this computer or a phone. Signing in takes the guardian password, because it puts the
 computer on a network with other machines that every account can then
-reach. Signing out does not. `kosherctl tailscale` does the same from a
-terminal.
+reach. Signing out does not. `kosherctl advanced tailscale on|off` and
+`kosherctl tailscale` do the same from a terminal.
 
 No operator is set on `tailscaled`, so an account can read its status but
 only root can change it, and root is kosherd. Every sign-in runs

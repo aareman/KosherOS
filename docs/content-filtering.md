@@ -138,6 +138,11 @@ connections that only they can open, so files that arrive from a paired device
 are not checked by the filter at all. What can be controlled is who has it and
 where it may connect.
 
+Syncthing is off on a new computer, and the Store does not offer it. An
+administrator turns it on for the computer in **Admin → Advanced**. Turning it
+off again stops Syncthing for every account. Each account's install and synced
+folders are kept, and its Syncthing starts again if it is turned back on.
+
 An administrator's account and an unfiltered one can install Syncthing from the
 Store like any other app. Any other account needs an administrator to allow it
 for that account, on the account's Apps tab, even when the account may use the

@@ -99,14 +99,14 @@ def test_only_one_retry_is_pending_at_a_time(monkeypatch):
 
 def test_opening_the_store_with_no_index_goes_to_look_now(monkeypatch):
     d, _glib = _daemon(monkeypatch, (0, False))
-    monkeypatch.setattr(apps, "store_apps", lambda account: {
+    monkeypatch.setattr(apps, "store_apps", lambda account, **_kw: {
         "access": "store", "ready": False, "apps": []})
     warmed = []
     monkeypatch.setattr(d, "_warm_app_index", lambda: warmed.append(1) or True)
     reply = json.loads(d.impl_ListStoreApps(_uid=1000).unpack()[0])
     assert reply["ready"] is False
     assert warmed == [1]
-    monkeypatch.setattr(apps, "store_apps", lambda account: {
+    monkeypatch.setattr(apps, "store_apps", lambda account, **_kw: {
         "access": "store", "ready": True, "apps": []})
     d.impl_ListStoreApps(_uid=1000)
     assert warmed == [1], "a store that is ready asks for nothing"

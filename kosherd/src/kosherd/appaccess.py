@@ -142,6 +142,7 @@ def individually_approved(account, ref: str) -> bool:
 # Why an app is not available to an account. Keys the Store and the admin
 # app turn into a sentence; the values are those sentences.
 REASONS = {
+    "off": "switched off on this computer",
     "blocked": "blocked for this account",
     "kind": "its kind of app is blocked for this account",
     "not-approved": "not on the approved list",
@@ -195,17 +196,21 @@ def content_words(app: dict) -> str:
     return ", ".join(words[:-1]) + " and " + words[-1]
 
 
-def decide(account, app: dict, approved: Iterable[str]) -> str | None:
+def decide(account, app: dict, approved: Iterable[str],
+           off: Iterable[str] = ()) -> str | None:
     """Why `account` may not have `app`, or None when it may.
 
     `app` is the app's index entry ({ref, categories, rating, ...}), or a
     bare {"ref": ...} when the app list does not know it; `approved` is
-    the approved list. Blocks the administrator set come first and apply
-    whatever the access mode; an approval then settles it; otherwise the
-    approved-only account is refused and the store account is judged by
-    the rating ceiling.
+    the approved list; `off` is what the computer has switched off for
+    everyone (Policy.switched_off_apps). Blocks the administrator set come
+    first and apply whatever the access mode; an approval then settles it;
+    otherwise the approved-only account is refused and the store account
+    is judged by the rating ceiling.
     """
     ref = app.get("ref") or ""
+    if ref in set(off):
+        return "off"
     if ref in set(_get(account, "blocked_apps") or ()):
         return "blocked"
     kinds = set(_get(account, "blocked_app_kinds") or ())
@@ -238,7 +243,8 @@ def explain(reason: str, app: dict) -> str:
     return f"{name} is {REASONS.get(reason, reason)}"
 
 
-def visible(account, index: Iterable[dict], approved_entries: Iterable[dict]) -> list[dict]:
+def visible(account, index: Iterable[dict], approved_entries: Iterable[dict],
+            off: Iterable[str] = ()) -> list[dict]:
     """The apps `account` may install, with a `kind` on each.
 
     The approved list is part of the answer in both modes — it is the
@@ -257,9 +263,10 @@ def visible(account, index: Iterable[dict], approved_entries: Iterable[dict]) ->
         merged = {**entry, **(known or {})}
         merged.setdefault("categories", [])
         by_ref[ref] = merged
+    off = set(off)
     out = []
     for ref, app in by_ref.items():
-        if decide(account, app, approved) is None:
+        if decide(account, app, approved, off) is None:
             out.append({**app, "kind": appkinds.kind_of(app),
                         "approved": ref in approved})
     out.sort(key=lambda a: (a.get("name") or a["ref"]).lower())

@@ -314,6 +314,14 @@ else
 fi
 image_only "[F7] no dracut shell on a failed boot" \
     && check_contains "[F7] no dracut shell on a failed boot" "rd.shell=0" cat /proc/cmdline
+# #225: an automount on /boot (systemd-gpt-auto-generator's, idle 120s)
+# made ostree-finalize-staged fail and an update was lost at the restart.
+if image_only "no automount on /boot"; then
+    check_contains "the kernel is told not to run the gpt-auto generator" "systemd.gpt_auto=0" \
+        cat /proc/cmdline
+    check "and /boot is ostree's bind mount alone, not an automount" 1 \
+        findmnt -t autofs /boot
+fi
 
 # -- F8: text consoles ----------------------------------------------------------------
 

@@ -123,6 +123,19 @@ while True:
 PY
 sleep 1
 
+section "Off for the whole computer until an administrator turns it on (#220)"
+kctl advanced syncthing off >/dev/null
+check_contains "kosherctl says it is off" "syncthing: off" kosherctl advanced syncthing
+out=$(install_for "$uid")
+case "$out" in
+    *"switched off"*) ok "while it is off the Store will not install it" ;;
+    *) bad "an install while off did not say it is switched off: $(printf '%s' "$out" | tail -1 | head -c 160)" ;;
+esac
+check_contains "and it cannot be allowed for an account" "switched off" \
+    kctl apps approve "$uid" "$REF"
+check "kosherctl turns it on" 0 kctl advanced syncthing on
+check_contains "the activity log records it" "SetSyncthingEnabled" kosherctl activity
+
 section "A filtered account needs its own approval"
 out=$(install_for "$uid")
 case "$out" in
@@ -262,6 +275,21 @@ check "and nothing from the internet does" 1 connect_from stwan 203.0.113.1 "$li
 check "off again" 0 kctl apps syncthing-lan "$uid" off
 sleep 2
 check "and the home network is refused again" 1 connect_from stlan 192.168.77.1 "$listen"
+
+section "Turned off for the computer, it stops; turned on, it starts again"
+check "kosherctl turns Syncthing off" 0 kctl advanced syncthing off
+sleep 2
+check "the service stops" 1 systemctl is-active --quiet "syncthing@$A.service"
+check "and its cgroup is out of the set" 0 not_in_set syncthing_out
+check "port 22000 is refused for the account" 1 connect_as "$A" 203.0.113.2 22000
+check "the install is kept" 0 test -e "$dropin"
+check "kosherctl turns it on again" 0 kctl advanced syncthing on
+for _ in $(seq 1 20); do
+    systemctl is-active --quiet "syncthing@$A.service" && break
+    sleep 1
+done
+check "the service runs again" 0 systemctl is-active --quiet "syncthing@$A.service"
+assert_that "and its cgroup is back in the set" in_set syncthing_out
 
 section "Taking the permission away, and removing it"
 check "an administrator takes the permission away" 0 kctl apps unapprove "$uid" "$REF"

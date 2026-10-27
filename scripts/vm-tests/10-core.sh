@@ -87,7 +87,32 @@ section "Tailscale (#30)"
 if ! command -v tailscale >/dev/null 2>&1; then
     skip "Tailscale is not installed (only the image ships it)"
 else
+    # Off until an administrator turns it on (#220). A test machine was
+    # never signed in, so kosherd settled it off at its first start.
+    ts_was=$(kosherctl advanced tailscale 2>/dev/null)
+    if [ "$ts_was" = "tailscale: off" ]; then
+        ok "Tailscale is off on a machine that never used it"
+        check "tailscaled is not running" 1 systemctl is-active --quiet tailscaled
+        check "and does not start at boot" 1 systemctl is-enabled --quiet tailscaled
+        check_contains "kosherctl tailscale status says it is switched off" "switched off" \
+            kosherctl tailscale status
+        out=$(timeout 60 python3 -c 'from kosherd.client import DaemonClient
+print(DaemonClient().tailscale_sign_in(""))' 2>&1)
+        case "$out" in
+            *"switched off"*) ok "a sign-in is refused while it is off" ;;
+            *) bad "a sign-in while off did not say it is switched off: $(printf '%s' "$out" | tail -1 | head -c 200)" ;;
+        esac
+    else
+        bad "Tailscale is not off on a test machine (got '$ts_was')"
+    fi
+    check "kosherctl turns it on" 0 kctl advanced tailscale on
+    check_contains "the activity log records it" "SetTailscaleEnabled" kosherctl activity
     check "tailscaled is running" 0 systemctl is-active --quiet tailscaled
+    # tailscaled answers its socket a moment after systemd calls it active.
+    for _ in $(seq 30); do
+        kosherctl tailscale status 2>/dev/null | grep -q "not signed in" && break
+        sleep 1
+    done
     check_contains "/etc/resolv.conf is still the local resolver" "nameserver 127.0.0.1" \
         cat /etc/resolv.conf
     check "and names no other server" 1 \
@@ -218,6 +243,9 @@ DaemonClient().disable_guardian(sys.argv[1])' "$gpw" >/dev/null 2>&1
     kctl set-mode "$no_uid" none >/dev/null
     check_contains "nokid is back to no internet" "none" \
         sh -c "kosherctl get-policy | python3 -c 'import json, sys; print([u[\"mode\"] for u in json.load(sys.stdin)[\"users\"] if u[\"username\"] == \"nokid\"][0])'"
+    check "kosherctl turns Tailscale off again" 0 kctl advanced tailscale off
+    check "tailscaled is stopped" 1 systemctl is-active --quiet tailscaled
+    check "and does not start at boot" 1 systemctl is-enabled --quiet tailscaled
     skip "a real tailnet sign-in needs a person at the login page: names on the tailnet, the 100.100.100.100 forward, a filtered account reaching a tailnet host through its proxy"
 fi
 

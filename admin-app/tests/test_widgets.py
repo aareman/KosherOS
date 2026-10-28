@@ -1609,6 +1609,24 @@ def test_the_updates_page_names_the_version_it_would_go_back_to():
     assert page.back_button.get_sensitive()
 
 
+def test_the_updates_page_keeps_its_width_while_an_update_runs():
+    # "same thing happens in kosheradmin update": a progress bar is as wide
+    # as its text unless it may cut it, and bootc's lines are long.
+    win = FakeWindow()
+    win.policy = {"revision": 1, "users": [], "guardian": {"enabled": False},
+                  "guest": {"enabled": False}}
+    page = computer.UpdatesPage(win)
+    drain()
+
+    def width():
+        return page.measure(Gtk.Orientation.HORIZONTAL, -1)[0]
+
+    page.on_progress(5, "Starting…")
+    before = width()
+    page.on_progress(40, "Fetching layer sha256:" + "f" * 64 + " (812 MB of 2.1 GB)")
+    assert width() == before
+
+
 def test_the_deployment_words_name_the_version_and_the_channel_not_the_image_reference():
     words = computer._deployment_words
     assert words({"version": "0.1.0-pre.064", "image": "ghcr.io/x/kosher-linux:edge"}) \

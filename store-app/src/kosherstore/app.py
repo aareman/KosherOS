@@ -221,15 +221,32 @@ class AppCard(Gtk.Box):
         # full-width blue bar on every card, which shouted louder than the
         # apps themselves; in a store the app is the thing being looked at
         # and the button is what you reach for once you have chosen.
-        self.button = Gtk.Button(valign=Gtk.Align.CENTER)
+        # One width whatever it says (Install, Update, Remove, or greyed
+        # out while busy), so the card never changes size under it.
+        self.button = Gtk.Button(valign=Gtk.Align.CENTER, width_request=96)
         self.button.add_css_class("pill")
         self.button.connect("clicked", self._on_clicked)
         self.button.set_cursor_from_name("pointer")
         top.append(self.button)
+        # Beside Update, so an app with an update waiting can still be
+        # removed: the one button is the update then, and an app that only
+        # ever said Update could not be got rid of anywhere.
+        self.remove_button = Gtk.Button(icon_name="user-trash-symbolic",
+                                        valign=Gtk.Align.CENTER)
+        self.remove_button.add_css_class("flat")
+        self.remove_button.add_css_class("circular")
+        self.remove_button.connect("clicked", lambda _b: self._act("remove"))
+        self.remove_button.set_cursor_from_name("pointer")
+        top.append(self.remove_button)
+        self.show_remove(False)
         self.append(top)
 
+        # A progress bar is as wide as its text unless the text may be cut:
+        # nix and flatpak report long lines, and each one widened the card
+        # and pushed the whole grid about.
         self.progress = Gtk.ProgressBar(show_text=True, visible=False,
-                                        valign=Gtk.Align.CENTER)
+                                        valign=Gtk.Align.CENTER,
+                                        ellipsize=Pango.EllipsizeMode.END)
         self.append(self.progress)
         # The store remembers what is in hand, so a card built while an
         # install is running shows the progress rather than an Install
@@ -241,19 +258,27 @@ class AppCard(Gtk.Box):
         self.state = state
         busy = state == "working"
         self.progress.set_visible(busy)
-        self.button.set_visible(not busy)
         if busy:
+            # The buttons stay where they are, greyed out, rather than
+            # going away: a row that loses a button reflows its text.
+            if not self.button.get_label():
+                self.button.set_label("Working")
+            self.button.set_sensitive(False)
+            self.remove_button.set_sensitive(False)
             self.progress.set_fraction(percent / 100)
             self.progress.set_text(status or f"{percent}%")
             return
+        self.show_remove(state == "update")
         if state == "update":
-            # Installed, and a newer build is on the remote. The one button
-            # on the card is the update; removing is still on the Installed
-            # shelf, where the app is not asking for anything.
+            # Installed, and a newer build is on the remote. The main button
+            # is the update; the small one beside it removes the app.
             self.button.set_label("Update")
             self.button.set_css_classes(["pill", "suggested-action"])
             self.button.set_sensitive(True)
             self.button.set_tooltip_text(self.store.update_words(self.ref))
+            self.remove_button.set_sensitive(self.store.is_admin)
+            self.remove_button.set_tooltip_text(
+                "Remove" if self.store.is_admin else "Only an admin can remove apps")
             return
         if state == "installed":
             self.button.set_label("Remove")
@@ -269,16 +294,28 @@ class AppCard(Gtk.Box):
                 None if self.store.can_install else
                 "App installation is turned off for your account")
 
+    def show_remove(self, on: bool) -> None:
+        """The small Remove beside Update. Its place is kept when it is not
+        there (it is only invisible), so the card is one width in every
+        state and finishing an update does not narrow it."""
+        self.remove_button.set_opacity(1 if on else 0)
+        self.remove_button.set_can_target(on)
+        self.remove_button.set_can_focus(on)
+        self.remove_shown = on
+
     def _on_clicked(self, _b) -> None:
+        self._act({"installed": "remove", "update": "update"}.get(self.state, "install"))
+
+    def _act(self, what: str) -> None:
         before = self.state
         if before == "working":
             return  # already in hand: a second request is an error, not a wish
         # Several apps can be requested at once; kosherd queues them.
         self.store.work_started(self.ref)
         self.set_state("working", 0, "Queued…")
-        work = {"installed": self.store.client.remove_app,
-                "update": self.store.client.update_app}.get(
-                    before, self.store.client.install_app)
+        work = {"remove": self.store.client.remove_app,
+                "update": self.store.client.update_app,
+                "install": self.store.client.install_app}[what]
 
         def on_error(e):
             self.store.work_ended(self.ref)

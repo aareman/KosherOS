@@ -32,6 +32,7 @@ permissions:
   contents: write       # the train/<run> branch, the merges
   pull-requests: write  # comments, labels, merging
   actions: write        # starting the next train, and the release
+  packages: write       # the VM test's build cache in the registry
 
 concurrency:
   # One train at a time; a second asked for while one runs waits, and takes

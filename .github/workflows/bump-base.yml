@@ -1,0 +1,47 @@
+name: Bump the base images
+
+# The Containerfile builds FROM Fedora's images pinned by digest, so the
+# build cache holds between builds (scripts/bump-base.py says why). Pinned
+# also means Fedora's updates arrive only when the pins move: this moves
+# them once a week, in a pull request queued for the merge train, which
+# tests the new base in a VM like any change before it lands.
+
+on:
+  schedule:
+    - cron: "17 5 * * 1" # Mondays, early
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+  actions: write # waking the train: a pull request this token opens wakes nothing itself
+
+jobs:
+  bump:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Pin to what the tags point at now
+        id: pin
+        run: |
+          python3 scripts/bump-base.py
+          if git diff --quiet; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+      - name: A pull request, queued
+        if: steps.pin.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          branch="chore/bump-base-$(date -u +%Y%m%d)"
+          git config user.name "KosherOS base bump"
+          git config user.email "bump-base@users.noreply.github.com"
+          git checkout -b "$branch"
+          git commit -qam "chore: Fedora's base images as of $(date -u +%Y-%m-%d)"
+          git push -q origin "$branch"
+          gh pr create --base master --head "$branch" --label queued \
+            --title "chore: Fedora's base images as of $(date -u +%Y-%m-%d)" \
+            --body "The weekly move of the Containerfile's pinned Fedora images to what \`fedora:44\` and \`fedora-bootc:44\` point at now (\`scripts/bump-base.py\`). Queued: the merge train tests it in a VM and lands it."
+          gh workflow run merge-train.yml --ref master

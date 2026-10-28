@@ -40,6 +40,21 @@ in the next, which starts when the current one has moved the queue on.
 A batch of five costs one VM test instead of five, and a push to a pull
 request no longer restarts an hour of testing.
 
+## Why a build takes seconds, not twenty minutes
+
+Most of a VM test used to be the image build: every one installed all of
+Fedora Workstation again, because the base image's tag moved about once a
+day and each move changed the cache key of every layer after it. The
+Containerfile now builds from Fedora's images pinned by digest, so the
+layers under a change stay cached until the pins move on purpose: `just
+bump-base` (`scripts/bump-base.py`), and every Monday the Bump the base
+images workflow, whose pull request goes through the train. A one-line
+change to the daemon rebuilds in under a minute.
+
+CI's runners start with nothing, so their builds share layers through a
+cache in the registry (`ghcr.io/<owner>/kosher-linux-cache`): the edge
+build, the test-image builds and the VM test read it and add to it.
+
 Nothing on this page needs sudo. Membership of the `kvm` group is enough.
 
 ## Unit tests

@@ -140,6 +140,9 @@ class FakeClient:
     def set_syncthing_enabled(self, enabled, guardian_password=""):
         self.calls.append(("set_syncthing_enabled", enabled))
 
+    def set_keyd_enabled(self, enabled, guardian_password=""):
+        self.calls.append(("set_keyd_enabled", enabled))
+
     def tailscale_sign_in(self, guardian_password=""):
         self.calls.append(("tailscale_sign_in", guardian_password))
         return self._overrides.get("login_url", "https://login.tailscale.com/a/abc123")
@@ -2831,9 +2834,9 @@ SIGNED_IN = {"installed": True, "state": "Running", "signed_in": True, "connecte
              "addresses": ["100.101.102.103"]}
 
 
-def _advanced(win, tailscale=True, syncthing=False):
-    """The Advanced page, with the switches as given (#220)."""
-    win.policy["advanced"] = {"tailscale": tailscale, "syncthing": syncthing}
+def _advanced(win, tailscale=True, syncthing=False, keyd=False):
+    """The Advanced page, with the switches as given (#220, #230)."""
+    win.policy["advanced"] = {"tailscale": tailscale, "syncthing": syncthing, "keyd": keyd}
     return computer.AdvancedPage(win)
 
 
@@ -3124,10 +3127,12 @@ def test_with_syncthing_off_the_apps_tab_says_nothing_about_it():
 
 # -- the Advanced page (#220) ------------------------------------------------------
 
-def test_both_switches_show_what_the_policy_says():
-    page = _advanced(FakeWindow(), tailscale=False, syncthing=True)
+def test_the_switches_show_what_the_policy_says():
+    page = _advanced(FakeWindow(), tailscale=False, syncthing=True, keyd=True)
     assert not page.tailscale_row.get_active()
     assert page.syncthing_row.get_active()
+    assert page.keyd_row.get_active()
+    assert not _advanced(FakeWindow(), keyd=False).keyd_row.get_active()
 
 
 def test_tailscales_sign_in_shows_only_while_it_is_on():
@@ -3143,9 +3148,11 @@ def test_the_protection_page_no_longer_carries_tailscale():
 
 def test_turning_a_feature_on_calls_the_daemon_without_asking():
     win = FakeWindow()
-    page = _advanced(win, tailscale=False, syncthing=False)
+    page = _advanced(win, tailscale=False, syncthing=False, keyd=False)
     page.tailscale_row.set_active(True)
     page.syncthing_row.set_active(True)
+    page.keyd_row.set_active(True)
+    assert _until(lambda: ("set_keyd_enabled", True) in win.client.calls)
     assert _until(lambda: ("set_syncthing_enabled", True) in win.client.calls)
     assert ("set_tailscale_enabled", True) in win.client.calls
 
@@ -3153,6 +3160,7 @@ def test_turning_a_feature_on_calls_the_daemon_without_asking():
 @pytest.mark.parametrize("row, heading, call", [
     ("tailscale_row", "Turn off Tailscale?", "set_tailscale_enabled"),
     ("syncthing_row", "Turn off Syncthing?", "set_syncthing_enabled"),
+    ("keyd_row", "Turn off key remapping?", "set_keyd_enabled"),
 ])
 def test_turning_a_feature_off_asks_first(monkeypatch, row, heading, call):
     shown = []
@@ -3164,7 +3172,7 @@ def test_turning_a_feature_off_asks_first(monkeypatch, row, heading, call):
 
     monkeypatch.setattr(computer, "confirm", fake_confirm)
     win = FakeWindow()
-    page = _advanced(win, tailscale=True, syncthing=True)
+    page = _advanced(win, tailscale=True, syncthing=True, keyd=True)
     getattr(page, row).set_active(False)
     assert [s[0] for s in shown] == [heading]
     assert not [c for c in win.client.calls if c[0] == call]

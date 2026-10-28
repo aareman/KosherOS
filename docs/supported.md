@@ -128,7 +128,13 @@ Host *
 ```
 
 An SSH connection still goes only where the account's kind of internet lets
-it. The browser extension's link to the app is not set up yet.
+it.
+
+The 1Password extension in Firefox talks to the app through the same kind
+of copy, `/run/wrappers/bin/1Password-BrowserSupport`, which KosherOS keeps
+once the app is installed. Turn on **Settings → Browser → Connect with
+1Password in the browser** in the app. The Firefox that comes with KosherOS
+works; a Flatpak browser from the Store cannot reach the app.
 
 ## Accounts and filtering
 

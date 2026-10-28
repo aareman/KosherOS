@@ -1,10 +1,12 @@
-"""1Password's op, setgid, for 1Password from nixpkgs (#234).
+"""1Password's setgid copies, for 1Password from nixpkgs (#234).
 
-The desktop app trusts `op` only when its group is onepassword-cli, so
-kosherd keeps a setgid copy at /run/wrappers/bin/op. These run as an
-ordinary user: chown and the store checks are stood in for.
+The desktop app trusts `op` only when its group is onepassword-cli, and the
+browser helper only as onepassword, so kosherd keeps setgid copies of both
+in /run/wrappers/bin. These run as an ordinary user: chown and the store
+checks are stood in for.
 """
 
+import json
 import os
 import stat
 from pathlib import Path
@@ -16,59 +18,99 @@ from kosherd.onepassword import REFS, WrapperError
 
 REPO = Path(__file__).parents[2]
 FILES = REPO / "os-image/files"
+GUI = "nixpkgs#_1password-gui"
+CLI = "nixpkgs#_1password-cli"
 
 
 @pytest.fixture
 def store(tmp_path, monkeypatch):
-    """A fake built CLI, and chown that records instead of failing."""
-    out = tmp_path / "store" / "abc-1password-cli-2.33.0"
-    (out / "bin").mkdir(parents=True)
-    (out / "bin" / "op").write_bytes(b"\x7fELF op binary")
-    chowned = []
+    """Fake builds of both packages, and chown that records instead of
+    failing. Returns (build, built, chowned)."""
+    outs = {"_1password-cli": tmp_path / "store" / "abc-1password-cli-2.33.0",
+            "_1password-gui": tmp_path / "store" / "def-1password-8.12.0"}
+    (outs["_1password-cli"] / "bin").mkdir(parents=True)
+    (outs["_1password-cli"] / "bin" / "op").write_bytes(b"\x7fELF op")
+    (outs["_1password-gui"] / "share/1password").mkdir(parents=True)
+    (outs["_1password-gui"] / "share/1password/1Password-BrowserSupport").write_bytes(
+        b"\x7fELF browser support")
+    chowned, built = [], []
     monkeypatch.setattr(onepassword, "source_ok", lambda p: True)
-    monkeypatch.setattr(os, "chown", lambda path, uid, gid: chowned.append((uid, gid)))
-    monkeypatch.setattr(onepassword.grp, "getgrnam",
-                        lambda name: type("G", (), {"gr_gid": {"onepassword-cli": 851}[name]}))
-    return out, chowned
+    monkeypatch.setattr(os, "chown", lambda path, uid, gid: chowned.append((Path(path).name, gid)))
+    monkeypatch.setattr(onepassword.grp, "getgrnam", lambda name: type(
+        "G", (), {"gr_gid": {"onepassword-cli": 851, "onepassword": 852}[name]}))
+
+    def build(attr):
+        built.append(attr)
+        return outs[attr]
+
+    return build, built, chowned
+
+
+def _modes(directory):
+    return {p.name: stat.S_IMODE(p.stat().st_mode) for p in directory.iterdir()}
 
 
 def test_anyone_with_either_package_wants_op():
-    assert onepassword.wanted({1000: {"nixpkgs#_1password-gui"}})
-    assert onepassword.wanted({1000: set(), 1001: {"nixpkgs#_1password-cli"}})
+    assert onepassword.wanted({1000: {GUI}})
+    assert onepassword.wanted({1000: set(), 1001: {CLI}})
     assert not onepassword.wanted({1000: {"nixpkgs#gh"}, 1001: set()})
-    assert REFS == {"nixpkgs#_1password-gui", "nixpkgs#_1password-cli"}
+    assert REFS == {GUI, CLI}
 
 
-def test_op_is_a_setgid_copy_of_the_built_cli(tmp_path, store):
-    out, chowned = store
+def test_the_app_brings_op_and_the_browser_helper(tmp_path, store):
+    build, built, chowned = store
     wrappers = tmp_path / "wrappers"
-    did = onepassword.refresh({1000: {"nixpkgs#_1password-gui"}},
-                              build=lambda: out, directory=wrappers)
-    assert did == "installed"
-    op = wrappers / "op"
-    assert op.read_bytes() == b"\x7fELF op binary"
-    assert stat.S_IMODE(op.stat().st_mode) == 0o2755
-    assert chowned == [(0, 851)]
-    assert not [p for p in wrappers.iterdir() if p.name.startswith(".")], "no temp left"
+    did = onepassword.refresh({1000: {GUI}}, build=build, directory=wrappers,
+                              gcroots=tmp_path / "gc")
+    assert did == {"op": "installed", "1Password-BrowserSupport": "installed"}
+    assert _modes(wrappers) == {"op": 0o2755, "1Password-BrowserSupport": 0o2755}
+    assert (wrappers / "op").read_bytes() == b"\x7fELF op"
+    assert sorted(gid for _n, gid in chowned) == [851, 852]
+    assert dict((n.split(".")[1], gid) for n, gid in chowned) == {
+        "op": 851, "1Password-BrowserSupport": 852}
+    assert sorted(built) == ["_1password-cli", "_1password-gui"]
 
 
-def test_nobody_with_1password_means_no_op(tmp_path, store):
-    out, _ = store
+def test_the_cli_alone_brings_op_only(tmp_path, store):
+    build, built, _ = store
     wrappers = tmp_path / "wrappers"
-    onepassword.refresh({1000: {"nixpkgs#_1password-cli"}}, build=lambda: out,
-                        directory=wrappers)
-    built = []
-    did = onepassword.refresh({1000: set()}, build=lambda: built.append(1) or out,
-                              directory=wrappers)
-    assert did == "removed" and not (wrappers / "op").exists()
+    did = onepassword.refresh({1000: {CLI}}, build=build, directory=wrappers,
+                              gcroots=tmp_path / "gc")
+    assert did == {"op": "installed", "1Password-BrowserSupport": "unchanged"}
+    assert list(_modes(wrappers)) == ["op"]
+    assert built == ["_1password-cli"], "the app is not fetched for op"
+
+
+def test_nobody_with_1password_means_no_copies_and_no_roots(tmp_path, store):
+    build, built, _ = store
+    wrappers, gc = tmp_path / "wrappers", tmp_path / "gc"
+    onepassword.refresh({1000: {GUI}}, build=build, directory=wrappers, gcroots=gc)
+    gc.mkdir()
+    (gc / "kosher-_1password-cli").symlink_to("/nix/store/abc")
+    (gc / "kosher-_1password-gui").symlink_to("/nix/store/def")
+    built.clear()
+    did = onepassword.refresh({1000: set()}, build=build, directory=wrappers, gcroots=gc)
+    assert did == {"op": "removed", "1Password-BrowserSupport": "removed"}
+    assert list(wrappers.iterdir()) == [] and list(gc.iterdir()) == []
     assert built == [], "nothing is built for nobody"
-    assert onepassword.refresh({}, directory=wrappers) == "unchanged"
 
 
-def test_the_copy_comes_from_kosherds_own_build_not_a_profile():
+def test_in_step_is_what_the_periodic_check_looks_at(tmp_path, store):
+    build, _, _ = store
+    wrappers = tmp_path / "wrappers"
+    wrappers.mkdir()
+    assert onepassword.in_step({}, wrappers)
+    assert not onepassword.in_step({1000: {GUI}}, wrappers)
+    onepassword.refresh({1000: {GUI}}, build=build, directory=wrappers, gcroots=tmp_path / "g")
+    assert onepassword.in_step({1000: {GUI}}, wrappers)
+    # Only the CLI now: the browser helper should go.
+    assert not onepassword.in_step({1000: {CLI}}, wrappers)
+
+
+def test_the_copy_comes_from_kosherds_own_rooted_build_not_a_profile(tmp_path):
     # The profile manifest is a file in the account's home; only whether
-    # 1Password is there is read from it. The source is what build_cli
-    # returns, and build_cli builds nixpkgs' attribute as root.
+    # 1Password is there is read from it. The source is kosherd's own
+    # build of nixpkgs' attribute, as root, kept by a GC root.
     seen = []
 
     def run(argv, **_kw):
@@ -76,10 +118,12 @@ def test_the_copy_comes_from_kosherds_own_build_not_a_profile():
         return type("R", (), {"returncode": 0, "stdout": "/nix/store/abc-1password-cli-2.33.0\n",
                               "stderr": ""})
 
-    assert onepassword.build_cli(run=run) == Path("/nix/store/abc-1password-cli-2.33.0")
+    out = onepassword.build("_1password-cli", run=run, gcroots=tmp_path)
+    assert out == Path("/nix/store/abc-1password-cli-2.33.0")
     assert seen[0][-1] == "nixpkgs#_1password-cli"
     assert "--impure" in seen[0] and "NIXPKGS_ALLOW_UNFREE=1" in seen[0]
     assert "--profile" not in seen[0]
+    assert seen[0][seen[0].index("--out-link") + 1] == str(tmp_path / "kosher-_1password-cli")
 
 
 def test_a_failed_build_says_so():
@@ -87,7 +131,7 @@ def test_a_failed_build_says_so():
         return type("R", (), {"returncode": 1, "stdout": "", "stderr": "error: no network\n"})
 
     with pytest.raises(WrapperError, match="no network"):
-        onepassword.build_cli(run=run)
+        onepassword.build("_1password-cli", run=run)
 
 
 def test_only_a_root_owned_store_file_is_made_setgid(tmp_path):
@@ -126,3 +170,14 @@ def test_the_store_offers_both():
     refs = {a["ref"] for a in json.loads(
         (FILES / "etc/kosher/catalog.json").read_text())["apps"]}
     assert REFS <= refs
+
+
+def test_firefox_finds_the_browser_helper_before_the_app_first_starts():
+    # The app writes ~/.mozilla's manifest at every start; until then (and
+    # whatever it writes) the system one points at the setgid copy.
+    for libdir in ("usr/lib64", "usr/lib"):
+        manifest = json.loads((FILES / libdir / "mozilla/native-messaging-hosts"
+                               / "com.1password.1password.json").read_text())
+        assert manifest["path"] == "/run/wrappers/bin/1Password-BrowserSupport"
+        assert manifest["type"] == "stdio"
+        assert "{d634138d-c276-4fc8-924b-40a0ea21d284}" in manifest["allowed_extensions"]

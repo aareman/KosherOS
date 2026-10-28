@@ -20,10 +20,18 @@ all. The group grants nothing else on the machine; what it buys is the
 desktop app's trust, and each account's app listens only in that account's
 own runtime directory.
 
+Browser integration is the same again: the extension in Firefox talks to
+the app through 1Password-BrowserSupport, started from the native
+messaging manifest the app writes into ~/.mozilla (pointing, for a nixpkgs
+build, at /run/wrappers/bin/1Password-BrowserSupport), and the app trusts
+it only running as group `onepassword`. The image also ships that
+manifest system-wide, for before the app's first start.
+
+Each build the copies come from has a GC root, because the copies are
+linked against libraries in the store.
+
 The SSH agent needs nothing from here: the app from nixpkgs runs it, and a
-person points ssh at ~/.1password/agent.sock (docs/apps.md). Browser
-integration (1Password-BrowserSupport, the `onepassword` group) is not done
-here yet.
+person points ssh at ~/.1password/agent.sock (docs/supported.md).
 """
 
 from __future__ import annotations
@@ -34,6 +42,7 @@ import os
 import pwd
 import subprocess
 import tempfile
+from dataclasses import dataclass
 from pathlib import Path
 
 from . import nixapps
@@ -45,10 +54,34 @@ STORE = "/nix/store/"
 # The packages that bring 1Password to an account; either one means the
 # account wants `op` to reach the app.
 REFS = frozenset({"nixpkgs#_1password-gui", "nixpkgs#_1password-cli"})
-CLI_ATTR = "_1password-cli"
-OP = "op"
-OP_GROUP = "onepassword-cli"
 BUILD_TIMEOUT = 900
+# Roots that keep the builds the copies came from (nix-collect-garbage
+# leaves anything reachable from here).
+GCROOTS = Path("/nix/var/nix/gcroots")
+
+
+@dataclass(frozen=True)
+class Wrapper:
+    name: str    # in /run/wrappers/bin
+    attr: str    # the nixpkgs attribute kosherd builds it from
+    file: str    # where it is in that build
+    group: str   # what it is setgid to: the group the app trusts
+    refs: frozenset[str]  # any of these installed means it is wanted
+
+    def wanted(self, installed_by_uid: dict[int, set[str]]) -> bool:
+        return any(refs & self.refs for refs in installed_by_uid.values())
+
+
+WRAPPED = (
+    # The CLI integration: the app trusts an op running as onepassword-cli.
+    Wrapper("op", "_1password-cli", "bin/op", "onepassword-cli", REFS),
+    # The browser integration: Firefox starts this from the native
+    # messaging manifest the app writes (path /run/wrappers/bin/... for a
+    # nixpkgs build), and the app trusts it running as onepassword.
+    Wrapper("1Password-BrowserSupport", "_1password-gui",
+            "share/1password/1Password-BrowserSupport", "onepassword",
+            frozenset({"nixpkgs#_1password-gui"})),
+)
 
 
 class WrapperError(Exception):
@@ -72,18 +105,22 @@ def accounts_installed() -> dict[int, set[str]]:
     return found
 
 
-def build_cli(run=subprocess.run) -> Path:
-    """Build (fetch) nixpkgs' 1Password CLI as root; its store path."""
+def build(attr: str, run=subprocess.run, gcroots: Path = GCROOTS) -> Path:
+    """Build (fetch) a nixpkgs attribute as root; its store path. The out
+    link is a GC root: the copies in /run/wrappers are linked against
+    libraries in the store, and a garbage collection would otherwise take
+    those away from under them."""
+    link = gcroots / f"kosher-{attr}"
     argv = ["env", "NIXPKGS_ALLOW_UNFREE=1", f"NIX_SSL_CERT_FILE={nixapps.CA_BUNDLE}",
-            "nix", "build", "--impure", "--no-link", "--print-out-paths",
-            f"{nixapps.PREFIX}{CLI_ATTR}"]
+            "nix", "build", "--impure", "--out-link", str(link), "--print-out-paths",
+            f"{nixapps.PREFIX}{attr}"]
     try:
         res = run(argv, capture_output=True, text=True, timeout=BUILD_TIMEOUT)
     except (OSError, subprocess.SubprocessError) as e:
-        raise WrapperError(f"could not build the 1Password CLI: {e}") from None
+        raise WrapperError(f"could not build {attr}: {e}") from None
     paths = [line.strip() for line in (res.stdout or "").splitlines() if line.strip()]
     if res.returncode != 0 or not paths:
-        raise WrapperError("could not build the 1Password CLI: "
+        raise WrapperError(f"could not build {attr}: "
                            + ((res.stderr or "").strip().splitlines() or ["no output"])[-1])
     return Path(paths[-1])
 
@@ -133,15 +170,27 @@ def drop(name: str, directory: Path = WRAPPERS) -> bool:
     return False
 
 
+def in_step(installed_by_uid: dict[int, set[str]], directory: Path = WRAPPERS) -> bool:
+    """Is every wanted copy there, and no unwanted one? The periodic check
+    builds nothing when so."""
+    return all((directory / w.name).exists() == w.wanted(installed_by_uid) for w in WRAPPED)
+
+
 def refresh(installed_by_uid: dict[int, set[str]] | None = None, *,
-            build=build_cli, directory: Path = WRAPPERS) -> str:
-    """Put /run/wrappers/bin/op in step with who has 1Password. Returns
-    what it did: "installed", "removed" or "unchanged"."""
+            build=build, directory: Path = WRAPPERS,
+            gcroots: Path = GCROOTS) -> dict[str, str]:
+    """Put the copies in /run/wrappers/bin in step with who has 1Password.
+    Returns, per copy, "installed", "removed" or "unchanged"."""
     if installed_by_uid is None:
         installed_by_uid = accounts_installed()
-    if not wanted(installed_by_uid):
-        return "removed" if drop(OP, directory) else "unchanged"
-    store_path = build()
-    install(store_path / "bin" / OP, OP, OP_GROUP, directory)
-    log.info("1password: %s is %s's op, setgid %s", directory / OP, store_path, OP_GROUP)
-    return "installed"
+    done = {}
+    for w in WRAPPED:
+        if not w.wanted(installed_by_uid):
+            (gcroots / f"kosher-{w.attr}").unlink(missing_ok=True)
+            done[w.name] = "removed" if drop(w.name, directory) else "unchanged"
+            continue
+        store_path = build(w.attr)
+        install(store_path / w.file, w.name, w.group, directory)
+        log.info("1password: %s is %s's, setgid %s", directory / w.name, store_path, w.group)
+        done[w.name] = "installed"
+    return done

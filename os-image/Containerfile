@@ -566,6 +566,16 @@ RUN true \
     #                       what the boot-menu password exists to prevent.
     && printf 'kargs = ["lockdown=integrity", "intel_iommu=on", "mem_sleep_default=s2idle", "rd.shell=0", "rd.emergency=reboot"]\n' \
          > /usr/lib/bootc/kargs.d/20-kosheros-security.toml \
+    # No systemd-gpt-auto-generator (#225). With an EFI partition and no
+    # /boot in fstab it puts boot.automount on /boot, idle timeout 120s,
+    # over ostree's bind mount of /sysroot/boot. Two minutes after the
+    # last touch systemd tries to unmount /boot; during an update download
+    # that fails as busy, and at shutdown ostree-finalize-staged's remount
+    # of /boot lands on the autofs mount, fails with EINVAL, and the
+    # update is never written: the computer starts the old version again.
+    # The root is named on the command line, so nothing else needs it.
+    && printf 'kargs = ["systemd.gpt_auto=0"]\n' \
+         > /usr/lib/bootc/kargs.d/30-kosheros-boot.toml \
     # A new account has never seen Dash to Panel's version, so upstream
     # announces an "update" at its first login. Seed the installed version
     # at build time instead of hard-coding a value that goes stale.

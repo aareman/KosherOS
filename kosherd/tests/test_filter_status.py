@@ -196,6 +196,11 @@ def test_a_healthy_certificate_says_nothing(monkeypatch, tmp_path):
     anchor.write_bytes(b"same")
     monkeypatch.setattr(mitmca, "CA_PEM", ca)
     monkeypatch.setattr(mitmca, "ANCHOR", anchor)
+    # And the copy Flatpak apps read matches the system bundle (#223).
+    bundle = tmp_path / "bundle.pem"
+    bundle.write_bytes(b"roots")
+    monkeypatch.setattr(mitmca, "SYSTEM_BUNDLE", bundle)
+    monkeypatch.setattr(mitmca, "FLATPAK_BUNDLE", bundle)
     users = [UserPolicy(uid=1001, username="a", mode="filtered")]
     status = _daemon(users, _all("active\n"), monkeypatch)
     assert status["inspection_ca"] == "ok"

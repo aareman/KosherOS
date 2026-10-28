@@ -25,7 +25,7 @@ gi.require_version("Gio", "2.0")
 from gi.repository import Gio, GLib
 
 from . import (BUS_NAME, OBJECT_PATH, access, appaccess, appkinds, apps, auth,
-               keyboard, policy as policy_mod, syncthing, ytsearch)
+               keyboard, onepassword, policy as policy_mod, syncthing, ytsearch)
 from .apply import apply_policy
 from .apps import AppError
 from .guardian import Guardian, GuardianError
@@ -782,6 +782,10 @@ class Daemon:
             lambda conn, name: (log.error("lost bus name %s", name), loop.quit()),
         )
         self._settle_advanced()
+        # 1Password's op (#234): at start, then every ten minutes for an
+        # install made with `nix profile` rather than the Store.
+        self._refresh_onepassword()
+        GLib.timeout_add_seconds(600, self._refresh_onepassword)
         try:
             apply_policy(self.policy)
         except Exception:
@@ -2604,7 +2608,29 @@ class Daemon:
     def _on_app_finished(self, ref: str, ok: bool, error: str) -> None:
         if ok:
             GLib.idle_add(lambda: (self._apply_mct(), False)[1])
+            if ref in onepassword.REFS:
+                # Installed, updated or removed: `op` follows (#234).
+                self._refresh_onepassword(force=True)
         self._emit_app_signal("AppFinished", "(sbs)", (ref, ok, error))
+
+    def _refresh_onepassword(self, force: bool = False) -> bool:
+        """Keep /run/wrappers/bin/op in step with who has 1Password (#234),
+        in a thread: building the CLI may fetch it. Without `force`, a
+        copy already in place is left as it is, so the periodic check costs
+        a look at the profiles and nothing more. Returns True to stay on a
+        GLib timer."""
+        def work() -> None:
+            try:
+                by_uid = onepassword.accounts_installed()
+                if (not force and onepassword.wanted(by_uid)
+                        and (onepassword.WRAPPERS / onepassword.OP).exists()):
+                    return
+                onepassword.refresh(by_uid)
+            except Exception:  # noqa: BLE001 - never worth the daemon
+                log.exception("1password: could not put op's wrapper in step")
+
+        threading.Thread(target=work, name="1password-op", daemon=True).start()
+        return True
 
     # ---- System ----------------------------------------------------------
 

@@ -1,26 +1,35 @@
 name: VM test
 
-# Every pull request through a real VM: `just pr-test`, the same recipe a
-# developer runs, on a GitHub runner with KVM. It builds the image, makes a
-# disk without root, boots it through the first-boot wizard, signs a test
-# account in at the login screen, and runs the in-VM suites. The report and
-# the logs, consoles and screenshots are uploaded whatever the result.
+# A real VM: `just pr-test`, the same recipe a developer runs, on a GitHub
+# runner with KVM. It builds the image, makes a disk without root, boots it
+# through the first-boot wizard, signs a test account in at the login
+# screen, and runs the in-VM suites. The report and the logs, consoles and
+# screenshots are uploaded whatever the result.
+#
+# Mostly it runs for the merge train (merge-train.yml), once for a batch of
+# queued pull requests rather than once per push per pull request: an hour
+# of runner for every push was why everything waited. A single pull request
+# gets it on request, with the `vm-test` label, and by hand (Actions -> VM
+# test -> Run workflow) for a branch.
 #
 # Same-repository pull requests only, as in try-image.yml: a fork's run has
 # no secrets and its hour on a runner is better spent after a look at the
-# change. Run it by hand (Actions -> VM test -> Run workflow) for a branch.
-#
-# Whether this is a required check is the maintainer's decision, made in
-# the branch protection settings, not here.
+# change.
 
 on:
   pull_request:
+    types: [opened, synchronize, reopened, labeled]
   workflow_dispatch:
-
-concurrency:
-  # A new push supersedes the run in progress for the same pull request.
-  group: vm-test-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  workflow_call:
+    inputs:
+      ref:
+        description: the commit to test
+        required: true
+        type: string
+      id:
+        description: names the run (artifact, concurrency)
+        required: true
+        type: string
 
 jobs:
   changes:
@@ -30,8 +39,11 @@ jobs:
     # Skipped here rather than with a paths filter, so that a skipped run
     # still reports and could be made a required check.
     if: >-
-      github.event_name == 'workflow_dispatch'
-      || github.event.pull_request.head.repo.full_name == github.repository
+      inputs.ref != ''
+      || github.event_name == 'workflow_dispatch'
+      || (github.event.pull_request.head.repo.full_name == github.repository
+          && contains(github.event.pull_request.labels.*.name, 'vm-test')
+          && (github.event.action != 'labeled' || github.event.label.name == 'vm-test'))
     runs-on: ubuntu-latest
     outputs:
       vm: ${{ steps.filter.outputs.vm }}
@@ -43,8 +55,9 @@ jobs:
         env:
           BASE: ${{ github.event.pull_request.base.sha }}
           HEAD: ${{ github.event.pull_request.head.sha }}
+          TRAIN_REF: ${{ inputs.ref }}
         run: |
-          if [ "$GITHUB_EVENT_NAME" != "pull_request" ]; then
+          if [ -n "$TRAIN_REF" ] || [ "$GITHUB_EVENT_NAME" != "pull_request" ]; then
             echo "vm=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
@@ -63,6 +76,12 @@ jobs:
     name: Boot, desktop and suites
     needs: [changes]
     if: needs.changes.outputs.vm == 'true'
+    # On the job, not the workflow: a run started by some other label (and
+    # skipping everything) must not cancel the VM test in progress. A new
+    # push supersedes the run for the same pull request; a train's is its own.
+    concurrency:
+      group: vm-test-${{ inputs.id || github.event.pull_request.number || github.ref }}
+      cancel-in-progress: true
     runs-on: ubuntu-24.04
     timeout-minutes: 180
     steps:
@@ -70,7 +89,7 @@ jobs:
         with:
           # The branch's own commit rather than GitHub's merge commit, so
           # the report names a commit that exists on the branch.
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          ref: ${{ inputs.ref || github.event.pull_request.head.sha || github.sha }}
           fetch-depth: 0 # the version is counted from the last tag
 
       - name: KVM
@@ -143,7 +162,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: vm-test-${{ github.event.pull_request.number || github.run_id }}
+          name: vm-test-${{ inputs.id || github.event.pull_request.number || github.run_id }}
           path: |
             build/pr-test/ci/
             !build/pr-test/ci/**/*.qcow2

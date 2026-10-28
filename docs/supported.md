@@ -10,7 +10,7 @@ behind it in the repository; where a limit is stated, it is a real one.
 |---|---|---|
 | Firefox | supported | The filter's certificate is trusted through the enterprise-roots policy the image ships. |
 | GNOME Web (Epiphany), Chromium and other browsers | supported | They read the system trust store, which holds the filter's certificate. |
-| Any Flatpak app that fetches from the web | supported | Same system trust store; the app must be approved in the KosherOS Store first. |
+| Any Flatpak app that fetches from the web | supported | The app must be approved in the KosherOS Store first. Inside a Flatpak, `/etc` belongs to the app's runtime, so KosherOS keeps a copy of the system's certificate list in `/var/lib/kosher-ca` and shares it with every Flatpak app through a system-wide override, with `SSL_CERT_FILE` and the other certificate variables pointing at it. A person's own `flatpak override` for an app still takes precedence. |
 | Syncthing | with an administrator's permission | From the Store, once an administrator turns it on under Advanced. Files from paired devices are not filtered; see [content filtering](content-filtering.md#syncthing). |
 | Sites behind a captive portal (hotel, airport Wi‑Fi) | supported | "Allow Wi‑Fi sign‑in" on the person's page opens a ten‑minute window; filtering resumes on its own. |
 | Certificate pinning inside an app | not filtered, not broken | An app that pins its own certificate refuses the filter's; such traffic is blocked rather than passed through. |

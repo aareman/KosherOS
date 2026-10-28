@@ -120,6 +120,27 @@ for _ in $(seq 1 120); do
 done
 check_contains "it runs a Flatpak" "flatpak-ok" \
     as_session dnskid flatpak run --command=sh org.gnome.Calculator -c 'echo flatpak-ok'
+# A Flatpak trusts the filter's certificate (#223). Inside the sandbox
+# /etc is the runtime's, so the system bundle is not there; kosherd keeps a
+# copy outside /etc and a global override hands it to every app. dnskid is
+# made filtered for this, so its HTTPS goes through the proxy.
+check "the Flatpak copy of the bundle matches the system's" 0 \
+    cmp -s /var/lib/kosher-ca/tls-ca-bundle.pem /etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem
+check_contains "the global override shares it" "/var/lib/kosher-ca:ro" \
+    cat /var/lib/flatpak/overrides/global
+kctl set-mode "$(id -u dnskid)" filtered >/dev/null
+wait_for_dns >/dev/null 2>&1 || true
+# The mode change restarts the proxy; outside the sandbox first, so a
+# refusal below is the sandbox's and not a proxy still starting.
+wait_for_proxy_as dnskid
+out=$(as_session dnskid flatpak run --command=sh org.gnome.Calculator -c \
+    'echo | openssl s_client -connect example.com:443 -servername example.com 2>/dev/null | grep -E "^issuer=|Verify return"; curl -sS -o /dev/null -w "curl=%{http_code}\n" --max-time 20 https://example.com/' 2>&1)
+case "$out" in
+    *mitmproxy*"Verify return code: 0 (ok)"*curl=200*)
+        ok "inside a Flatpak, a filtered account's HTTPS goes through the filter and verifies" ;;
+    *) bad "inside a Flatpak the filter's certificate is not trusted: $(printf '%s' "$out" | tr '\n' ' ' | head -c 300)" ;;
+esac
+kctl set-mode "$(id -u dnskid)" dnsfilter >/dev/null
 check_contains "it runs a rootless container" "podman-ok" \
     as_session dnskid timeout 600 podman run --rm registry.fedoraproject.org/fedora-minimal:44 echo podman-ok
 for _ in $(seq 1 120); do

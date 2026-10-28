@@ -121,7 +121,7 @@ def _user(uid, name, key, admin=False, **kw):
     u = {"uid": uid, "username": name, "mode": p.mode, "admin": admin, "whitelist": [],
          "rules": [], "apps": [], "blocked_categories": list(p.blocked_categories),
          "media_level": p.media_level, "language_filter": p.language_filter,
-         "youtube": dict(p.youtube), "can_install_apps": p.can_install_apps,
+         "youtube": dict(p.youtube), "calm": {}, "can_install_apps": p.can_install_apps,
          "app_access": p.app_access, "blocked_app_kinds": list(p.blocked_app_kinds),
          "blocked_apps": list(p.blocked_apps),
          "layout": "classic", "cover_style": "frost", "time": {},
@@ -305,6 +305,10 @@ class DemoClient:
     def set_youtube(self, uid, settings, pw=""):
         self._user(uid)["youtube"] = dict(settings)
         self._change(uid, "SetYouTube", [uid])
+
+    def set_calm(self, uid, settings, pw=""):
+        self._user(uid)["calm"] = dict(settings)
+        self._change(uid, "SetCalm", [uid])
 
     def search_youtube_channels(self, query):
         """Made-up channels shaped like the real answer; the demo never

@@ -132,6 +132,11 @@ INTROSPECTION_XML = """
       <arg direction="in" type="s" name="settings_json"/>
       <arg direction="in" type="s" name="guardian_password"/>
     </method>
+    <method name="SetCalm">
+      <arg direction="in" type="i" name="uid"/>
+      <arg direction="in" type="s" name="settings_json"/>
+      <arg direction="in" type="s" name="guardian_password"/>
+    </method>
     <method name="SearchYouTubeChannels">
       <arg direction="in" type="s" name="query"/>
       <arg direction="out" type="s" name="results_json"/>
@@ -1526,6 +1531,23 @@ class Daemon:
         if unknown:
             raise PolicyError(f"unknown YouTube categories: {sorted(unknown)}")
         self._managed(uid).youtube = settings
+        self._save_and_apply()
+        return None
+
+    def impl_SetCalm(self, uid: int, settings_json: str, _guardian_pw: str):
+        """The calmer addictive sites (#179): which of them an account
+        gets calmed, the feed-item cap, and each site's daily budget."""
+        from . import calm as calm_mod
+
+        try:
+            settings = json.loads(settings_json or "{}")
+        except ValueError as e:
+            raise PolicyError(f"not valid JSON: {e}") from None
+        try:
+            settings = calm_mod.normalize(settings)
+        except ValueError as e:
+            raise PolicyError(str(e)) from None
+        self._managed(uid).calm = settings
         self._save_and_apply()
         return None
 

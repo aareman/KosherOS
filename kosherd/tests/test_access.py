@@ -165,7 +165,9 @@ def test_the_guardian_gate_covers_every_filter_weakening_method():
                 "DeleteProfile", "ApproveRequest", "AllowUrl",
                 "EditList", "SetUserAdmin",
                 "SetMediaLevel",
-                "SetLanguageFilter", "SetYouTube", "SetGuestConfig",
+                "SetLanguageFilter", "SetYouTube", "SetCalm", "SetGuestConfig",
+                # Calmer feeds and a daily budget for the addictive sites
+                # (#179): a filter setting like the others.
                 "DisableGuardian",
                 "Enrol", "Unenrol", "SetAdBlock", "SetTimeLimits",
                 # Beyond the web: video calls and extra ports widen reach.

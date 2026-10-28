@@ -218,6 +218,9 @@
         "developer_tools": {
           "type": "boolean",
           "description": "May use the Nix daemon and reach the package registries directly (nix, devbox, devenv from a shell). Default false."
+        },
+        "calm": {
+          "$ref": "#/$defs/calm"
         }
       }
     },
@@ -262,6 +265,9 @@
           },
           "youtube": {
             "type": "object"
+          },
+          "calm": {
+            "$ref": "#/$defs/calm"
           },
           "can_install_apps": {
             "type": "boolean"
@@ -593,6 +599,62 @@
         "syncthing_lan": {
           "type": "boolean",
           "description": "Devices on the home network may connect to this account's Syncthing directly (TCP 22000, UDP 22000 and 21027, from the LAN ranges only). Default false."
+        },
+        "calm": {
+          "$ref": "#/$defs/calm"
+        }
+      }
+    },
+    "calm": {
+      "type": "object",
+      "additionalProperties": false,
+      "default": {},
+      "description": "Calmer versions of the addictive sites (#179), enforced by the proxy and a script it injects into these pages: a feed page ends after a set number of items with ads, sidebars and recommendations stripped, and a direct link to a post renders as the post alone \u2014 no comments, no navigation, no links back into the site. Login flows are never touched. Empty means off.",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "default": false,
+          "description": "The master switch for the calmer sites."
+        },
+        "feed_items": {
+          "type": "integer",
+          "minimum": 5,
+          "maximum": 500,
+          "default": 30,
+          "description": "Where a feed page ends: this many items and no more."
+        },
+        "sites": {
+          "type": "object",
+          "additionalProperties": false,
+          "default": {},
+          "description": "Which sites the calmer version applies to; a site not listed is left exactly as it is.",
+          "properties": {
+            "x": {
+              "$ref": "#/$defs/calm_site"
+            },
+            "reddit": {
+              "$ref": "#/$defs/calm_site"
+            },
+            "youtube": {
+              "$ref": "#/$defs/calm_site"
+            },
+            "facebook": {
+              "$ref": "#/$defs/calm_site"
+            }
+          }
+        }
+      }
+    },
+    "calm_site": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "daily_minutes": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1440,
+          "default": 0,
+          "description": "The site's daily budget in minutes, counted while a page of it is on screen; when it is spent the site is done for the day. 0 means no limit."
         }
       }
     },

@@ -26,7 +26,8 @@ import gi
 
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
-from gi.repository import Adw, GLib, Gtk  # noqa: E402
+gi.require_version("Pango", "1.0")
+from gi.repository import Adw, GLib, Gtk, Pango  # noqa: E402
 
 from . import labels  # noqa: E402
 from .common import (banner_slot, clear, confirm, error_text, pointer_cursors,  # noqa: E501
@@ -725,8 +726,11 @@ class UpdatesPage(_Page):
         # that goes dead for ten minutes is a button that gets pressed
         # again. It listens to the daemon's own signals, so it also shows
         # an update somebody else (or the timer) started.
+        # Ellipsized: a progress bar is otherwise as wide as its text, and
+        # each long status line from bootc widened the whole page.
         self.progress = Gtk.ProgressBar(show_text=True, visible=False,
-                                        margin_top=8, margin_start=12, margin_end=12)
+                                        margin_top=8, margin_start=12, margin_end=12,
+                                        ellipsize=Pango.EllipsizeMode.END)
         group.add(self.progress)
         self.prefs.add(group)
         self.auto_group = AutoUpdatesGroup(win)

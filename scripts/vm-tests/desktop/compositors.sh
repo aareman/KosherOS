@@ -85,8 +85,19 @@ section "Signing in to each one"
 # GDM signs the account in by itself (automatic login) into the session
 # accountsservice names, the one the login screen would preselect.
 [ -f /etc/gdm/custom.conf ] && cp -a /etc/gdm/custom.conf /run/pr-test-gdm-custom.conf
+home=$(getent passwd "$u" | cut -d: -f6)
 for c in hyprland umbriel niri; do
     set_compositor "$c" >/dev/null 2>&1
+    # Umbriel signs in with a config of the person's own that does not start
+    # Noctalia, as Umbriel's example config does not: the session came up
+    # black until kosher-shell.service started the shell itself.
+    if [ "$c" = umbriel ]; then
+        install -d -o "$u" -g "$u" "$home/.config/umbriel"
+        sed '/^autostart/d' /etc/xdg/umbriel/config.toml > "$home/.config/umbriel/config.toml"
+        chown "$u:" "$home/.config/umbriel/config.toml"
+    else
+        rm -rf "$home/.config/umbriel"
+    fi
     for s in $(loginctl list-sessions --no-legend | awk -v u="$u" '$3 == u {print $1}'); do
         loginctl terminate-session "$s"
     done
@@ -115,10 +126,14 @@ for c in hyprland umbriel niri; do
     else
         bad "$c: no $proc process for $u"
     fi
-    if wait_until 60 sh -c "pgrep -u $uid -f noctalia >/dev/null"; then
+    if wait_until 60 sh -c "pgrep -u $uid -x noctalia >/dev/null"; then
         ok "$c: Noctalia is running"
     else
         bad "$c: Noctalia did not start"
+    fi
+    if [ "$c" = umbriel ]; then
+        check "$c: with an own config that leaves it out, kosher-shell started it" 0 \
+            user_systemctl is-active --quiet kosher-shell.service
     fi
     sleep 10
     check "$c: graphical-session.target is active" 0 user_systemctl is-active --quiet graphical-session.target

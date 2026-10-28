@@ -433,3 +433,24 @@ def test_a_budgeted_page_sends_a_heartbeat_and_none_is_sent_without_one():
     assert budgeted["beats"] == [{"url": "https://x.com/home", "seconds": 15}]
     unbudgeted = _harness("x", "feed", 4, "/home", -1)
     assert unbudgeted["beats"] == []
+
+
+@node
+@pytest.mark.parametrize("site, path", [
+    ("x", "/someone/status/12"),
+    ("reddit", "/r/linux/comments/1/title/"),
+    ("youtube", "/watch"),
+    ("facebook", "/someone/posts/12"),
+])
+def test_in_a_post_same_site_links_go_nowhere_and_links_out_work(site, path):
+    links = _harness(site, "single", 30, path)["links"]
+    # [href, stopped, marked]: the first two are the same site, the third is
+    # the site's own way out, the last goes straight out.
+    assert [stopped for _href, stopped, _marked in links] == [True, True, False, False]
+    assert [marked for _href, _stopped, marked in links] == [True, True, False, False]
+
+
+@node
+def test_in_a_feed_links_are_left_alone():
+    links = _harness("x", "feed", 30, "/home")["links"]
+    assert not any(stopped or marked for _href, stopped, marked in links)

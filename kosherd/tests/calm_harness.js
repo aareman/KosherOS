@@ -140,6 +140,16 @@ for (let n = 0; n < 6; n++) {
   feedItems.push(cell);
   main.appendChild(cell);
 }
+// Links inside the first post: to the same site, to the site's own way
+// out, and straight out.
+const LINKS = {
+  x: ["/someone/status/9", "https://twitter.com/someone", "https://t.co/abc", "https://example.com/a"],
+  reddit: ["/r/other/comments/1/x/", "https://redd.it/abc", "https://out.reddit.com/t3_x?url=https%3A%2F%2Fexample.com", "https://example.com/a"],
+  youtube: ["/watch?v=other", "https://youtu.be/abc", "https://www.youtube.com/redirect?q=https%3A%2F%2Fexample.com", "https://example.com/a"],
+  facebook: ["/someone/posts/9", "https://fb.watch/abc", "https://l.facebook.com/l.php?u=https%3A%2F%2Fexample.com", "https://example.com/a"],
+}[site] || [];
+const anchors = LINKS.map((href) => el("a", { href: href }, [el("span", {}, [])]));
+anchors.forEach((a) => feedItems[0].appendChild(a));
 const sidebar = el("div", { id: "secondary", "data-testid": "sidebarColumn" }, []);
 const related = el("div", { id: "related" }, []);
 const comments = el("ytd-comments", {}, []);
@@ -168,8 +178,11 @@ class FakeXHR {
   }
 }
 
-global.window = { addEventListener() {} };
-global.location = { href: "https://x.com" + pathArg, pathname: pathArg };
+const windowListeners = [];
+global.window = { addEventListener(type, fn, capture) { windowListeners.push([type, fn, capture]); } };
+const HOST = { x: "x.com", reddit: "www.reddit.com", youtube: "www.youtube.com",
+               facebook: "www.facebook.com" }[site] || "x.com";
+global.location = { href: "https://" + HOST + pathArg, pathname: pathArg };
 global.history = { pushState() {}, replaceState() {} };
 global.XMLHttpRequest = FakeXHR;
 global.MutationObserver = class { constructor(cb) { observerCallback = cb; } observe() {} disconnect() {} };
@@ -216,7 +229,21 @@ Date.now = () => realNow() + 15000;
 for (const fn of intervals) fn();
 Date.now = realNow;
 
+// A click on each link, on the span inside it as a person would: was it
+// stopped before the app saw it?
+const clicks = anchors.map((a) => {
+  const event = { target: a.children[0], prevented: false, stopped: false,
+                  preventDefault() { this.prevented = true; },
+                  stopImmediatePropagation() { this.stopped = true; } };
+  for (const [type, fn, capture] of windowListeners) {
+    if (type === "click" && capture) fn(event);
+  }
+  return [a.attrs.href, event.prevented && event.stopped,
+          a.attrs["data-kosheros-calm-inert"] !== undefined];
+});
+
 process.stdout.write(JSON.stringify({
+  links: clicks,
   hidden: feedItems.map((cell) => !!cell.hiddenByStyle),
   endCard: !!document.getElementById("__kosheros_calm_end"),
   sidebarHidden: !!sidebar.hiddenByStyle,

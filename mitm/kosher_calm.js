@@ -221,10 +221,63 @@
     if (last && last.parentNode) last.parentNode.insertBefore(card, last.nextSibling);
   }
 
+  // Same-site links in a post go nowhere, so a linked post has no rabbit
+  // hole behind it; a link out (the reason somebody linked the post) still
+  // works (#179). Each site sends its links out through an address of its
+  // own, and that address counts as out: t.co on X is not listed as X's.
+  var LINKS = {
+    x: { own: ["x.com", "twitter.com"], out: [], outPaths: [] },
+    reddit: { own: ["reddit.com", "redd.it"], out: ["out.reddit.com"], outPaths: [] },
+    youtube: { own: ["youtube.com", "youtu.be"], out: [], outPaths: ["/redirect"] },
+    facebook: { own: ["facebook.com", "fb.com", "fb.watch"],
+                out: ["l.facebook.com", "lm.facebook.com"], outPaths: [] }
+  };
+
+  function hostIn(host, list) {
+    for (var i = 0; i < list.length; i++) {
+      if (host === list[i] || host.slice(-(list[i].length + 1)) === "." + list[i]) return true;
+    }
+    return false;
+  }
+
+  function inertLink(href) {
+    var links = LINKS[site];
+    if (!links || !href) return false;
+    var url;
+    try { url = new URL(href, location.href); } catch (e) { return false; }
+    if (url.protocol !== "https:" && url.protocol !== "http:") return false;
+    var host = url.hostname.toLowerCase();
+    if (hostIn(host, links.out)) return false;
+    if (!hostIn(host, links.own)) return false;
+    for (var i = 0; i < links.outPaths.length; i++) {
+      if (url.pathname === links.outPaths[i]) return false;
+    }
+    return true;
+  }
+
+  function onLinkClick(e) {
+    if (stopped || modeNow() !== "single") return;
+    var a = e.target && e.target.closest ? e.target.closest("a[href]") : null;
+    if (!a || !inertLink(a.getAttribute("href"))) return;
+    // Before the app's own router, which listens further down.
+    e.preventDefault();
+    e.stopImmediatePropagation();
+  }
+
+  function markLinks() {
+    var anchors = document.querySelectorAll("a[href]");
+    for (var i = 0; i < anchors.length; i++) {
+      if (!inertLink(anchors[i].getAttribute("href"))) continue;
+      anchors[i].setAttribute("data-kosheros-calm-inert", "");
+      anchors[i].style.setProperty("cursor", "default", "important");
+    }
+  }
+
   function cleanSingle() {
     var list = spec.single || [];
     for (var i = 0; i < list.length; i++) hideAll(document, list[i]);
     removeEndCard();
+    markLinks();
     // A conversation page keeps the first post and hides the rest of the
     // thread, so the linked post is the page (#179: "the post alone").
     if (spec.item) {
@@ -283,6 +336,9 @@
 
   function start() {
     hookHistory();
+    // Capture on the window, so this runs before the app's own handlers.
+    window.addEventListener("click", onLinkClick, true);
+    window.addEventListener("auxclick", onLinkClick, true);
     apply();
     observer.observe(document.documentElement,
                      { childList: true, subtree: true });

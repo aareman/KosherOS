@@ -1884,6 +1884,10 @@ class Daemon:
         if user.mode in INSPECTED_MODES:
             settings["media_level"] = user.media_level
             settings["youtube"] = user.youtube
+        if user.mode == "filtered" and user.calm:
+            # The calmer sites (#179) work only through the proxy, so only
+            # a filtered account is told about them.
+            settings["calm"] = user.calm
         if user.mode == "whitelist":
             # The whitelist is already deliberately discoverable through
             # KosherOS Search, so listing it here reveals nothing new and

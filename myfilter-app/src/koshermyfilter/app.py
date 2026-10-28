@@ -23,6 +23,7 @@ gi.require_version("Adw", "1")
 from gi.repository import Adw, GLib, Gtk  # noqa: E402
 
 from kosherd.client import DaemonClient  # noqa: E402
+from kosherd import calm as calm_mod  # noqa: E402
 from kosherd.language import OFF  # noqa: E402
 from kosherd.policy import MEDIA_LEVEL_LABELS  # noqa: E402
 
@@ -266,6 +267,18 @@ class Window(Adw.ApplicationWindow):
                 subtitle += (f" · {len(allowed)} approved "
                              + ("channel" if len(allowed) == 1 else "channels"))
             group.add(Adw.ActionRow(title="YouTube", subtitle=subtitle))
+
+        calm = s.get("calm") or {}
+        sites = calm_mod.enabled_sites(calm)
+        if sites:
+            names = ", ".join(calm_mod.label(k) for k in sites)
+            subtitle = f"{names}: feeds end after {calm_mod.feed_items(calm)} items"
+            budgets = [f"{calm_mod.label(k)} {calm_mod.daily_minutes(calm, k)} min a day"
+                       for k in sites if calm_mod.daily_minutes(calm, k)]
+            if budgets:
+                subtitle += " · " + ", ".join(budgets)
+            group.add(Adw.ActionRow(title="Calmer sites", subtitle=subtitle,
+                                    subtitle_lines=3))
 
         group.add(Adw.ActionRow(
             title="Installing apps",

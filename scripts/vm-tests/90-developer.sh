@@ -210,6 +210,51 @@ for _ in $(seq 1 24); do
 done
 check "and can be removed again" 1 as wlkid bash -lc 'command -v gh'
 
+section "1Password's op, trusted by the app (#234)"
+# The app trusts an op running as group onepassword-cli; kosherd keeps a
+# setgid copy from its own build once anybody has 1Password. (The app's
+# browser helper is the same mechanism and is not fetched here: the app is
+# hundreds of megabytes.)
+has_op() { test -x "/home/$1/.local/state/nix/profiles/profile/bin/op"; }
+wrapper=/run/wrappers/bin/op
+check "nixpkgs#_1password-cli is on the approved list" 0 grep -q '"nixpkgs#_1password-cli"' /etc/kosher/catalog.json
+check_contains "onepassword-cli has its fixed gid and nobody in it" "^onepassword-cli:x:851:$" \
+    getent group onepassword-cli
+check "nobody has 1Password yet, so there is no copy" 1 test -e "$wrapper"
+out=$(python3 - <<'PY' 2>&1
+import pwd
+from kosherd.client import DaemonClient
+client = DaemonClient()
+uid = pwd.getpwnam("wlkid").pw_uid
+client.set_user_can_install(uid, True)
+client.install_app_for(uid, "nixpkgs#_1password-cli")
+print("QUEUED")
+PY
+)
+queued=0
+case "$out" in
+    *QUEUED*) queued=1 ;;
+    *) bad "the 1Password CLI install was refused: $(printf '%s' "$out" | tail -2 | head -c 240)" ;;
+esac
+for _ in $(seq 1 120); do
+    [ "$queued" = 1 ] || break
+    has_op wlkid && test -e "$wrapper" && break
+    sleep 5
+done
+check "the CLI is in the account's profile" 0 has_op wlkid
+check_contains "kosherd keeps a setgid copy, root:onepassword-cli" "2755 root onepassword-cli" \
+    stat -c '%a %U %G' "$wrapper"
+check "and keeps the build it came from (a GC root)" 0 test -L /nix/var/nix/gcroots/kosher-_1password-cli
+check_contains "a login shell's op is the copy" "$wrapper" as wlkid bash -lc 'command -v op'
+check_contains "and it runs" "." as wlkid bash -lc 'op --version'
+python3 -c 'from kosherd.client import DaemonClient; DaemonClient().remove_app("nixpkgs#_1password-cli")' >/dev/null 2>&1
+for _ in $(seq 1 36); do
+    test -e "$wrapper" || break
+    sleep 5
+done
+check "removed again, the copy goes" 1 test -e "$wrapper"
+check "and so does its GC root" 1 test -L /nix/var/nix/gcroots/kosher-_1password-cli
+
 section "Nix apps find the graphics drivers (#157)"
 # A Nix build's OpenGL loader looks in /run/opengl-driver, as on NixOS.
 # kosher-nix-opengl.service fetches the pinned Mesa into the store on the

@@ -226,6 +226,16 @@ class AppCard(Gtk.Box):
         self.button.connect("clicked", self._on_clicked)
         self.button.set_cursor_from_name("pointer")
         top.append(self.button)
+        # Beside Update, so an app with an update waiting can still be
+        # removed: the one button is the update then, and an app that only
+        # ever said Update could not be got rid of anywhere.
+        self.remove_button = Gtk.Button(icon_name="user-trash-symbolic",
+                                        valign=Gtk.Align.CENTER, visible=False)
+        self.remove_button.add_css_class("flat")
+        self.remove_button.add_css_class("circular")
+        self.remove_button.connect("clicked", lambda _b: self._act("remove"))
+        self.remove_button.set_cursor_from_name("pointer")
+        top.append(self.remove_button)
         self.append(top)
 
         self.progress = Gtk.ProgressBar(show_text=True, visible=False,
@@ -242,18 +252,21 @@ class AppCard(Gtk.Box):
         busy = state == "working"
         self.progress.set_visible(busy)
         self.button.set_visible(not busy)
+        self.remove_button.set_visible(state == "update")
         if busy:
             self.progress.set_fraction(percent / 100)
             self.progress.set_text(status or f"{percent}%")
             return
         if state == "update":
-            # Installed, and a newer build is on the remote. The one button
-            # on the card is the update; removing is still on the Installed
-            # shelf, where the app is not asking for anything.
+            # Installed, and a newer build is on the remote. The main button
+            # is the update; the small one beside it removes the app.
             self.button.set_label("Update")
             self.button.set_css_classes(["pill", "suggested-action"])
             self.button.set_sensitive(True)
             self.button.set_tooltip_text(self.store.update_words(self.ref))
+            self.remove_button.set_sensitive(self.store.is_admin)
+            self.remove_button.set_tooltip_text(
+                "Remove" if self.store.is_admin else "Only an admin can remove apps")
             return
         if state == "installed":
             self.button.set_label("Remove")
@@ -270,15 +283,18 @@ class AppCard(Gtk.Box):
                 "App installation is turned off for your account")
 
     def _on_clicked(self, _b) -> None:
+        self._act({"installed": "remove", "update": "update"}.get(self.state, "install"))
+
+    def _act(self, what: str) -> None:
         before = self.state
         if before == "working":
             return  # already in hand: a second request is an error, not a wish
         # Several apps can be requested at once; kosherd queues them.
         self.store.work_started(self.ref)
         self.set_state("working", 0, "Queued…")
-        work = {"installed": self.store.client.remove_app,
-                "update": self.store.client.update_app}.get(
-                    before, self.store.client.install_app)
+        work = {"remove": self.store.client.remove_app,
+                "update": self.store.client.update_app,
+                "install": self.store.client.install_app}[what]
 
         def on_error(e):
             self.store.work_ended(self.ref)

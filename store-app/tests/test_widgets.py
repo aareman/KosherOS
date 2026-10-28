@@ -385,6 +385,31 @@ def test_an_app_with_no_update_keeps_its_ordinary_button(window):
     assert sum(1 for s in states.values() if s == "update") == 2
 
 
+def test_an_app_with_an_update_can_still_be_removed(window, monkeypatch):
+    # It said only Update, with no way to remove it anywhere.
+    window.show_shelf("installed")
+    drain()
+    waiting = [c for c in window.cards.values() if c.state == "update"]
+    plain = [c for c in window.cards.values() if c.state == "installed"]
+    assert waiting and plain
+    for card in waiting:
+        assert card.button.get_label() == "Update"
+        assert card.remove_button.get_visible()
+        assert card.remove_button.get_sensitive() == window.is_admin
+    for card in plain:
+        assert not card.remove_button.get_visible(), "Remove is already the button"
+    asked = []
+    monkeypatch.setattr(window.client, "remove_app", lambda ref: asked.append(ref))
+    monkeypatch.setattr(window.client, "update_app",
+                        lambda ref: pytest.fail("Remove updated the app"))
+    waiting[0].remove_button.emit("clicked")
+    assert waiting[0].state == "working"
+    assert not waiting[0].remove_button.get_visible()
+    for _ in range(5):
+        drain()
+    assert asked == [waiting[0].ref]
+
+
 # -- what is in hand, and what is installed ---------------------------------------
 
 def test_an_install_in_hand_survives_a_rebuild_and_cannot_be_asked_for_twice(window):

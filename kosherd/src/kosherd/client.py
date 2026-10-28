@@ -330,6 +330,10 @@ class DaemonClient:
         """Syncthing for the whole computer (#220)."""
         self._call("Apps", "SetSyncthingEnabled", "(bs)", bool(enabled), guardian_password)
 
+    def set_keyd_enabled(self, enabled: bool, guardian_password: str = "") -> None:
+        """Key remapping (keyd) for the whole computer (#230)."""
+        self._call("Profiles", "SetKeydEnabled", "(bs)", bool(enabled), guardian_password)
+
     def list_installed(self) -> list[str]:
         return self._call("Apps", "ListInstalled")[0]
 

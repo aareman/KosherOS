@@ -55,6 +55,14 @@ keyd compiled for KosherOS reads /run/keyd (not /etc/keyd), so nothing
 here writes /etc and a reboot always starts from the machine's config;
 keyd.service puts /etc/keyd/default.conf there, alone, each time it
 starts.
+
+All of this is a switch under Advanced in the admin app (#230), off on a
+new install: most families never remap a key, and keyd is a root daemon
+reading every keyboard. Off, kosherd stops and disables keyd.service
+(`set_running`) and refuses a person's files with the reason, and the
+files stay in their home for when it is on. kosher-keyboard sends them
+again when the policy changes, so switching it on takes effect for the
+person at the screen without a new sign-in.
 """
 
 from __future__ import annotations
@@ -89,6 +97,9 @@ APP_CONF = "app.conf"
 # it stands for (root only).
 RUN_HELPER = "/usr/libexec/kosher-keyd-run"
 COMMANDS_DIR = Path("/run/kosher-keyd")
+SERVICE = "keyd.service"
+SWITCHED_OFF = ("Key remapping is switched off on this computer. An administrator "
+                "can turn it on in the admin app, under Advanced.")
 
 # Well inside keyd's own limits (64 KiB per file with its includes, 4096
 # bytes a line, 32 sections, 1024 entries a section, 64 ids and 64
@@ -411,6 +422,9 @@ class Keyboards:
         self.configs: dict[int, PersonSet] = {}
         # Whose app.conf bindings are on top of the loaded config.
         self.bound_uid: int | None = None
+        # The Advanced switch (#230). Off, keyd is not running: nothing is
+        # accepted and nothing is written for it.
+        self.enabled = True
 
     def base_config(self) -> str:
         try:
@@ -488,8 +502,11 @@ class Keyboards:
         """A person's files, as they saved them. No files means none.
 
         Files that fail change nothing: whatever of theirs was in force
-        stays in force. Returns whether keyd was reloaded."""
+        stays in force. Returns whether keyd was reloaded. Refused while
+        key remapping is switched off, unless there are no files."""
         files = {name: text for name, text in files.items() if text.strip()}
+        if files and not self.enabled:
+            raise KeymapError(SWITCHED_OFF)
         if not files:
             self.configs.pop(uid, None)
         else:
@@ -502,6 +519,8 @@ class Keyboards:
     def bind(self, uid: int, bindings: list[str], active_uid: int | None) -> None:
         """app.conf's bindings for the window now in front, on top of the
         person's files. Only for the person on the screen."""
+        if not self.enabled:
+            raise KeymapError(SWITCHED_OFF)
         if uid != active_uid:
             raise KeymapError("only the person using the screen can change its keys")
         self.refresh(active_uid)
@@ -532,8 +551,21 @@ class Keyboards:
             log.warning("keyboard: keyd %s failed: %s", args[0], e)
             return None
 
+    def set_enabled(self, on: bool) -> None:
+        """The switch changed. Off forgets every person's set and their
+        commands: keyd is stopping, and keyd.service puts the machine's
+        config back alone when it next starts."""
+        self.enabled = bool(on)
+        if not self.enabled:
+            for uid in list(self.configs):
+                del self.configs[uid]
+                self._write_commands(uid)
+            self.bound_uid = None
+
     def refresh(self, active_uid: int | None) -> bool:
         """Put the right set in force. Returns whether keyd was reloaded."""
+        if not self.enabled:
+            return False
         wanted = self.wanted(active_uid)
         if self.live() == wanted:
             if self.bound_uid is not None and self.bound_uid != active_uid:
@@ -681,6 +713,35 @@ def _dbus_message(error) -> str:
         if sep:
             return rest
     return message
+
+
+def set_running(on: bool, *, wait: bool = True, run=subprocess.run) -> None:
+    """Enable and start keyd, or stop and disable it (#230). `wait=False`
+    queues the job, for kosherd's start."""
+    argv = ["systemctl", "enable" if on else "disable", "--now"]
+    if not wait:
+        argv.append("--no-block")
+    argv.append(SERVICE)
+    try:
+        res = run(argv, capture_output=True, text=True, timeout=60)
+    except (OSError, subprocess.SubprocessError) as e:
+        raise KeymapError(f"could not {'start' if on else 'stop'} keyd: {e}") from None
+    if res.returncode != 0:
+        raise KeymapError(f"could not {'start' if on else 'stop'} keyd: "
+                          + (res.stderr or res.stdout or "").strip())
+
+
+def used_before(homes) -> bool:
+    """Does any of these home folders have keyboard files? For a computer
+    that remapped keys before the switch existed: kosherd keeps it on if
+    so. A folder it cannot read counts as no."""
+    for home in homes:
+        try:
+            if read_own(Path(home)):
+                return True
+        except (KeymapError, OSError):
+            continue
+    return False
 
 
 def read_own(home: Path) -> dict[str, str]:
@@ -878,15 +939,20 @@ def main(argv=None) -> int:  # pragma: no cover - needs a session and kosherd
                         "kosher-keyd-apps.service"], check=False)
 
     pending = {"id": 0}
+    # The last thing that went wrong, so a policy change that leaves it as
+    # it was (key remapping still switched off, say) does not say it again.
+    last = {"problem": None}
 
     def apply_now() -> bool:
         pending["id"] = 0
         problem = send()
         if problem:
             log.warning("not applied: %s", problem)
-            notify(problem)
+            if problem != last["problem"]:
+                notify(problem)
         else:
             log.info("applied")
+        last["problem"] = problem
         return False
 
     def soon(*_args) -> None:
@@ -912,6 +978,12 @@ def main(argv=None) -> int:  # pragma: no cover - needs a session and kosherd
     monitor.connect("changed", changed)
     Gio.bus_watch_name(Gio.BusType.SYSTEM, BUS_NAME, Gio.BusNameWatcherFlags.NONE,
                        lambda *_a: soon(), None)
+    # An administrator switching key remapping on or off under Advanced
+    # (#230) changes the policy: send the files again, so it takes effect
+    # without a new sign-in.
+    system.signal_subscribe(BUS_NAME, "org.kosherlinux.Daemon1.Profiles", "PolicyChanged",
+                            OBJECT_PATH, None, Gio.DBusSignalFlags.NONE,
+                            lambda *_a: soon())
     GLib.MainLoop().run()
     return 0
 

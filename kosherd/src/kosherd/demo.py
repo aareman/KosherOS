@@ -138,7 +138,7 @@ class DemoClient:
             "revision": 3, "guardian": {"enabled": True}, "adblock": {"enabled": True},
             # On in the demo so every page has something to show; a new
             # install has both off.
-            "advanced": {"tailscale": True, "syncthing": True},
+            "advanced": {"tailscale": True, "syncthing": True, "keyd": True},
             "custom_profiles": [profiles.to_dict(g) for g in DEMO_GROUPS],
             "users": [
                 _user(1000, "avi", "grown-up", admin=True),
@@ -417,6 +417,10 @@ class DemoClient:
     def set_syncthing_enabled(self, enabled, guardian_password=""):
         self.policy["advanced"]["syncthing"] = bool(enabled)
         self._change(None, "SetSyncthingEnabled", [bool(enabled)])
+
+    def set_keyd_enabled(self, enabled, guardian_password=""):
+        self.policy["advanced"]["keyd"] = bool(enabled)
+        self._change(None, "SetKeydEnabled", [bool(enabled)])
 
     def set_network_access(self, uid, video_calls, extra_ports, pw=""):
         u = self._user(uid)

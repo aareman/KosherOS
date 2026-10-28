@@ -209,6 +209,10 @@ ACTIONS = {
     # Store does not offer it. On, an administrator's account and an
     # unfiltered one may install it with no approval, so it is gated.
     "SetSyncthingEnabled": ACTION_MANAGE_FILTER,
+    # Key remapping for the whole computer (#230): keyd is a root daemon
+    # that reads every keyboard, and a remapped key can run a command in
+    # the person's session. Gated like the other Advanced switches.
+    "SetKeydEnabled": ACTION_MANAGE_FILTER,
     "SearchApps": ACTION_READ_CONFIG,
     "ApproveApp": ACTION_INSTALL_APPS,
     "UnapproveApp": ACTION_INSTALL_APPS,
@@ -280,7 +284,7 @@ GUARDIAN_GATED = frozenset({
     "SetBootMenuPassword",
     "SetUserAppAccess", "SetUserBlockedAppKinds", "SetUserBlockedApps",
     "SetUserAppApproval", "SetSyncthingLan", "SetSyncthingEnabled",
-    "TailscaleSignIn", "SetTailscaleEnabled",
+    "TailscaleSignIn", "SetTailscaleEnabled", "SetKeydEnabled",
 })
 
 # First-boot only; closed forever once setup is stamped complete.
@@ -334,6 +338,8 @@ CHANGES = frozenset({
     "TryImage", "ReturnToKept",
     # Joining a tailnet and leaving it.
     "TailscaleSignIn", "TailscaleSignOut", "SetTailscaleEnabled",
+    # And key remapping switched on or off.
+    "SetKeydEnabled",
 })
 # Changes whose first argument is the account they are about.
 PER_USER = frozenset({

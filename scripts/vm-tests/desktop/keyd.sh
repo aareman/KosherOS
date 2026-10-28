@@ -29,6 +29,30 @@ wait_until() {
     return 1
 }
 
+section "Off until an administrator turns it on (#230)"
+# A test machine has nobody with keyd files at kosherd's first start, so
+# the switch settled off.
+check_contains "kosherctl says key remapping is off" "keyd: off" kosherctl advanced keyd
+check "keyd.service is not running" 1 systemctl is-active --quiet keyd
+check "and does not start at boot" 1 systemctl is-enabled --quiet keyd
+printf '[main]\nx = y\n' | save default.conf
+if wait_until 20 sh -c "journalctl -b --no-pager _SYSTEMD_USER_UNIT=kosher-keyboard.service \
+        _UID=$uid | grep -q 'switched off on this computer'"; then
+    ok "the account's file is refused, saying key remapping is switched off"
+else
+    bad "kosher-keyboard did not report the switch: $(journalctl -b --no-pager _SYSTEMD_USER_UNIT=kosher-keyboard.service | tail -2)"
+fi
+check "and nothing reached /run/keyd" 1 test -f /run/keyd/person-default.conf
+check "kosherctl turns it on" 0 kctl advanced keyd on
+check_contains "the activity log records it" "SetKeydEnabled" kosherctl activity
+if wait_until 20 sh -c 'grep -q "x = y" /run/keyd/person-default.conf 2>/dev/null'; then
+    ok "switched on, the account's file is in force without signing out"
+else
+    bad "switched on, the account's file never reached /run/keyd: $(ls /run/keyd 2>&1)"
+fi
+as "$u" rm -f "$home/.config/keyd/default.conf"
+wait_until 20 sh -c '! test -f /run/keyd/person-default.conf' || true
+
 section "keyd is the only thing reading the keyboards"
 check "keyd.service is running" 0 systemctl is-active --quiet keyd
 members=$(getent group keyd | cut -d: -f4)
@@ -149,5 +173,16 @@ fi
 sleep 2
 check "and F5 no longer runs the account's command" 1 test -e "$home/.kosher-keyd-ran"
 as "$u" rm -f "$home/.config/keyd/default.conf"
+
+section "Switched off again"
+check "kosherctl turns it off" 0 kctl advanced keyd off
+check "keyd.service is stopped" 1 systemctl is-active --quiet keyd
+check "and does not start at boot" 1 systemctl is-enabled --quiet keyd
+out=$(keys 45)
+if [ "$out" = 45 ]; then
+    ok "with keyd stopped the keyboard types as it is"
+else
+    bad "with keyd stopped x came out as '$out'"
+fi
 
 report

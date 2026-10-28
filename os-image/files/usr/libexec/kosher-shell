@@ -1,0 +1,24 @@
+#!/bin/sh
+# KosherOS: make sure the advanced desktop has its shell (kosher-shell.service).
+#
+# niri, Hyprland and Umbriel each start Noctalia from the configuration
+# KosherOS ships. A person's own configuration replaces that one whole, and
+# Umbriel's example config, copied to ~/.config/umbriel/config.toml as its
+# documentation suggests, has the autostart line commented out: the session
+# came up black, with only a cursor and the keybind sheet. This gives the
+# compositor's own autostart its chance, then starts Noctalia if nothing
+# did. Noctalia allows one copy per session, so it never runs twice.
+case "${XDG_CURRENT_DESKTOP:-}" in
+    *niri* | *Hyprland* | *hyprland* | *umbriel*) ;;
+    *) exit 0 ;;
+esac
+command -v noctalia >/dev/null 2>&1 || exit 0
+
+i=0
+while [ "$i" -lt 15 ]; do
+    pgrep -u "$(id -u)" -x noctalia >/dev/null && exit 0
+    sleep 1
+    i=$((i + 1))
+done
+echo "no shell after 15 seconds; starting Noctalia" >&2
+exec noctalia

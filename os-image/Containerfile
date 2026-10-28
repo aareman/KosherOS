@@ -685,6 +685,10 @@ RUN python3 -m pip install --prefix=/usr --no-deps \
     # and runs the per-app key mapper for people with an app.conf.
     && systemctl --global enable kosher-keyboard.service kosher-keyd-apps.service \
     && chmod 755 /usr/libexec/kosher-keyd-run \
+    # ...and starts Noctalia on niri, Hyprland or Umbriel when a personal
+    # compositor configuration left it out.
+    && systemctl --global enable kosher-shell.service \
+    && chmod 755 /usr/libexec/kosher-shell \
     && systemctl enable kosher-search-secret.service kosher-searxng.service \
         kosher-search.service \
     # Portal sync is inert until the device enrols (the unit and timer

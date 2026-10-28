@@ -2763,8 +2763,13 @@ class Daemon:
         self._emit_system_signal("UpdateProgress", "(is)", (int(percent), str(status)))
 
     def _on_update_finished(self, ok: bool, error: str) -> None:
+        trying, self._trying = getattr(self, "_trying", False), False
         if not ok:
             log.error("update failed: %s", error)
+        elif trying:
+            # A build somebody asked to try: they are waiting for it, so it
+            # gets the pop-up as well as the mark, notices on or not.
+            self._sync_pending(announce=True, always=True)
         else:
             # Downloaded by hand (or a channel switch): the mark in the
             # panel shows for everyone, without the pop-up.
@@ -2962,7 +2967,7 @@ class Daemon:
         updates.save_state(state)
         self._sync_pending(announce=True)
 
-    def _sync_pending(self, announce: bool = False) -> None:
+    def _sync_pending(self, announce: bool = False, always: bool = False) -> None:
         """Note what waits for the next restart, from bootc's status, and
         tell the sessions: UpdateReady(version, digest, announce) with an
         empty digest when nothing waits any more. `announce` asks for the
@@ -2979,7 +2984,7 @@ class Daemon:
                 digest = staged.get("digest") or staged.get("version") or staged.get("image") or "staged"
                 pop = updates.record_staged(state, staged.get("version"), digest,
                                             updates.boot_id(),
-                                            announce=announce and self.policy.update_notify)
+                                            announce=announce and (always or self.policy.update_notify))
                 updates.save_state(state)
                 self._emit_system_signal("UpdateReady", "(ssb)",
                                          (staged.get("version") or "", digest, pop))
@@ -3168,6 +3173,7 @@ class Daemon:
                      booted.get("image"))
         self._undeploy(plan["undeploy"])
         log.info("trying %s: %s", target, " ".join(plan["argv"]))
+        self._trying = True
         self._update_thread = updates.run_upgrade(
             self._on_update_progress, self._on_update_finished, argv=plan["argv"])
         return None

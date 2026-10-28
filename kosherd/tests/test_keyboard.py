@@ -501,6 +501,31 @@ def test_app_bindings_are_cleared_when_someone_else_takes_the_screen(kb):
     assert len(kb.fake.calls) == calls + 1, "and only once"
 
 
+def test_the_same_app_bindings_are_not_sent_again(kb):
+    # The mapper asks on every focus change; keyd's bind is one request per
+    # binding, so a repeat left a moment with the app's keys missing.
+    kb.bind(1001, ["a = b"], active_uid=1001)
+    calls = len(kb.fake.calls)
+    kb.bind(1001, ["a = b"], active_uid=1001)
+    assert len(kb.fake.calls) == calls, "nothing changed, nothing sent"
+    kb.bind(1001, ["a = c"], active_uid=1001)
+    assert kb.fake.calls[-1] == ["bind", "reset", "a = c"]
+    # After someone else had the screen, they are sent again.
+    kb.refresh(1002)
+    kb.bind(1001, ["a = c"], active_uid=1001)
+    assert kb.fake.calls[-1] == ["bind", "reset", "a = c"]
+
+
+def test_bindings_keyd_refused_are_sent_again(kb):
+    kb.fake.bind_rc = 1
+    with pytest.raises(KeymapError):
+        kb.bind(1001, ["a = b"], active_uid=1001)
+    calls = len(kb.fake.calls)
+    kb.fake.bind_rc = 0
+    kb.bind(1001, ["a = b"], active_uid=1001)
+    assert kb.fake.calls[-1] == ["bind", "reset", "a = b"] and len(kb.fake.calls) > calls
+
+
 def test_app_bindings_are_checked(kb):
     commands = Commands()
     for bad in (["a"], ["a = b\nc = d"], ["a = " + "b" * keyboard.MAX_BINDING],

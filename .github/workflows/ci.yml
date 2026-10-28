@@ -10,8 +10,15 @@ on:
   pull_request:
   # "Rebuild and publish edge now", for when the last commits touched
   # nothing in the image and a fresh one is wanted anyway — before
-  # promoting a version to stable, for instance.
+  # promoting a version to stable, for instance. The merge train
+  # (merge-train.yml) also starts it with `landed`: its merges are the
+  # workflow's own and start no push run, so this releases them instead.
   workflow_dispatch:
+    inputs:
+      landed:
+        description: release what the merge train just landed, as a push would
+        type: boolean
+        default: false
 
 concurrency:
   # One Pages deployment at a time; a second push while one is publishing
@@ -119,8 +126,9 @@ jobs:
       - id: filter
         env:
           BASE: ${{ github.event.before }}
+          LANDED: ${{ inputs.landed }}
         run: |
-          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then
+          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ] && [ "$LANDED" != "true" ]; then
             echo "image=true" >> "$GITHUB_OUTPUT"
             echo "asked for by hand: building"
             exit 0
@@ -130,7 +138,11 @@ jobs:
             echo "a pull request: the image is built from the merge, not here"
             exit 0
           fi
-          if [ "$GITHUB_EVENT_NAME" != "push" ] || [ -z "$BASE" ] \
+          if [ "$LANDED" = "true" ]; then
+            # The train's merges: what changed since the last version tag
+            # decides, as for a push.
+            BASE="$(git describe --tags --abbrev=0 --match 'v*' "$GITHUB_SHA" 2>/dev/null || true)"
+          elif [ "$GITHUB_EVENT_NAME" != "push" ] || [ -z "$BASE" ] \
              || [ "$BASE" = "0000000000000000000000000000000000000000" ] \
              || ! git cat-file -e "$BASE" 2>/dev/null; then
             echo "image=true" >> "$GITHUB_OUTPUT"
@@ -273,7 +285,7 @@ jobs:
     # since the previous tag.
     needs: [unit, compile, shell, changes, image]
     if: |
-      always() && github.event_name == 'push'
+      always() && (github.event_name == 'push' || inputs.landed)
       && needs.unit.result == 'success'
       && needs.compile.result == 'success'
       && needs.shell.result == 'success'

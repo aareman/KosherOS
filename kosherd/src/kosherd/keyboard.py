@@ -422,6 +422,9 @@ class Keyboards:
         self.configs: dict[int, PersonSet] = {}
         # Whose app.conf bindings are on top of the loaded config.
         self.bound_uid: int | None = None
+        # The bindings last sent for bound_uid, so a focus change that asks
+        # for the same ones is not sent again.
+        self.bound_exprs: list[str] | None = None
         # The Advanced switch (#230). Off, keyd is not running: nothing is
         # accepted and nothing is written for it.
         self.enabled = True
@@ -531,11 +534,18 @@ class Keyboards:
         exprs = prepare_bindings(bindings, uid=uid, commands=person.commands)
         if person.commands.table != before:
             self._write_commands(uid)
+        if self.bound_uid == uid and self.bound_exprs == exprs:
+            # The mapper asks on every focus change, mostly for what is
+            # already there; `keyd bind` sends one request per binding, so
+            # each repeat left a moment with the app's keys missing.
+            return
         result = self._keyd("bind", "reset", *exprs)
         self.bound_uid = uid
         if result is not None and result.returncode != 0:
+            self.bound_exprs = None  # not what keyd has: send it again next time
             raise KeymapError("keyd did not take every binding: "
                               + (result.stderr or result.stdout or "").strip())
+        self.bound_exprs = exprs
 
     def forget_all_but(self, signed_in: set[int]) -> None:
         """Drop the sets of people with no session left."""

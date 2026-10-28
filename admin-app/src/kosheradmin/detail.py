@@ -19,6 +19,7 @@ from gi.repository import Adw, GLib, Gtk  # noqa: E402
 
 from kosherd import activity as activity_mod  # noqa: E402
 from kosherd import appaccess, appkinds  # noqa: E402
+from kosherd import calm as calm_mod  # noqa: E402
 from kosherd import profiles as profiles_mod  # noqa: E402
 from kosherd import timelimits  # noqa: E402
 from kosherd.policy import MEDIA_LEVELS, MODES, YOUTUBE_CATEGORIES  # noqa: E402
@@ -37,6 +38,7 @@ TABS = (("overview", "Overview", "view-list-symbolic"),
         # sidebar, and a truncated tab is worse than a shorter one.
         ("media", "Pictures", "image-x-generic-symbolic"),
         ("youtube", "YouTube", "video-display-symbolic"),
+        ("calm", "Calm", "night-light-symbolic"),
         ("time", "Time", "alarm-symbolic"),
         ("apps", "Apps", "view-grid-symbolic"),
         ("account", "Account", "system-users-symbolic"))
@@ -89,6 +91,7 @@ class UserDetailPage(Adw.NavigationPage):
         self.stack = Adw.ViewStack()
         builders = {"overview": self._overview_tab, "filtering": self._filtering_tab,
                     "media": self._media_tab, "youtube": self._youtube_tab,
+                    "calm": self._calm_tab,
                     "time": self._time_tab,
                     "apps": self._apps_tab, "account": self._account_tab}
         tabs = TABS
@@ -957,6 +960,140 @@ class UserDetailPage(Adw.NavigationPage):
             remove.connect("clicked", lambda _b, r=ref: self._remove_channel(r))
             row.add_suffix(remove)
             self.channel_list.append(row)
+
+    # -- calm ----------------------------------------------------------------------
+
+    def _calm_tab(self, user: dict) -> list[Adw.PreferencesGroup]:
+        """Calmer versions of the addictive sites (#179).
+
+        X, Reddit, YouTube and Facebook cannot always be blocked — an
+        article links a tweet, a reddit post answers a bug — but their
+        feeds are bottomless. Given a calmer version, a feed ends after a
+        set number of items, a linked post opens on its own, and the ads,
+        sidebars and recommendations are gone. A site may also carry a
+        daily budget, counted only while one of its pages is on screen.
+        Every change saves at once.
+        """
+        settings = dict(user.get("calm") or {})
+        self.calm_sites = set(calm_mod.enabled_sites(settings))
+        self.calm_feed = calm_mod.feed_items(settings)
+        self.calm_minutes = {key: calm_mod.daily_minutes(settings, key)
+                             for key in calm_mod.SITE_ORDER}
+        self._calm_saved = self._calm_settings()
+        self._calm_building = True
+        groups: list[Adw.PreferencesGroup] = []
+
+        shape = Adw.PreferencesGroup(
+            title="Calmer feeds",
+            description=("A calmer site ends: a feed stops after a set number of items, "
+                         "a post you follow a link to opens on its own, and the ads, "
+                         "sidebars and recommendations are not there. Signing in is "
+                         "never touched."))
+        self.calm_master = Adw.SwitchRow(title="Give these sites a calmer version",
+                                         active=bool(self.calm_sites))
+        self.calm_master.connect("notify::active", self._on_calm_master)
+        shape.add(self.calm_master)
+        self.calm_feed_row = Adw.SpinRow.new_with_range(calm_mod.MIN_FEED_ITEMS,
+                                                        calm_mod.MAX_FEED_ITEMS, 5)
+        self.calm_feed_row.set_title("Items in a feed")
+        self.calm_feed_row.set_subtitle("Where a feed page ends.")
+        self.calm_feed_row.set_value(self.calm_feed)
+        self.calm_feed_row.connect("notify::value", self._on_calm_feed)
+        shape.add(self.calm_feed_row)
+        groups.append(shape)
+
+        sites = Adw.PreferencesGroup(
+            title="Sites",
+            description=("A site that is not switched on is left exactly as it is. "
+                         "Minutes a day is counted only while a page of that site is "
+                         "on screen; 0 means no limit."))
+        self.calm_rows: dict[str, Adw.SwitchRow] = {}
+        self.calm_minute_rows: dict[str, Adw.SpinRow] = {}
+        for key in calm_mod.SITE_ORDER:
+            row = Adw.SwitchRow(title=calm_mod.label(key), active=key in self.calm_sites)
+            row.connect("notify::active", self._on_calm_site, key)
+            self.calm_rows[key] = row
+            sites.add(row)
+            minutes = Adw.SpinRow.new_with_range(0, calm_mod.MAX_DAILY_MINUTES, 15)
+            minutes.set_title(f"Daily budget for {calm_mod.label(key)}")
+            minutes.set_subtitle("Minutes; 0 means no limit.")
+            minutes.set_value(self.calm_minutes[key])
+            minutes.set_sensitive(key in self.calm_sites)
+            minutes.connect("notify::value", self._on_calm_minutes, key)
+            self.calm_minute_rows[key] = minutes
+            sites.add(minutes)
+        groups.append(sites)
+
+        if user["mode"] != "filtered":
+            # Nothing outside the proxy can rewrite a page or count the time
+            # one is on screen, so in other modes this is genuinely inert.
+            for group in groups:
+                group.set_description("Calmer sites apply only in Filtered internet mode.")
+                group.set_sensitive(False)
+        self._calm_building = False
+        return groups
+
+    def _calm_settings(self) -> dict:
+        if not self.calm_sites:
+            return {}
+        settings: dict = {"enabled": True}
+        if self.calm_feed != calm_mod.DEFAULT_FEED_ITEMS:
+            settings["feed_items"] = self.calm_feed
+        settings["sites"] = {
+            key: ({"daily_minutes": self.calm_minutes.get(key, 0)}
+                  if self.calm_minutes.get(key) else {})
+            for key in calm_mod.SITE_ORDER if key in self.calm_sites}
+        return settings
+
+    def _save_calm(self) -> None:
+        if self._calm_building:
+            return
+        user = self.user
+        settings = self._calm_settings()
+        if settings == self._calm_saved:
+            return
+        self._calm_saved = settings
+        self._gated(lambda pw: self.win.client.set_calm(user["uid"], settings, pw),
+                    f"Calmer sites saved for {user['username']}")
+
+    def _on_calm_master(self, row, _param) -> None:
+        if self._calm_building:
+            return
+        if row.get_active() and not self.calm_sites:
+            self.calm_sites = set(calm_mod.SITE_ORDER)
+        elif not row.get_active():
+            self.calm_sites = set()
+        self._calm_building = True
+        for key, site_row in self.calm_rows.items():
+            site_row.set_active(key in self.calm_sites)
+            self.calm_minute_rows[key].set_sensitive(key in self.calm_sites)
+        self._calm_building = False
+        self._save_calm()
+
+    def _on_calm_site(self, row, _param, key: str) -> None:
+        if self._calm_building:
+            return
+        if row.get_active():
+            self.calm_sites.add(key)
+        else:
+            self.calm_sites.discard(key)
+        self.calm_minute_rows[key].set_sensitive(key in self.calm_sites)
+        self._calm_building = True
+        self.calm_master.set_active(bool(self.calm_sites))
+        self._calm_building = False
+        self._save_calm()
+
+    def _on_calm_feed(self, row, _param) -> None:
+        if self._calm_building:
+            return
+        self.calm_feed = int(row.get_value())
+        self._save_calm()
+
+    def _on_calm_minutes(self, row, _param, key: str) -> None:
+        if self._calm_building:
+            return
+        self.calm_minutes[key] = int(row.get_value())
+        self._save_calm()
 
     # -- time --------------------------------------------------------------------
 

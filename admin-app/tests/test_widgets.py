@@ -685,7 +685,8 @@ def test_an_enabled_guest_opens_the_same_page_as_anyone_without_an_apps_tab():
     drain()
     names = [page.stack.get_pages().get_item(i).get_name()
              for i in range(page.stack.get_pages().get_n_items())]
-    assert names == ["overview", "filtering", "media", "youtube", "time", "account"]
+    assert names == ["overview", "filtering", "media", "youtube", "calm", "time",
+                     "account"]
     titles = {r.get_title() for r in _rows(page)}
     assert "Guest account is on" in titles
     assert "Administrator" not in titles and "Remove account…" not in titles
@@ -840,13 +841,14 @@ def _detail(mode="filtered", users=None, **kw):
     return page, win, user
 
 
-def test_the_detail_page_has_seven_tabs_and_starts_on_the_overview():
+def test_the_detail_page_has_eight_tabs_and_starts_on_the_overview():
     page, _w, _u = _detail()
     names = []
     stack_pages = page.stack.get_pages()
     for i in range(stack_pages.get_n_items()):
         names.append(stack_pages.get_item(i).get_name())
-    assert names == ["overview", "filtering", "media", "youtube", "time", "apps", "account"]
+    assert names == ["overview", "filtering", "media", "youtube", "calm", "time",
+                     "apps", "account"]
     assert page.stack.get_visible_child_name() == "overview"
 
 
@@ -2038,7 +2040,7 @@ def test_the_demo_family_drives_every_screen():
     for user in win.policy["users"]:
         page = detail.UserDetailPage(win, user)
         drain()
-        assert page.stack.get_pages().get_n_items() == 7, user["username"]
+        assert page.stack.get_pages().get_n_items() == 8, user["username"]
     activity = feed.ActivityPage(win)
     activity.refresh()
     drain()

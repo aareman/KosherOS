@@ -90,7 +90,7 @@ def test_details_action_follows_install_progress(window, requested, monkeypatch)
     assert calls == [app["ref"]]
     window._on_progress(app["ref"], 42, "Downloading")
     assert page.card.progress.get_fraction() == pytest.approx(.42)
-    assert not page.card.button.get_visible()
+    assert not page.card.button.get_sensitive()
     window.client.installed.append({"ref": app["ref"], "name": app["name"], "approved": True})
     window._on_finished(app["ref"], True, "")
     drain()

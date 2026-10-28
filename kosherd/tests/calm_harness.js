@@ -150,11 +150,18 @@ const LINKS = {
 }[site] || [];
 const anchors = LINKS.map((href) => el("a", { href: href }, [el("span", {}, [])]));
 anchors.forEach((a) => feedItems[0].appendChild(a));
+// On X's post page the second cell is the post the address names (the
+// first is the post it answers), the rest are replies.
+if (site === "x" && /\/status\/12$/.test(pathArg)) {  // post 12 is drawn; others are not yet
+  feedItems[1].appendChild(el("a", { href: pathArg + "?ref=1" }, [el("time", {}, [])]));
+}
+const commentTree = el("shreddit-comment-tree", {}, []);
 const sidebar = el("div", { id: "secondary", "data-testid": "sidebarColumn" }, []);
 const related = el("div", { id: "related" }, []);
 const comments = el("ytd-comments", {}, []);
 const roleAside = el("div", { role: "complementary" }, []);
 body.appendChild(sidebar);
+body.appendChild(commentTree);
 body.appendChild(related);
 body.appendChild(comments);
 body.appendChild(roleAside);
@@ -280,6 +287,9 @@ process.stdout.write(JSON.stringify({
   sidebarHidden: !!sidebar.hiddenByStyle,
   relatedHidden: !!related.hiddenByStyle,
   commentsHidden: !!comments.hiddenByStyle,
+  commentTreeHidden: !!commentTree.hiddenByStyle,
+  full: page.attrs["data-kosheros-calm-full"] !== undefined,
+  counted: feedItems.map((cell) => cell.attrs["data-kosheros-calm-ok"] !== undefined),
   asideHidden: !!roleAside.hiddenByStyle,
   beats: beats,
 }) + "\n");

@@ -414,8 +414,10 @@ def test_each_site_is_capped_by_its_own_names():
 
 @node
 def test_a_post_on_its_own_hides_the_thread_and_the_rails():
+    # The post the address names and the one it answers stay; the replies
+    # go (the post itself used to go with them).
     state = _harness("x", "single", 30, "/someone/status/12")
-    assert state["hidden"] == [False, True, True, True, True, True]
+    assert state["hidden"] == [False, False, True, True, True, True]
     assert state["endCard"] is False
     youtube = _harness("youtube", "single", 30, "/watch")
     assert youtube["commentsHidden"] and youtube["sidebarHidden"]
@@ -467,3 +469,30 @@ def test_a_timeline_that_recycles_its_cells_still_ends():
     assert state["shownPosts"] == [str(n) for n in range(10)]
     # The first scroll shows 6 of 10; from the second the end is in sight.
     assert state["endCardAt"] == [False, True, True, True, True, True]
+
+
+@node
+def test_a_reddit_post_keeps_its_comments():
+    # "reddit should show comments": often the answer the link was for.
+    state = _harness("reddit", "single", 30, "/r/linux/comments/1/title/")
+    assert state["commentTreeHidden"] is False
+
+
+@node
+def test_an_x_post_not_yet_drawn_hides_nothing():
+    # The post the address names is not in the page yet: hiding "everything
+    # after it" would hide everything.
+    state = _harness("x", "single", 30, "/someone/status/99")
+    assert state["hidden"] == [False] * 6
+
+
+@node
+def test_past_the_end_the_stylesheet_keeps_new_items_from_showing_at_all():
+    # "it keeps popping in new ones and then it removes them": once full,
+    # the page is marked and a stylesheet hides every item not counted, from
+    # the moment it is inserted, before the observer's pass.
+    state = _harness("reddit", "feed", 4, "/r/linux/")
+    assert state["full"] is True
+    assert state["counted"] == [True, True, True, True, False, False]
+    roomy = _harness("reddit", "feed", 30, "/r/linux/")
+    assert roomy["full"] is False, "not full: new items show as they come"

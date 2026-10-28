@@ -62,9 +62,14 @@
         '[data-testid="BottomBar"]'
       ],
       single: [
-        '[data-testid="sidebarColumn"]',
-        '[aria-label="Timeline: Conversation"]'
-      ]
+        '[data-testid="sidebarColumn"]'
+      ],
+      // A post page shows the thread up to the post the address names, and
+      // nothing after it: the replies (cleanSingle).
+      focal: function (path) {
+        var m = /^\/[^\/]+\/status\/(\d+)/.exec(path) || /^\/i\/web\/status\/(\d+)/.exec(path);
+        return m ? m[1] : null;
+      }
     },
     reddit: {
       item: 'shreddit-post, div[data-testid="post-container"]',
@@ -88,15 +93,12 @@
         'faceplate-tracker[noun="trending"]',
         'div[slot="related-community-recommendation"]'
       ],
+      // A post keeps its comments: on reddit they are often the answer the
+      // link was for. The ads among them, the rails and the nav still go.
+      keepComments: true,
       single: [
-        'shreddit-comment-tree',
-        '#comment-tree',
-        '[data-testid="comment-tree"]',
         'shreddit-comment-tree-ads',
-        'shreddit-comment-tree-stats',
-        'comment-body-header',
-        'shreddit-comments-sort-dropdown',
-        'pdp-comment-search-input',
+        'shreddit-comment-tree-ad',
         '#right-sidebar-container',
         '#left-sidebar-container',
         'shreddit-sidebar'
@@ -258,7 +260,48 @@
     return el.__kosherosCalmKey;
   }
 
+  // Past the end, new items must never be drawn at all: hiding them after
+  // the observer's debounce let each one show for a moment and vanish ("it
+  // keeps popping in new ones"). So once a feed is full the page root is
+  // marked, and one stylesheet rule hides every feed item that is not one
+  // of the counted ones, from the moment it is inserted. Not :nth-child:
+  // X recycles a dozen cells, so the sixth child is not the sixth post.
+  // A constructed sheet, so a site's CSP on inline styles does not stop it.
+  var OK = "data-kosheros-calm-ok";
+  var FULL = "data-kosheros-calm-full";
+  var sheetDone = false;
+
+  function addSheet() {
+    if (sheetDone || !spec.item) return;
+    sheetDone = true;
+    var rule = spec.item.split(",").map(function (sel) {
+      return "html[" + FULL + "] " + sel.trim() + ":not([" + OK + "])";
+    }).join(",\n") + " { display: none !important; }";
+    try {
+      var sheet = new CSSStyleSheet();
+      sheet.replaceSync(rule);
+      document.adoptedStyleSheets = (document.adoptedStyleSheets || []).concat([sheet]);
+      return;
+    } catch (e) { /* an older engine: a style element instead */ }
+    try {
+      var style = document.createElement("style");
+      style.textContent = rule;
+      (document.head || document.documentElement).appendChild(style);
+    } catch (e) { /* the per-item hiding below still holds */ }
+  }
+
+  function setFull(on) {
+    var root = document.documentElement;
+    if (!root || !root.setAttribute) return;
+    if (on) {
+      if (root.getAttribute(FULL) === null) root.setAttribute(FULL, "");
+    } else if (root.getAttribute(FULL) !== null) {
+      root.removeAttribute(FULL);
+    }
+  }
+
   function capFeed() {
+    addSheet();
     var path = pathNow();
     var seen = seenByPath[path] || (seenByPath[path] = { order: [], at: {} });
     var found = itemsIn();
@@ -270,12 +313,15 @@
         seen.order.push(key);
       }
       if (seen.at.hasOwnProperty(key)) {
+        if (found[i].getAttribute(OK) === null) found[i].setAttribute(OK, "");
         unhide(found[i]);
       } else {
+        if (found[i].getAttribute(OK) !== null) found[i].removeAttribute(OK);
         hide(found[i]);
         if (!firstPast) firstPast = found[i];
       }
     }
+    setFull(seen.order.length >= items);
     var card = document.getElementById("__kosheros_calm_end");
     if (!firstPast || !firstPast.parentNode) { removeEndCard(); return; }
     // Already in place: touching the page again would wake the observer,
@@ -343,11 +389,26 @@
     for (var i = 0; i < list.length; i++) hideAll(document, list[i]);
     removeEndCard();
     markLinks();
-    // A conversation page keeps the first post and hides the rest of the
-    // thread, so the linked post is the page (#179: "the post alone").
-    if (spec.item) {
-      var found = itemsIn();
-      for (var j = 1; j < found.length; j++) hide(found[j]);
+    if (!spec.item || spec.keepComments) return;
+    var found = itemsIn();
+    // Where the post the address names is: everything up to it stays (the
+    // post, and on X the thread it answers), everything after it, the
+    // replies, goes. Not yet drawn: nothing is hidden until it is.
+    var keepTo = 0;
+    var id = spec.focal ? spec.focal(pathNow()) : null;
+    if (id) {
+      keepTo = -1;
+      for (var j = 0; j < found.length && keepTo < 0; j++) {
+        var links = found[j].querySelectorAll ? found[j].querySelectorAll("a[href]") : [];
+        for (var k = 0; k < links.length; k++) {
+          var href = (links[k].getAttribute("href") || "").replace(/[?#].*$/, "");
+          if (new RegExp("/status/" + id + "$").test(href)) { keepTo = j; break; }
+        }
+      }
+      if (keepTo < 0) return;
+    }
+    for (var n = 0; n < found.length; n++) {
+      if (n <= keepTo) unhide(found[n]); else hide(found[n]);
     }
   }
 
@@ -358,7 +419,7 @@
     var now = modeNow();
     if (now === "login") return;  // signing in is never touched
     stripAll(document);
-    if (now === "single") cleanSingle();
+    if (now === "single") { setFull(false); cleanSingle(); }
     else capFeed();
   }
 
@@ -380,6 +441,8 @@
     if (location.href === lastURL) return;
     lastURL = location.href;
     removeEndCard();
+    // Another page: whether it is full is worked out again for it.
+    setFull(false);
     apply();
   }
 
@@ -397,7 +460,34 @@
     window.addEventListener("hashchange", function () { lastURL = ""; checkURL(); });
   }
 
-  var observer = new MutationObserver(function () { schedule(); });
+  // A counted post the site draws again (X re-creates the ones scrolled
+  // back to) is marked at once, so the stylesheet does not hide it until
+  // the next pass. Nothing new is counted here: that waits for apply().
+  function markCounted(mutations) {
+    var seen = seenByPath[pathNow()];
+    if (!seen || !spec.item || !mutations) return;
+    for (var m = 0; m < mutations.length; m++) {
+      var added = mutations[m].addedNodes || [];
+      for (var n = 0; n < added.length; n++) {
+        var node = added[n];
+        if (!node || node.nodeType !== 1) continue;
+        var list = [];
+        try {
+          if (node.matches && node.matches(spec.item)) list.push(node);
+          var inner = node.querySelectorAll ? node.querySelectorAll(spec.item) : [];
+          for (var k = 0; k < inner.length; k++) list.push(inner[k]);
+        } catch (e) { continue; }
+        for (var j = 0; j < list.length; j++) {
+          if (seen.at.hasOwnProperty(keyOf(list[j]))) list[j].setAttribute(OK, "");
+        }
+      }
+    }
+  }
+
+  var observer = new MutationObserver(function (mutations) {
+    if (!stopped && modeNow() === "feed") markCounted(mutations);
+    schedule();
+  });
 
   function start() {
     hookHistory();

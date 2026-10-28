@@ -43,6 +43,7 @@ try:
     from kosherd import accessreq as accessreq_mod
     from kosherd import buildsources as buildsources_mod
     from kosherd import activity as activity_mod
+    from kosherd import calm as calm_mod
     from kosherd import search as search_mod
     from kosherd import siterules as siterules_mod
     from kosherd import suggest as suggest_mod
@@ -67,6 +68,7 @@ except ImportError:  # pragma: no cover - only when interpreters differ
     from kosherd import accessreq as accessreq_mod
     from kosherd import buildsources as buildsources_mod
     from kosherd import activity as activity_mod
+    from kosherd import calm as calm_mod
     from kosherd import search as search_mod
     from kosherd import siterules as siterules_mod
     from kosherd import suggest as suggest_mod
@@ -93,6 +95,20 @@ REQUEST_PATH = "/__kosheros__/request"
 SCRIPT_PATH = "/__kosheros__/filter.js"
 WORDS_PATH = "/__kosheros__/words.json"
 JUDGE_PATH = "/__kosheros__/judge"
+# The calm filter (kosher_calm.js, beside this file): the calmer versions
+# of the addictive sites (#179). Served on every host like the page
+# filter, injected into the pages of the sites an account calms, and the
+# heartbeats it sends back are what the daily budget counts.
+CALM_SCRIPT_PATH = "/__kosheros__/calm.js"
+CALM_BEAT_PATH = "/__kosheros__/calm-beat"
+CALM_SCRIPT = Path(__file__).with_name("kosher_calm.js")
+# Where the per-day budgets accumulate, so a proxy restart — which every
+# policy apply causes — does not hand the time back.
+CALM_TIME_PATH = Path("/var/lib/kosher-mitm/calm-time.json")
+# One heartbeat may credit at most this many seconds, whatever the page
+# claims: the script beats far more often.
+CALM_BEAT_MAX_SECONDS = 120
+CALM_TIME_FLUSH_SECONDS = 30
 # The token each page gets with its script, sent back on every call.
 PAGE_TOKEN_HEADER = "X-KosherOS-Page"
 JUDGE_CALLS_PER_MINUTE = 120
@@ -202,7 +218,7 @@ def _fail_closed_entry() -> dict:
     return {"rules": [], "blocked_categories": blocked,
             "media_level": "immodest", "cover_style": "frost",
             "language_filter": "substitute",
-            "youtube": {"restrict": "strict"}}
+            "youtube": {"restrict": "strict"}, "calm": {}}
 
 
 class PolicyCache:
@@ -223,6 +239,7 @@ class PolicyCache:
         self._cover: dict[int, str] = {}
         self._language: dict[int, str] = {}
         self._youtube: dict[int, dict] = {}
+        self._calm: dict[int, dict] = {}
         self._system_allowed: dict[int, tuple] = {}
         self._build_developers: list[dict] | None = None
         self._fallback = _fail_closed_entry()
@@ -283,6 +300,14 @@ class PolicyCache:
             return dict(self._fallback["youtube"])
         return self._youtube.get(uid, {})
 
+    def calm_for(self, uid: int | None) -> dict:
+        """The account's calmer-sites settings (#179); empty = off. The
+        fail-closed floor calms nothing: it is a content floor, and this
+        is not content."""
+        if not self._is_known(uid):
+            return dict(self._fallback["calm"])
+        return self._calm.get(uid, {})
+
     def build_developers(self) -> list[dict] | None:
         """The developer accounts' filters a Nix build is held to (#199,
         buildsources.judge), or None for a rules file written before
@@ -309,6 +334,7 @@ class PolicyCache:
         cover: dict[int, str] = {}
         language: dict[int, str] = {}
         youtube: dict[int, dict] = {}
+        calm: dict[int, dict] = {}
         system_allowed: dict[int, tuple] = {}
         by_port: dict[int, int] = {}
         build_developers: list[dict] | None = None
@@ -326,6 +352,7 @@ class PolicyCache:
                 cover[uid] = entry.get("cover_style", "frost")
                 language[uid] = entry.get("language_filter", "off")
                 youtube[uid] = dict(entry.get("youtube", {}))
+                calm[uid] = dict(entry.get("calm", {}))
                 system_allowed[uid] = tuple(str(n).lower()
                                             for n in entry.get("system_allowed", []))
                 if uid == BUILDER_UID and entry.get("developers") is not None:
@@ -338,6 +365,7 @@ class PolicyCache:
         self._cover = cover
         self._language = language
         self._youtube = youtube
+        self._calm = calm
         self._system_allowed = system_allowed
         self._build_developers = build_developers
         self._known = set(rules)
@@ -982,6 +1010,7 @@ class KosherFilter:
 
     def done(self) -> None:
         self.usage.flush()
+        self._calm_flush(force=True)
 
     @staticmethod
     def _timed(flow: http.HTTPFlow, started: float) -> None:
@@ -1071,6 +1100,8 @@ class KosherFilter:
             self._handle_request_form(flow, uid)
             return
         if self._serve_page_filter(flow, uid):
+            return
+        if self._serve_calm(flow, uid):
             return
 
         query = _search_query(flow)
@@ -1196,13 +1227,13 @@ class KosherFilter:
 
         if YouTube.applies(flow.request.pretty_host):
             self._filter_youtube(flow, uid)
-            return
-
-        if self.siterules.is_suggestions(flow.request.pretty_url):
+        elif self.siterules.is_suggestions(flow.request.pretty_url):
             self._filter_suggestions(flow, uid)
-            return
-
-        self._filter_page(flow, uid)
+        else:
+            self._filter_page(flow, uid)
+        # The calmer sites run last, on whatever the content filters let
+        # through: a page they blocked is theirs, not ours to soften.
+        self._calm_filter(flow, uid)
 
     def _youtube_limited(self, uid: int) -> bool:
         """Whether this account has YouTube limits of any kind."""
@@ -1910,6 +1941,233 @@ class KosherFilter:
             flow.response.content or b"", videocheck_mod.key(flow.request.pretty_url, total))
         self._video_settle(flow, uid, level, verdict)
 
+    # ---- the calm filter: calmer versions of the addictive sites (#179) ---------
+    #
+    # A feed page ends after a set number of items; a direct link to a post
+    # renders as the post alone; a site may carry a daily budget, counted
+    # from the page's heartbeats while it is on screen. The pages are
+    # single-page apps, so the rewriting happens in the page itself, by
+    # kosher_calm.js; here is where the script is served, injected, and
+    # the budget kept.
+
+    _calm_script_cache: tuple[bytes, str] | None = None
+
+    def _calm_script(self) -> tuple[bytes, str] | None:
+        if self._calm_script_cache is None:
+            try:
+                body = CALM_SCRIPT.read_bytes()
+            except OSError as e:
+                # The script is shipped beside this file (os-image does
+                # copy the whole mitm/ directory); if it is missing the
+                # feature does nothing, and the rest of the proxy must
+                # still run.
+                log.warning("calm script missing at %s: %s", CALM_SCRIPT, e)
+                return None
+            self._calm_script_cache = (body, '"' + hashlib.sha256(body).hexdigest()[:32] + '"')
+        return self._calm_script_cache
+
+    def _serve_calm(self, flow: http.HTTPFlow, uid) -> bool:
+        """Answer the calm filter's two addresses. True when answered."""
+        path = flow.request.path.split("?", 1)[0]
+        if path == CALM_SCRIPT_PATH and flow.request.method == "GET":
+            script = self._calm_script()
+            if script is None:
+                self._refuse(flow, 404, "the calm script is not installed")
+                return True
+            body, etag = script
+            self._cached(flow, body, etag, "application/javascript; charset=utf-8")
+            return True
+        if path == CALM_BEAT_PATH and flow.request.method == "POST":
+            if not self._page_token_ok(flow, uid):
+                self._refuse(flow, 403, "no page token")
+            else:
+                self._calm_beat(flow, uid)
+            return True
+        return False
+
+    CALM_OVER_PAGE = """<!doctype html>
+<html><head><meta charset="utf-8"><title>Enough for today — KosherOS</title>
+<style>{style}</style></head>
+<body><div class="card">
+  <h1>Enough {site} for today</h1>
+  <p>KosherOS counted the time <code>{site}</code> was on screen today,
+     and it is spent. The site comes back tomorrow.</p>
+</div></body></html>
+"""
+
+    def _calm_over_page(self, site_label: str) -> str:
+        return self.CALM_OVER_PAGE.format(style=BLOCK_STYLE,
+                                          site=_escape(site_label))
+
+    # -- the budget -----------------------------------------------------------
+    #
+    # Seconds per (uid, site) per local day, kept in memory and written out
+    # every CALM_TIME_FLUSH_SECONDS so a proxy restart — which every policy
+    # apply causes — does not hand spent time back. The page reports its
+    # own seconds; a page could lie, but this limit is a nudge, not a wall:
+    # the wall is the category block. A beat may never credit more than
+    # CALM_BEAT_MAX_SECONDS.
+
+    def _calm_store(self) -> dict:
+        store = getattr(self, "_calm_time", None)
+        if store is None:
+            path = getattr(self, "_calm_time_path", None) or CALM_TIME_PATH
+            try:
+                store = json.loads(Path(path).read_text())
+            except (OSError, ValueError):
+                store = {}
+            store = store if isinstance(store, dict) else {}
+            # A file from yesterday is yesterday's business: drop it on
+            # the way in so a restart does not leave the accounts with
+            # yesterday's spent time.
+            today = usage_mod.day_key()
+            store = {k: v for k, v in store.items()
+                     if isinstance(v, dict) and v.get("day") == today}
+            self._calm_time = store
+        return store
+
+    def _calm_entry(self, uid, site: str) -> dict:
+        store = self._calm_store()
+        key = f"{uid}:{site}"
+        entry = store.get(key)
+        today = usage_mod.day_key()
+        if not isinstance(entry, dict) or entry.get("day") != today:
+            entry = {"day": today, "seconds": 0.0}
+            store[key] = entry
+        return entry
+
+    def _calm_remaining(self, uid, site: str, minutes: int) -> float:
+        """Seconds of today's budget left; the budget is `minutes` minutes."""
+        entry = self._calm_entry(uid, site)
+        return max(0.0, minutes * 60 - float(entry.get("seconds", 0)))
+
+    def _calm_credit(self, uid, site: str, seconds: float, minutes: int) -> float:
+        """Count a page's heartbeat and say what is left of today."""
+        entry = self._calm_entry(uid, site)
+        spent = min(minutes * 60 + CALM_BEAT_MAX_SECONDS,
+                    float(entry.get("seconds", 0)) + seconds)
+        entry["seconds"] = spent
+        self._calm_flush()
+        return max(0.0, minutes * 60 - spent)
+
+    def _calm_flush(self, force: bool = False) -> None:
+        store = getattr(self, "_calm_time", None)
+        if not store:
+            return
+        now = time.monotonic()
+        if not force and now - getattr(self, "_calm_flushed_at", 0.0) < CALM_TIME_FLUSH_SECONDS:
+            return
+        self._calm_flushed_at = now
+        today = usage_mod.day_key()
+        keep = {k: v for k, v in store.items()
+                if isinstance(v, dict) and v.get("day") == today}
+        path = Path(getattr(self, "_calm_time_path", None) or CALM_TIME_PATH)
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            tmp = path.with_suffix(".tmp")
+            tmp.write_text(json.dumps(keep, separators=(",", ":")) + "\n")
+            tmp.replace(path)
+        except OSError as e:
+            log.warning("could not write calm time to %s: %s", path, e)
+
+    def _calm_beat(self, flow: http.HTTPFlow, uid) -> None:
+        """One page's heartbeat: credit the seconds it stayed visible and
+        answer with what is left, so the page can stop itself at zero."""
+        try:
+            body = json.loads(flow.request.get_text(strict=False) or "{}")
+        except ValueError:
+            body = {}
+        url = str(body.get("url") or "")[:2048]
+        host = urlsplit(url).hostname or flow.request.pretty_host or ""
+        if host.lower() != (flow.request.pretty_host or "").lower():
+            # As with the judge: a page names itself and no other page.
+            self._refuse(flow, 403, "the address is not this page's")
+            return
+        site = calm_mod.site_for(host)
+        settings = self.policy.calm_for(uid)
+        minutes = calm_mod.daily_minutes(settings, site) if site else 0
+        if site is None or not calm_mod.applies(settings, site):
+            self._refuse(flow, 404, "this site is not calmed for this account")
+            return
+        try:
+            seconds = float(body.get("seconds") or 0)
+        except (TypeError, ValueError):
+            seconds = 0.0
+        seconds = max(0.0, min(float(CALM_BEAT_MAX_SECONDS), seconds))
+        if minutes <= 0:
+            answer: dict = {"remaining": -1, "over": False}
+        else:
+            remaining = self._calm_credit(uid, site, seconds, minutes)
+            over = remaining <= 0
+            answer = {"remaining": int(remaining), "over": over}
+            if over:
+                answer["page"] = self._calm_over_page(calm_mod.label(site))
+                self._note(activity_mod.BLOCK, flow, url=url, why=f"calm:{site}")
+        flow.response = http.Response.make(
+            200, json.dumps(answer).encode(),
+            {"Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store"})
+
+    def _calm_filter(self, flow: http.HTTPFlow, uid: int) -> None:
+        """Give an account the calmer version of a page, after the content
+        filters have had their say: they own a page they blocked, and a
+        calm page must still be the page the filters let through."""
+        site = calm_mod.site_for(flow.request.pretty_host)
+        if site is None:
+            return
+        settings = self.policy.calm_for(uid)
+        if not calm_mod.applies(settings, site):
+            return
+        if getattr(flow.response, "status_code", 0) != 200:
+            return
+        content_type = (flow.response.headers.get("content-type") or "").lower()
+        if "text/html" not in content_type:
+            return
+        mode = calm_mod.mode_for(site, flow.request.path or "")
+        if mode == "login":
+            return  # signing in is never touched
+        minutes = calm_mod.daily_minutes(settings, site)
+        if minutes and self._calm_remaining(uid, site, minutes) <= 0:
+            log.info("calm budget spent for uid=%s on %s", uid, site)
+            flow.response = http.Response.make(
+                403, self._calm_over_page(calm_mod.label(site)).encode(),
+                {"Content-Type": "text/html; charset=utf-8"})
+            self._note(activity_mod.BLOCK, flow, url=flow.request.pretty_url,
+                       why=f"calm:{site}")
+            return
+        self._inject_calm(flow, uid, site, settings, mode, minutes)
+
+    def _inject_calm(self, flow: http.HTTPFlow, uid, site: str, settings: dict,
+                     mode: str, minutes: int) -> None:
+        """Put the calm filter into a page that is being let through, the
+        way the page filter goes in: same token, same CSP nonce handling.
+        The script re-reads the address on every soft navigation — these
+        sites are single-page apps — so the mode on the tag is only where
+        it starts."""
+        body = flow.response.get_text(strict=False) or ""
+        if not body or CALM_SCRIPT_PATH in body or not _is_markup(body):
+            return
+        remaining = -1
+        if minutes:
+            remaining = int(self._calm_remaining(uid, site, minutes))
+        token = self._page_token(uid, flow.request.pretty_host)
+        rules = _attrs_json(calm_mod.path_rules(site))
+        attrs = (f'src="{CALM_SCRIPT_PATH}" data-kosheros-calm-site="{site}" '
+                 f'data-kosheros-calm-mode="{mode}" '
+                 f'data-kosheros-calm-items="{calm_mod.feed_items(settings)}" '
+                 f'data-kosheros-calm-remaining="{remaining}" '
+                 f'data-kosheros-calm-rules="{rules}" '
+                 f'data-kosheros-token="{token}" defer')
+        csp = flow.response.headers.get("content-security-policy") or ""
+        nonce = re.search(r"'nonce-([A-Za-z0-9+/=_-]+)'", csp)
+        if nonce:
+            attrs += f' nonce="{nonce.group(1)}"'
+        tag = f"<script {attrs}></script>"
+        at = _injection_point(body)
+        if at is None:
+            return  # the page ends inside a script; nowhere safe to put it
+        flow.response.text = body[:at] + tag + body[at:]
+        flow.response.headers["x-kosheros-calm"] = f"{site}:{mode}"
+
     # -- pictures judged clean a moment ago ----------------------------------------
     #
     # Every picture on a page is held until the model has looked at it, and
@@ -2284,6 +2542,14 @@ def _is_markup(body: str) -> bool:
 def _escape(text: str) -> str:
     return (text.replace("&", "&amp;").replace("<", "&lt;")
                 .replace(">", "&gt;").replace('"', "&quot;"))[:300]
+
+
+def _attrs_json(value) -> str:
+    """JSON safe to put in an HTML attribute: no quote, angle or ampersand
+    of its own may end the attribute or start markup."""
+    return (json.dumps(value, separators=(",", ":"))
+            .replace("&", "&amp;").replace("<", "&lt;")
+            .replace(">", "&gt;").replace('"', "&quot;"))
 
 
 # How long a connection may sit with nothing from the client and no

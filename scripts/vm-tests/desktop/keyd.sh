@@ -178,11 +178,12 @@ section "Switched off again"
 check "kosherctl turns it off" 0 kctl advanced keyd off
 check "keyd.service is stopped" 1 systemctl is-active --quiet keyd
 check "and does not start at boot" 1 systemctl is-enabled --quiet keyd
+# keys.py reads what keyd's virtual keyboard sends; with keyd stopped
+# there is none, and nothing between the keyboard and the desktop.
 out=$(keys 45)
-if [ "$out" = 45 ]; then
-    ok "with keyd stopped the keyboard types as it is"
-else
-    bad "with keyd stopped x came out as '$out'"
-fi
+case "$out" in
+    *"no keyd virtual keyboard"*) ok "with keyd stopped nothing stands between the keyboard and the desktop" ;;
+    *) bad "with keyd stopped its virtual keyboard is still there (got '$out')" ;;
+esac
 
 report

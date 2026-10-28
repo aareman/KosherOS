@@ -306,6 +306,12 @@ reopening to refresh their font lists.
   Hebrew with Alt+Shift themselves. niri rejects a configuration with a
   key bound twice and falls back to built-in defaults that start programs
   the image does not have, so the unit tests check for duplicate binds.
+- A person's own configuration replaces the system one whole, and may not
+  start Noctalia: Umbriel's own example config has its autostart line
+  commented out. `kosher-shell.service` runs with every graphical session,
+  waits 15 seconds for the compositor to start the shell, and starts
+  Noctalia itself if nothing did, so the desktop never comes up as a bare
+  black screen. On GNOME it does nothing.
 - niri and Umbriel run as systemd user services and start the graphical
   session target themselves. Hyprland does not, so its configuration
   starts `kosher-hyprland-session.target` once it is up, which is what

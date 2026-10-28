@@ -685,7 +685,8 @@ def test_an_enabled_guest_opens_the_same_page_as_anyone_without_an_apps_tab():
     drain()
     names = [page.stack.get_pages().get_item(i).get_name()
              for i in range(page.stack.get_pages().get_n_items())]
-    assert names == ["overview", "filtering", "media", "youtube", "time", "account"]
+    assert names == ["overview", "filtering", "media", "youtube", "time", "extras",
+                     "account"]
     titles = {r.get_title() for r in _rows(page)}
     assert "Guest account is on" in titles
     assert "Administrator" not in titles and "Remove account…" not in titles
@@ -840,13 +841,14 @@ def _detail(mode="filtered", users=None, **kw):
     return page, win, user
 
 
-def test_the_detail_page_has_seven_tabs_and_starts_on_the_overview():
+def test_the_detail_page_has_eight_tabs_and_starts_on_the_overview():
     page, _w, _u = _detail()
     names = []
     stack_pages = page.stack.get_pages()
     for i in range(stack_pages.get_n_items()):
         names.append(stack_pages.get_item(i).get_name())
-    assert names == ["overview", "filtering", "media", "youtube", "time", "apps", "account"]
+    assert names == ["overview", "filtering", "media", "youtube", "time", "apps",
+                     "extras", "account"]
     assert page.stack.get_visible_child_name() == "overview"
 
 
@@ -2056,7 +2058,7 @@ def test_the_demo_family_drives_every_screen():
     for user in win.policy["users"]:
         page = detail.UserDetailPage(win, user)
         drain()
-        assert page.stack.get_pages().get_n_items() == 7, user["username"]
+        assert page.stack.get_pages().get_n_items() == 8, user["username"]
     activity = feed.ActivityPage(win)
     activity.refresh()
     drain()
@@ -3270,3 +3272,78 @@ def test_a_failed_check_is_never_shown_as_up_to_date():
     assert words({"schedule": "monthly"}, now).startswith("Has not checked yet")
     assert words({"schedule": "off", "last_error": "x"}, now) == \
         "Only when you press Check above."
+
+
+# -- Extras: the calmer sites (#179) -----------------------------------------------
+
+class CalmSaving(FakeClient):
+    def __init__(self, **kw):
+        super().__init__(**kw)
+        self.saved = []
+
+    def set_calm(self, uid, settings, guardian_password=""):
+        self.saved.append(settings)
+
+
+def _extras(calm=None, mode="filtered"):
+    win = FakeWindow(CalmSaving())
+    user = a_user(mode=mode, **({"calm": calm} if calm is not None else {}))
+    win.policy = {"revision": 1, "users": [user], "guardian": {"enabled": False},
+                  "guest": {"enabled": False}, "custom_profiles": []}
+    page = detail.UserDetailPage(win, user)
+    drain()
+    return page, win
+
+
+ALL_CALM = {"enabled": True, "sites": {"x": {}, "reddit": {}, "youtube": {}, "facebook": {}}}
+
+
+def test_extras_is_a_checklist_with_the_calmer_sites():
+    page, _win = _extras()
+    assert page.calm_row.get_title() == "Calmer sites"
+    assert not page.calm_check.get_active()
+    assert not page.calm_settings_button.get_sensitive(), "nothing to set while it is off"
+
+
+def test_ticking_calmer_sites_calms_every_site():
+    page, win = _extras()
+    page.calm_check.set_active(True)
+    assert win.client.saved == [ALL_CALM]
+    assert page.calm_settings_button.get_sensitive()
+    assert "Feeds end after 30 items" in page.calm_row.get_subtitle()
+
+
+def test_unticking_turns_it_off():
+    page, win = _extras(calm=ALL_CALM)
+    assert page.calm_check.get_active()
+    page.calm_check.set_active(False)
+    assert win.client.saved == [{}]
+
+
+def test_the_settings_dialog_unticks_a_site_and_sets_a_budget():
+    page, win = _extras(calm=ALL_CALM)
+    page._open_calm_dialog()
+    page.calm_site_checks["facebook"].set_active(False)
+    assert not page.calm_minute_rows["facebook"].get_sensitive()
+    page.calm_minute_rows["youtube"].set_value(45)
+    page.calm_feed_row.set_value(50)
+    assert win.client.saved[-1] == {"enabled": True, "feed_items": 50,
+                                    "sites": {"x": {}, "reddit": {}, "youtube": {"daily_minutes": 45}}}
+    assert "Facebook" not in page.calm_row.get_subtitle()
+    page.calm_dialog.force_close()
+
+
+def test_unticking_the_last_site_in_the_dialog_turns_the_extra_off():
+    page, win = _extras(calm={"enabled": True, "sites": {"x": {}}})
+    page._open_calm_dialog()
+    page.calm_site_checks["x"].set_active(False)
+    assert win.client.saved[-1] == {}
+    assert not page.calm_check.get_active()
+    page.calm_dialog.force_close()
+
+
+def test_extras_are_inert_outside_filtered_internet():
+    page, _win = _extras(mode="dnsfilter")
+    group = page.calm_row.get_ancestor(Adw.PreferencesGroup)
+    assert not group.get_sensitive()
+    assert "Filtered internet" in group.get_description()

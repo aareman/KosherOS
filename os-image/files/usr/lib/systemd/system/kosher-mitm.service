@@ -29,6 +29,13 @@ EnvironmentFile=-/var/lib/kosher-mitm/listen.env
 # /run always has a real timestamp.
 ExecStartPre=/usr/bin/install -m 0644 \
     /usr/share/kosher/mitm/kosher_filter.py /run/kosher-mitm/kosher_filter.py
+# The scripts the addon serves beside itself (kosher_page.js, and the calm
+# filter's kosher_calm.js) are read from the addon's own directory, which
+# at runtime is /run — so they are copied there too, not left in /usr.
+ExecStartPre=/usr/bin/install -m 0644 \
+    /usr/share/kosher/mitm/kosher_page.js /run/kosher-mitm/kosher_page.js
+ExecStartPre=/usr/bin/install -m 0644 \
+    /usr/share/kosher/mitm/kosher_calm.js /run/kosher-mitm/kosher_calm.js
 # connection_strategy=lazy: the far end is reached only for a request the
 # filter lets through. With the default (eager) the proxy connected first,
 # so a blocked site that was slow or unreachable failed the connection and

@@ -145,6 +145,8 @@ ACTIONS = {
     "SetMediaLevel": ACTION_MANAGE_FILTER,
     "SetLanguageFilter": ACTION_MANAGE_FILTER,
     "SetYouTube": ACTION_MANAGE_FILTER,
+    # The calmer addictive sites (#179): a filter setting like any other.
+    "SetCalm": ACTION_MANAGE_FILTER,
     # Finding a channel to approve reads nothing of the machine's and
     # changes nothing; approving it is SetYouTube, which is gated.
     "SearchYouTubeChannels": ACTION_READ_CONFIG,
@@ -273,7 +275,7 @@ GUARDIAN_GATED = frozenset({
     "SetFilterMode", "SetWhitelist", "SetWhitelistBundles", "SetUrlRules", "SetBlockedCategories", "ApplyProfile", "SaveProfile", "DeleteProfile", "ApproveRequest", "AllowUrl", "EditList",
     "SetUserAdmin",
     "SetMediaLevel",
-    "SetLanguageFilter", "SetYouTube",
+    "SetLanguageFilter", "SetYouTube", "SetCalm",
     "SetGuestConfig", "DisableGuardian", "Enrol", "Unenrol",
     "SetAdBlock", "SetTimeLimits", "SetChannel", "TryImage", "Rollback", "SetNetworkAccess",
     "SetDeveloperTools", "SetBuildSources",
@@ -309,7 +311,7 @@ CHANGES = frozenset({
     "SetBlockedCategories",
     "ApplyProfile", "SaveProfile", "DeleteProfile", "ApproveRequest",
     "DismissRequest", "AllowUrl", "EditList", "SetMediaLevel",
-    "SetLanguageFilter", "SetYouTube", "SetUserAdmin", "SetLayout",
+    "SetLanguageFilter", "SetYouTube", "SetCalm", "SetUserAdmin", "SetLayout",
     "SetCoverStyle", "SetAdBlock", "SetTimeLimits", "SetNetworkAccess", "SetDeveloperTools",
     "SetBuildSources",
     "SetBootMenuPassword", "SetGuestConfig", "CreateUser",
@@ -340,7 +342,7 @@ PER_USER = frozenset({
     "SetFilterMode", "SetWhitelist", "SetWhitelistBundles", "SetUrlRules",
     "SetBlockedCategories",
     "ApplyProfile", "SaveProfile", "AllowUrl", "SetMediaLevel",
-    "SetLanguageFilter", "SetYouTube", "SetUserAdmin", "SetLayout",
+    "SetLanguageFilter", "SetYouTube", "SetCalm", "SetUserAdmin", "SetLayout",
     "SetCoverStyle", "SetTimeLimits", "SetNetworkAccess", "SetDeveloperTools", "InstallAppFor",
     "RemoveUser", "ResetPassword", "SetUserApps",
     "SetUserCanInstall", "SetUserAppAccess", "SetUserBlockedAppKinds",

@@ -585,6 +585,37 @@ def drift_sentences(changes: list[dict]) -> list[str]:
                 out.append(f"{plural(len(removed), 'app')} unblocked")
         elif field == "youtube":
             out.extend(_youtube_drift(change.get("from") or {}, change.get("to") or {}))
+        elif field == "calm":
+            out.extend(_calm_drift(change.get("from") or {}, change.get("to") or {}))
+    return out
+
+
+CALM_SITE_LABELS = {"x": "X", "reddit": "Reddit", "youtube": "YouTube",
+                    "facebook": "Facebook"}
+
+
+def _calm_drift(before: dict, after: dict) -> list[str]:
+    """What changed about the calmer sites (#179), in short lines."""
+    out = []
+    b_sites = set((before.get("sites") if before.get("enabled") else {}) or {})
+    a_sites = set((after.get("sites") if after.get("enabled") else {}) or {})
+    for key in sorted(a_sites - b_sites):
+        out.append(f"Calmer {CALM_SITE_LABELS.get(key, key)}")
+    for key in sorted(b_sites - a_sites):
+        out.append(f"{CALM_SITE_LABELS.get(key, key)} as it is")
+    if before.get("enabled") and after.get("enabled"):
+        b_items = before.get("feed_items", 30)
+        a_items = after.get("feed_items", 30)
+        if b_items != a_items:
+            out.append(f"Calmer feeds: {plural(a_items, 'item')}")
+        for key in sorted(a_sites & b_sites):
+            b_min = ((before.get("sites") or {}).get(key) or {}).get("daily_minutes", 0)
+            a_min = ((after.get("sites") or {}).get(key) or {}).get("daily_minutes", 0)
+            if b_min != a_min and a_min:
+                name = CALM_SITE_LABELS.get(key, key)
+                out.append(f"{name}: {plural(a_min, 'minute')} a day")
+            elif b_min != a_min:
+                out.append(f"{CALM_SITE_LABELS.get(key, key)}: no daily limit")
     return out
 
 
@@ -687,6 +718,13 @@ def protection_lines(user: dict) -> list[tuple[str, str, bool]]:
 
     apps, apps_protect = apps_line(user)
 
+    calm = user.get("calm") or {}
+    calm_sites = list((calm.get("sites") if calm.get("enabled") else None) or {})
+    if mode == "filtered" and calm_sites:
+        calm_text = f"Calm: {plural(len(calm_sites), 'site')}"
+    else:
+        calm_text = "Bottomless feeds"
+
     mode_protects = MODE_PROTECTS.get(mode, True)
     return [
         ("web-browser-symbolic", web, mode_protects),
@@ -696,6 +734,7 @@ def protection_lines(user: dict) -> list[tuple[str, str, bool]]:
          mode in ("none", "whitelist") or (mode == "filtered" and (
              bool(youtube.get("allowed_channels")) or bool(youtube.get("blocked_categories"))
              or youtube.get("restrict", "moderate") != "none"))),
+        ("night-light-symbolic", calm_text, mode == "filtered" and bool(calm_sites)),
         ("view-grid-symbolic", apps, apps_protect),
     ]
 

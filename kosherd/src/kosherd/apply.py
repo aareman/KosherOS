@@ -96,6 +96,7 @@ def write_mitm_rules(policy: Policy, tailnet_allowed: tuple[str, ...] | None = N
             "cover_style": getattr(user, "cover_style", "frost"),
             "language_filter": getattr(user, "language_filter", "off"),
             "youtube": user.youtube,
+            "calm": getattr(user, "calm", {}),
             "system_allowed": list(tailnet_allowed),
         }
     listen_ports = sorted(ports.values())
@@ -116,6 +117,7 @@ def write_mitm_rules(policy: Policy, tailnet_allowed: tuple[str, ...] | None = N
             "cover_style": "frost",
             "language_filter": "off",
             "youtube": {},
+            "calm": {},
         }
         listen_ports.append(nft.BUILDER_PORT)
     MITM_DIR.mkdir(parents=True, exist_ok=True)

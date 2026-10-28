@@ -132,6 +132,11 @@ INTROSPECTION_XML = """
       <arg direction="in" type="s" name="settings_json"/>
       <arg direction="in" type="s" name="guardian_password"/>
     </method>
+    <method name="SetCalm">
+      <arg direction="in" type="i" name="uid"/>
+      <arg direction="in" type="s" name="settings_json"/>
+      <arg direction="in" type="s" name="guardian_password"/>
+    </method>
     <method name="SearchYouTubeChannels">
       <arg direction="in" type="s" name="query"/>
       <arg direction="out" type="s" name="results_json"/>
@@ -1529,6 +1534,23 @@ class Daemon:
         self._save_and_apply()
         return None
 
+    def impl_SetCalm(self, uid: int, settings_json: str, _guardian_pw: str):
+        """The calmer addictive sites (#179): which of them an account
+        gets calmed, the feed-item cap, and each site's daily budget."""
+        from . import calm as calm_mod
+
+        try:
+            settings = json.loads(settings_json or "{}")
+        except ValueError as e:
+            raise PolicyError(f"not valid JSON: {e}") from None
+        try:
+            settings = calm_mod.normalize(settings)
+        except ValueError as e:
+            raise PolicyError(str(e)) from None
+        self._managed(uid).calm = settings
+        self._save_and_apply()
+        return None
+
     def impl_SearchYouTubeChannels(self, query: str):
         """Channels matching a name, so an admin approves one by picking it
         instead of copying its ID out of an address (see ytsearch)."""
@@ -1862,6 +1884,10 @@ class Daemon:
         if user.mode in INSPECTED_MODES:
             settings["media_level"] = user.media_level
             settings["youtube"] = user.youtube
+        if user.mode == "filtered" and user.calm:
+            # The calmer sites (#179) work only through the proxy, so only
+            # a filtered account is told about them.
+            settings["calm"] = user.calm
         if user.mode == "whitelist":
             # The whitelist is already deliberately discoverable through
             # KosherOS Search, so listing it here reveals nothing new and

@@ -125,3 +125,12 @@ def test_load_failure_can_be_retried(monkeypatch):
     assert window.refresh_button.get_sensitive()
     assert isinstance(window.view.get_content(), Adw.PreferencesPage)
     window.destroy()
+
+
+def test_the_calmer_sites_are_said_with_their_budgets():
+    calm = {"enabled": True, "feed_items": 20,
+            "sites": {"x": {}, "reddit": {"daily_minutes": 30}}}
+    row = next(r for r in _rows(_page({**_settings(), "calm": calm}))
+               if r.get_title() == "Calmer sites")
+    assert row.get_subtitle() == "X (Twitter), Reddit: feeds end after 20 items · Reddit 30 min a day"
+    assert not [r for r in _rows(_page(_settings())) if r.get_title() == "Calmer sites"]

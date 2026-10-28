@@ -329,6 +329,35 @@ At the modesty picture levels YouTube's thumbnails are treated like image
 search thumbnails: hidden whenever a person is in them, because they are
 small pictures of the whole web from a host the family cannot curate.
 
+## Calmer sites
+
+X, Reddit, YouTube and Facebook cannot always be blocked wholesale — an
+article links a tweet you need to read, a reddit post answers a question
+about a bug — but their feeds are built to be bottomless. An account can
+be given a calmer version of a site instead. A feed page ends after a set
+number of items; a post opened by a link is shown on its own, without the
+comments, the related videos or the rails back into the site; and the
+ads, sidebars and recommendations are never drawn. Signing in is never
+touched, so a flow that needs the site's own login still works.
+
+The pages are single-page applications, so the stripping happens in the
+page: the proxy injects a script of its own (`/__kosheros__/calm.js`),
+and the script re-reads the address on every soft navigation, because a
+click inside these apps does not load a new page. The rules for which
+page is a post and which a feed live in one place and are handed to the
+script, so the two cannot drift.
+
+A site may also carry a daily budget. The page sends a heartbeat while
+it is visible; the proxy keeps the seconds, writes them out so a proxy
+restart (every policy change restarts it) does not hand the time back,
+and answers the page with what is left. A budget that is spent closes
+that site for the rest of the day with the proxy's own page; another
+calmed site is unaffected. The count is a nudge rather than a wall — a
+page could misreport its own seconds — the wall is the category block.
+
+The calmer sites are set on the person's Calm tab, and apply in Filtered
+internet mode, the only mode where the proxy sees the page.
+
 ## Ad blocking, for everyone
 
 The machine already forces every account's DNS through its own resolvers,

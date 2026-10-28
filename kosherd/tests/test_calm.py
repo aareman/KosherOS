@@ -382,12 +382,14 @@ def test_the_script_parses():
     subprocess.run(["node", "--check", str(SCRIPT)], check=True)
 
 
-def _harness(site, mode, items, path, budget="-1"):
+def _harness(site, mode, items, path, budget="-1", scenario=""):
+    import os
     import subprocess
 
     out = subprocess.run(["node", str(HARNESS), str(SCRIPT), site, mode,
                           str(items), path, str(budget)],
-                         capture_output=True, text=True, check=True)
+                         capture_output=True, text=True, check=True,
+                         env={**os.environ, "SCENARIO": scenario})
     return json.loads(out.stdout)
 
 
@@ -454,3 +456,14 @@ def test_in_a_post_same_site_links_go_nowhere_and_links_out_work(site, path):
 def test_in_a_feed_links_are_left_alone():
     links = _harness("x", "feed", 30, "/home")["links"]
     assert not any(stopped or marked for _href, stopped, marked in links)
+
+
+@node
+def test_a_timeline_that_recycles_its_cells_still_ends():
+    # X keeps about a dozen posts in the page and hands the cells to new
+    # posts as it scrolls; counting the page's cells never reached 30, so
+    # the feed never ended on the real site. Ten posts, six cells at a time.
+    state = _harness("x", "feed", 10, "/home", scenario="recycle")["recycle"]
+    assert state["shownPosts"] == [str(n) for n in range(10)]
+    # The first scroll shows 6 of 10; from the second the end is in sight.
+    assert state["endCardAt"] == [False, True, True, True, True, True]

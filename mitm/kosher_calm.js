@@ -49,6 +49,9 @@
   var SITES = {
     x: {
       item: '[data-testid="cellInnerDiv"]',
+      // What a cell shows: its post's own address. X recycles cells as the
+      // timeline scrolls, so the element is not the post.
+      key: 'a[href*="/status/"]',
       strip: [
         '[data-testid="sidebarColumn"]',
         '[data-testid="Trending"]',
@@ -65,21 +68,37 @@
     },
     reddit: {
       item: 'shreddit-post, div[data-testid="post-container"]',
+      // What fetches the next page of a feed when it scrolls into view.
+      // Hidden posts take no room, so it stays in view and reddit kept
+      // fetching pages nobody would see; at the end it goes too.
+      more: 'faceplate-partial[slot="load-after"], shreddit-feed-page-loading',
       strip: [
         'shreddit-sidebar',
         '#right-sidebar-container',
+        'aside#right-rail-experience-root',
+        'pdp-right-rail',
         '[data-testid="frontpage-sidebar"]',
         '#trending-posts-rail',
         'shreddit-ad-post',
+        'shreddit-sidebar-ad',
+        'shreddit-comments-page-ad',
+        'shreddit-async-loader[bundlename="sidebar_ad"]',
         '[data-testid="promoted-post"]',
         'reddit-search-large',
-        'faceplate-tracker[noun="trending"]'
+        'faceplate-tracker[noun="trending"]',
+        'div[slot="related-community-recommendation"]'
       ],
       single: [
         'shreddit-comment-tree',
         '#comment-tree',
         '[data-testid="comment-tree"]',
+        'shreddit-comment-tree-ads',
+        'shreddit-comment-tree-stats',
+        'comment-body-header',
+        'shreddit-comments-sort-dropdown',
+        'pdp-comment-search-input',
         '#right-sidebar-container',
+        '#left-sidebar-container',
         'shreddit-sidebar'
       ]
     },
@@ -158,6 +177,14 @@
     el.style.setProperty("display", "none", "important");
   }
 
+  // A feed item hidden past the end that now shows a post within it (an
+  // element the site recycled) comes back.
+  function unhide(el) {
+    if (!el || !el.__kosherosCalmHidden) return;
+    el.__kosherosCalmHidden = false;
+    el.style.setProperty("display", "", "");
+  }
+
   function hideAll(root, selector) {
     var found;
     try { found = root.querySelectorAll(selector); }
@@ -209,16 +236,54 @@
     return box;
   }
 
-  function capFeed() {
-    var found = itemsIn();
-    for (var i = 0; i < found.length; i++) {
-      if (i >= items) hide(found[i]);
+  // A feed is counted by what it has shown, not by what is in the page
+  // now: X keeps a dozen posts in the page and recycles them as it
+  // scrolls, so counting the page never reached the end. Each item is
+  // named by its post (spec.key's link, or the element's own permalink or
+  // id) or, failing that, by the element itself. The count is kept per
+  // feed address, so opening a post and coming back does not start a
+  // fresh one.
+  var seenByPath = {};
+  var anon = 0;
+
+  function keyOf(el) {
+    if (spec.key && el.querySelector) {
+      var link = el.querySelector(spec.key);
+      var href = link && link.getAttribute("href");
+      if (href) return href.replace(/[?#].*$/, "");
     }
+    var own = el.getAttribute && (el.getAttribute("permalink") || el.getAttribute("id"));
+    if (own) return own;
+    if (!el.__kosherosCalmKey) el.__kosherosCalmKey = "#" + (++anon);
+    return el.__kosherosCalmKey;
+  }
+
+  function capFeed() {
+    var path = pathNow();
+    var seen = seenByPath[path] || (seenByPath[path] = { order: [], at: {} });
+    var found = itemsIn();
+    var firstPast = null;
+    for (var i = 0; i < found.length; i++) {
+      var key = keyOf(found[i]);
+      if (!seen.at.hasOwnProperty(key) && seen.order.length < items) {
+        seen.at[key] = seen.order.length;
+        seen.order.push(key);
+      }
+      if (seen.at.hasOwnProperty(key)) {
+        unhide(found[i]);
+      } else {
+        hide(found[i]);
+        if (!firstPast) firstPast = found[i];
+      }
+    }
+    var card = document.getElementById("__kosheros_calm_end");
+    if (!firstPast || !firstPast.parentNode) { removeEndCard(); return; }
+    // Already in place: touching the page again would wake the observer,
+    // which would run this again, every 150 ms for as long as it is open.
+    if (spec.more) hideAll(document, spec.more);
+    if (card && card.nextSibling === firstPast) return;
     removeEndCard();
-    if (found.length <= items) return;
-    var last = found[items - 1];
-    var card = endCard(Math.min(items, found.length));
-    if (last && last.parentNode) last.parentNode.insertBefore(card, last.nextSibling);
+    firstPast.parentNode.insertBefore(endCard(seen.order.length), firstPast);
   }
 
   // Same-site links in a post go nowhere, so a linked post has no rabbit

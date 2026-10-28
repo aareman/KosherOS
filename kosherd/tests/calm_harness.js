@@ -138,7 +138,7 @@ for (let n = 0; n < 6; n++) {
   const cell = CELL();
   cell.textContent = "post " + n;
   feedItems.push(cell);
-  main.appendChild(cell);
+  if (process.env.SCENARIO !== "recycle") main.appendChild(cell);
 }
 // Links inside the first post: to the same site, to the site's own way
 // out, and straight out.
@@ -242,7 +242,38 @@ const clicks = anchors.map((a) => {
           a.attrs["data-kosheros-calm-inert"] !== undefined];
 });
 
+// SCENARIO=recycle: X's timeline, which keeps six cells in the page and
+// gives them to new posts as you scroll. Five scrolls of six new posts
+// each, with the old cells taken out, as X does.
+const recycle = { shownPosts: [], endCardAt: [] };
+if (process.env.SCENARIO === "recycle") {
+  let next = 0;
+  const cellFor = (n) => {
+    const cell = el("div", { "data-testid": "cellInnerDiv" },
+                    [el("a", { href: "/someone/status/" + n + "?s=20" }, [])]);
+    cell.textContent = "post " + n;
+    return cell;
+  };
+  const visible = () => main.children.filter((c) => c.attrs["data-testid"] === "cellInnerDiv"
+                                                  && !c.hiddenByStyle);
+
+  for (let round = 0; round < 6; round++) {
+    for (const c of main.children.slice()) {
+      if (c.attrs["data-testid"] === "cellInnerDiv") main.removeChild(c);
+    }
+    for (let k = 0; k < 6; k++) main.appendChild(cellFor(next++));
+    if (observerCallback) observerCallback([{ type: "childList", addedNodes: [] }]);
+    while (timers.length) timers.shift()();
+    for (const c of visible()) {
+      const n = c.textContent.split(" ")[1];
+      if (!recycle.shownPosts.includes(n)) recycle.shownPosts.push(n);
+    }
+    recycle.endCardAt.push(!!document.getElementById("__kosheros_calm_end"));
+  }
+}
+
 process.stdout.write(JSON.stringify({
+  recycle: recycle,
   links: clicks,
   hidden: feedItems.map((cell) => !!cell.hiddenByStyle),
   endCard: !!document.getElementById("__kosheros_calm_end"),

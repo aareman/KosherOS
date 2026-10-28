@@ -22,7 +22,8 @@ def test_the_workflow_parses(path):
     assert isinstance(document, dict)
     assert document.get("jobs"), f"{path.name} defines no jobs"
     for name, job in document["jobs"].items():
-        assert "runs-on" in job, f"{path.name}: {name} has no runner"
+        # A job either runs somewhere or calls another workflow that does.
+        assert "runs-on" in job or "uses" in job, f"{path.name}: {name} has no runner"
 
 
 def test_no_run_block_smuggles_a_heredoc():
@@ -295,7 +296,61 @@ def test_every_pull_request_that_reaches_the_machine_is_tested_in_a_vm():
     assert uploads and uploads[0]["if"] == "always()"
     assert "!build/pr-test/ci/**/*.qcow2" in uploads[0]["with"]["path"]
     assert "id_ed25519" in uploads[0]["with"]["path"], "the run's private key stays behind"
-    assert document["concurrency"]["cancel-in-progress"] is True
+    # On the job: a run some other label starts (and skips) must not cancel
+    # the VM test in progress.
+    assert "concurrency" not in document
+    assert vm["concurrency"]["cancel-in-progress"] is True
+
+
+def test_a_pull_request_gets_a_vm_test_only_with_the_label():
+    # The merge train tests batches; one pull request's own VM test is on
+    # request, and adding another label does not start (or cancel) one.
+    document = yaml.safe_load((ROOT / ".github/workflows/vm-test.yml").read_text())
+    triggers = document.get(True) or document.get("on")
+    assert "labeled" in triggers["pull_request"]["types"]
+    assert set(triggers["workflow_call"]["inputs"]) == {"ref", "id"}
+    gate = " ".join(document["jobs"]["changes"]["if"].split())
+    assert "contains(github.event.pull_request.labels.*.name, 'vm-test')" in gate
+    assert "github.event.label.name == 'vm-test'" in gate
+    assert "inputs.ref" in document["jobs"]["vm"]["steps"][0]["with"]["ref"]
+
+
+def _train():
+    return yaml.safe_load((ROOT / ".github/workflows/merge-train.yml").read_text())
+
+
+def test_the_train_tests_a_batch_once_and_lands_it():
+    train = _train()
+    jobs = train["jobs"]
+    # One train at a time, never cancelling the one running.
+    assert "merge-train" in train["concurrency"]["group"]
+    assert train["concurrency"]["cancel-in-progress"] is False
+    # The VM test is the same workflow a pull request would run.
+    assert jobs["vm"]["uses"] == "./.github/workflows/vm-test.yml"
+    assert jobs["land"]["needs"] == ["assemble", "checks", "vm"]
+    land = jobs["land"]["steps"][0]["run"]
+    # master takes pull requests only, with a linear history.
+    assert "gh pr merge" in land and "--squash" in land
+    assert 'git push' not in land.split("refs/heads/train")[0], "no push to master"
+    # Its merges start nothing, so it asks for the release.
+    assert "gh workflow run ci.yml" in land and "landed=true" in land
+    # A failed batch is split; a failure on its own is told and dequeued.
+    assert "queued-solo" in land
+    # It starts the next train only after moving the queue on.
+    assert '"$progress" = 1' in land
+
+
+def test_the_train_leaves_out_forks_and_what_does_not_merge():
+    build = _train()["jobs"]["assemble"]["steps"][1]["run"]
+    assert "isCrossRepository | not" in build
+    assert "git merge --abort" in build
+
+
+def test_a_landed_train_is_released_like_a_push():
+    ci = yaml.safe_load((ROOT / ".github/workflows/ci.yml").read_text())
+    triggers = ci.get(True) or ci.get("on")
+    assert triggers["workflow_dispatch"]["inputs"]["landed"]["type"] == "boolean"
+    assert "inputs.landed" in ci["jobs"]["release"]["if"]
 
 
 def test_the_vm_harness_never_needs_sudo():

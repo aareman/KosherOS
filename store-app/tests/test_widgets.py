@@ -302,7 +302,7 @@ def test_installing_shows_progress_then_the_app_is_installed(window):
     assert card.button.get_label() == "Install"
     card.button.emit("clicked")
     assert card.state == "working"
-    assert card.progress.get_visible() and not card.button.get_visible()
+    assert card.progress.get_visible() and not card.button.get_sensitive()
     for _ in range(40):          # the demo install ticks over about a second
         drain()
         import time
@@ -394,17 +394,20 @@ def test_an_app_with_an_update_can_still_be_removed(window, monkeypatch):
     assert waiting and plain
     for card in waiting:
         assert card.button.get_label() == "Update"
-        assert card.remove_button.get_visible()
+        assert card.remove_shown
         assert card.remove_button.get_sensitive() == window.is_admin
     for card in plain:
-        assert not card.remove_button.get_visible(), "Remove is already the button"
+        assert not card.remove_shown, "Remove is already the button"
     asked = []
     monkeypatch.setattr(window.client, "remove_app", lambda ref: asked.append(ref))
     monkeypatch.setattr(window.client, "update_app",
                         lambda ref: pytest.fail("Remove updated the app"))
     waiting[0].remove_button.emit("clicked")
     assert waiting[0].state == "working"
-    assert not waiting[0].remove_button.get_visible()
+    # Still there, greyed out: a button that goes away reflows the card.
+    assert waiting[0].remove_shown
+    assert not waiting[0].remove_button.get_sensitive()
+    assert not waiting[0].button.get_sensitive()
     for _ in range(5):
         drain()
     assert asked == [waiting[0].ref]
@@ -439,7 +442,7 @@ def test_an_install_in_hand_survives_a_rebuild_and_cannot_be_asked_for_twice(win
                    if c.get_child().ref == "org.gnome.Chess")
     assert rebuilt is not card
     assert rebuilt.state == "working"
-    assert rebuilt.progress.get_visible() and not rebuilt.button.get_visible()
+    assert rebuilt.progress.get_visible() and not rebuilt.button.get_sensitive()
 
 
 def test_the_installing_shelf_lists_what_is_being_installed(window):
@@ -698,3 +701,25 @@ def test_typing_from_app_navigation_focuses_and_edits_search(window, shelf):
         wait_for(lambda: list(window.cards) == ["org.gimp.GIMP"])
     finally:
         window.destroy()
+
+
+def test_a_card_keeps_its_width_while_it_works(window):
+    # "pops width wise a bunch when updating / installing apps": a progress
+    # bar is as wide as its text unless it may cut it, and the buttons came
+    # and went.
+    from gi.repository import Gtk
+
+    window.show_shelf("installed")
+    drain()
+    card = next(c for c in window.cards.values() if c.state == "update")
+
+    def width():
+        return card.measure(Gtk.Orientation.HORIZONTAL, -1)[0]
+
+    before = width()
+    card.set_state("working", 3, "copying path '/nix/store/" + "x" * 200 + "' from 'https://cache.nixos.org'")
+    assert width() == before
+    card.set_state("working", 60, "Queued (3 ahead)")
+    assert width() == before
+    card.set_state("installed")
+    assert width() == before

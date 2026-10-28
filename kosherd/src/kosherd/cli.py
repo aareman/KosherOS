@@ -831,8 +831,8 @@ def cmd_system(args) -> int:
                   f"({kept.get('image') or 'unknown image'}) at the next restart")
             return 0
         c.try_image(what, _guardian_pw(args))
-        print(f"trying {what}; the download runs in the background and the "
-              "build is used from the next restart\n"
+        print(f"trying {what}; the download runs in the background, a notice "
+              "says when it is ready, and the build is used from the next restart\n"
               "the version running now is kept: 'kosherctl system try done' "
               "returns to it, 'kosherctl system status' shows both")
         return 0

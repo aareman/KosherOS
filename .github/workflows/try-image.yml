@@ -60,7 +60,14 @@ jobs:
           version="$(python3 scripts/version.py release)-pr.${PR}+g${SHA::7}"
           echo "this build is $version"
           echo "VERSION=$version" >> "$GITHUB_ENV"
+          # Layers come from (and go to) the build cache in the registry:
+          # a runner starts empty, and without it every build installed all
+          # of Fedora Workstation again, twenty minutes, to change a line
+          # of Python. The base is pinned by digest (scripts/bump-base.py),
+          # so the cache holds until the base is bumped on purpose.
+          podman login ghcr.io -u "$GITHUB_ACTOR" -p "${{ secrets.GITHUB_TOKEN }}"
           podman build --build-arg "KOSHER_VERSION=$version" \
+            --layers --cache-from "$IMAGE-cache" --cache-to "$IMAGE-cache" \
             -t "$IMAGE:$TAG" -f os-image/Containerfile .
 
       - name: The category lists are complete

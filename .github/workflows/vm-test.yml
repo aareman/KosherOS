@@ -84,6 +84,9 @@ jobs:
       cancel-in-progress: true
     runs-on: ubuntu-24.04
     timeout-minutes: 180
+    permissions:
+      contents: read
+      packages: write # the build cache in the registry
     steps:
       - uses: actions/checkout@v5
         with:
@@ -149,8 +152,13 @@ jobs:
         # CI has no cached base, so this is the direct path: a disk from the
         # change's own image, a fresh install only when the change needs one,
         # and the checks its paths select. Two suite machines beside the
-        # desktop on a 4-core runner.
-        run: devenv shell -- just pr-test HEAD --id ci --vms 2
+        # desktop on a 4-core runner. The image build reuses the layers in
+        # the registry's build cache (Justfile: build).
+        env:
+          KOSHER_BUILD_CACHE: ghcr.io/${{ github.repository_owner }}/kosher-linux-cache
+        run: |
+          devenv shell -- podman login ghcr.io -u "$GITHUB_ACTOR" -p "${{ secrets.GITHUB_TOKEN }}"
+          devenv shell -- just pr-test HEAD --id ci --vms 2
 
       - name: Report
         if: always()

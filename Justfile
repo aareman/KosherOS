@@ -245,17 +245,12 @@ deploy-admin VM="kosher-gui":
 [group('image')]
 build:
     # KOSHER_BUILD_CACHE (a registry repository) shares layers between
-    # machines that start empty, CI's runners; here podman's own cache and
-    # the pinned base (scripts/bump-base.py) are enough.
+    # machines that start empty, CI's runners; here podman's own cache is
+    # enough.
     podman build --build-arg "KOSHER_VERSION=$(python3 scripts/version.py show)" \
         ${KOSHER_BUILD_CACHE:+--layers --cache-from $KOSHER_BUILD_CACHE --cache-to $KOSHER_BUILD_CACHE} \
         -t {{image}} -f os-image/Containerfile .
 
-# Pin the base images to the digests their tags point at now (weekly in
-# CI too: bump-base.yml). `--check` only says whether the pins are behind.
-[group('image')]
-bump-base *ARGS:
-    python3 scripts/bump-base.py {{ARGS}}
 
 # The category lists inside a built image, each against its floor: the
 # check CI makes before it pushes :edge (#202). Any image name works:

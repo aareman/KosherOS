@@ -141,6 +141,14 @@ case "$out" in
     *) bad "inside a Flatpak the filter's certificate is not trusted: $(printf '%s' "$out" | tr '\n' ' ' | head -c 300)" ;;
 esac
 kctl set-mode "$(id -u dnskid)" dnsfilter >/dev/null
+# Fedora's registry drops a pull now and then ("unable to copy from
+# source", one train run): the image gets three tries first, and the run
+# is the check.
+for _ in 1 2 3; do
+    as_session dnskid timeout 300 podman pull -q registry.fedoraproject.org/fedora-minimal:44 \
+        >/dev/null 2>&1 && break
+    sleep 20
+done
 check_contains "it runs a rootless container" "podman-ok" \
     as_session dnskid timeout 600 podman run --rm registry.fedoraproject.org/fedora-minimal:44 echo podman-ok
 for _ in $(seq 1 120); do

@@ -44,6 +44,8 @@ def _policy(**kw) -> Policy:
     "hackage.haskell.org", "repo1.maven.org", "cache.nixos.org",
     "channels.nixos.org", "tarballs.nixos.org", "releases.nixos.org",
     "GitHub.com.",
+    # The Store's 1Password, whose builds fetch the publisher's release (#234).
+    "cache.agilebits.com", "downloads.1password.com",
 ])
 def test_the_known_source_hosts_are_allowed(host):
     assert buildsources.allows(host, buildsources.DEFAULT_BUILD_SOURCES)

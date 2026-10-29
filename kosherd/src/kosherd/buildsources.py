@@ -97,6 +97,13 @@ DEFAULT_BUILD_SOURCES = (
     "channels.nixos.org",
     "tarballs.nixos.org",
     "releases.nixos.org",
+    # Where the Store's own unfree nixpkgs apps come from: they are not on
+    # the binary cache, so a build fetches the publisher's release. Without
+    # these, an account on approved sites only with developer tools on held
+    # every build to the list above, and 1Password could not be installed
+    # at all (#234).
+    "cache.agilebits.com",      # 1Password CLI
+    "downloads.1password.com",  # 1Password
 )
 
 # The same shape as a policy domain (policy.schema.json $defs/domain).

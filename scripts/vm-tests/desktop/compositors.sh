@@ -54,6 +54,8 @@ check_contains "Hyprland --verify-config accepts /etc/xdg/hypr/hyprland.lua" "co
 check "umbriel is installed" 0 command -v umbriel
 check_contains "umbriel config validate accepts /etc/xdg/umbriel/config.toml" "config: ok" \
     umbriel config validate -c /etc/xdg/umbriel/config.toml
+check "Umbriel's own starter config is the KosherOS one" 0 \
+    cmp /etc/xdg/umbriel/config.toml /usr/share/umbriel/config.toml
 check "the Hyprland session target is installed" 0 \
     test -f /usr/lib/systemd/user/kosher-hyprland-session.target
 check_contains "the Look app lists all three" "niri hyprland umbriel" \

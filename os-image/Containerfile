@@ -380,6 +380,14 @@ RUN flatpak remote-add --system --if-not-exists \
 # --- Static configuration (units, polkit, dbus, dnsmasq, baseline firewall) --
 COPY os-image/files/ /
 
+# Umbriel ships its own starter config at /usr/share/umbriel/config.toml,
+# headed "Copy this file to ~/.config/umbriel/config.toml": no shell at
+# startup, no help or settings keys, bare Super for the launcher. Copied
+# by hand, it replaced the KosherOS one whole and the desktop came up
+# black. The KosherOS config takes its place, so either copy is ours.
+RUN install -m 0644 /etc/xdg/umbriel/config.toml /usr/share/umbriel/config.toml \
+    && cmp /etc/xdg/umbriel/config.toml /usr/share/umbriel/config.toml
+
 # Nix's own profile script exports NIX_SSL_CERT_FILE for the tools a Nix
 # shell brings (their curl, git, python carry nixpkgs' own cacert), and it
 # looks for the bundle at paths Fedora 44 no longer has — so it would fall

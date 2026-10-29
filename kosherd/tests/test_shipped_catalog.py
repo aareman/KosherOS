@@ -33,7 +33,7 @@ def test_refs_are_flatpak_ids_nixpkgs_packages_or_known_builds_and_unique():
     assert len(refs) == len(set(refs))
     for ref in refs:
         assert (re.fullmatch(r"[A-Za-z][\w-]*(\.[A-Za-z0-9][\w-]*){2,}", ref)
-                or re.fullmatch(r"nixpkgs#[A-Za-z0-9][A-Za-z0-9_.-]*", ref)
+                or re.fullmatch(r"nixpkgs#(_?)[A-Za-z0-9][A-Za-z0-9_.-]*", ref)
                 or ref[len(upstreamapps.PREFIX):] in upstreamapps.RELEASES), ref
 
 
@@ -49,7 +49,9 @@ def test_the_ai_tools_and_editors_come_from_nixpkgs():
     for app in APPS:
         if (app["ref"] in nix and "TerminalEmulator" not in app["categories"]
                 and "Font" not in app["categories"]
-                and app["ref"] != "nixpkgs#syncthing"):  # a service, on Utilities (#213)
+                # A service, and a password manager, on Utilities (#213, #234).
+                and app["ref"] not in ("nixpkgs#syncthing", "nixpkgs#_1password-gui",
+                                       "nixpkgs#_1password-cli")):
             assert appkinds.kind_of(app) == "develop", app["ref"]
 
 

@@ -111,6 +111,31 @@ kind of internet is "No internet" cannot use the daemon at all. `devbox`
 is in the image; `devenv` installs itself into your profile the first time
 you run it, from nixpkgs, with devenv's own cache already trusted.
 
+### 1Password
+
+Install **1Password** and **1Password CLI** from the Store. They come from
+nixpkgs, not Flathub: 1Password's Flatpak cannot run its SSH agent or let
+`op` use the app. In a terminal opened after the install, `op` is
+`/run/wrappers/bin/op`, a copy KosherOS keeps with the group the app
+trusts, so turning on **Settings → Developer → Integrate with 1Password
+CLI** in the app lets `op` sign in through it. For the SSH agent, turn on
+**Settings → Developer → Use the SSH agent**, and tell ssh where it is, in
+`~/.ssh/config`:
+
+```
+Host *
+    IdentityAgent ~/.1password/agent.sock
+```
+
+An SSH connection still goes only where the account's kind of internet lets
+it.
+
+The 1Password extension in Firefox talks to the app through the same kind
+of copy, `/run/wrappers/bin/1Password-BrowserSupport`, which KosherOS keeps
+once the app is installed. Turn on **Settings → Browser → Connect with
+1Password in the browser** in the app. The Firefox that comes with KosherOS
+works; a Flatpak browser from the Store cannot reach the app.
+
 ## Accounts and filtering
 
 No presets ship. An account is in one of the family's own groups or in none; a group

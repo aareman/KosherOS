@@ -405,6 +405,13 @@ RUN sed -i 's|^    if \[ -e /etc/ssl/certs/ca-certificates.crt \]; then|    if [
     # commands are links to /usr/bin/nix.
     && systemd-sysusers /usr/lib/sysusers.d/kosher-nix.conf \
     && test "$(getent group kosher-nix | cut -d: -f3)" = 850 \
+    # 1Password's groups (#234): kosherd makes /run/wrappers/bin/op setgid
+    # to onepassword-cli, the group the desktop app trusts. Fixed gids, and
+    # nobody in them.
+    && systemd-sysusers /usr/lib/sysusers.d/kosher-1password.conf \
+    && test "$(getent group onepassword-cli | cut -d: -f3)" = 851 \
+    && test "$(getent group onepassword | cut -d: -f3)" = 852 \
+    && test -z "$(getent group onepassword-cli | cut -d: -f4)" \
     && chown root:850 /usr/bin/nix /usr/libexec/nix-nswrapper /usr/lib64/libnix*.so.* \
     && chmod 0750 /usr/bin/nix /usr/libexec/nix-nswrapper /usr/lib64/libnix*.so.* \
     && test -z "$(find /usr/bin /usr/libexec /usr/lib64 -maxdepth 1 -type f \( -name 'nix*' -o -name 'libnix*' \) -perm /o=rwx)"

@@ -53,7 +53,9 @@ def package(ref: str) -> str:
     """'nixpkgs#claude-code' -> 'claude-code'. Refuses anything that is not
     a plain attribute name: a ref is also an argument to nix."""
     name = ref[len(PREFIX):] if is_nix(ref) else ""
-    if (not name or not name[0].isalnum()
+    # A leading underscore is how nixpkgs names a package that starts with a
+    # digit (_1password-gui); a leading dash would be an option to nix.
+    if (not name or not (name[0].isalnum() or (name[0] == "_" and name[1:2].isalnum()))
             or not all(c.isalnum() or c in "-_." for c in name)):
         raise NixAppError(f"{ref!r} is not a nixpkgs package reference")
     return name

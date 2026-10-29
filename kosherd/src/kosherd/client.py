@@ -170,6 +170,13 @@ class DaemonClient:
         self._call("Profiles", "SetYouTube", "(iss)", uid,
                    json.dumps(settings), guardian_password)
 
+    def set_calm(self, uid: int, settings: dict,
+                 guardian_password: str = "") -> None:
+        """The calmer addictive sites (#179): {"enabled", "feed_items",
+        "sites": {<site>: {"daily_minutes"}}}, empty to turn it off."""
+        self._call("Profiles", "SetCalm", "(iss)", uid,
+                   json.dumps(settings), guardian_password)
+
     def search_youtube_channels(self, query: str) -> list[dict]:
         """Channels matching a name, best first: `id`, `title`, and when
         known `handle` and `subscribers`."""
@@ -329,6 +336,10 @@ class DaemonClient:
     def set_syncthing_enabled(self, enabled: bool, guardian_password: str = "") -> None:
         """Syncthing for the whole computer (#220)."""
         self._call("Apps", "SetSyncthingEnabled", "(bs)", bool(enabled), guardian_password)
+
+    def set_keyd_enabled(self, enabled: bool, guardian_password: str = "") -> None:
+        """Key remapping (keyd) for the whole computer (#230)."""
+        self._call("Profiles", "SetKeydEnabled", "(bs)", bool(enabled), guardian_password)
 
     def list_installed(self) -> list[str]:
         return self._call("Apps", "ListInstalled")[0]

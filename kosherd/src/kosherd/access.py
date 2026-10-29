@@ -145,6 +145,8 @@ ACTIONS = {
     "SetMediaLevel": ACTION_MANAGE_FILTER,
     "SetLanguageFilter": ACTION_MANAGE_FILTER,
     "SetYouTube": ACTION_MANAGE_FILTER,
+    # The calmer addictive sites (#179): a filter setting like any other.
+    "SetCalm": ACTION_MANAGE_FILTER,
     # Finding a channel to approve reads nothing of the machine's and
     # changes nothing; approving it is SetYouTube, which is gated.
     "SearchYouTubeChannels": ACTION_READ_CONFIG,
@@ -209,6 +211,10 @@ ACTIONS = {
     # Store does not offer it. On, an administrator's account and an
     # unfiltered one may install it with no approval, so it is gated.
     "SetSyncthingEnabled": ACTION_MANAGE_FILTER,
+    # Key remapping for the whole computer (#230): keyd is a root daemon
+    # that reads every keyboard, and a remapped key can run a command in
+    # the person's session. Gated like the other Advanced switches.
+    "SetKeydEnabled": ACTION_MANAGE_FILTER,
     "SearchApps": ACTION_READ_CONFIG,
     "ApproveApp": ACTION_INSTALL_APPS,
     "UnapproveApp": ACTION_INSTALL_APPS,
@@ -273,14 +279,14 @@ GUARDIAN_GATED = frozenset({
     "SetFilterMode", "SetWhitelist", "SetWhitelistBundles", "SetUrlRules", "SetBlockedCategories", "ApplyProfile", "SaveProfile", "DeleteProfile", "ApproveRequest", "AllowUrl", "EditList",
     "SetUserAdmin",
     "SetMediaLevel",
-    "SetLanguageFilter", "SetYouTube",
+    "SetLanguageFilter", "SetYouTube", "SetCalm",
     "SetGuestConfig", "DisableGuardian", "Enrol", "Unenrol",
     "SetAdBlock", "SetTimeLimits", "SetChannel", "TryImage", "Rollback", "SetNetworkAccess",
     "SetDeveloperTools", "SetBuildSources",
     "SetBootMenuPassword",
     "SetUserAppAccess", "SetUserBlockedAppKinds", "SetUserBlockedApps",
     "SetUserAppApproval", "SetSyncthingLan", "SetSyncthingEnabled",
-    "TailscaleSignIn", "SetTailscaleEnabled",
+    "TailscaleSignIn", "SetTailscaleEnabled", "SetKeydEnabled",
 })
 
 # First-boot only; closed forever once setup is stamped complete.
@@ -309,7 +315,7 @@ CHANGES = frozenset({
     "SetBlockedCategories",
     "ApplyProfile", "SaveProfile", "DeleteProfile", "ApproveRequest",
     "DismissRequest", "AllowUrl", "EditList", "SetMediaLevel",
-    "SetLanguageFilter", "SetYouTube", "SetUserAdmin", "SetLayout",
+    "SetLanguageFilter", "SetYouTube", "SetCalm", "SetUserAdmin", "SetLayout",
     "SetCoverStyle", "SetAdBlock", "SetTimeLimits", "SetNetworkAccess", "SetDeveloperTools",
     "SetBuildSources",
     "SetBootMenuPassword", "SetGuestConfig", "CreateUser",
@@ -334,13 +340,15 @@ CHANGES = frozenset({
     "TryImage", "ReturnToKept",
     # Joining a tailnet and leaving it.
     "TailscaleSignIn", "TailscaleSignOut", "SetTailscaleEnabled",
+    # And key remapping switched on or off.
+    "SetKeydEnabled",
 })
 # Changes whose first argument is the account they are about.
 PER_USER = frozenset({
     "SetFilterMode", "SetWhitelist", "SetWhitelistBundles", "SetUrlRules",
     "SetBlockedCategories",
     "ApplyProfile", "SaveProfile", "AllowUrl", "SetMediaLevel",
-    "SetLanguageFilter", "SetYouTube", "SetUserAdmin", "SetLayout",
+    "SetLanguageFilter", "SetYouTube", "SetCalm", "SetUserAdmin", "SetLayout",
     "SetCoverStyle", "SetTimeLimits", "SetNetworkAccess", "SetDeveloperTools", "InstallAppFor",
     "RemoveUser", "ResetPassword", "SetUserApps",
     "SetUserCanInstall", "SetUserAppAccess", "SetUserBlockedAppKinds",

@@ -1,0 +1,220 @@
+name: Merge train
+
+# Pull requests land in batches, tested together once.
+#
+# Every pull request used to get its own VM test (about fifty minutes) on
+# every push, and a push restarted it, so a day of small fixes was a day of
+# waiting. Now a pull request runs the quick checks (Checks: unit tests,
+# compile, shellcheck) and, when it is ready, is labelled `queued`. The
+# train takes every queued pull request, merges them onto master in a
+# scratch branch (train/<run>), runs the quick checks and ONE VM test on
+# that, and if both pass, lands them: each is squash-merged into master in
+# the same order (master takes only pull requests, with a linear history),
+# which gives master exactly the tree that was tested. A pull request that
+# does not merge cleanly is left out and told why.
+#
+# When a batch fails, nobody can tell from one red run which pull request
+# did it, so each one in it moves from `queued` to `queued-solo`, and the
+# trains after take those one at a time; one that fails on its own loses
+# its label and is told. The queue keeps moving: a train that ends with
+# pull requests still queued starts the next.
+#
+# The `queued` label is the approval to merge. A workflow's own pushes and
+# merges start no other workflow, so after landing the train asks Checks
+# to release the result (version tag, release, the :edge image).
+
+on:
+  pull_request:
+    types: [labeled]
+  workflow_dispatch:
+
+permissions:
+  contents: write       # the train/<run> branch, the merges
+  pull-requests: write  # comments, labels, merging
+  actions: write        # starting the next train, and the release
+  packages: write       # the VM test's build cache in the registry
+
+concurrency:
+  # One train at a time; a second asked for while one runs waits, and takes
+  # whatever is queued by then. The label runs only wake it, each on its own.
+  group: ${{ github.event_name == 'workflow_dispatch' && 'merge-train' || format('merge-train-wake-{0}', github.run_id) }}
+  cancel-in-progress: false
+
+jobs:
+  wake:
+    name: Wake the train
+    if: >-
+      github.event_name == 'pull_request'
+      && (github.event.label.name == 'queued' || github.event.label.name == 'queued-solo')
+      && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    steps:
+      - env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run merge-train.yml --repo "$GITHUB_REPOSITORY" --ref master
+
+  assemble:
+    name: Assemble
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    outputs:
+      prs: ${{ steps.build.outputs.prs }}
+      mode: ${{ steps.build.outputs.mode }}
+      sha: ${{ steps.build.outputs.sha }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: master
+          fetch-depth: 0
+      - id: build
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          git config user.name "KosherOS merge train"
+          git config user.email "merge-train@users.noreply.github.com"
+          same_repo='[.[] | select(.isCrossRepository | not) | .number] | sort | .[]'
+          # A pull request that failed in a batch goes alone, the oldest first.
+          solo="$(gh pr list --repo "$GITHUB_REPOSITORY" --state open --label queued-solo \
+                    --json number,isCrossRepository --jq "$same_repo" | head -1)"
+          if [ -n "$solo" ]; then
+            mode="solo"; wanted="$solo"
+          else
+            mode="batch"
+            wanted="$(gh pr list --repo "$GITHUB_REPOSITORY" --state open --label queued \
+                        --json number,isCrossRepository --jq "$same_repo")"
+          fi
+          if [ -z "$wanted" ]; then
+            echo "nothing is queued"
+            echo "prs=" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          git checkout -B train origin/master
+          prs=""
+          for n in $wanted; do
+            git fetch -q origin "pull/$n/head:pr-$n"
+            title="$(gh pr view "$n" --repo "$GITHUB_REPOSITORY" --json title --jq .title)"
+            if git merge --no-ff --no-edit -m "Merge #$n: $title" "pr-$n"; then
+              prs="$prs $n"
+            else
+              git merge --abort
+              gh pr edit "$n" --repo "$GITHUB_REPOSITORY" --remove-label queued --remove-label queued-solo
+              gh pr comment "$n" --repo "$GITHUB_REPOSITORY" --body \
+                "Left out of [merge train $GITHUB_RUN_ID]($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID): it does not merge cleanly onto master and the pull requests queued before it. Merge master in and label it \`queued\` again."
+            fi
+          done
+          prs="${prs# }"
+          if [ -z "$prs" ]; then
+            echo "prs=" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          git push -q origin "HEAD:refs/heads/train/$GITHUB_RUN_ID"
+          {
+            echo "prs=$prs"
+            echo "mode=$mode"
+            echo "sha=$(git rev-parse HEAD)"
+          } >> "$GITHUB_OUTPUT"
+          echo "### Train $GITHUB_RUN_ID ($mode): #${prs// / #}" >> "$GITHUB_STEP_SUMMARY"
+
+  checks:
+    name: Quick checks on the train
+    needs: [assemble]
+    if: needs.assemble.outputs.prs != ''
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ needs.assemble.outputs.sha }}
+      # The same as Checks (ci.yml): each pull request passed them alone,
+      # and together is what lands.
+      - name: Python with GObject
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y python3-gi gir1.2-glib-2.0 python3-pip nftables shellcheck
+          python3 -m pip install --break-system-packages \
+            pytest pytest-cov jsonschema cryptography fastapi httpx pillow pyyaml
+      - name: Unit tests
+        run: |
+          (cd kosherd && python3 -m pytest tests/ -q)
+          (cd portal && PYTHONPATH=src:../kosherd/src python3 -m pytest tests/ -q)
+      - name: Apps compile
+        run: |
+          python3 -m compileall -q \
+            kosherd/src admin-app/src store-app/src setup-app/src \
+            myfilter-app/src portal/src mitm
+      - name: shellcheck
+        run: git ls-files '*.sh' | grep -v '^legacy/' | xargs shellcheck -e SC1091
+
+  vm:
+    name: VM test of the train
+    needs: [assemble]
+    if: needs.assemble.outputs.prs != ''
+    uses: ./.github/workflows/vm-test.yml
+    with:
+      ref: ${{ needs.assemble.outputs.sha }}
+      id: train-${{ github.run_id }}
+
+  land:
+    name: Land or split
+    needs: [assemble, checks, vm]
+    if: always() && needs.assemble.outputs.prs != ''
+    runs-on: ubuntu-latest
+    steps:
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          PRS: ${{ needs.assemble.outputs.prs }}
+          MODE: ${{ needs.assemble.outputs.mode }}
+          CHECKS: ${{ needs.checks.result }}
+          VM: ${{ needs.vm.result }}
+        run: |
+          set -uo pipefail
+          repo="$GITHUB_REPOSITORY"
+          run="[merge train $GITHUB_RUN_ID]($GITHUB_SERVER_URL/$repo/actions/runs/$GITHUB_RUN_ID)"
+          landed=0
+          # Whether this train moved the queue on; only then does it start
+          # the next (a cancelled one, or one that could not merge, would
+          # otherwise go round for ever).
+          progress=0
+          if [ "$CHECKS" = success ] && [ "$VM" = success ]; then
+            for n in $PRS; do
+              # In the train's order; each was tested on top of the ones
+              # before it, so the last merge leaves master as tested.
+              if gh pr merge "$n" --repo "$repo" --squash --delete-branch=false; then
+                gh pr edit "$n" --repo "$repo" --remove-label queued --remove-label queued-solo || true
+                gh pr comment "$n" --repo "$repo" --body "Landed by $run: quick checks and the VM test passed with #${PRS// / #} on master." || true
+                landed=1
+                progress=1
+              else
+                gh pr edit "$n" --repo "$repo" --remove-label queued --remove-label queued-solo || true
+                gh pr comment "$n" --repo "$repo" --body \
+                  "$run passed, but merging this failed (did it change while the train ran?). Label it \`queued\` again to go in the next train." || true
+              fi
+            done
+          elif [ "$CHECKS" = cancelled ] || [ "$VM" = cancelled ]; then
+            echo "the train was cancelled; the queue stays as it was"
+          elif [ "$MODE" = batch ] && [ "$(printf "%s\n" "$PRS" | wc -w)" -gt 1 ]; then
+            for n in $PRS; do
+              gh pr edit "$n" --repo "$repo" --remove-label queued --add-label queued-solo || true
+              gh pr comment "$n" --repo "$repo" --body \
+                "$run failed (quick checks: $CHECKS, VM test: $VM) with #${PRS// / #} together. Each goes again on its own to find which one." || true
+            done
+            progress=1
+          else
+            for n in $PRS; do
+              gh pr edit "$n" --repo "$repo" --remove-label queued --remove-label queued-solo || true
+              gh pr comment "$n" --repo "$repo" --body \
+                "$run failed with this pull request on its own (quick checks: $CHECKS, VM test: $VM). The report is in the run's artifacts. Fix it and label it \`queued\` again." || true
+            done
+            progress=1
+          fi
+          git_ref="train/$GITHUB_RUN_ID"
+          gh api -X DELETE "repos/$repo/git/refs/heads/$git_ref" >/dev/null 2>&1 || true
+          if [ "$landed" = 1 ]; then
+            # The merges were the workflow's own and start nothing: release
+            # them the way a merge by hand would be.
+            gh workflow run ci.yml --repo "$repo" --ref master -f landed=true
+          fi
+          left="$(gh pr list --repo "$repo" --state open --search 'label:queued,queued-solo' --json number --jq 'length')"
+          if [ "$progress" = 1 ] && [ "${left:-0}" -gt 0 ]; then
+            gh workflow run merge-train.yml --repo "$repo" --ref master
+          fi

@@ -831,8 +831,8 @@ def cmd_system(args) -> int:
                   f"({kept.get('image') or 'unknown image'}) at the next restart")
             return 0
         c.try_image(what, _guardian_pw(args))
-        print(f"trying {what}; the download runs in the background and the "
-              "build is used from the next restart\n"
+        print(f"trying {what}; the download runs in the background, a notice "
+              "says when it is ready, and the build is used from the next restart\n"
               "the version running now is kept: 'kosherctl system try done' "
               "returns to it, 'kosherctl system status' shows both")
         return 0
@@ -1123,17 +1123,18 @@ def cmd_check_catalog(args) -> int:
 
 
 def cmd_advanced(args) -> int:
-    """kosherctl advanced [tailscale|syncthing [on|off]]"""
+    """kosherctl advanced [tailscale|syncthing|keyd [on|off]]"""
     c = _client()
     if args.feature and args.value:
         on = args.value == "on"
         setter = {"tailscale": c.set_tailscale_enabled,
-                  "syncthing": c.set_syncthing_enabled}[args.feature]
+                  "syncthing": c.set_syncthing_enabled,
+                  "keyd": c.set_keyd_enabled}[args.feature]
         setter(on, _guardian_pw(args))
         print(f"{args.feature}: {'on' if on else 'off'}")
         return 0
     advanced = c.get_policy().get("advanced") or {}
-    for feature in ([args.feature] if args.feature else ["tailscale", "syncthing"]):
+    for feature in ([args.feature] if args.feature else ["tailscale", "syncthing", "keyd"]):
         print(f"{feature}: {'on' if advanced.get(feature) else 'off'}")
     return 0
 
@@ -1580,8 +1581,8 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("--guardian-password")
     s.set_defaults(func=cmd_tailscale)
 
-    s = sub.add_parser("advanced", help="Tailscale and Syncthing, off until switched on")
-    s.add_argument("feature", nargs="?", choices=["tailscale", "syncthing"])
+    s = sub.add_parser("advanced", help="Tailscale, Syncthing and key remapping, off until switched on")
+    s.add_argument("feature", nargs="?", choices=["tailscale", "syncthing", "keyd"])
     s.add_argument("value", nargs="?", choices=["on", "off"])
     s.add_argument("--guardian-password")
     s.set_defaults(func=cmd_advanced)

@@ -121,7 +121,7 @@ def _user(uid, name, key, admin=False, **kw):
     u = {"uid": uid, "username": name, "mode": p.mode, "admin": admin, "whitelist": [],
          "rules": [], "apps": [], "blocked_categories": list(p.blocked_categories),
          "media_level": p.media_level, "language_filter": p.language_filter,
-         "youtube": dict(p.youtube), "can_install_apps": p.can_install_apps,
+         "youtube": dict(p.youtube), "calm": {}, "can_install_apps": p.can_install_apps,
          "app_access": p.app_access, "blocked_app_kinds": list(p.blocked_app_kinds),
          "blocked_apps": list(p.blocked_apps),
          "layout": "classic", "cover_style": "frost", "time": {},
@@ -138,7 +138,7 @@ class DemoClient:
             "revision": 3, "guardian": {"enabled": True}, "adblock": {"enabled": True},
             # On in the demo so every page has something to show; a new
             # install has both off.
-            "advanced": {"tailscale": True, "syncthing": True},
+            "advanced": {"tailscale": True, "syncthing": True, "keyd": True},
             "custom_profiles": [profiles.to_dict(g) for g in DEMO_GROUPS],
             "users": [
                 _user(1000, "avi", "grown-up", admin=True),
@@ -306,6 +306,10 @@ class DemoClient:
         self._user(uid)["youtube"] = dict(settings)
         self._change(uid, "SetYouTube", [uid])
 
+    def set_calm(self, uid, settings, pw=""):
+        self._user(uid)["calm"] = dict(settings)
+        self._change(uid, "SetCalm", [uid])
+
     def search_youtube_channels(self, query):
         """Made-up channels shaped like the real answer; the demo never
         goes to YouTube."""
@@ -417,6 +421,10 @@ class DemoClient:
     def set_syncthing_enabled(self, enabled, guardian_password=""):
         self.policy["advanced"]["syncthing"] = bool(enabled)
         self._change(None, "SetSyncthingEnabled", [bool(enabled)])
+
+    def set_keyd_enabled(self, enabled, guardian_password=""):
+        self.policy["advanced"]["keyd"] = bool(enabled)
+        self._change(None, "SetKeydEnabled", [bool(enabled)])
 
     def set_network_access(self, uid, video_calls, extra_ports, pw=""):
         u = self._user(uid)

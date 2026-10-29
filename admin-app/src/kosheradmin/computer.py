@@ -7,7 +7,8 @@ tile with two words on it:
                everyone, and the guardian password that guards the answer
   Apps       — which apps this computer may install at all
   Updates    — what version it runs, and the way back if one goes wrong
-  Advanced   — Tailscale and Syncthing, off until someone turns them on
+  Advanced   — Tailscale, Syncthing and key remapping, off until someone
+               turns them on
 
 "Applies to everyone" is the honest heading for the middle group. Ad
 blocking is rendered into the machine's own resolvers, the word lists are
@@ -218,12 +219,15 @@ class ProtectionPage(_Page):
 
 
 class AdvancedPage(_Page):
-    """Tailscale and Syncthing, off until an administrator turns them on (#220).
+    """Tailscale, Syncthing and key remapping, off until an administrator
+    turns them on (#220, #230).
 
-    Most families use neither, so neither runs on a new install. Turning
+    Most families use none of them, so none runs on a new install. Turning
     Tailscale on starts its service and shows the sign-in below the
     switch; turning Syncthing on lets it be installed from the Store and
-    allowed on an account's Apps tab.
+    allowed on an account's Apps tab; turning key remapping on starts keyd,
+    which applies each person's ~/.config/keyd files while they use the
+    computer.
     """
 
     def __init__(self, win):
@@ -245,6 +249,14 @@ class AdvancedPage(_Page):
             subtitle_lines=3)
         self.syncthing_row.connect("notify::active", self._on_syncthing)
         switches.add(self.syncthing_row)
+        self.keyd_row = Adw.SwitchRow(
+            title="Key remapping",
+            subtitle=("Lets each person change what keys do, with keyd files in their own "
+                      "~/.config/keyd folder. Their changes apply only while they use "
+                      "the computer."),
+            subtitle_lines=3)
+        self.keyd_row.connect("notify::active", self._on_keyd)
+        switches.add(self.keyd_row)
         self.prefs.add(switches)
 
         self.tailscale = TailscaleGroup(win)
@@ -264,6 +276,7 @@ class AdvancedPage(_Page):
         on = self._advanced()
         self._set_row(self.tailscale_row, self._on_tailscale, bool(on.get("tailscale")))
         self._set_row(self.syncthing_row, self._on_syncthing, bool(on.get("syncthing")))
+        self._set_row(self.keyd_row, self._on_keyd, bool(on.get("keyd")))
         self.tailscale.set_visible(bool(on.get("tailscale")))
         if on.get("tailscale"):
             self.tailscale.refresh()
@@ -300,6 +313,23 @@ class AdvancedPage(_Page):
                          lambda: self._switch(
                              lambda pw: self.win.client.set_syncthing_enabled(False, pw),
                              "Syncthing is off"))
+        dialog.connect("response", lambda _d, r: r != "yes" and self.refresh())
+
+    def _on_keyd(self, row, _param) -> None:
+        wanted = row.get_active()
+        if wanted == bool(self._advanced().get("keyd")):
+            return
+        if wanted:
+            self._switch(lambda pw: self.win.client.set_keyd_enabled(True, pw),
+                         "Key remapping is on")
+            return
+        dialog = confirm(self.win, "Turn off key remapping?",
+                         "Everyone's keys go back to normal. Their keyd files stay in their "
+                         "folders, so turning this on again brings their keys back.",
+                         "Turn Off",
+                         lambda: self._switch(
+                             lambda pw: self.win.client.set_keyd_enabled(False, pw),
+                             "Key remapping is off"))
         dialog.connect("response", lambda _d, r: r != "yes" and self.refresh())
 
     def _switch(self, work, done_msg: str) -> None:

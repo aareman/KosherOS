@@ -17,8 +17,43 @@ new test belongs.
 
 CI runs the unit layer with coverage, byte-compiles every app and
 shellchecks every script on every pull request, and builds the image on
-every merge that changes it. A pull request that changes anything the
-machine runs also goes through `just pr-test` on a runner with KVM.
+every merge that changes it. The VM test (`just pr-test` on a runner with
+KVM) runs for the merge train, once for a batch of pull requests, and for
+a single pull request only when it has the `vm-test` label.
+
+## The merge train
+
+A pull request that is ready gets the `queued` label. That is the approval
+to merge it. The train (`.github/workflows/merge-train.yml`) then:
+
+1. merges every queued pull request onto `master` in a scratch branch,
+   `train/<run>`, leaving out (and telling) any that does not merge cleanly;
+2. runs the quick checks and one VM test on the result;
+3. if both pass, squash-merges each pull request into `master` in the same
+   order, which leaves `master` exactly as tested, and starts the release;
+4. if either fails, moves each pull request in the batch to `queued-solo`,
+   and the trains after take those one at a time; one that fails on its own
+   loses its label and is told.
+
+One train runs at a time. Labelling a pull request while one runs puts it
+in the next, which starts when the current one has moved the queue on.
+A batch of five costs one VM test instead of five, and a push to a pull
+request no longer restarts an hour of testing.
+
+## Why a build takes seconds, not twenty minutes
+
+Most of a VM test used to be the image build: every one installed all of
+Fedora Workstation again, because the base image's tag moved about once a
+day and each move changed the cache key of every layer after it. The
+Containerfile now builds from Fedora's images pinned by digest, so the
+layers under a change stay cached until the pins move on purpose: `just
+bump-base` (`scripts/bump-base.py`), and every Monday the Bump the base
+images workflow, whose pull request goes through the train. A one-line
+change to the daemon rebuilds in under a minute.
+
+CI's runners start with nothing, so their builds share layers through a
+cache in the registry (`ghcr.io/<owner>/kosher-linux-cache`): the edge
+build, the test-image builds and the VM test read it and add to it.
 
 Nothing on this page needs sudo. Membership of the `kvm` group is enough.
 
@@ -302,8 +337,9 @@ The desktop stage draws on a plain virtual screen by default.
 `KOSHER_GL=1` (or `--gl`) gives it a virgl GPU through the host's QEMU
 instead, for checks of the compositor, on a machine that has a GPU.
 
-In CI, `.github/workflows/vm-test.yml` runs `just pr-test HEAD` on pull
-requests from this repository that change anything the machine runs. A
+In CI, `.github/workflows/vm-test.yml` runs `just pr-test HEAD` for the
+merge train, and on pull requests from this repository that change
+anything the machine runs and carry the `vm-test` label. A
 runner keeps no cache, so there it makes a disk from the change's own
 image every time and runs the checks the change selects. It fails at
 once on a runner without KVM, never uses the GPU mode, and uploads the

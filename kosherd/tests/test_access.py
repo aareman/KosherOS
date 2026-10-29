@@ -165,7 +165,9 @@ def test_the_guardian_gate_covers_every_filter_weakening_method():
                 "DeleteProfile", "ApproveRequest", "AllowUrl",
                 "EditList", "SetUserAdmin",
                 "SetMediaLevel",
-                "SetLanguageFilter", "SetYouTube", "SetGuestConfig",
+                "SetLanguageFilter", "SetYouTube", "SetCalm", "SetGuestConfig",
+                # Calmer feeds and a daily budget for the addictive sites
+                # (#179): a filter setting like the others.
                 "DisableGuardian",
                 "Enrol", "Unenrol", "SetAdBlock", "SetTimeLimits",
                 # Beyond the web: video calls and extra ports widen reach.
@@ -197,7 +199,10 @@ def test_the_guardian_gate_covers_every_filter_weakening_method():
                 # The Advanced switches (#220): Syncthing on lets an
                 # administrator's or unfiltered account have it unapproved;
                 # Tailscale on is the first step to a sign-in.
-                "SetSyncthingEnabled", "SetTailscaleEnabled"}
+                "SetSyncthingEnabled", "SetTailscaleEnabled",
+                # Key remapping (#230): keyd reads every keyboard, and a
+                # remapped key can run a command.
+                "SetKeydEnabled"}
     assert GUARDIAN_GATED == expected
     filter_actions = {m for m, a in ACTIONS.items()
                       if a == access.ACTION_MANAGE_FILTER}

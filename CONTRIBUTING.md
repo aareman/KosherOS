@@ -20,6 +20,10 @@ The short version:
    There is no contributor licence agreement.
 6. **Open a pull request** against `master` that links its issue with
    `Closes #N` and is on the milestone.
+7. **When it is ready, label it `queued`.** The merge train tests it with
+   the other queued pull requests in one VM run and merges them together
+   when that passes. A pull request that needs its own VM run before then
+   gets the `vm-test` label.
 
 Always welcome without asking first: a site or a word the shipped lists
 miss, a sentence a parent would not understand, a claim in the docs that a

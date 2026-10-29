@@ -348,6 +348,26 @@ def test_a_download_by_hand_shows_the_mark_without_a_pop_up(daemon, monkeypatch)
     assert ("UpdateReady", ("0.21.0", "sha256:new", False)) in daemon.signals
 
 
+def test_a_tried_build_gets_the_pop_up_even_with_notices_off(daemon, monkeypatch):
+    # "does try notify once download is done with a restart now?": the
+    # person who typed `kosherctl system try` is waiting for it.
+    _bootc(monkeypatch, staged=STAGED)
+    daemon.policy.update_notify = False
+    daemon._trying = True
+    daemon._on_update_finished(True, "")
+    assert ("UpdateReady", ("0.21.0", "sha256:new", True)) in daemon.signals
+    # Once: the next download by hand is the ordinary kind again.
+    assert daemon._trying is False
+
+
+def test_a_tried_build_that_failed_says_nothing_and_forgets_the_try(daemon, monkeypatch):
+    _bootc(monkeypatch, staged=STAGED)
+    daemon._trying = True
+    daemon._on_update_finished(False, "pull failed")
+    assert not [s for s in daemon.signals if s[0] == "UpdateReady"]
+    assert daemon._trying is False
+
+
 def test_after_a_restart_or_a_discard_nothing_waits(daemon, monkeypatch):
     bootc = _bootc(monkeypatch, staged=STAGED)
     daemon._sync_pending()

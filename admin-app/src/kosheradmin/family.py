@@ -35,6 +35,7 @@ def guest_user(policy: dict) -> dict | None:
             "media_level": guest.get("media_level", "none"),
             "language_filter": guest.get("language_filter", "off"),
             "youtube": dict(guest.get("youtube", {})),
+            "calm": dict(guest.get("calm", {})),
             "cover_style": guest.get("cover_style", "frost"),
             "time": dict(guest.get("time", {})),
             "admin": False, "apps": [], "can_install_apps": False}

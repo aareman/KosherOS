@@ -279,6 +279,10 @@ class UserPolicy:
     blocked_categories: list[str] = field(default_factory=list)
     media_level: str = DEFAULT_MEDIA_LEVEL
     youtube: dict = field(default_factory=dict)
+    # Calmer versions of the addictive sites (calm.py, #179): feeds end
+    # after a set number of items, a linked post renders on its own, and
+    # a site may have a daily time budget. Empty means off.
+    calm: dict = field(default_factory=dict)
     language_filter: str = "off"
     layout: str = DEFAULT_LAYOUT
     compositor: str = DEFAULT_COMPOSITOR
@@ -334,6 +338,8 @@ class UserPolicy:
             d["media_level"] = self.media_level
         if self.youtube:
             d["youtube"] = self.youtube
+        if self.calm:
+            d["calm"] = self.calm
         if self.language_filter != "off":
             d["language_filter"] = self.language_filter
         if self.apps:
@@ -393,6 +399,7 @@ class GuestPolicy:
     media_level: str = DEFAULT_MEDIA_LEVEL
     language_filter: str = "off"
     youtube: dict = field(default_factory=dict)
+    calm: dict = field(default_factory=dict)
     cover_style: str = DEFAULT_COVER_STYLE
     time: dict = field(default_factory=dict)
 
@@ -416,6 +423,8 @@ class GuestPolicy:
             d["language_filter"] = self.language_filter
         if self.youtube:
             d["youtube"] = self.youtube
+        if self.calm:
+            d["calm"] = self.calm
         if self.cover_style != DEFAULT_COVER_STYLE:
             d["cover_style"] = self.cover_style
         if self.time:
@@ -444,6 +453,9 @@ class Policy:
     # computer that had them before there was a switch (daemon.py).
     tailscale: bool | None = None
     syncthing: bool | None = None
+    # Key remapping through keyd (#230): keyd.service runs, and a person's
+    # ~/.config/keyd files are applied while they are at the screen.
+    keyd: bool | None = None
     system_whitelist: list[str] = field(default_factory=list)
     guest: GuestPolicy = field(default_factory=GuestPolicy)
     # A family's own presets, saved from a tuned account (see profiles.py).
@@ -487,6 +499,7 @@ class Policy:
                 media_level=self.guest.media_level,
                 language_filter=self.guest.language_filter,
                 youtube=dict(self.guest.youtube),
+                calm=dict(self.guest.calm),
                 cover_style=self.guest.cover_style,
                 time=dict(self.guest.time),
             ))
@@ -517,7 +530,8 @@ class Policy:
     def advanced(self) -> dict:
         """The switches that have been decided, as the policy file keeps them."""
         return {name: on for name, on in (("tailscale", self.tailscale),
-                                          ("syncthing", self.syncthing)) if on is not None}
+                                          ("syncthing", self.syncthing),
+                                          ("keyd", self.keyd)) if on is not None}
 
     def to_dict(self) -> dict:
         return {
@@ -562,6 +576,7 @@ class Policy:
                     blocked_categories=list(u.get("blocked_categories", [])),
                     media_level=u.get("media_level", DEFAULT_MEDIA_LEVEL),
                     youtube=dict(u.get("youtube", {})),
+                    calm=dict(u.get("calm", {})),
                     language_filter=u.get("language_filter", "off"),
                     layout=u.get("layout", DEFAULT_LAYOUT),
                     compositor=u.get("compositor", DEFAULT_COMPOSITOR),
@@ -582,6 +597,7 @@ class Policy:
             update_notify=bool((doc.get("updates") or {}).get("notify", True)),
             tailscale=(doc.get("advanced") or {}).get("tailscale"),
             syncthing=(doc.get("advanced") or {}).get("syncthing"),
+            keyd=(doc.get("advanced") or {}).get("keyd"),
             custom_profiles=list(doc.get("custom_profiles") or []),
             system_whitelist=list(doc.get("system_whitelist", [])),
             build_sources_extra=list((doc.get("developer") or {}).get("build_sources_extra", [])),
@@ -596,6 +612,7 @@ class Policy:
                 media_level=guest_doc.get("media_level", DEFAULT_MEDIA_LEVEL),
                 language_filter=guest_doc.get("language_filter", "off"),
                 youtube=dict(guest_doc.get("youtube", {})),
+                calm=dict(guest_doc.get("calm", {})),
                 cover_style=guest_doc.get("cover_style", DEFAULT_COVER_STYLE),
                 time=dict(guest_doc.get("time", {})),
             ),

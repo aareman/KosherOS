@@ -69,6 +69,13 @@ works the same under every layout and session, and at the level of the
 keyboard itself, so Hebrew and the other keyboard layouts in GNOME
 Settings still apply on top of it.
 
+Key remapping is off until an administrator turns it on, in the admin app
+under **Advanced** (or `kosherctl advanced keyd on`). While it is off,
+keyd does not run, and a person's files are refused with a notification
+that says so; the files stay where they are. Turning it on applies the
+files of whoever is using the computer straight away, with no need to sign
+out.
+
 Each person writes their own files in `~/.config/keyd/`, in keyd's own
 format (`man keyd`, and the examples in `/usr/share/doc/keyd/examples`).
 The simplest is one file, `default.conf`, for every keyboard:

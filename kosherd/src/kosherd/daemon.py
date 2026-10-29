@@ -132,6 +132,11 @@ INTROSPECTION_XML = """
       <arg direction="in" type="s" name="settings_json"/>
       <arg direction="in" type="s" name="guardian_password"/>
     </method>
+    <method name="SetCalm">
+      <arg direction="in" type="i" name="uid"/>
+      <arg direction="in" type="s" name="settings_json"/>
+      <arg direction="in" type="s" name="guardian_password"/>
+    </method>
     <method name="SearchYouTubeChannels">
       <arg direction="in" type="s" name="query"/>
       <arg direction="out" type="s" name="results_json"/>
@@ -170,6 +175,10 @@ INTROSPECTION_XML = """
     </method>
     <method name="SetMyAppKeys">
       <arg direction="in" type="as" name="bindings"/>
+    </method>
+    <method name="SetKeydEnabled">
+      <arg direction="in" type="b" name="enabled"/>
+      <arg direction="in" type="s" name="guardian_password"/>
     </method>
     <method name="SetTimeLimits">
       <arg direction="in" type="i" name="uid"/>
@@ -1533,6 +1542,23 @@ class Daemon:
         self._save_and_apply()
         return None
 
+    def impl_SetCalm(self, uid: int, settings_json: str, _guardian_pw: str):
+        """The calmer addictive sites (#179): which of them an account
+        gets calmed, the feed-item cap, and each site's daily budget."""
+        from . import calm as calm_mod
+
+        try:
+            settings = json.loads(settings_json or "{}")
+        except ValueError as e:
+            raise PolicyError(f"not valid JSON: {e}") from None
+        try:
+            settings = calm_mod.normalize(settings)
+        except ValueError as e:
+            raise PolicyError(str(e)) from None
+        self._managed(uid).calm = settings
+        self._save_and_apply()
+        return None
+
     def impl_SearchYouTubeChannels(self, query: str):
         """Channels matching a name, so an admin approves one by picking it
         instead of copying its ID out of an address (see ytsearch)."""
@@ -1866,6 +1892,10 @@ class Daemon:
         if user.mode in INSPECTED_MODES:
             settings["media_level"] = user.media_level
             settings["youtube"] = user.youtube
+        if user.mode == "filtered" and user.calm:
+            # The calmer sites (#179) work only through the proxy, so only
+            # a filtered account is told about them.
+            settings["calm"] = user.calm
         if user.mode == "whitelist":
             # The whitelist is already deliberately discoverable through
             # KosherOS Search, so listing it here reveals nothing new and
@@ -2785,8 +2815,13 @@ class Daemon:
         self._emit_system_signal("UpdateProgress", "(is)", (int(percent), str(status)))
 
     def _on_update_finished(self, ok: bool, error: str) -> None:
+        trying, self._trying = getattr(self, "_trying", False), False
         if not ok:
             log.error("update failed: %s", error)
+        elif trying:
+            # A build somebody asked to try: they are waiting for it, so it
+            # gets the pop-up as well as the mark, notices on or not.
+            self._sync_pending(announce=True, always=True)
         else:
             # Downloaded by hand (or a channel switch): the mark in the
             # panel shows for everyone, without the pop-up.
@@ -2984,7 +3019,7 @@ class Daemon:
         updates.save_state(state)
         self._sync_pending(announce=True)
 
-    def _sync_pending(self, announce: bool = False) -> None:
+    def _sync_pending(self, announce: bool = False, always: bool = False) -> None:
         """Note what waits for the next restart, from bootc's status, and
         tell the sessions: UpdateReady(version, digest, announce) with an
         empty digest when nothing waits any more. `announce` asks for the
@@ -3001,7 +3036,7 @@ class Daemon:
                 digest = staged.get("digest") or staged.get("version") or staged.get("image") or "staged"
                 pop = updates.record_staged(state, staged.get("version"), digest,
                                             updates.boot_id(),
-                                            announce=announce and self.policy.update_notify)
+                                            announce=announce and (always or self.policy.update_notify))
                 updates.save_state(state)
                 self._emit_system_signal("UpdateReady", "(ssb)",
                                          (staged.get("version") or "", digest, pop))
@@ -3190,6 +3225,7 @@ class Daemon:
                      booted.get("image"))
         self._undeploy(plan["undeploy"])
         log.info("trying %s: %s", target, " ".join(plan["argv"]))
+        self._trying = True
         self._update_thread = updates.run_upgrade(
             self._on_update_progress, self._on_update_finished, argv=plan["argv"])
         return None
@@ -3386,10 +3422,52 @@ class Daemon:
         log.info("tailscale: switched %s", "on" if on else "off")
         return None
 
+    def impl_SetKeydEnabled(self, enabled: bool, _guardian_pw: str):
+        """Key remapping for the whole computer (#230). keyd.service changes
+        first and the policy is saved after; a save that fails puts the
+        service back.
+
+        Off stops keyd and forgets every person's set, so nobody's keys
+        are remapped; their files stay in their homes. On starts it, and
+        each session's kosher-keyboard sends its files again when it sees
+        PolicyChanged, so the person at the screen has their keys at once."""
+        on = bool(enabled)
+        before = bool(self.policy.keyd)
+        try:
+            keyboard.set_running(on)
+        except keyboard.KeymapError as e:
+            raise PolicyError(str(e)) from None
+        self.policy.keyd = on
+        try:
+            policy_mod.save(self.policy)
+        except Exception:
+            self.policy.keyd = before
+            try:
+                keyboard.set_running(before)
+            except keyboard.KeymapError:
+                log.exception("could not put keyd back")
+            raise
+        self.keyboards.set_enabled(on)
+        if self.connection:
+            self.connection.emit_signal(
+                None, OBJECT_PATH, "org.kosherlinux.Daemon1.Profiles", "PolicyChanged",
+                GLib.Variant("(i)", (self.policy.revision,)))
+        log.info("keyd: switched %s", "on" if on else "off")
+        return None
+
+    @staticmethod
+    def _account_homes() -> list[str]:
+        """The people's home folders: every account in the range useradd
+        gives people, managed or not."""
+        import pwd
+
+        return [p.pw_dir for p in pwd.getpwall() if 1000 <= p.pw_uid < 60000]
+
     def _settle_advanced(self) -> None:
         """At start: decide the Advanced switches for a computer that had
-        Tailscale and Syncthing before there were switches (#220) — each
-        stays on if it was in use — then put tailscaled in step."""
+        Tailscale, Syncthing or keyd before there were switches (#220,
+        #230) — each stays on if it was in use — then put tailscaled and
+        keyd in step."""
         from . import tailnet
 
         settled = False
@@ -3400,10 +3478,14 @@ class Daemon:
             self.policy.syncthing = bool(syncthing.load_registry()) or any(
                 syncthing.REF in u.approved_apps for u in self.policy.users)
             settled = True
+        if self.policy.keyd is None:
+            self.policy.keyd = keyboard.used_before(self._account_homes())
+            settled = True
         if settled:
-            log.info("advanced: tailscale %s, syncthing %s",
+            log.info("advanced: tailscale %s, syncthing %s, keyd %s",
                      "on" if self.policy.tailscale else "off",
-                     "on" if self.policy.syncthing else "off")
+                     "on" if self.policy.syncthing else "off",
+                     "on" if self.policy.keyd else "off")
             try:
                 policy_mod.save(self.policy)
             except Exception:  # noqa: BLE001 - decided again at the next start
@@ -3413,6 +3495,11 @@ class Daemon:
                 tailnet.set_running(self.policy.tailscale, wait=False)
             except tailnet.TailnetError:
                 log.exception("could not put tailscaled in step with the policy")
+        self.keyboards.set_enabled(bool(self.policy.keyd))
+        try:
+            keyboard.set_running(bool(self.policy.keyd), wait=False)
+        except keyboard.KeymapError:
+            log.exception("could not put keyd in step with the policy")
 
     def setup_complete(self) -> bool:
         """Setup is finished only when FinishSetup has stamped it.

@@ -241,3 +241,23 @@ def test_the_desktop_shard_runs_no_suites():
     assert pr_test.parse_shard("suites:2/3") == (False, (2, 3))
     with pytest.raises(SystemExit):
         pr_test.parse_shard("suites:4/3")
+
+
+def test_a_registry_image_is_a_name_pinned_to_its_digest():
+    d = "sha256:" + "0" * 64
+    assert pr_test.parse_registry_image(f"ghcr.io/x/kosher-linux-ci:pr-7-1@{d}") == \
+        ("ghcr.io/x/kosher-linux-ci", d)
+    assert pr_test.parse_registry_image(f"ghcr.io/x/kosher-linux@{d}") == ("ghcr.io/x/kosher-linux", d)
+    for bad in ("ghcr.io/x/kosher-linux:edge", f"ghcr.io/x/kosher-linux@{d[:-1]}", ""):
+        with pytest.raises(SystemExit):
+            pr_test.parse_registry_image(bad)
+
+
+def test_a_switch_to_a_public_registry_pins_the_digest_and_leaves_no_trust_behind():
+    # The harness's own registry is added to the machine's trust for the
+    # switch and taken out again; a public one the policy already accepts
+    # gets neither, and the switch is to the digest (pr-test.py).
+    src = (ROOT / "scripts/pr-test.py").read_text()
+    assert 'target = ref if local else f"{ref}@{digest}"' in src
+    assert '(SWITCH_SETUP if local else "set -e\\n")' in src
+    assert "if local:\n            rc, out = vm.sh(CLEAN_SWITCH)" in src

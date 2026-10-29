@@ -283,6 +283,74 @@ jobs:
           retry cosign sign --yes "$IMAGE:${SHA::12}"
           retry cosign sign --yes "$IMAGE:edge"
 
+  base:
+    name: The VM test's base disk
+    # Master's image installed and set up once, for every VM test after
+    # it: the runners restore this from the Actions cache and switch it to
+    # the change's image (vm-test.yml), instead of installing from scratch
+    # — twenty minutes on a runner — for every part of every run. Nothing
+    # waits for it: a VM test before it is saved takes the previous base,
+    # or installs.
+    needs: [image]
+    if: needs.image.result == 'success'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    permissions:
+      contents: read
+    env:
+      IMAGE: ghcr.io/${{ github.repository_owner }}/kosher-linux
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: KVM
+        # As vm-test.yml opens it: the harness installs the image in a VM.
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+            | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+          sudo udevadm settle --timeout=30 || true
+          if [ ! -e /dev/kvm ] || [ ! -w /dev/kvm ]; then
+            echo "::error::This runner has no usable /dev/kvm."
+            exit 1
+          fi
+
+      - uses: cachix/install-nix-action@v31
+
+      - name: The static virtiofsd bcvk needs
+        uses: actions/cache@v4
+        with:
+          path: /var/tmp/kosher-harness-1001
+          key: virtiofsd-${{ hashFiles('devenv.lock') }}
+
+      - name: Set up the runner
+        run: |
+          (sudo apt-get update && sudo apt-get install -y qemu-system-x86 qemu-utils uidmap \
+             && sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0) > apt.log 2>&1 &
+          apt=$!
+          (nix profile install nixpkgs#devenv && devenv shell -- true) > devenv.log 2>&1 &
+          dev=$!
+          failed=0
+          wait "$apt" || { failed=1; cat apt.log; }
+          wait "$dev" || { failed=1; cat devenv.log; }
+          exit "$failed"
+
+      - name: just pr-test --base-only
+        # The image this run pushed, by digest; the base's meta records it,
+        # so a VM test of a change that alters nothing in the image runs
+        # the base as it is, with no switch.
+        run: |
+          digest="$(skopeo inspect --format '{{.Digest}}' "docker://$IMAGE:${GITHUB_SHA::12}")"
+          devenv shell -- just pr-test HEAD --id master-base --base-only \
+            --registry-image "$IMAGE:${GITHUB_SHA::12}@$digest"
+
+      - uses: actions/cache/save@v4
+        with:
+          path: ~/.cache/kosher-pr-test
+          key: pr-test-base-${{ github.sha }}
+
   release:
     name: Release this version
     # Every merge that passes the tests gets a version tag and a release —

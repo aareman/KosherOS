@@ -111,6 +111,19 @@ kind of internet is "No internet" cannot use the daemon at all. `devbox`
 is in the image; `devenv` installs itself into your profile the first time
 you run it, from nixpkgs, with devenv's own cache already trusted.
 
+devenv's local proxy (`process.proxy.enable`, the `http://web.demo.localhost`
+names) works as on any other machine: open `http://web.demo.localhost` or
+`https://web.demo.localhost`, no port. Behind that it listens on a pair of
+ports that are yours rather than on 80 and 443, which would need root
+(`echo $DEVENV_PROXY_LISTEN` shows them), and your own visits to 80 and 443
+on this computer go to it; devenv's own screen shows the addresses with
+that port, and both work. For HTTPS, devenv's mkcert adds its local
+certificate authority to your own browsers' certificate stores, so Firefox
+trusts the pages; it is trusted for your account only. The pair is closed to
+the other accounts on the computer. The proxy itself only talks to your own
+processes; what they fetch from the internet goes through your filter as
+usual.
+
 ### 1Password
 
 Install **1Password** and **1Password CLI** from the Store. They come from

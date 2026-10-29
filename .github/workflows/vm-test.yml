@@ -109,9 +109,10 @@ jobs:
         run: |
           podman login ghcr.io -u "$GITHUB_ACTOR" -p "${{ secrets.GITHUB_TOKEN }}"
           since="$(git merge-base origin/master HEAD)"
-          # Everything the Containerfile copies in, and the Containerfile.
+          # What reaches the image: ci.yml's list (What changed), which an
+          # app's tests, copied in but never installed, are not on.
           if ! git diff --name-only "$since" HEAD | grep -E -q \
-               '^(os-image/|kosherd/|search-app/|admin-app/|store-app/|setup-app/|myfilter-app/|welcome-app/|look-app/|policy/schema/|mitm/|branding/|scripts/fetch-categories\.py|scripts/curated-sites\.json|scripts/check-searxng-settings\.py|scripts/version\.py)'; then
+               '^(os-image/|(kosherd|admin-app|store-app|setup-app|myfilter-app|welcome-app|look-app)/(src/|pyproject)|search-app/(kosher_search/|pyproject)|mitm/|branding/|policy/|scripts/fetch-categories\.py|scripts/curated-sites\.json|scripts/check-searxng-settings\.py|scripts/version\.py)'; then
             digest="$(skopeo inspect --format '{{.Digest}}' "docker://$MASTER_IMAGE:edge")"
             echo "nothing the image is built from changed: testing master's :edge ($digest)"
             echo "image=$MASTER_IMAGE:edge@$digest" >> "$GITHUB_OUTPUT"

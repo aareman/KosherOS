@@ -160,7 +160,7 @@ jobs:
           changed="$(git diff --name-only "$since" "$GITHUB_SHA")"
           echo "$changed"
           if echo "$changed" | grep -E -q \
-               '^(os-image/|kosherd/src/|kosherd/pyproject|admin-app/src/|store-app/src/|setup-app/src/|myfilter-app/src/|search-app/kosher_search/|mitm/|branding/|policy/|scripts/fetch-categories\.py|scripts/curated-sites\.json|scripts/check-searxng-settings\.py|scripts/version\.py)'; then
+               '^(os-image/|(kosherd|admin-app|store-app|setup-app|myfilter-app|welcome-app|look-app)/(src/|pyproject)|search-app/(kosher_search/|pyproject)|mitm/|branding/|policy/|scripts/fetch-categories\.py|scripts/curated-sites\.json|scripts/check-searxng-settings\.py|scripts/version\.py)'; then
             echo "image=true" >> "$GITHUB_OUTPUT"
             echo "the image changes: building"
           else

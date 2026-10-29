@@ -465,6 +465,22 @@ def test_umbriel_is_built_from_pinned_commits_and_checked():
     assert "set -euo pipefail" in script
 
 
+def test_umbriels_own_starter_config_is_the_kosheros_one():
+    # Umbriel's starter, which says to copy it to ~/.config, has no shell at
+    # startup and none of the KosherOS keys; a person who copied it got a
+    # black desktop with no help or settings keys. The image puts the
+    # KosherOS config in its place, after os-image/files is in.
+    files_in = CONTAINERFILE.index("COPY os-image/files/ /")
+    over = CONTAINERFILE.index(
+        "install -m 0644 /etc/xdg/umbriel/config.toml /usr/share/umbriel/config.toml")
+    assert over > files_in
+    assert "cmp /etc/xdg/umbriel/config.toml /usr/share/umbriel/config.toml" in CONTAINERFILE
+    ours = (ROOT / "os-image/files/etc/xdg/umbriel/config.toml").read_text()
+    for key in ('autostart = ["noctalia"]', '"Mod+Shift+Slash" = "cheatsheet-toggle"',
+                '"Mod+Shift+Comma" = "spawn:noctalia msg settings-toggle"'):
+        assert key in ours, key
+
+
 def _hyprland_binds(text):
     """The key strings of every hl.bind, with the loops spelled out."""
     keys = re.findall(r'^hl\.bind\(([^,]+),', text, re.M)

@@ -340,7 +340,9 @@ jobs:
           cosign login ghcr.io -u "$GITHUB_ACTOR" -p "$GITHUB_TOKEN"
           failed=""
           [ "${{ needs.image.result }}" = "failure" ] && failed=--image-failed
-          python3 scripts/publish-releases.py --sha "$GITHUB_SHA" --image "$IMAGE" $failed
+          # Tag and sign only: the GitHub release, with notes worth reading,
+          # is cut once a week for the newest version (roundup.yml).
+          python3 scripts/publish-releases.py --sha "$GITHUB_SHA" --image "$IMAGE" $failed --no-release
 
   docs:
     name: Docs site

@@ -30,6 +30,7 @@ Design (see docs/architecture.md):
 
 from __future__ import annotations
 
+from . import devenvproxy
 from . import syncthing as st
 from .dns import SAFESEARCH_ADDRESSES
 from .policy import INSPECTED_MODES, UNFILTERED_MODES, Policy
@@ -323,6 +324,14 @@ def render(policy: Policy, *, dns_uid: int, mitm_uid: int | None = None,
         f"        ip daddr 127.0.0.0/8 tcp dport {int(port)} meta skuid != {owner_match(int(uid))} "
         f"meta skuid >= {UID_MIN} reject\n"
         for uid, port in sorted(gui_ports.items()))
+    # devenv's local proxy (devenvproxy.py): each developer account's pair,
+    # like the Syncthing page, is its own on loopback; another account on
+    # the computer does not reach somebody's dev servers through it.
+    devenv_guard = "".join(
+        f"        ip daddr 127.0.0.0/8 tcp dport {{ {http}, {https} }} "
+        f"meta skuid != {owner_match(u.uid)} meta skuid >= {UID_MIN} reject\n"
+        for u in sorted(policy.developer_accounts(), key=lambda u: u.uid)
+        for http, https in [devenvproxy.ports(u.uid)])
     # Devices on the home network reaching the service, for the accounts
     # whose administrator allowed it: from the LAN ranges only, to the
     # account's listening port and local discovery, and only into a
@@ -449,7 +458,7 @@ table {TABLE} {{
 
     chain output {{
         type filter hook output priority filter; policy accept;
-{build_loopback}{backend_guard}{open_dns_guard}{syncthing_gui}        oif "lo" accept
+{build_loopback}{backend_guard}{open_dns_guard}{syncthing_gui}{devenv_guard}        oif "lo" accept
         # A packet the nat rules just redirected (DNS to the resolver, web to
         # the proxy) already has a loopback DESTINATION here, but this hook
         # still sees the interface of its original route — so `oif "lo"`

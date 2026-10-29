@@ -111,6 +111,14 @@ kind of internet is "No internet" cannot use the daemon at all. `devbox`
 is in the image; `devenv` installs itself into your profile the first time
 you run it, from nixpkgs, with devenv's own cache already trusted.
 
+devenv's local proxy (`process.proxy.enable`, the `http://web.demo.localhost`
+names) listens on a pair of ports that are yours rather than on 80 and 443,
+which would need root: `echo $DEVENV_PROXY_LISTEN` shows them, and the
+addresses carry the port, `http://web.demo.localhost:7502` for example. The
+pair is closed to the other accounts on the computer. The proxy itself only
+talks to your own processes; what they fetch from the internet goes through
+your filter as usual.
+
 ### 1Password
 
 Install **1Password** and **1Password CLI** from the Store. They come from

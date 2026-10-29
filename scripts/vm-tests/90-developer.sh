@@ -282,8 +282,12 @@ section "devenv's proxy: no sudo, no port in the address, the owner's alone (#24
 # stand-in server on the pair plays devenv's proxy.
 wl_uid=$(id -u wlkid)
 pair=$((7100 + 2 * (wl_uid % 400)))
+# The suite's own shell carries root's pair (bash reads /etc/bashrc, and
+# so profile.d, even for an ssh command), and a login shell keeps a value
+# it inherits: the test account starts without one, as a person does.
 check_contains "a login shell names the account's pair for devenv" "127.0.0.1:$pair" \
-    as wlkid bash -lc "printenv DEVENV_PROXY_LISTEN"
+    as wlkid env -u DEVENV_PROXY_LISTEN -u DEVENV_PROXY_HTTPS_LISTEN \
+    bash -lc "printenv DEVENV_PROXY_LISTEN"
 as wlkid sh -c "cd /tmp && exec python3 -m http.server $pair --bind 127.0.0.1" >/dev/null 2>&1 &
 devenv_stand_in=$!
 for _ in $(seq 1 20); do

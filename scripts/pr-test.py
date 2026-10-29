@@ -990,6 +990,32 @@ def groups_for(suites: list[str], n: int) -> list[list[str]]:
     return [sorted(b) for b in bins if b]
 
 
+def parse_shard(shard: str) -> tuple[bool, tuple[int, int] | None]:
+    """What one machine of a split run does (CI runs these side by side):
+    "all" (the desktop and every suite group, here), "desktop", or
+    "suites:K/N" (the K-th of N suite groups). Returns (desktop, (k, n))."""
+    if shard in ("", "all"):
+        return True, None
+    if shard == "desktop":
+        return True, (0, 0)
+    m = re.fullmatch(r"suites:(\d+)/(\d+)", shard)
+    if not m or not 1 <= int(m.group(1)) <= int(m.group(2)):
+        raise SystemExit(f"--shard {shard!r}: all, desktop or suites:K/N")
+    return False, (int(m.group(1)), int(m.group(2)))
+
+
+def shard_groups(suites: list[str], part: tuple[int, int]) -> list[list[str]]:
+    """The suite groups a shard runs: none for the desktop's, the K-th of N
+    for a suites shard. Every runner works the groups out from the same
+    selection, so the K-th is the same on all of them."""
+    k, n = part
+    if n == 0:
+        return []
+    groups = groups_for(suites, n)
+    groups.sort(key=lambda g: (-sum(SUITE_SECONDS.get(x, 60) for x in g), g))
+    return [groups[k - 1]] if k <= len(groups) else []
+
+
 def child_overlay(base: Path, path: Path) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.unlink(missing_ok=True)
@@ -1464,6 +1490,8 @@ def main() -> int:
                         help="machines for the suites, besides the desktop's (default 3, "
                              "or KOSHER_PR_TEST_VMS)")
     parser.add_argument("--image", help="test this already-built image; skips the build")
+    parser.add_argument("--shard", default="all",
+                        help="one part of a split run: all, desktop, or suites:K/N (CI)")
     parser.add_argument("--keep", action="store_true",
                         help="keep everything the run made: the machines, the disks, bcvk's "
                              "temp disk, the worktree and the image tag")
@@ -1508,6 +1536,7 @@ def main() -> int:
         subprocess.run(["ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-C", "pr-test",
                         "-f", str(key)], check=True)
 
+    want_desktop, part = parse_shard(args.shard)
     started = time.monotonic()
     summary = {"target": args.target, "id": run_id, "commit": "", "image": image,
                "image_id": "", "started": datetime.now(timezone.utc).isoformat(timespec="seconds"),
@@ -1556,6 +1585,12 @@ def main() -> int:
             for r in sel.reasons:
                 print(f"    {r}")
         if pre.status != "passed" or sel is None or sel.empty:
+            raise Done
+        if part is not None and not (sel.desktop and want_desktop) \
+                and not shard_groups(sel.ordered_suites(), part):
+            # Before the disk: this runner's part of the split has no checks
+            # in what the change selects.
+            print(f"\n  nothing for shard {args.shard} in this selection", flush=True)
             raise Done
         caps = {} if args.full else FAST_CAPS
         summary["caps"] = [f"{k}={v!r}" for k, v in caps.items()]
@@ -1608,15 +1643,18 @@ def main() -> int:
             raise Done
 
         # From here on, every machine is an overlay of the set-up one, all at once.
-        if sel.desktop:
+        if sel.desktop and want_desktop:
             def desktop():
                 with stage("desktop") as st:
                     stage_desktop(st, child_overlay(machine, outdir / "desktop.qcow2"),
                                   outdir, key, args.gl, tree=tree, parts=sel.desktop)
             workers.append(threading.Thread(target=desktop))
-        groups = groups_for(sel.ordered_suites(), machines_to_use(args.vms))
-        # The longest group starts first, so the machines finish together.
-        groups.sort(key=lambda g: -sum(SUITE_SECONDS.get(x, 60) for x in g))
+        if part is None:
+            groups = groups_for(sel.ordered_suites(), machines_to_use(args.vms))
+            # The longest group starts first, so the machines finish together.
+            groups.sort(key=lambda g: -sum(SUITE_SECONDS.get(x, 60) for x in g))
+        else:
+            groups = shard_groups(sel.ordered_suites(), part)
         for i, group in enumerate(groups, 1):
             def suites(group=group, i=i):
                 with stage(f"suites-{i}") as st:

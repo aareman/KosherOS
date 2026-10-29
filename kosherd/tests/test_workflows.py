@@ -285,10 +285,25 @@ def test_every_pull_request_that_reaches_the_machine_is_tested_in_a_vm():
     assert "pull_request" in triggers
     gate = " ".join(document["jobs"]["changes"]["if"].split())
     assert "head.repo.full_name == github.repository" in gate
+    build = document["jobs"]["build"]
+    assert build["needs"] == ["changes"]
+    built = "\n".join(step.get("run", "") for step in build["steps"])
+    assert "just build" in built and "podman push" in built
+    assert "KOSHER_BUILD_CACHE" in build["steps"][-1]["env"], "the build keeps its layer cache"
+    assert build["outputs"]["image"]
     vm = document["jobs"]["vm"]
-    assert vm["needs"] == ["changes"]
+    assert vm["needs"] == ["changes", "build"]
+    # Built once, tested side by side: the desktop and each suite group on
+    # a runner of its own, every part reporting even when another fails.
+    assert vm["strategy"]["fail-fast"] is False
+    shards = [part["shard"] for part in vm["strategy"]["matrix"]["include"]]
+    assert "desktop" in shards
+    n = sum(1 for x in shards if x.startswith("suites:"))
+    assert {x for x in shards if x != "desktop"} == {f"suites:{k}/{n}" for k in range(1, n + 1)}
     runs = "\n".join(step.get("run", "") for step in vm["steps"])
     assert "just pr-test" in runs
+    assert "--image" in runs and "--shard" in runs, "the runners test the pushed image"
+    assert "needs.build.outputs.image" in str(vm["steps"])
     assert "/dev/kvm" in runs and "exit 1" in runs, "no KVM is a failure, not a slow run"
     assert "99-kvm4all.rules" in runs, "the runner's /dev/kvm needs the udev rule"
     assert "--gl" not in runs and "KOSHER_GL" not in text, "runners have no GPU"
@@ -300,6 +315,8 @@ def test_every_pull_request_that_reaches_the_machine_is_tested_in_a_vm():
     # the VM test in progress.
     assert "concurrency" not in document
     assert vm["concurrency"]["cancel-in-progress"] is True
+    assert "matrix.name" in vm["concurrency"]["group"], "the parts must not cancel each other"
+    assert "matrix.name" in uploads[0]["with"]["name"], "one artifact per part"
 
 
 def test_a_pull_request_gets_a_vm_test_only_with_the_label():

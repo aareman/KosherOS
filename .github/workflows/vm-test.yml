@@ -72,21 +72,86 @@ jobs:
             echo "nothing that boots changed: no VM test"
           fi
 
-  vm:
-    name: Boot, desktop and suites
+  build:
+    name: Build the image
     needs: [changes]
+    if: needs.changes.outputs.vm == 'true'
+    # Once, for every machine after it: the VM test used to build and then
+    # run the desktop and two suite machines on one 4-core runner, where
+    # they slowed each other down (46 minutes). The image goes to the
+    # registry and four runners test it side by side.
+    concurrency:
+      group: vm-build-${{ inputs.id || github.event.pull_request.number || github.ref }}
+      cancel-in-progress: true
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    permissions:
+      contents: read
+      packages: write # the build cache, and the image the machines pull
+    outputs:
+      image: ${{ steps.push.outputs.image }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.ref || github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0 # the version is counted from the last tag
+
+      - name: Room on the disk
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL /usr/local/share/boost
+          sudo docker image prune --all --force >/dev/null
+          df -h /
+
+      - name: Host packages
+        # The dev shell's rootless podman needs user namespaces, which
+        # Ubuntu 24.04 keeps to programs with an AppArmor profile.
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y uidmap
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+
+      - uses: cachix/install-nix-action@v31
+
+      - name: Dev shell
+        run: |
+          nix profile install nixpkgs#devenv
+          devenv shell -- true
+
+      - name: Build and push
+        id: push
+        # The layers come from the registry's build cache (Justfile: build).
+        env:
+          KOSHER_BUILD_CACHE: ghcr.io/${{ github.repository_owner }}/kosher-linux-cache
+          KOSHER_IMAGE: ghcr.io/${{ github.repository_owner }}/kosher-linux-ci:${{ inputs.id || format('pr-{0}', github.event.pull_request.number) }}-${{ github.run_id }}
+        run: |
+          devenv shell -- podman login ghcr.io -u "$GITHUB_ACTOR" -p "${{ secrets.GITHUB_TOKEN }}"
+          devenv shell -- just build
+          devenv shell -- podman push "$KOSHER_IMAGE"
+          echo "image=$KOSHER_IMAGE" >> "$GITHUB_OUTPUT"
+
+  vm:
+    name: Boot and test (${{ matrix.name }})
+    needs: [changes, build]
     if: needs.changes.outputs.vm == 'true'
     # On the job, not the workflow: a run started by some other label (and
     # skipping everything) must not cancel the VM test in progress. A new
     # push supersedes the run for the same pull request; a train's is its own.
     concurrency:
-      group: vm-test-${{ inputs.id || github.event.pull_request.number || github.ref }}
+      group: vm-test-${{ inputs.id || github.event.pull_request.number || github.ref }}-${{ matrix.name }}
       cancel-in-progress: true
+    strategy:
+      fail-fast: false # every part reports, so one red run shows all its failures
+      matrix:
+        include:
+          - { name: desktop, shard: desktop }
+          - { name: suites-1, shard: "suites:1/3" }
+          - { name: suites-2, shard: "suites:2/3" }
+          - { name: suites-3, shard: "suites:3/3" }
     runs-on: ubuntu-24.04
-    timeout-minutes: 180
+    timeout-minutes: 150
     permissions:
       contents: read
-      packages: write # the build cache in the registry
+      packages: read
     steps:
       - uses: actions/checkout@v5
         with:
@@ -116,8 +181,8 @@ jobs:
           ls -l /dev/kvm
 
       - name: Room on the disk
-        # The image is about 9 GB, its disk as much again, and the build's
-        # layers more; the runner starts with too little free.
+        # The image is about 9 GB, its disk as much again; the runner
+        # starts with too little free.
         run: |
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL /usr/local/share/boost
           sudo docker image prune --all --force >/dev/null
@@ -149,16 +214,16 @@ jobs:
           devenv shell -- true
 
       - name: just pr-test
-        # CI has no cached base, so this is the direct path: a disk from the
-        # change's own image, a fresh install only when the change needs one,
-        # and the checks its paths select. Two suite machines beside the
-        # desktop on a 4-core runner. The image build reuses the layers in
-        # the registry's build cache (Justfile: build).
+        # The direct path on the image the build job pushed: a disk from it,
+        # a fresh install only when the change needs one, then this
+        # runner's part of the checks the change selects (pr-test.py
+        # --shard). One machine per runner, so nothing waits on anything.
         env:
-          KOSHER_BUILD_CACHE: ghcr.io/${{ github.repository_owner }}/kosher-linux-cache
+          IMAGE: ${{ needs.build.outputs.image }}
+          SHARD: ${{ matrix.shard }}
         run: |
-          devenv shell -- podman login ghcr.io -u "$GITHUB_ACTOR" -p "${{ secrets.GITHUB_TOKEN }}"
-          devenv shell -- just pr-test HEAD --id ci --vms 2
+          devenv shell -- podman pull "$IMAGE"
+          devenv shell -- just pr-test HEAD --id ci --vms 1 --image "$IMAGE" --shard "$SHARD"
 
       - name: Report
         if: always()
@@ -170,7 +235,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: vm-test-${{ inputs.id || github.event.pull_request.number || github.run_id }}
+          name: vm-test-${{ inputs.id || github.event.pull_request.number || github.run_id }}-${{ matrix.name }}
           path: |
             build/pr-test/ci/
             !build/pr-test/ci/**/*.qcow2

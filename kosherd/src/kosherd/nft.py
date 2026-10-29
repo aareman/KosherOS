@@ -332,6 +332,17 @@ def render(policy: Policy, *, dns_uid: int, mitm_uid: int | None = None,
         f"meta skuid != {owner_match(u.uid)} meta skuid >= {UID_MIN} reject\n"
         for u in sorted(policy.developer_accounts(), key=lambda u: u.uid)
         for http, https in [devenvproxy.ports(u.uid)])
+    # ...and its own visits to http://web.demo.localhost, port 80 or 443 on
+    # loopback, go to that pair: devenv listens high, without sudo, and the
+    # address needs no port. Only the owner's own connections are turned;
+    # another account's to port 80 find nothing there.
+    devenv_redirect = "".join(
+        f"        meta skuid {owner_match(u.uid)} ip daddr 127.0.0.0/8 tcp dport 80 "
+        f"redirect to :{http}\n"
+        f"        meta skuid {owner_match(u.uid)} ip daddr 127.0.0.0/8 tcp dport 443 "
+        f"redirect to :{https}\n"
+        for u in sorted(policy.developer_accounts(), key=lambda u: u.uid)
+        for http, https in [devenvproxy.ports(u.uid)])
     # Devices on the home network reaching the service, for the accounts
     # whose administrator allowed it: from the LAN ranges only, to the
     # account's listening port and local discovery, and only into a
@@ -445,8 +456,9 @@ table {TABLE} {{
     chain dns_redirect {{
         type nat hook output priority dstnat; policy accept;
         # Loopback is nobody's business but the machine's: a dev server or a
-        # local service on any port — 443 included — is never redirected.
-{dnsfilter_dns}        oif "lo" return
+        # local service on any port — 443 included — is never redirected,
+        # except a developer's own 80 and 443 to devenv's proxy (devenvproxy.py).
+{devenv_redirect}{dnsfilter_dns}        oif "lo" return
         ip daddr 127.0.0.0/8 return
         ip6 daddr ::1 return
         # Never redirect the resolver's or the proxy's own traffic, or they

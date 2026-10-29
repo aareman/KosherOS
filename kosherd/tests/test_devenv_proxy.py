@@ -76,3 +76,25 @@ def test_the_ruleset_with_the_guard_parses(tmp_path):
     if res.returncode != 0 and "Operation not permitted" in res.stderr:
         pytest.skip("no user namespace here")
     assert res.returncode == 0, res.stderr
+
+
+def test_a_developers_own_80_and_443_on_loopback_go_to_its_pair():
+    # "i shouldn't need ports specified that's the point of the proxy":
+    # http://web.demo.localhost reaches devenv on the account's high pair.
+    dev = UserPolicy(uid=1001, username="dev", mode="filtered", developer_tools=True)
+    kid = UserPolicy(uid=1002, username="kid", mode="filtered")
+    out = nft.render(_policy(dev, kid), dns_uid=989)
+    http, https = devenvproxy.ports(1001)
+    assert re.search(rf"meta skuid \S+ ip daddr 127\.0\.0\.0/8 tcp dport 80 redirect to :{http}", out)
+    assert re.search(rf"meta skuid \S+ ip daddr 127\.0\.0\.0/8 tcp dport 443 redirect to :{https}", out)
+    # Ahead of the rule that leaves loopback alone, or it would never apply.
+    chain = out[out.index("chain dns_redirect"):]
+    assert chain.index(f"redirect to :{http}") < chain.index('oif "lo" return')
+    # Nothing for the account without developer tools.
+    kid_http, _ = devenvproxy.ports(1002)
+    assert f"redirect to :{kid_http}" not in out
+
+
+def test_the_image_has_certutil_for_mkcert():
+    text = (ROOT / "os-image/Containerfile").read_text()
+    assert "dnf -y install nss-tools" in text and "command -v certutil" in text

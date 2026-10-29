@@ -261,3 +261,10 @@ def test_a_switch_to_a_public_registry_pins_the_digest_and_leaves_no_trust_behin
     assert 'target = ref if local else f"{ref}@{digest}"' in src
     assert '(SWITCH_SETUP if local else "set -e\\n")' in src
     assert "if local:\n            rc, out = vm.sh(CLEAN_SWITCH)" in src
+
+
+def test_a_switch_by_name_waits_for_the_machines_resolver():
+    # kosher-dns is up a few seconds after sshd; a switch to ghcr before
+    # it answered failed with "Temporary failure in name resolution".
+    src = (ROOT / "scripts/pr-test.py").read_text()
+    assert "getent hosts {host}" in src and 'host = ref.split("/", 1)[0]' in src

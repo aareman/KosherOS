@@ -1190,6 +1190,16 @@ def switch_machine(st: Stage, machine: Path, workdir: Path, key: Path, ref: str,
     try:
         if not st.check("the set-up machine boots and answers ssh", vm.wait_ssh()):
             raise StageError("no ssh")
+        if not local:
+            # The machine's own resolver (kosher-dns) is up a few seconds
+            # after sshd, and a switch by name before it answers fails
+            # with "Temporary failure in name resolution". The harness's
+            # registry is an address, so it never waited.
+            host = ref.split("/", 1)[0]
+            rc, out = vm.sh(f"for i in $(seq 45); do getent hosts {host} >/dev/null && exit 0; "
+                            "sleep 2; done; exit 1", timeout=120)
+            if not st.check(f"the machine resolves {host}", rc == 0, out):
+                raise StageError("no name resolution")
         rc, out = vm.sh((SWITCH_SETUP if local else "set -e\n") + f"bootc switch {target}",
                         timeout=1800)
         with st.log.open("a") as fh:

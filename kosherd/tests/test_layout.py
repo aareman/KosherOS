@@ -456,8 +456,7 @@ def test_hyprland_comes_from_the_copr_which_is_removed_afterwards():
 def test_umbriel_is_built_from_pinned_commits_and_checked():
     for arg in ("UMBRIEL_REF", "UMBRIEL_PORTAL_REF"):
         assert re.search(rf"^ARG {arg}=[0-9a-f]{{40}}$", CONTAINERFILE, re.M), arg
-    assert re.search(r"^FROM quay\.io/fedora/fedora:44@sha256:[0-9a-f]{64} as umbriel-build$",
-                     CONTAINERFILE, re.M)
+    assert "FROM quay.io/fedora/fedora:44 as umbriel-build" in CONTAINERFILE
     assert "COPY --from=umbriel-build /out/ /tmp/umbriel/" in CONTAINERFILE
     script = (ROOT / "os-image/desktop/build-umbriel.sh").read_text()
     assert 'test "$(git -C "$umbriel" rev-parse HEAD)" = "$umbriel_ref"' in script

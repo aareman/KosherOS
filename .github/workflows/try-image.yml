@@ -63,8 +63,10 @@ jobs:
           # Layers come from (and go to) the build cache in the registry:
           # a runner starts empty, and without it every build installed all
           # of Fedora Workstation again, twenty minutes, to change a line
-          # of Python. The base is pinned by digest (scripts/bump-base.py),
-          # so the cache holds until the base is bumped on purpose.
+          # of Python. The cache holds until Fedora moves its base image,
+          # about once a day. (Pinning the base by digest was tried, #242:
+          # quay.io deletes a digest once its tag moves, and the next build
+          # could not pull it.)
           podman login ghcr.io -u "$GITHUB_ACTOR" -p "${{ secrets.GITHUB_TOKEN }}"
           podman build --build-arg "KOSHER_VERSION=$version" \
             --layers --cache-from "$IMAGE-cache" --cache-to "$IMAGE-cache" \

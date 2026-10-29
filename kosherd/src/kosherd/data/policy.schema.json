@@ -343,6 +343,10 @@
         "syncthing": {
           "type": "boolean",
           "description": "Syncthing can be installed from the Store and allowed for an account. Off, every account's Syncthing is stopped and the Store does not offer it. Absent means kosherd decides once at its next start: on if any account already has it, off otherwise."
+        },
+        "keyd": {
+          "type": "boolean",
+          "description": "Key remapping: keyd runs, and each person's ~/.config/keyd files are applied while they are at the screen. Off, keyd is stopped and nobody's files are applied. Absent means kosherd decides once at its next start: on if any account already has keyd files, off otherwise."
         }
       }
     }

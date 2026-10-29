@@ -17,7 +17,7 @@ import pytest
 from kosherd import access, appaccess, nft, policy as policy_mod
 from kosherd import syncthing as st
 from kosherd import tailnet
-from kosherd.policy import Policy, UserPolicy
+from kosherd.policy import Policy, PolicyError, UserPolicy
 
 REF = st.REF
 
@@ -110,7 +110,8 @@ def test_no_state_or_a_broken_one_counts_as_no(tmp_path, text):
 # ---- the daemon ----------------------------------------------------------------------------
 
 @pytest.fixture
-def daemon(monkeypatch):
+def daemon(monkeypatch, tmp_path):
+    from kosherd import keyboard
     from kosherd.daemon import Daemon
 
     d = Daemon.__new__(Daemon)
@@ -119,6 +120,14 @@ def daemon(monkeypatch):
     d.saved = []
     d.applied = []
     d.services = []
+    d.keyd_services = []
+    d.homes = []
+    d.keyboards = keyboard.Keyboards(system_dir=tmp_path / "run-keyd",
+                                     commands_dir=tmp_path / "commands",
+                                     run=lambda *a, **k: None)
+    monkeypatch.setattr(keyboard, "set_running",
+                        lambda on, wait=True: d.keyd_services.append((on, wait)))
+    monkeypatch.setattr(Daemon, "_account_homes", staticmethod(lambda: d.homes))
     monkeypatch.setattr(policy_mod, "save", lambda p, *a, **k: d.saved.append(p.advanced()))
     monkeypatch.setattr(Daemon, "_save_and_apply",
                         lambda self: (self.saved.append(self.policy.advanced()),
@@ -135,15 +144,17 @@ def test_a_new_install_starts_with_both_off(daemon, monkeypatch):
     monkeypatch.setattr(tailnet, "signed_in_before", lambda: False)
     monkeypatch.setattr(st, "load_registry", lambda: {})
     daemon._settle_advanced()
-    assert daemon.saved == [{"tailscale": False, "syncthing": False}]
+    assert daemon.saved == [{"tailscale": False, "syncthing": False, "keyd": False}]
     assert daemon.services == [(False, False)], "tailscaled stopped, without waiting"
+    assert daemon.keyd_services == [(False, False)], "keyd stopped, without waiting"
+    assert not daemon.keyboards.enabled
 
 
 def test_a_computer_already_using_them_keeps_both_on(daemon, monkeypatch):
     monkeypatch.setattr(tailnet, "signed_in_before", lambda: True)
     monkeypatch.setattr(st, "load_registry", lambda: {"kid": {"uid": 1001}})
     daemon._settle_advanced()
-    assert daemon.saved == [{"tailscale": True, "syncthing": True}]
+    assert daemon.saved == [{"tailscale": True, "syncthing": True, "keyd": False}]
     assert daemon.services == [(True, False)]
 
 
@@ -156,11 +167,81 @@ def test_an_approval_alone_keeps_syncthing_on(daemon, monkeypatch):
 
 
 def test_switches_already_decided_are_not_decided_again(daemon, monkeypatch):
-    daemon.policy.tailscale, daemon.policy.syncthing = False, True
+    daemon.policy.tailscale, daemon.policy.syncthing, daemon.policy.keyd = False, True, True
     monkeypatch.setattr(tailnet, "signed_in_before", lambda: pytest.fail("decided again"))
+    daemon.homes = [None]  # would fail if looked at
     daemon._settle_advanced()
     assert daemon.saved == []
     assert daemon.services == [(False, False)]
+    assert daemon.keyd_services == [(True, False)]
+
+
+# ---- key remapping (#230) ---------------------------------------------------------------------
+
+def _home_with_keyd(tmp_path, name: str, files: dict) -> str:
+    home = tmp_path / name
+    (home / ".config/keyd").mkdir(parents=True)
+    for fname, text in files.items():
+        (home / ".config/keyd" / fname).write_text(text)
+    return str(home)
+
+
+def test_a_computer_whose_people_remap_keys_keeps_keyd_on(daemon, monkeypatch, tmp_path):
+    monkeypatch.setattr(tailnet, "signed_in_before", lambda: False)
+    monkeypatch.setattr(st, "load_registry", lambda: {})
+    daemon.homes = [_home_with_keyd(tmp_path, "a", {}),
+                    _home_with_keyd(tmp_path, "b", {"default.conf": "[main]\ncapslock = esc\n"})]
+    daemon._settle_advanced()
+    assert daemon.policy.keyd is True
+    assert daemon.keyd_services == [(True, False)]
+    assert daemon.keyboards.enabled
+
+
+def test_an_app_conf_alone_is_not_key_remapping(daemon, monkeypatch, tmp_path):
+    monkeypatch.setattr(tailnet, "signed_in_before", lambda: False)
+    monkeypatch.setattr(st, "load_registry", lambda: {})
+    daemon.homes = [_home_with_keyd(tmp_path, "a", {"app.conf": "[firefox]\n"})]
+    daemon._settle_advanced()
+    assert daemon.policy.keyd is False
+
+
+def test_keyd_switch_starts_the_service_then_saves(daemon):
+    daemon.policy.keyd = False
+    daemon.keyboards.set_enabled(False)
+    daemon.impl_SetKeydEnabled(True, "")
+    assert daemon.keyd_services == [(True, True)]
+    assert daemon.policy.keyd is True and daemon.saved[-1]["keyd"] is True
+    assert daemon.keyboards.enabled
+    daemon.impl_SetKeydEnabled(False, "")
+    assert daemon.keyd_services[-1] == (False, True)
+    assert daemon.policy.keyd is False and not daemon.keyboards.enabled
+
+
+def test_a_failed_save_puts_keyd_back(daemon, monkeypatch):
+    daemon.policy.keyd = False
+
+    def refuse(*_a, **_k):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(policy_mod, "save", refuse)
+    with pytest.raises(OSError):
+        daemon.impl_SetKeydEnabled(True, "")
+    assert daemon.keyd_services == [(True, True), (False, True)]
+    assert daemon.policy.keyd is False
+
+
+def test_keyd_that_will_not_start_changes_nothing(daemon, monkeypatch):
+    from kosherd import keyboard
+
+    daemon.policy.keyd = False
+
+    def refuse(on, wait=True):
+        raise keyboard.KeymapError("could not start keyd: no such unit")
+
+    monkeypatch.setattr(keyboard, "set_running", refuse)
+    with pytest.raises(PolicyError):
+        daemon.impl_SetKeydEnabled(True, "")
+    assert daemon.policy.keyd is False and daemon.saved == []
 
 
 def test_syncthing_switch_is_saved_and_applied(daemon):

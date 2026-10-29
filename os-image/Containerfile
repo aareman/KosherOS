@@ -599,10 +599,12 @@ RUN passwd -l root \
     && systemctl mask systemd-resolved.service debug-shell.service \
     && systemctl enable sshd.service \
     && systemctl enable kosherd.service kosher-firewall.service kosher-dns.service \
-    # The key remapper. It remaps nothing until a person's own file says
-    # to, and then only while their session is on the screen.
-    && systemctl enable keyd.service \
-    && systemctl is-enabled keyd.service \
+    # The key remapper is not enabled here: it is a switch under Advanced
+    # (#230), off on a new install, and kosherd enables and starts it when
+    # an administrator turns it on. Even then it remaps nothing until a
+    # person's own file says to, and only while their session is on the
+    # screen.
+    && ! systemctl is-enabled --quiet keyd.service \
     # Updates are applied by a parent from the admin app (kosherd's path,
     # which turns signature enforcement on with the first switch), never on
     # their own: the stock timer would pull the first update before that

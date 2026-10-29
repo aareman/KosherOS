@@ -626,7 +626,9 @@ def test_keyd_is_built_from_a_pinned_checked_release_reading_run():
     assert "make install PREFIX=/usr CONFIG_DIR=/run/keyd" in CONTAINERFILE, \
         "both, or the man page and the binary disagree"
     assert "COPY --from=keyd-build /out/usr/ /usr/" in CONTAINERFILE
-    assert "systemctl enable keyd.service" in CONTAINERFILE
+    # Off on a new install; kosherd enables it with the switch (#230).
+    assert "systemctl enable keyd.service" not in CONTAINERFILE
+    assert "! systemctl is-enabled --quiet keyd.service" in CONTAINERFILE
 
 
 def test_nobody_gets_raw_input_or_keyds_socket():
@@ -767,3 +769,57 @@ def test_a_refusal_is_reported_by_its_text_not_a_bool():
         "GDBus.Error:org.kosherlinux.Error: default.conf line 2: invalid key or action",
         Gio.DBusError.FAILED)
     assert keyboard._dbus_message(error) == "default.conf line 2: invalid key or action"
+
+
+# -- switched off under Advanced (#230) ---------------------------------------------
+
+def test_switched_off_a_persons_files_are_refused_with_the_reason(kb):
+    kb.set_enabled(False)
+    with pytest.raises(KeymapError, match="switched off on this computer"):
+        kb.set(1001, {"default.conf": CAPS}, active_uid=1001)
+    assert 1001 not in kb.configs
+    assert kb.fake.calls == [], "keyd is not running; nothing is asked of it"
+
+
+def test_switched_off_no_files_is_fine(kb):
+    kb.set_enabled(False)
+    assert kb.set(1001, {}, active_uid=1001) is False
+
+
+def test_switched_off_app_keys_are_refused(kb):
+    kb.set_enabled(False)
+    with pytest.raises(KeymapError, match="switched off on this computer"):
+        kb.bind(1001, ["a = b"], active_uid=1001)
+
+
+def test_switching_off_forgets_everyone_and_writes_nothing(kb):
+    kb.set(1001, {"default.conf": CAPS}, active_uid=1001)
+    before = len(kb.fake.calls)
+    kb.set_enabled(False)
+    assert kb.configs == {}
+    assert kb.refresh(1001) is False
+    assert len(kb.fake.calls) == before
+    kb.set_enabled(True)
+    kb.set(1001, {"default.conf": CAPS}, active_uid=1001)
+    assert 1001 in kb.configs
+
+
+def test_set_running_enables_or_disables_keyd():
+    from kosherd.keyboard import set_running
+
+    seen = []
+
+    def run(argv, **_kw):
+        seen.append(argv)
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    set_running(True, run=run)
+    set_running(False, wait=False, run=run)
+    assert seen == [["systemctl", "enable", "--now", "keyd.service"],
+                    ["systemctl", "disable", "--now", "--no-block", "keyd.service"]]
+
+    def fails(argv, **_kw):
+        return SimpleNamespace(returncode=5, stdout="", stderr="Unit keyd.service not found.")
+
+    with pytest.raises(KeymapError, match="not found"):
+        set_running(True, run=fails)

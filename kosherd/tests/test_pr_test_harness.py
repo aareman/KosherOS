@@ -268,3 +268,16 @@ def test_a_switch_by_name_waits_for_the_machines_resolver():
     # it answered failed with "Temporary failure in name resolution".
     src = (ROOT / "scripts/pr-test.py").read_text()
     assert "getent hosts {host}" in src and 'host = ref.split("/", 1)[0]' in src
+
+
+def test_a_switch_to_the_release_repository_is_held_to_the_signature_policy():
+    # As kosherd's own updates are (updates.py); the harness's unsigned
+    # images (the local registry, kosher-linux-ci) cannot be, and 80-hardening
+    # [F10] looks only at a machine on the release repository.
+    src = (ROOT / "scripts/pr-test.py").read_text()
+    assert 'RELEASE_IMAGE = "ghcr.io/aareman/kosher-linux"' in src
+    assert 'enforce = ["--enforce-container-sigpolicy"] if ref == RELEASE_IMAGE else []' in src
+    assert pr_test.parse_registry_image("ghcr.io/aareman/kosher-linux:edge@sha256:" + "0" * 64)[0] \
+        == pr_test.RELEASE_IMAGE
+    assert pr_test.parse_registry_image("ghcr.io/aareman/kosher-linux-ci:x-1@sha256:" + "0" * 64)[0] \
+        != pr_test.RELEASE_IMAGE

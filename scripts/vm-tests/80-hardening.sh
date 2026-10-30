@@ -376,8 +376,11 @@ wait_for_dns >/dev/null 2>&1 || true
 # from the ISO starts unverified; kosherd's first update switches it with
 # --enforce-container-sigpolicy. A machine running its own build (a test
 # VM on localhost/...) is held to nothing by the policy: nothing to see.
+# The release repository only: the VM test's own images live beside it
+# (kosher-linux-ci, unsigned, taken as the policy takes any other ghcr
+# repository), and the glob once caught those too.
 case "$(booted_signature)" in
-    ghcr.io/aareman/kosher-linux*)
+    ghcr.io/aareman/kosher-linux:*|ghcr.io/aareman/kosher-linux@*|"ghcr.io/aareman/kosher-linux ")
         check_contains "[F10] bootc enforces the policy on this deployment" "containerPolicy" booted_signature ;;
     *) skip "[F10] bootc enforcement: this machine does not run a KosherOS release image" ;;
 esac

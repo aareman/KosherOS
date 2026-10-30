@@ -414,3 +414,29 @@ def test_the_vm_harness_never_needs_sudo():
     assert clean.returncode == 0, clean.stdout + clean.stderr
     dirty = subprocess.run(check + ["vm"], cwd=ROOT, capture_output=True, text=True)
     assert dirty.returncode == 1 and "_sudo" in dirty.stdout
+
+
+def test_the_train_lands_only_the_commit_it_tested_and_may_carry_a_workflow_change():
+    # A push to a queued pull request after assembly used to land untested
+    # (plain `gh pr merge`); and the workflow's own token cannot push a
+    # workflow file's new content, so a MERGE_TRAIN_TOKEN secret, when
+    # there is one, does the push and the merges instead.
+    train = _train()
+    assemble = train["jobs"]["assemble"]
+    checkout = assemble["steps"][0]
+    assert checkout["with"]["token"] == "${{ secrets.MERGE_TRAIN_TOKEN || github.token }}"
+    build = assemble["steps"][1]["run"]
+    assert 'heads="$heads $n:$(git rev-parse "pr-$n")"' in build
+    assert "heads" in assemble["outputs"]
+    land = train["jobs"]["land"]["steps"][0]
+    assert land["env"]["MERGE_TRAIN_TOKEN"] == "${{ secrets.MERGE_TRAIN_TOKEN }}"
+    run = land["run"]
+    assert '--match-head-commit "$(head_of "$n")"' in run
+    assert 'GH_TOKEN="${MERGE_TRAIN_TOKEN:-$GH_TOKEN}" gh pr merge' in run
+    # Labels and comments stay with the workflow's token: a label by the
+    # train's own token would wake another train.
+    assert 'GH_TOKEN="${MERGE_TRAIN_TOKEN:-$GH_TOKEN}" gh pr edit' not in run
+    # A merge by the token is a push and releases itself; only the
+    # workflow's own merges need the ask.
+    assert '[ "$landed" = 1 ] && [ -z "$MERGE_TRAIN_TOKEN" ]' in run
+    assert "gh workflow run ci.yml" in run and "landed=true" in run

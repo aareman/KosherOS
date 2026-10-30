@@ -1116,6 +1116,8 @@ CACHE = Path(os.environ.get("KOSHER_PR_TEST_CACHE")
 CACHE_LOCK = CACHE / "lock"
 REGISTRY = "kosher-pr-test-registry"
 REGISTRY_PORT = 5078
+# The family's own repository, signed with the KosherOS key (ci.yml).
+RELEASE_IMAGE = "ghcr.io/aareman/kosher-linux"
 BASE_MAX_AGE_DAYS = 7
 
 
@@ -1194,6 +1196,12 @@ def switch_machine(st: Stage, machine: Path, workdir: Path, key: Path, ref: str,
     machine's own policy already accepts."""
     vm = Machine(machine, workdir, key, gl=False, console="switch-console.log")
     target = ref if local else f"{ref}@{digest}"
+    # A switch to the release repository is held to the signature policy,
+    # as kosherd's own updates are (updates.py): the machine then runs a
+    # verified deployment, which is what 80-hardening [F10] looks for. The
+    # harness's own images (the local registry, kosher-linux-ci) are
+    # unsigned, and the policy takes them as it takes any other registry.
+    enforce = ["--enforce-container-sigpolicy"] if ref == RELEASE_IMAGE else []
     try:
         if not st.check("the set-up machine boots and answers ssh", vm.wait_ssh()):
             raise StageError("no ssh")
@@ -1207,8 +1215,8 @@ def switch_machine(st: Stage, machine: Path, workdir: Path, key: Path, ref: str,
                             "sleep 2; done; exit 1", timeout=120)
             if not st.check(f"the machine resolves {host}", rc == 0, out):
                 raise StageError("no name resolution")
-        rc, out = vm.sh((SWITCH_SETUP if local else "set -e\n") + f"bootc switch {target}",
-                        timeout=1800)
+        rc, out = vm.sh((SWITCH_SETUP if local else "set -e\n")
+                        + f"bootc switch {' '.join(enforce + [target])}", timeout=1800)
         with st.log.open("a") as fh:
             fh.write(out)
         if not st.check("bootc switch stages the image", rc == 0, out[-1500:]):

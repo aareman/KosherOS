@@ -160,7 +160,7 @@ jobs:
           changed="$(git diff --name-only "$since" "$GITHUB_SHA")"
           echo "$changed"
           if echo "$changed" | grep -E -q \
-               '^(os-image/|kosherd/src/|kosherd/pyproject|admin-app/src/|store-app/src/|setup-app/src/|myfilter-app/src/|search-app/kosher_search/|mitm/|branding/|policy/|scripts/fetch-categories\.py|scripts/curated-sites\.json|scripts/check-searxng-settings\.py|scripts/version\.py)'; then
+               '^(os-image/|(kosherd|admin-app|store-app|setup-app|myfilter-app|welcome-app|look-app)/(src/|pyproject)|search-app/(kosher_search/|pyproject)|mitm/|branding/|policy/|scripts/fetch-categories\.py|scripts/curated-sites\.json|scripts/check-searxng-settings\.py|scripts/version\.py)'; then
             echo "image=true" >> "$GITHUB_OUTPUT"
             echo "the image changes: building"
           else
@@ -282,6 +282,115 @@ jobs:
           retry cosign sign --yes --key env://COSIGN_PRIVATE_KEY $legacy "$IMAGE:edge"
           retry cosign sign --yes "$IMAGE:${SHA::12}"
           retry cosign sign --yes "$IMAGE:edge"
+
+  base:
+    name: The VM test's base disk
+    # Master's image installed and set up once, for every VM test after
+    # it: the runners restore this from the Actions cache and switch it to
+    # the change's image (vm-test.yml), instead of installing from scratch
+    # — twenty minutes on a runner — for every part of every run. Nothing
+    # waits for it: a VM test before it is saved takes the previous base,
+    # or installs. A merge that changed nothing in the image (the image
+    # job skipped) leaves master's image as it was, and a base for it is
+    # still good; only when the cache holds none is one made, from :edge.
+    needs: [image]
+    if: >-
+      always() && github.event_name != 'pull_request'
+      && (needs.image.result == 'success' || needs.image.result == 'skipped')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    permissions:
+      contents: read
+    env:
+      IMAGE: ghcr.io/${{ github.repository_owner }}/kosher-linux
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Is there a base already
+        id: have
+        if: needs.image.result == 'skipped'
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/.cache/kosher-pr-test
+          key: pr-test-base-${{ github.sha }}
+          restore-keys: pr-test-base-
+          lookup-only: true
+
+      - name: Is one needed
+        id: need
+        env:
+          BUILT: ${{ needs.image.result == 'success' }}
+          HAVE: ${{ steps.have.outputs.cache-matched-key }}
+        run: |
+          if [ "$BUILT" = true ]; then
+            echo "the image was built: a base from it"
+            echo "tag=${GITHUB_SHA::12}" >> "$GITHUB_OUTPUT"
+            echo "needed=true" >> "$GITHUB_OUTPUT"
+          elif [ -z "$HAVE" ]; then
+            echo "no base in the cache: one from :edge, which this merge did not change"
+            echo "tag=edge" >> "$GITHUB_OUTPUT"
+            echo "needed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "a base is cached ($HAVE) and the image did not change: nothing to do"
+            echo "needed=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: KVM
+        # As vm-test.yml opens it: the harness installs the image in a VM.
+        if: steps.need.outputs.needed == 'true'
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+            | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+          sudo udevadm settle --timeout=30 || true
+          if [ ! -e /dev/kvm ] || [ ! -w /dev/kvm ]; then
+            echo "::error::This runner has no usable /dev/kvm."
+            exit 1
+          fi
+
+      - uses: cachix/install-nix-action@v31
+        if: steps.need.outputs.needed == 'true'
+
+      - name: The static virtiofsd bcvk needs
+        if: steps.need.outputs.needed == 'true'
+        uses: actions/cache@v4
+        with:
+          path: /var/tmp/kosher-harness-1001
+          key: virtiofsd-${{ hashFiles('devenv.lock') }}
+
+      - name: Set up the runner
+        if: steps.need.outputs.needed == 'true'
+        run: |
+          (sudo apt-get update && sudo apt-get install -y qemu-system-x86 qemu-utils uidmap \
+             && sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0) > apt.log 2>&1 &
+          apt=$!
+          (nix profile install nixpkgs#devenv && devenv shell -- true) > devenv.log 2>&1 &
+          dev=$!
+          failed=0
+          wait "$apt" || { failed=1; cat apt.log; }
+          wait "$dev" || { failed=1; cat devenv.log; }
+          exit "$failed"
+
+      - name: just pr-test --base-only
+        # The image by digest; the base's meta records it, so a VM test of
+        # a change that alters nothing in the image runs the base as it
+        # is, with no switch.
+        if: steps.need.outputs.needed == 'true'
+        env:
+          TAG: ${{ steps.need.outputs.tag }}
+        run: |
+          digest="$(skopeo inspect --format '{{.Digest}}' "docker://$IMAGE:$TAG")"
+          devenv shell -- just pr-test HEAD --id master-base --base-only \
+            --registry-image "$IMAGE:$TAG@$digest"
+
+      - uses: actions/cache/save@v4
+        if: steps.need.outputs.needed == 'true'
+        with:
+          path: ~/.cache/kosher-pr-test
+          key: pr-test-base-${{ github.sha }}
 
   release:
     name: Release this version

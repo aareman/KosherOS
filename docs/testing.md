@@ -45,10 +45,14 @@ request no longer restarts an hour of testing.
 Most of a VM test used to be the image build: every one installed all of
 Fedora Workstation again, because the base image's tag moved about once a
 day and each move changed the cache key of every layer after it. The
-Containerfile now builds from Fedora's images pinned by digest, so the
-layers under a change stay cached until the pins move on purpose: `just
-bump-base` (`scripts/bump-base.py`), and every Monday the Bump the base
-images workflow, whose pull request goes through the train. A one-line
+Containerfile now builds from our own copy of Fedora's images
+(`ghcr.io/<owner>/kosher-base-fedora*:44-<date>`), pinned by digest, so
+the layers under a change stay cached until the copy is refreshed on
+purpose: `just bump-base` (`scripts/bump-base.py`) and, every Monday, the
+Bump the base images workflow, whose pull request goes through the train.
+A copy rather than Fedora's own digest, because quay.io deletes a digest
+once its tag moves on, and a build pinned to it could not pull it a day
+later (#242). A one-line
 change to the daemon rebuilds in under a minute.
 
 CI's runners start with nothing, so their builds share layers through a

@@ -9,7 +9,16 @@ kctl set-whitelist "$(id -u wlkid)" example.com >/dev/null
 kctl set-mode "$(id -u nokid)" none >/dev/null
 kctl set-mode "$(id -u dnskid)" dnsfilter >/dev/null
 wait_for_dns  # the resolver restarts on every policy change
-sleep 1       # ...and then repopulates the whitelist sets
+# ...and only then loads the new whitelist. A fixed second was not always
+# enough on a slow runner: the fetch below reached the restarted resolver
+# before example.com was on wlkid's list, and failed with the set still
+# empty, while every faster machine passed. Wait for the list to be in
+# force (the site loads), for up to a minute; a whitelist that never
+# loads still fails the check below.
+for _ in $(seq 1 30); do
+    fetch_as wlkid https://example.com >/dev/null 2>&1 && break
+    sleep 2
+done
 
 section "Filter modes"
 check "root is unrestricted"                    0 fetch https://fedoraproject.org

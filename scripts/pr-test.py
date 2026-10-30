@@ -16,7 +16,8 @@ and the report says why. The stages:
            disk and set up by the boot test, kept in ~/.cache/kosher-pr-test
            (KOSHER_PR_TEST_CACHE), shared by every checkout of the repo
   switch   that machine `bootc switch`ed to the change's image from a
-           local registry, the way an update reaches a family
+           local registry, the way an update reaches a family (or from a
+           public registry CI pushed it to: --registry-image)
   disk, boot
            instead, for a change to power-on and setup (or --full, or in
            CI): a fresh disk from the change's own image and
@@ -32,6 +33,12 @@ Everything lands in build/pr-test/<ID>/: summary.json (for machines),
 report.md (for people), each stage's log, the serial consoles and the
 screenshots. A failure listed in scripts/vm-tests/known-failures.txt is
 known; the exit status is non-zero when anything else failed.
+
+CI (vm-test.yml) runs the same stages over several runners: one builds
+the image and pushes it to ghcr, and each of the others restores master's
+base from the Actions cache (made by ci.yml with --base-only), switches it
+to that image (--registry-image) and runs one --shard. A runner without a
+usable base takes the direct path (--prefer-base).
 
 Nothing here runs sudo. A `sudo` that fails loudly is put first on the PATH
 of every command the harness starts, and the just recipes it calls are
@@ -609,6 +616,19 @@ def stage_build(st: Stage, tree: Path, image: str, env: dict) -> None:
         raise StageError("build failed")
 
 
+def stage_pull(st: Stage, registry: tuple[str, str], image: str, env: dict) -> None:
+    """The registry image into local storage, under the run's tag, for the
+    stages that install from an image (rootless-disk.sh) rather than
+    switch to one."""
+    name, digest = registry
+    rc = run_logged(["podman", "pull", f"{name}@{digest}"], st.log, env, timeout=1800)
+    ok = rc == 0 and subprocess.run(["podman", "tag", f"{name}@{digest}", image],
+                                    capture_output=True).returncode == 0
+    st.check(f"the image is pulled from {name}", ok, f"exit {rc}; see {st.log}")
+    if not ok:
+        raise StageError("no image")
+
+
 def stage_disk(st: Stage, image: str, disk: Path, env: dict) -> None:
     # bcvk's container carries the run's label, so a run that is stopped
     # half way can remove it; its temp disk is found by when it appeared.
@@ -799,6 +819,13 @@ def stage_desktop(st: Stage, machine: Path, outdir: Path, key: Path, gl: bool,
             st.check("the account signs in through GDM", False, f"{reason}\n{journal}")
             raise StageError(reason)
         st.check("the account signs in through GDM", True)
+        if props.get("Active") != "yes":
+            # The session is listed while still "opening"; one train run
+            # read it a moment before it was active and failed on that.
+            def active() -> dict:
+                p = session_of(vm, USER)
+                return p if p.get("Active") == "yes" else {}
+            props = wait_for(active, 90) or props
         st.check("the session has a seat (seat0)", props.get("Seat") == "seat0", str(props))
         st.check("the session is active and local",
                  props.get("Active") == "yes" and props.get("Remote") == "no", str(props))
@@ -990,6 +1017,41 @@ def groups_for(suites: list[str], n: int) -> list[list[str]]:
     return [sorted(b) for b in bins if b]
 
 
+def parse_registry_image(ref: str) -> tuple[str, str]:
+    """NAME[:TAG]@sha256:DIGEST, as a registry reports a pushed image: the
+    name the machine switches to and the digest it must then be running."""
+    m = re.fullmatch(r"([^@\s]+?)(?::[A-Za-z0-9_][A-Za-z0-9_.-]*)?@(sha256:[0-9a-f]{64})", ref)
+    if not m:
+        raise SystemExit(f"--registry-image {ref!r}: NAME[:TAG]@sha256:DIGEST")
+    return m.group(1), m.group(2)
+
+
+def parse_shard(shard: str) -> tuple[bool, tuple[int, int] | None]:
+    """What one machine of a split run does (CI runs these side by side):
+    "all" (the desktop and every suite group, here), "desktop", or
+    "suites:K/N" (the K-th of N suite groups). Returns (desktop, (k, n))."""
+    if shard in ("", "all"):
+        return True, None
+    if shard == "desktop":
+        return True, (0, 0)
+    m = re.fullmatch(r"suites:(\d+)/(\d+)", shard)
+    if not m or not 1 <= int(m.group(1)) <= int(m.group(2)):
+        raise SystemExit(f"--shard {shard!r}: all, desktop or suites:K/N")
+    return False, (int(m.group(1)), int(m.group(2)))
+
+
+def shard_groups(suites: list[str], part: tuple[int, int]) -> list[list[str]]:
+    """The suite groups a shard runs: none for the desktop's, the K-th of N
+    for a suites shard. Every runner works the groups out from the same
+    selection, so the K-th is the same on all of them."""
+    k, n = part
+    if n == 0:
+        return []
+    groups = groups_for(suites, n)
+    groups.sort(key=lambda g: (-sum(SUITE_SECONDS.get(x, 60) for x in g), g))
+    return [groups[k - 1]] if k <= len(groups) else []
+
+
 def child_overlay(base: Path, path: Path) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.unlink(missing_ok=True)
@@ -1115,16 +1177,37 @@ python3 -c 'import json; p = "/etc/containers/policy.json"; d = json.load(open(p
 """
 
 
-def switch_machine(st: Stage, machine: Path, workdir: Path, key: Path, tag: str,
-                   digest: str) -> None:
+def local_ref(tag: str) -> str:
+    """The harness's registry as the machine sees it (10.0.2.2 is the host)."""
+    return f"10.0.2.2:{REGISTRY_PORT}/kosher-linux:{tag}"
+
+
+def switch_machine(st: Stage, machine: Path, workdir: Path, key: Path, ref: str,
+                   digest: str, *, local: bool = True) -> None:
     """Boot the machine, `bootc switch` it to the pushed image, reboot into
     it and check it is running that image: the update path a family's
-    machine takes, from the set-up state the cached base holds."""
+    machine takes, from the set-up state the cached base holds.
+
+    REF is in the harness's own registry (local_ref), which the machine is
+    told to trust for the switch and to forget afterwards, or the image's
+    name in a public one (--registry-image), pinned to DIGEST, which the
+    machine's own policy already accepts."""
     vm = Machine(machine, workdir, key, gl=False, console="switch-console.log")
+    target = ref if local else f"{ref}@{digest}"
     try:
         if not st.check("the set-up machine boots and answers ssh", vm.wait_ssh()):
             raise StageError("no ssh")
-        rc, out = vm.sh(SWITCH_SETUP + f"bootc switch 10.0.2.2:{REGISTRY_PORT}/kosher-linux:{tag}",
+        if not local:
+            # The machine's own resolver (kosher-dns) is up a few seconds
+            # after sshd, and a switch by name before it answers fails
+            # with "Temporary failure in name resolution". The harness's
+            # registry is an address, so it never waited.
+            host = ref.split("/", 1)[0]
+            rc, out = vm.sh(f"for i in $(seq 45); do getent hosts {host} >/dev/null && exit 0; "
+                            "sleep 2; done; exit 1", timeout=120)
+            if not st.check(f"the machine resolves {host}", rc == 0, out):
+                raise StageError("no name resolution")
+        rc, out = vm.sh((SWITCH_SETUP if local else "set -e\n") + f"bootc switch {target}",
                         timeout=1800)
         with st.log.open("a") as fh:
             fh.write(out)
@@ -1144,8 +1227,10 @@ def switch_machine(st: Stage, machine: Path, workdir: Path, key: Path, tag: str,
         # Take the harness's registry back out: a suite checks that no
         # development registry is trusted (N6), and the machine must look
         # like one that was updated, not one with a test hook left in it.
-        rc, out = vm.sh(CLEAN_SWITCH)
-        st.check("the harness registry is removed from the machine's trust again", rc == 0, out)
+        if local:
+            rc, out = vm.sh(CLEAN_SWITCH)
+            st.check("the harness registry is removed from the machine's trust again",
+                     rc == 0, out)
     finally:
         vm.stop()
 
@@ -1208,11 +1293,17 @@ def prune_bases(keep: Path) -> None:
         shutil.rmtree(d, ignore_errors=True)
 
 
-def make_base(st: Stage, master: str, sha: str, image: str, key: Path, env: dict) -> Path:
+def make_base(st: Stage, master: str, sha: str, image: str, key: Path, env: dict,
+              registry: tuple[str, str] | None = None) -> Path:
     """Master's image, installed and set up by the wizard, then switched to
     itself through the registry, so later switches pull only the layers a
-    change makes. Once per master commit (or week)."""
+    change makes. Once per master commit (or week).
+
+    With REGISTRY (CI, where master's image is already public), the switch
+    is to that image there, and the base's meta records its digest."""
     base_image = image if master == sha else "localhost/kosher-linux:pr-test-base"
+    if registry and base_image == image:
+        stage_pull(st, registry, image, env)
     fingerprint = key_fingerprint(key.with_suffix(".pub").read_text())
     if base_image != image:
         LEFTOVERS.image(base_image)
@@ -1267,12 +1358,16 @@ def make_base(st: Stage, master: str, sha: str, image: str, key: Path, env: dict
         st.check("the base is set up (over ssh: the wizard did not finish)", rc == 0, out)
     else:
         st.check("the base is set up by the wizard", True)
-    registry_up(env, st.log)
-    digest = push(base_image, "base", env, st.log)
-    switch_machine(st, setup, base, key, "base", digest)
-    (base / "meta.json").write_text(json.dumps(
-        {"master": master, "image_id": stamp.read_text().strip(), "created": time.time(),
-         "ssh_key": fingerprint}))
+    meta = {"master": master, "image_id": stamp.read_text().strip(), "created": time.time(),
+            "ssh_key": fingerprint}
+    if registry and base_image == image:
+        switch_machine(st, setup, base, key, registry[0], registry[1], local=False)
+        meta["digest"] = registry[1]
+    else:
+        registry_up(env, st.log)
+        digest = push(base_image, "base", env, st.log)
+        switch_machine(st, setup, base, key, local_ref("base"), digest)
+    (base / "meta.json").write_text(json.dumps(meta))
     if base_image != image:
         keep_build_cache(base_image)
     return base
@@ -1455,15 +1550,28 @@ def main() -> int:
                         help="a fresh install of the change's own image and every check")
     parser.add_argument("--all", action="store_true",
                         help="every check whatever the change touches, from the set-up base")
-    parser.add_argument("--direct", action="store_true", default=bool(os.environ.get("CI")),
+    parser.add_argument("--direct", action=argparse.BooleanOptionalAction,
+                        default=bool(os.environ.get("CI")),
                         help="no cached base: a disk from the change's own image, set up over "
                              "ssh unless a fresh install is selected (the default in CI)")
+    parser.add_argument("--prefer-base", action="store_true",
+                        help="the cached base when there is a usable one, else --direct (a CI "
+                             "runner, which may or may not have restored master's base)")
+    parser.add_argument("--base-only", action="store_true",
+                        help="make the cached base for master, or check it is there, and stop "
+                             "(ci.yml, which then saves it for the runners)")
     parser.add_argument("--fresh-base", action="store_true",
                         help="make a new cached base from master even if a recent one exists")
     parser.add_argument("--vms", type=int, default=int(os.environ.get("KOSHER_PR_TEST_VMS", "3")),
                         help="machines for the suites, besides the desktop's (default 3, "
                              "or KOSHER_PR_TEST_VMS)")
     parser.add_argument("--image", help="test this already-built image; skips the build")
+    parser.add_argument("--registry-image", metavar="NAME@DIGEST",
+                        help="the change's image, already in a registry the machine can reach "
+                             "(CI pushes it to ghcr): no build, and the machine switches to it "
+                             "there, not through the harness's registry")
+    parser.add_argument("--shard", default="all",
+                        help="one part of a split run: all, desktop, or suites:K/N (CI)")
     parser.add_argument("--keep", action="store_true",
                         help="keep everything the run made: the machines, the disks, bcvk's "
                              "temp disk, the worktree and the image tag")
@@ -1495,6 +1603,7 @@ def main() -> int:
         print(f"Removed {len(pruned)} dangling images over a day old: {' '.join(pruned)}",
               flush=True)
     env = sudo_trap(outdir)
+    registry = parse_registry_image(args.registry_image) if args.registry_image else None
     image = args.image or f"localhost/kosher-linux:pr-test-{run_id.lower()}"
     if not args.image:
         LEFTOVERS.image(image)
@@ -1508,8 +1617,10 @@ def main() -> int:
         subprocess.run(["ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-C", "pr-test",
                         "-f", str(key)], check=True)
 
+    want_desktop, part = parse_shard(args.shard)
     started = time.monotonic()
-    summary = {"target": args.target, "id": run_id, "commit": "", "image": image,
+    summary = {"target": args.target, "id": run_id, "commit": "",
+               "image": args.registry_image or image,
                "image_id": "", "started": datetime.now(timezone.utc).isoformat(timespec="seconds"),
                "gl": args.gl, "stages": [], "result": "failed", "seconds": 0,
                "mode": "full" if args.full else ("direct" if args.direct else "fast")}
@@ -1555,19 +1666,43 @@ def main() -> int:
             print("  what runs, and why:")
             for r in sel.reasons:
                 print(f"    {r}")
-        if pre.status != "passed" or sel is None or sel.empty:
+        if pre.status != "passed" or sel is None:
+            raise Done
+        if sel.empty and not args.base_only:
+            raise Done
+        if part is not None and not (sel.desktop and want_desktop) \
+                and not shard_groups(sel.ordered_suites(), part):
+            # Before the disk: this runner's part of the split has no checks
+            # in what the change selects.
+            print(f"\n  nothing for shard {args.shard} in this selection", flush=True)
             raise Done
         caps = {} if args.full else FAST_CAPS
         summary["caps"] = [f"{k}={v!r}" for k, v in caps.items()]
 
-        if not args.image:
+        if not args.image and not registry:
             with stage("build") as st:
                 stage_build(st, tree, image, env)
             if not ok("build"):
                 raise Done
 
-        if sel.boot or args.direct:
+        fingerprint = key_fingerprint(key.with_suffix(".pub").read_text())
+        direct = args.direct
+        if args.prefer_base and not args.base_only:
+            # A CI runner: master's base from the cache if one was restored
+            # (and is recent enough), else the install every run used to do.
+            found, _ = find_base(master, fingerprint)
+            direct = found is None
+            if direct:
+                print("  no usable cached base: a fresh disk from the change's image", flush=True)
+        if args.base_only:
+            direct = False
+        if sel.boot or direct:
             # The change's own image, installed: the path every run took before.
+            if registry:
+                with stage("pull") as st:
+                    stage_pull(st, registry, image, env)
+                if not ok("pull"):
+                    raise Done
             with stage("disk") as st:
                 stage_disk(st, image, disk, env)
             if not ok("disk"):
@@ -1580,43 +1715,58 @@ def main() -> int:
                     stage_setup_over_ssh(st, disk, machine, outdir, key)
             summary["base"] = "a fresh install of this change's image"
         else:
-            fingerprint = key_fingerprint(key.with_suffix(".pub").read_text())
             base, why = (None, "") if args.fresh_base else find_base(master, fingerprint)
             if base is None:
                 with stage("base") as st:
-                    base = make_base(st, master, sha, image, key, env)
+                    base = make_base(st, master, sha, image, key, env, registry)
                 if not ok("base"):
                     raise Done
                 why = f"a new cached base for master {master[:9]}, set up by the boot test"
             summary["base"] = why
             print(f"  machine: {why}")
+            prune_bases(base)
+            if args.base_only:
+                print(f"  the base is at {base}; nothing more was asked", flush=True)
+                raise Done
             child_overlay(base / "setup.qcow2", machine)
             meta = json.loads((base / "meta.json").read_text())
-            target_id = subprocess.run(["podman", "image", "inspect", image, "--format", "{{.Id}}"],
-                                       capture_output=True, text=True).stdout.strip()
-            if target_id != meta.get("image_id"):
+            if registry:
+                # The base already runs this very image (a change to nothing
+                # the image is built from tests master's own): no switch.
+                current = meta.get("digest") == registry[1]
+            else:
+                target_id = subprocess.run(["podman", "image", "inspect", image, "--format",
+                                            "{{.Id}}"], capture_output=True, text=True).stdout.strip()
+                current = target_id == meta.get("image_id")
+            if not current:
                 with stage("switch") as st:
-                    registry_up(env, st.log)
-                    tag = f"pr-test-{run_id.lower()}"
-                    digest = push(image, tag, env, st.log)
-                    switch_machine(st, machine, outdir / "switch", key, tag, digest)
+                    if registry:
+                        switch_machine(st, machine, outdir / "switch", key, registry[0],
+                                       registry[1], local=False)
+                    else:
+                        registry_up(env, st.log)
+                        tag = f"pr-test-{run_id.lower()}"
+                        digest = push(image, tag, env, st.log)
+                        switch_machine(st, machine, outdir / "switch", key, local_ref(tag), digest)
                 if not ok("switch"):
                     raise Done
-            prune_bases(base)
 
         if not machine.exists():
             raise Done
 
         # From here on, every machine is an overlay of the set-up one, all at once.
-        if sel.desktop:
+        if sel.desktop and want_desktop:
             def desktop():
                 with stage("desktop") as st:
                     stage_desktop(st, child_overlay(machine, outdir / "desktop.qcow2"),
                                   outdir, key, args.gl, tree=tree, parts=sel.desktop)
             workers.append(threading.Thread(target=desktop))
-        groups = groups_for(sel.ordered_suites(), machines_to_use(args.vms))
-        # The longest group starts first, so the machines finish together.
-        groups.sort(key=lambda g: -sum(SUITE_SECONDS.get(x, 60) for x in g))
+        if part is None:
+            groups = groups_for(sel.ordered_suites(), machines_to_use(args.vms))
+            # The longest group starts first, so the machines finish together.
+            groups.sort(key=lambda g: -sum(SUITE_SECONDS.get(x, 60) for x in g))
+        else:
+            groups = shard_groups(sel.ordered_suites(), part)
         for i, group in enumerate(groups, 1):
             def suites(group=group, i=i):
                 with stage(f"suites-{i}") as st:

@@ -268,3 +268,59 @@ def test_a_switch_by_name_waits_for_the_machines_resolver():
     # it answered failed with "Temporary failure in name resolution".
     src = (ROOT / "scripts/pr-test.py").read_text()
     assert "getent hosts {host}" in src and 'host = ref.split("/", 1)[0]' in src
+
+
+def _c(name, ok, detail="", **more):
+    return {"name": name, "ok": ok, "detail": detail, **more}
+
+
+def test_a_check_that_fails_both_runs_is_a_failure_and_once_is_flaky():
+    first = [_c("s: a", True), _c("s: b", False, "boom"), _c("s: c", False, "twice")]
+    second = [_c("s: a", True), _c("s: b", True), _c("s: c", False, "twice again")]
+    merged = pr_test.merge_runs(first, second)
+    assert [c["name"] for c in merged] == ["s: a", "s: b", "s: c"]
+    assert merged[0] == _c("s: a", True)
+    assert merged[1]["ok"] and merged[1]["flaky"]
+    assert merged[1]["detail"] == "failed on the first of two runs: boom"
+    assert not merged[2]["ok"] and "flaky" not in merged[2]
+    assert merged[2]["detail"] == "twice again", "the second run's words"
+
+
+def test_a_check_that_passes_first_and_fails_second_is_flaky_too():
+    merged = pr_test.merge_runs([_c("s: a", True)], [_c("s: a", False, "later")])
+    assert merged[0]["ok"] and merged[0]["flaky"]
+    assert merged[0]["detail"] == "failed on the second of two runs: later"
+
+
+def test_a_check_only_one_run_reached_stands_as_it_was():
+    # The first run stopped early (run.sh died); the second got further.
+    first = [_c("s: a", True), _c("s: run.sh finished", False, "exit 1")]
+    second = [_c("s: a", True), _c("s: b", True), _c("s: c", True)]
+    merged = pr_test.merge_runs(first, second)
+    names = [c["name"] for c in merged]
+    assert names == ["s: a", "s: run.sh finished", "s: b", "s: c"]
+    assert not merged[1]["ok"], "the early death is not forgotten"
+
+
+def test_the_verdict_lists_flaky_checks_and_the_report_shows_them(tmp_path):
+    stages = [{"name": "suites-1", "status": "passed", "seconds": 1, "note": "", "log": "x",
+               "checks": [_c("90-developer: it runs a rootless container", True,
+                             "failed on the first of two runs: unable to copy", flaky=True),
+                          _c("10-core: boots", True)]}]
+    verdict = pr_test.classify(stages, [])
+    assert verdict["new"] == [] and verdict["known"] == []
+    assert [f["check"] for f in verdict["flaky"]] == ["90-developer: it runs a rootless container"]
+    summary = {"target": "HEAD", "commit": "abc1234567", "result": "passed", "seconds": 60,
+               "mode": "fast", "stages": stages, "failures": verdict}
+    pr_test.write_report(tmp_path, summary)
+    report = (tmp_path / "report.md").read_text()
+    assert "Flaky: 1." in report
+    assert "## Passed on a second run" in report
+    assert "unable to copy" in report
+
+
+def test_a_second_run_can_be_switched_off():
+    src = (ROOT / "scripts/pr-test.py").read_text()
+    assert '"--no-retry"' in src
+    assert "retry=not args.no_retry" in src
+    assert 'if args.no_retry or all(c["ok"] for c in st.checks):' in src

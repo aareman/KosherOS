@@ -33,6 +33,13 @@ existing tag, with no target, does not go near that rule.
 
 A release made for an older tag is created with `--latest=false`: the newest
 version keeps the "Latest" badge, which the stable promotion reads.
+
+Releases are weekly now (2026-10-29). A merge still gets its version tag
+and its signed image, so `:edge` and `bootc switch ...:vX` are as before,
+but no GitHub release: `--no-release` stops after step 3. Once a week
+`--roundup` (roundup.yml) releases the newest version, with notes written
+from every pull request merged since the last release (release-notes.py
+--roundup), the way a project with something to say per release does.
 """
 
 from __future__ import annotations
@@ -229,13 +236,17 @@ def create_release(tag: str, version: str, notes: Path, *, latest: bool,
 
 
 def finish(tag: str, commit: str, image: str, *, latest: bool, image_failed: bool = False,
-           cwd: Path = ROOT, workdir: Path | None = None, sleep=time.sleep) -> bool:
-    """Everything after the tag: the image's version tag, then the release.
-    Safe to run again. Returns whether a release was created."""
+           cwd: Path = ROOT, workdir: Path | None = None, sleep=time.sleep,
+           release: bool = True) -> bool:
+    """Everything after the tag: the image's version tag, then the release
+    (unless `release` is off: the weekly roundup makes it). Safe to run
+    again. Returns whether a release was created."""
     version = tag[1:]
     if not image_exists(image, tag) and image_exists(image, commit[:12]):
         tag_image(image, commit[:12], tag)
         print(f"{tag}: the image is tagged and signed")
+    if not release:
+        return False
     built = "yes" if image_exists(image, tag) else "no"
     if release_exists(tag):
         print(f"{tag}: release exists")
@@ -250,15 +261,20 @@ def finish(tag: str, commit: str, image: str, *, latest: bool, image_failed: boo
 
 
 def publish(sha: str, image: str, image_failed: bool = False, *, cwd: Path = ROOT,
-            workdir: Path | None = None, sleep=time.sleep) -> list[str]:
+            workdir: Path | None = None, sleep=time.sleep, release: bool = True) -> list[str]:
     """Tag and release `sha`, then finish every version tag without a
-    release. Returns the tags released, this run's first."""
+    release. Without `release`, tag and sign only: the version exists and
+    its image is published, and the weekly roundup writes the release.
+    Returns the tags released, this run's first."""
     head = out("rev-parse", sha, cwd=cwd)
     made = []
     tag = reserve(head, cwd)
     if tag and finish(tag, head, image, latest=True, image_failed=image_failed,
-                      cwd=cwd, workdir=workdir, sleep=sleep):
+                      cwd=cwd, workdir=workdir, sleep=sleep, release=release):
         made.append(tag)
+    if not release:
+        print(f"{tag or 'this commit'}: tagged; released in the weekly roundup")
+        return made
     tags = version_tags(cwd)
     released = released_tags()
     # Only tags this commit contains: an older run re-run must not finish a
@@ -277,6 +293,42 @@ def publish(sha: str, image: str, image_failed: bool = False, *, cwd: Path = ROO
     return made
 
 
+def semver(tag: str) -> tuple[int, ...]:
+    return tuple(int(n) for n in tag[1:].split("."))
+
+
+def roundup(image: str, *, cwd: Path = ROOT, workdir: Path | None = None,
+            sleep=time.sleep, notes=None) -> str | None:
+    """The weekly release: the newest version tag, with notes covering every
+    version since the last release. Returns the tag released, or None when
+    nothing new has been tagged since."""
+    tags = version_tags(cwd)
+    if not tags:
+        print("no version tags")
+        return None
+    newest = max(tags, key=semver)
+    released = released_tags()
+    if newest in released:
+        print(f"{newest}: already released; nothing new this week")
+        return None
+    before = [t for t in released if VERSION_TAG.match(t) and semver(t) < semver(newest)]
+    previous = max(before, key=semver) if before else previous_tag(tags[newest], cwd)
+    built = "yes" if image_exists(image, newest) else "no"
+    path = (workdir or cwd) / f"release-notes-{newest}.md"
+    if notes is None:
+        command = [sys.executable, str(NOTES), "--roundup", "--version", newest[1:],
+                   "--previous", previous, "--sha", tags[newest], "--image", image,
+                   "--built", built]
+        text = subprocess.run(command, check=True, capture_output=True, text=True).stdout
+    else:
+        text = notes(newest, previous, tags[newest], built)
+    path.write_text(text)
+    print(f"--- {newest} (since {previous or 'the beginning'}) ---")
+    print(text)
+    create_release(newest, newest[1:], path, latest=True, sleep=sleep)
+    return newest
+
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--sha", default="HEAD", help="the commit this run built")
@@ -285,7 +337,14 @@ def main(argv=None) -> int:
                         help="this run's image build failed")
     parser.add_argument("--dry-run", action="store_true",
                         help="say what would be tagged and released and stop")
+    parser.add_argument("--no-release", action="store_true",
+                        help="tag and sign only; the weekly roundup writes the release")
+    parser.add_argument("--roundup", action="store_true",
+                        help="the weekly release of the newest version, notes since the last")
     args = parser.parse_args(argv)
+    if args.roundup:
+        roundup(args.image)
+        return 0
     if args.dry_run:
         head = out("rev-parse", args.sha)
         tags = version_tags()
@@ -295,7 +354,7 @@ def main(argv=None) -> int:
             print(f"{tag}: tagged {tags[tag][:12]}, no release"
                   f"{' (image in the registry)' if image_exists(args.image, tag) else ''}")
         return 0
-    publish(args.sha, args.image, args.image_failed)
+    publish(args.sha, args.image, args.image_failed, release=not args.no_release)
     return 0
 
 

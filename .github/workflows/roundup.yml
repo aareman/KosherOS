@@ -1,0 +1,45 @@
+name: Weekly release
+
+# Once a week, the newest version gets its GitHub release, with notes
+# written from every pull request merged since the last one: what the week
+# brings in a first paragraph, what is different, each new thing under its
+# own heading, the fixes one line each (scripts/release-notes.py --roundup).
+# Every merge still gets its version tag and its signed image (ci.yml), so
+# :edge and `bootc switch ...:vX` are as before; this is the page a person
+# reads, and the version a stable promotion picks from.
+
+on:
+  schedule:
+    - cron: "0 14 * * 1" # Mondays, 10 AM US Eastern (daylight time)
+  workflow_dispatch:
+
+permissions:
+  contents: write # the release
+  packages: read
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  roundup:
+    runs-on: ubuntu-latest
+    env:
+      IMAGE: ghcr.io/${{ github.repository_owner }}/kosher-linux
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0 # the tags, and the commits between them
+      - name: Release the newest version
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          sudo apt-get update && sudo apt-get install -y skopeo
+          skopeo login ghcr.io -u "$GITHUB_ACTOR" -p "$GH_TOKEN"
+          python3 scripts/publish-releases.py --roundup --image "$IMAGE"
+      - name: The Releases page
+        # The docs site lists the releases; a release made by this token
+        # starts no other workflow, so ask Checks to rebuild it.
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run ci.yml --ref master

@@ -158,6 +158,57 @@ else
     kctl developer-tools "$(id -u sshkid)" off >/dev/null
 fi
 
+section "SSH to other machines: the listed ones, or anywhere (#257)"
+# An account may be given machines of its own to ssh to — a name, an
+# address, a range or the tailnet — in sets of its own that dnsmasq fills
+# as the names resolve; or anywhere, the administrator's call. The public
+# SSH server above stands in for a machine of the family's own.
+if ! command -v ssh >/dev/null 2>&1 || ! answered "${root_other:-}"; then
+    skip "no ssh client, or no public SSH server answered root: the SSH machines are not judged"
+else
+    ssh_uid=$(id -u sshkid)
+    kctl ssh "$ssh_uid" --hosts "$other" >/dev/null
+    wait_for_dns >/dev/null 2>&1 || true
+    sleep 1
+    other_ip=$(as sshkid getent ahostsv4 "$other" 2>/dev/null | awk '{print $1; exit}')
+    if [ -n "$other_ip" ]; then
+        check_contains "the listed machine's address is in the account's own set once it resolves" \
+            "$other_ip" nft list set inet kosher "ssh4_$ssh_uid"
+    else
+        bad "the listed machine $other did not resolve for the account"
+    fi
+    r=$(ssh_as sshkid "demo@$other")
+    if answered "$r"; then
+        ok "the listed machine answers the account over SSH"
+    else
+        bad "the listed machine did not answer the account over SSH: $r"
+    fi
+    r=$(ssh_as sshkid git@github.com)
+    if refused_fast "$r"; then
+        ok "a machine not on the list is still refused at once"
+    else
+        bad "a machine not on the list was not refused at once: $r"
+    fi
+    kctl ssh "$ssh_uid" --hosts none --anywhere on >/dev/null
+    sleep 1
+    r=$(ssh_as sshkid git@github.com)
+    if answered "$r"; then
+        ok "anywhere: GitHub answers the account over SSH"
+    elif answered "$root_gh"; then
+        bad "anywhere: GitHub did not answer the account over SSH: $r"
+    else
+        skip "anywhere: not judged against GitHub (root cannot reach it either)"
+    fi
+    kctl ssh "$ssh_uid" --anywhere off >/dev/null
+    sleep 1
+    r=$(ssh_as sshkid "demo@$other")
+    if refused_fast "$r"; then
+        ok "anywhere off, no list: SSH is refused at once again"
+    else
+        bad "anywhere off, no list: SSH was not refused at once: $r"
+    fi
+fi
+
 section "Captive portal"
 check "a temporary window can be opened" 0 kosherctl captive "$(id -u nokid)" 1
 check "the window lets that user out"    0 fetch_as nokid https://example.com

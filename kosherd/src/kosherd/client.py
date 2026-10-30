@@ -221,6 +221,13 @@ class DaemonClient:
         self._call("Profiles", "SetNetworkAccess", "(ibss)", uid, bool(video_calls),
                    json.dumps([int(p) for p in extra_ports]), guardian_password)
 
+    def set_ssh(self, uid: int, anywhere: bool, hosts: list[str],
+                guardian_password: str = "") -> None:
+        """SSH to other machines (#257): the listed ones (names, addresses,
+        ranges, `tailnet`), or anywhere."""
+        self._call("Profiles", "SetSsh", "(ibss)", uid, bool(anywhere),
+                   json.dumps([str(h) for h in hosts]), guardian_password)
+
     def set_time_limits(self, uid: int, settings: dict,
                         guardian_password: str = "") -> None:
         """{"daily_minutes": n, "allowed": [7 day strings]} — see timelimits.py."""

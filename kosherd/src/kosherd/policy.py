@@ -298,6 +298,12 @@ class UserPolicy:
     # web nor mail; everything not named is refused.
     video_calls: bool = True
     extra_ports: list[int] = field(default_factory=list)
+    # SSH to other machines (#257): the machines this account may open
+    # port 22 to — a name, an address, a range, or `tailnet` for every
+    # machine on this computer's tailnet — and nothing else; or anywhere,
+    # for the account an administrator trusts with a way around the filter.
+    ssh_hosts: list[str] = field(default_factory=list)
+    ssh_anywhere: bool = False
     # Developer tools (#123): may this account use the Nix daemon itself —
     # nix, devbox, devenv from a shell — and reach the package registries
     # directly? Off by default: the Store still installs catalogue apps for
@@ -364,6 +370,10 @@ class UserPolicy:
             d["video_calls"] = False
         if self.extra_ports:
             d["extra_ports"] = sorted(set(int(p) for p in self.extra_ports))
+        if self.ssh_hosts:
+            d["ssh_hosts"] = list(dict.fromkeys(str(h) for h in self.ssh_hosts))
+        if self.ssh_anywhere:
+            d["ssh_anywhere"] = True
         if self.developer_tools:
             d["developer_tools"] = True
         if self.approved_apps:
@@ -584,6 +594,8 @@ class Policy:
                     time=dict(u.get("time", {})),
                     video_calls=bool(u.get("video_calls", True)),
                     extra_ports=[int(p) for p in u.get("extra_ports", [])],
+                    ssh_hosts=[str(h) for h in u.get("ssh_hosts", [])],
+                    ssh_anywhere=bool(u.get("ssh_anywhere", False)),
                     developer_tools=bool(u.get("developer_tools", False)),
                     approved_apps=list(u.get("approved_apps", [])),
                     syncthing_lan=bool(u.get("syncthing_lan", False)),

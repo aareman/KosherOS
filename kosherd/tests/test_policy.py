@@ -199,3 +199,16 @@ def test_usernames_may_have_capitals_and_dots_like_useradd_allows():
         with pytest.raises(Exception):
             policy_mod.validate(pol.to_dict())
 
+
+
+def test_ssh_machines_round_trip_and_stay_out_of_a_plain_account():
+    from kosherd.policy import UserPolicy
+
+    plain = UserPolicy(uid=1000, username="p", mode="filtered")
+    assert "ssh_hosts" not in plain.to_dict() and "ssh_anywhere" not in plain.to_dict()
+    u = UserPolicy(uid=1001, username="s", mode="filtered",
+                   ssh_hosts=["nas.example.org", "tailnet", "nas.example.org"], ssh_anywhere=True)
+    d = u.to_dict()
+    assert d["ssh_hosts"] == ["nas.example.org", "tailnet"] and d["ssh_anywhere"] is True
+    back = Policy.from_dict(Policy(users=[u]).to_dict()).users[0]
+    assert back.ssh_hosts == ["nas.example.org", "tailnet"] and back.ssh_anywhere is True

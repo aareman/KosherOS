@@ -369,3 +369,74 @@ def test_a_ruleset_with_every_mode_and_nix_passes_nft_check(tmp_path):
     if "unshare" in res.stderr and res.returncode != 0:
         pytest.skip(f"cannot create user/net namespace here: {res.stderr.strip()}")
     assert res.returncode == 0, res.stderr
+
+
+# -- SSH to other machines (#257) ---------------------------------------------------
+
+def _ssh_policy(mode="filtered", hosts=(), anywhere=False, uid=1000) -> Policy:
+    from kosherd.policy import UserPolicy
+
+    return Policy(users=[UserPolicy(uid=uid, username="u", mode=mode, ssh_hosts=list(hosts),
+                                    ssh_anywhere=anywhere)])
+
+
+def test_listed_ssh_machines_get_the_accounts_own_sets_and_nothing_else():
+    out = nft.render(_ssh_policy(hosts=["nas.example.org", "192.168.1.20", "10.0.0.0/8", "tailnet"]),
+                     dns_uid=989, mitm_uid=988)
+    output = out.split("chain output")[1].split("chain input")[0]
+    v4 = "meta skuid 1000 ip daddr @ssh4_1000 tcp dport 22 accept"
+    v6 = "meta skuid 1000 ip6 daddr @ssh6_1000 tcp dport 22 accept"
+    assert v4 in output and v6 in output
+    # before the mode dispatch, whose chains would refuse it
+    assert output.index(v4) < output.index("meta skuid vmap")
+    assert "tcp dport 22 accept" not in output.replace(v4, "").replace(v6, "")
+    s4 = out.split("set ssh4_1000 {")[1].split("}")[0]
+    assert "flags interval" in s4
+    for element in ("192.168.1.20/32", "10.0.0.0/8", "100.64.0.0/10"):
+        assert element in s4, element
+    s6 = out.split("set ssh6_1000 {")[1].split("}")[0]
+    assert "fd7a:115c:a1e0::/48" in s6
+    assert "nas.example.org" not in out, "a name is dnsmasq's to resolve into the set"
+
+
+def test_ssh_anywhere_opens_port_22_plainly():
+    out = nft.render(_ssh_policy(anywhere=True, hosts=["nas.example.org"]), dns_uid=989, mitm_uid=988)
+    output = out.split("chain output")[1].split("chain input")[0]
+    assert "meta skuid 1000 tcp dport 22 accept" in output
+    assert "ssh4_1000" not in out
+
+
+def test_no_ssh_machines_means_port_22_stays_closed():
+    out = nft.render(_ssh_policy(), dns_uid=989, mitm_uid=988)
+    output = out.split("chain output")[1].split("chain input")[0]
+    assert "dport 22" not in output and "ssh4_1000" not in out
+
+
+def test_ssh_machines_of_an_unfiltered_or_offline_account_render_nothing():
+    for mode in ("unfiltered", "none"):
+        out = nft.render(_ssh_policy(mode=mode, hosts=["10.0.0.5"], anywhere=False),
+                         dns_uid=989, mitm_uid=988)
+        assert "ssh4_1000" not in out and "meta skuid 1000 tcp dport 22 accept" not in out
+
+
+def test_ssh_entries_are_told_apart():
+    assert nft.ssh_entry_kind("nas.example.org") == "name"
+    assert nft.ssh_entry_kind(" Tailnet ") == "tailnet"
+    assert nft.ssh_entry_kind("192.168.1.20") == "v4"
+    assert nft.ssh_entry_kind("10.0.0.0/8") == "v4"
+    assert nft.ssh_entry_kind("fd00::1") == "v6"
+    assert nft.ssh_set_elements(["tailnet", "tailnet", "10.1.2.3/24"]) == \
+        (("100.64.0.0/10", "10.1.2.0/24"), ("fd7a:115c:a1e0::/48",))
+
+
+@pytest.mark.skipif(shutil.which("nft") is None, reason="nft binary not installed")
+def test_the_ssh_ruleset_passes_nft_check(tmp_path):
+    f = tmp_path / "kosher.nft"
+    f.write_text(nft.render(_ssh_policy(hosts=["nas.example.org", "192.168.1.20", "10.0.0.0/8",
+                                               "tailnet", "fd00::5"]), dns_uid=989, mitm_uid=988))
+    res = subprocess.run(
+        ["unshare", "-rn", "nft", "--check", "-f", str(f)], capture_output=True, text=True
+    )
+    if "unshare" in res.stderr and res.returncode != 0:
+        pytest.skip(f"cannot create user/net namespace here: {res.stderr.strip()}")
+    assert res.returncode == 0, res.stderr

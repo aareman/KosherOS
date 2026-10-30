@@ -216,3 +216,55 @@ def test_the_label_reaches_bcvk():
 
 def test_the_cache_tag_is_never_a_run_image():
     assert os.path.basename(pr_test.CACHE_TAG) == "kosher-linux:pr-test-cache"
+
+
+def test_the_suite_shards_run_every_suite_once():
+    # CI splits a run over runners (vm-test.yml): each works out the same
+    # groups from the same selection and takes its own.
+    suites = sorted(pr_test.SUITE_SECONDS)
+    for n in (1, 2, 3, 4):
+        parts = [pr_test.shard_groups(suites, pr_test.parse_shard(f"suites:{k}/{n}")[1])
+                 for k in range(1, n + 1)]
+        ran = [s for part in parts for group in part for s in group]
+        assert sorted(ran) == suites, n
+        assert all(len(part) == 1 for part in parts)
+
+
+def test_a_shard_past_the_suites_runs_nothing():
+    assert pr_test.shard_groups(["10-core"], (2, 3)) == []
+
+
+def test_the_desktop_shard_runs_no_suites():
+    desktop, part = pr_test.parse_shard("desktop")
+    assert desktop and pr_test.shard_groups(sorted(pr_test.SUITE_SECONDS), part) == []
+    assert pr_test.parse_shard("all") == (True, None)
+    assert pr_test.parse_shard("suites:2/3") == (False, (2, 3))
+    with pytest.raises(SystemExit):
+        pr_test.parse_shard("suites:4/3")
+
+
+def test_a_registry_image_is_a_name_pinned_to_its_digest():
+    d = "sha256:" + "0" * 64
+    assert pr_test.parse_registry_image(f"ghcr.io/x/kosher-linux-ci:pr-7-1@{d}") == \
+        ("ghcr.io/x/kosher-linux-ci", d)
+    assert pr_test.parse_registry_image(f"ghcr.io/x/kosher-linux@{d}") == ("ghcr.io/x/kosher-linux", d)
+    for bad in ("ghcr.io/x/kosher-linux:edge", f"ghcr.io/x/kosher-linux@{d[:-1]}", ""):
+        with pytest.raises(SystemExit):
+            pr_test.parse_registry_image(bad)
+
+
+def test_a_switch_to_a_public_registry_pins_the_digest_and_leaves_no_trust_behind():
+    # The harness's own registry is added to the machine's trust for the
+    # switch and taken out again; a public one the policy already accepts
+    # gets neither, and the switch is to the digest (pr-test.py).
+    src = (ROOT / "scripts/pr-test.py").read_text()
+    assert 'target = ref if local else f"{ref}@{digest}"' in src
+    assert '(SWITCH_SETUP if local else "set -e\\n")' in src
+    assert "if local:\n            rc, out = vm.sh(CLEAN_SWITCH)" in src
+
+
+def test_a_switch_by_name_waits_for_the_machines_resolver():
+    # kosher-dns is up a few seconds after sshd; a switch to ghcr before
+    # it answered failed with "Temporary failure in name resolution".
+    src = (ROOT / "scripts/pr-test.py").read_text()
+    assert "getent hosts {host}" in src and 'host = ref.split("/", 1)[0]' in src

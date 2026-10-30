@@ -72,21 +72,85 @@ jobs:
             echo "nothing that boots changed: no VM test"
           fi
 
-  vm:
-    name: Boot, desktop and suites
+  build:
+    name: The change's image
     needs: [changes]
+    if: needs.changes.outputs.vm == 'true'
+    # Once, for every runner after it: the image goes to ghcr, and each
+    # runner switches master's base to it from there. A change to nothing
+    # the image is built from (a suite, the harness, a workflow) builds
+    # nothing and tests master's own :edge.
+    concurrency:
+      group: vm-build-${{ inputs.id || github.event.pull_request.number || github.ref }}
+      cancel-in-progress: true
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    permissions:
+      contents: read
+      packages: write # the build cache, and the image the runners switch to
+    outputs:
+      image: ${{ steps.image.outputs.image }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.ref || github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0 # the version is counted from the last tag; master is diffed against
+
+      - name: Build and push, or take master's
+        id: image
+        # The runner's own podman, as ci.yml builds: the dev shell is three
+        # minutes this job has no use for. The layers come from the
+        # registry's build cache (Justfile: build).
+        env:
+          CACHE: ghcr.io/${{ github.repository_owner }}/kosher-linux-cache
+          CI_IMAGE: ghcr.io/${{ github.repository_owner }}/kosher-linux-ci
+          MASTER_IMAGE: ghcr.io/${{ github.repository_owner }}/kosher-linux
+          TAG: ${{ inputs.id || format('pr-{0}', github.event.pull_request.number) }}-${{ github.run_id }}
+        run: |
+          podman login ghcr.io -u "$GITHUB_ACTOR" -p "${{ secrets.GITHUB_TOKEN }}"
+          since="$(git merge-base origin/master HEAD)"
+          # What reaches the image: ci.yml's list (What changed), which an
+          # app's tests, copied in but never installed, are not on.
+          if ! git diff --name-only "$since" HEAD | grep -E -q \
+               '^(os-image/|(kosherd|admin-app|store-app|setup-app|myfilter-app|welcome-app|look-app)/(src/|pyproject)|search-app/(kosher_search/|pyproject)|mitm/|branding/|policy/|scripts/fetch-categories\.py|scripts/curated-sites\.json|scripts/check-searxng-settings\.py|scripts/version\.py)'; then
+            digest="$(skopeo inspect --format '{{.Digest}}' "docker://$MASTER_IMAGE:edge")"
+            echo "nothing the image is built from changed: testing master's :edge ($digest)"
+            echo "image=$MASTER_IMAGE:edge@$digest" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          version="$(python3 scripts/version.py show)"
+          podman build --build-arg "KOSHER_VERSION=$version" \
+            --layers --cache-from "$CACHE" --cache-to "$CACHE" \
+            -t "$CI_IMAGE:$TAG" -f os-image/Containerfile .
+          podman push --digestfile digest "$CI_IMAGE:$TAG"
+          echo "image=$CI_IMAGE:$TAG@$(cat digest)" >> "$GITHUB_OUTPUT"
+          echo "pushed $CI_IMAGE:$TAG@$(cat digest)"
+
+  vm:
+    name: Boot and test (${{ matrix.name }})
+    needs: [changes, build]
     if: needs.changes.outputs.vm == 'true'
     # On the job, not the workflow: a run started by some other label (and
     # skipping everything) must not cancel the VM test in progress. A new
     # push supersedes the run for the same pull request; a train's is its own.
     concurrency:
-      group: vm-test-${{ inputs.id || github.event.pull_request.number || github.ref }}
+      group: vm-test-${{ inputs.id || github.event.pull_request.number || github.ref }}-${{ matrix.name }}
       cancel-in-progress: true
+    strategy:
+      fail-fast: false # every part reports, so one red run shows all its failures
+      matrix:
+        # The desktop and each suite group on a runner of its own. They
+        # used to share one 4-core runner and slow each other down.
+        include:
+          - { name: desktop, shard: desktop }
+          - { name: suites-1, shard: "suites:1/4" }
+          - { name: suites-2, shard: "suites:2/4" }
+          - { name: suites-3, shard: "suites:3/4" }
+          - { name: suites-4, shard: "suites:4/4" }
     runs-on: ubuntu-24.04
-    timeout-minutes: 180
+    timeout-minutes: 90
     permissions:
       contents: read
-      packages: write # the build cache in the registry
     steps:
       - uses: actions/checkout@v5
         with:
@@ -115,50 +179,57 @@ jobs:
           fi
           ls -l /dev/kvm
 
-      - name: Room on the disk
-        # The image is about 9 GB, its disk as much again, and the build's
-        # layers more; the runner starts with too little free.
-        run: |
-          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL /usr/local/share/boost
-          sudo docker image prune --all --force >/dev/null
-          df -h /
-
-      - name: Host packages
-        # bcvk runs QEMU from the host's /usr, not from the dev shell.
-        # Ubuntu 24.04 lets only programs with an AppArmor profile make
-        # user namespaces, and the dev shell's rootless podman has none
-        # ("failed to reexec: Permission denied"), so that is switched off
-        # on this throwaway runner.
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y qemu-system-x86 qemu-utils uidmap
-          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
-
       - uses: cachix/install-nix-action@v31
 
       - name: The static virtiofsd bcvk needs
-        id: virtiofsd
         uses: actions/cache@v4
         with:
           path: /var/tmp/kosher-harness-1001
           key: virtiofsd-${{ hashFiles('devenv.lock') }}
 
-      - name: Dev shell
+      - name: Master's base disk
+        # Made and saved by ci.yml after each merge that changes the image
+        # (just pr-test --base-only). The newest one there is; the harness
+        # switches it to the change's image, as a family's machine takes an
+        # update, instead of installing from scratch — twenty minutes on a
+        # runner, which every part of every run used to spend. With none
+        # restored (or one too old), the harness installs as before.
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/.cache/kosher-pr-test
+          key: pr-test-base-${{ github.sha }}
+          restore-keys: pr-test-base-
+
+      - name: Set up the runner
+        # Side by side, since neither waits on the other: the host's QEMU
+        # (bcvk runs it from /usr, not from the dev shell) with user
+        # namespaces opened for the dev shell's rootless podman, which
+        # Ubuntu 24.04 keeps to programs with an AppArmor profile; and the
+        # dev shell itself.
         run: |
-          nix profile install nixpkgs#devenv
-          devenv shell -- true
+          (sudo apt-get update && sudo apt-get install -y qemu-system-x86 qemu-utils uidmap \
+             && sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0) > apt.log 2>&1 &
+          apt=$!
+          (nix profile install nixpkgs#devenv && devenv shell -- true) > devenv.log 2>&1 &
+          dev=$!
+          failed=0
+          wait "$apt" || { failed=1; cat apt.log; }
+          wait "$dev" || { failed=1; cat devenv.log; }
+          tail -n 2 apt.log devenv.log
+          df -h /
+          exit "$failed"
 
       - name: just pr-test
-        # CI has no cached base, so this is the direct path: a disk from the
-        # change's own image, a fresh install only when the change needs one,
-        # and the checks its paths select. Two suite machines beside the
-        # desktop on a 4-core runner. The image build reuses the layers in
-        # the registry's build cache (Justfile: build).
+        # This runner's part of the checks the change selects (pr-test.py
+        # --shard), on master's base switched to the image the build job
+        # pushed, or on a fresh install of it when there is no base or the
+        # change needs one. One machine per runner, so nothing waits.
         env:
-          KOSHER_BUILD_CACHE: ghcr.io/${{ github.repository_owner }}/kosher-linux-cache
+          IMAGE: ${{ needs.build.outputs.image }}
+          SHARD: ${{ matrix.shard }}
         run: |
-          devenv shell -- podman login ghcr.io -u "$GITHUB_ACTOR" -p "${{ secrets.GITHUB_TOKEN }}"
-          devenv shell -- just pr-test HEAD --id ci --vms 2
+          devenv shell -- just pr-test HEAD --id ci --vms 1 --shard "$SHARD" \
+            --registry-image "$IMAGE" --prefer-base
 
       - name: Report
         if: always()
@@ -170,7 +241,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: vm-test-${{ inputs.id || github.event.pull_request.number || github.run_id }}
+          name: vm-test-${{ inputs.id || github.event.pull_request.number || github.run_id }}-${{ matrix.name }}
           path: |
             build/pr-test/ci/
             !build/pr-test/ci/**/*.qcow2

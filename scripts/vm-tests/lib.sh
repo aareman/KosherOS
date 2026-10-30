@@ -31,7 +31,13 @@ check_contains() {
     if printf '%s' "$output" | grep -qi -- "$needle"; then
         ok "$desc"
     else
-        bad "$desc (no '$needle' in: $(printf '%s' "$output" | head -c 120))"
+        # The end of the output, where a command's error is: a podman
+        # failure once showed "Trying to pull..." and nothing of why.
+        if [ "${#output}" -gt 300 ]; then
+            bad "$desc (no '$needle' in: ...$(printf '%s' "$output" | tail -c 300 | tr '\n' ' '))"
+        else
+            bad "$desc (no '$needle' in: $(printf '%s' "$output" | tr '\n' ' '))"
+        fi
     fi
 }
 

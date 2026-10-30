@@ -661,6 +661,12 @@ RUN python3 -c 'import json; p = json.load(open("/etc/containers/policy.json"));
     && test -s /etc/pki/containers/kosheros-images.pub \
     && grep -q 'ghcr.io/aareman/kosher-linux' /etc/containers/registries.d/kosheros.yaml
 
+# certutil, so mkcert (which devenv runs for its proxy's https://*.localhost
+# names) can add its local CA to the account's own browser certificate
+# stores, Firefox's profiles and ~/.pki/nssdb, without root. Never the
+# system-wide store: one account's CA is trusted by that account alone.
+RUN dnf -y install nss-tools && dnf clean all && command -v certutil
+
 
 # --- kosherd + apps (last layers: change most often) --------------------------
 COPY kosherd/ /tmp/kosherd/

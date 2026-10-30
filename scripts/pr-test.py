@@ -819,6 +819,13 @@ def stage_desktop(st: Stage, machine: Path, outdir: Path, key: Path, gl: bool,
             st.check("the account signs in through GDM", False, f"{reason}\n{journal}")
             raise StageError(reason)
         st.check("the account signs in through GDM", True)
+        if props.get("Active") != "yes":
+            # The session is listed while still "opening"; one train run
+            # read it a moment before it was active and failed on that.
+            def active() -> dict:
+                p = session_of(vm, USER)
+                return p if p.get("Active") == "yes" else {}
+            props = wait_for(active, 90) or props
         st.check("the session has a seat (seat0)", props.get("Seat") == "seat0", str(props))
         st.check("the session is active and local",
                  props.get("Active") == "yes" and props.get("Remote") == "no", str(props))

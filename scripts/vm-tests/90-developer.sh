@@ -111,12 +111,21 @@ from kosherd.client import DaemonClient
 client = DaemonClient()
 uid = pwd.getpwnam("dnskid").pw_uid
 client.set_user_can_install(uid, True)
-client.install_app_for(uid, "org.gnome.Calculator")
 client.install_app_for(uid, "nixpkgs#foot")
 PY
-for _ in $(seq 1 120); do
+# The Calculator and its GNOME runtime are about a gigabyte from Flathub.
+# One install, waited for once, left nothing to run when a download on a
+# CI runner failed part-way; up to three tries, each given five minutes,
+# with what kosherd said kept in the log.
+for attempt in 1 2 3; do
     flatpak info --system org.gnome.Calculator >/dev/null 2>&1 && break
-    sleep 5
+    python3 -c 'import pwd; from kosherd.client import DaemonClient
+DaemonClient().install_app_for(pwd.getpwnam("dnskid").pw_uid, "org.gnome.Calculator")' 2>&1 \
+        | tail -2 | sed "s/^/  calculator install, try $attempt: /"
+    for _ in $(seq 1 60); do
+        flatpak info --system org.gnome.Calculator >/dev/null 2>&1 && break
+        sleep 5
+    done
 done
 check_contains "it runs a Flatpak" "flatpak-ok" \
     as_session dnskid flatpak run --command=sh org.gnome.Calculator -c 'echo flatpak-ok'
@@ -282,6 +291,35 @@ check "with Mesa's EGL vendor file where the loader looks" 0 \
 # from nixpkgs, without a display, as an ordinary account.
 check_contains "a Nix program gets an EGL driver from it" "Mesa" \
     as wlkid bash -lc 'nix shell nixpkgs#mesa-demos -c eglinfo -B -p surfaceless 2>&1'
+
+section "devenv's proxy: no sudo, no port in the address, the owner's alone (#246)"
+# devenv listens on the account's own pair (7100 + 2 * (uid % 400) and the
+# next), which a login shell names in DEVENV_PROXY_LISTEN; the account's
+# own visits to 127.0.0.1:80 and :443 are sent there by the firewall. A
+# stand-in server on the pair plays devenv's proxy.
+wl_uid=$(id -u wlkid)
+pair=$((7100 + 2 * (wl_uid % 400)))
+# The suite's own shell carries root's pair (bash reads /etc/bashrc, and
+# so profile.d, even for an ssh command), and a login shell keeps a value
+# it inherits: the test account starts without one, as a person does.
+check_contains "a login shell names the account's pair for devenv" "127.0.0.1:$pair" \
+    as wlkid env -u DEVENV_PROXY_LISTEN -u DEVENV_PROXY_HTTPS_LISTEN \
+    bash -lc "printenv DEVENV_PROXY_LISTEN"
+as wlkid sh -c "cd /tmp && exec python3 -m http.server $pair --bind 127.0.0.1" >/dev/null 2>&1 &
+devenv_stand_in=$!
+for _ in $(seq 1 20); do
+    as wlkid curl -s -o /dev/null --max-time 2 "http://127.0.0.1:$pair/" && break
+    sleep 0.5
+done
+check_contains "the account reaches it at port 80, with no port in the address" "Directory listing" \
+    as wlkid curl -s --max-time 5 http://127.0.0.1/
+check "another account does not reach the pair" 1 \
+    as dnskid curl -s -o /dev/null --max-time 5 "http://127.0.0.1:$pair/"
+check "and its port 80 is not turned to somebody else's pair" 1 \
+    as dnskid curl -s -o /dev/null --max-time 5 http://127.0.0.1/
+kill "$devenv_stand_in" 2>/dev/null
+pkill -u wlkid -f "http.server $pair" 2>/dev/null
+check "mkcert can trust its CA without root: certutil is there" 0 command -v certutil
 
 section "Containers are the account's"
 check "docker is podman's shim" 0 test -x /usr/bin/docker

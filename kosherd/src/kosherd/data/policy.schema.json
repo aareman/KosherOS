@@ -588,6 +588,21 @@
           "uniqueItems": true,
           "description": "TCP ports this account may open directly, beyond the web and mail: an advanced setting, empty by default."
         },
+        "ssh_hosts": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 253
+          },
+          "maxItems": 50,
+          "uniqueItems": true,
+          "description": "Machines this account may connect to over SSH, and no others: a name, an address, a range (CIDR), or 'tailnet' for every machine on this computer's tailnet. Empty by default: port 22 is closed, since an SSH tunnel reaches anything."
+        },
+        "ssh_anywhere": {
+          "type": "boolean",
+          "description": "SSH to every machine, for an account an administrator trusts with a way around the filter. Default false."
+        },
         "developer_tools": {
           "type": "boolean",
           "description": "May use the Nix daemon and reach the package registries directly (nix, devbox, devenv from a shell). Default false."
@@ -613,7 +628,7 @@
       "type": "object",
       "additionalProperties": false,
       "default": {},
-      "description": "Calmer versions of the addictive sites (#179), enforced by the proxy and a script it injects into these pages: a feed page ends after a set number of items with ads, sidebars and recommendations stripped, and a direct link to a post renders as the post alone \u2014 no comments, no navigation, no links back into the site. Login flows are never touched. Empty means off.",
+      "description": "Calmer versions of the addictive sites (#179), enforced by the proxy and a script it injects into these pages: a feed page ends after a set number of items with ads, sidebars and recommendations stripped, and a direct link to a post renders as the post alone — no comments, no navigation, no links back into the site. Login flows are never touched. Empty means off.",
       "properties": {
         "enabled": {
           "type": "boolean",

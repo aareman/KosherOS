@@ -111,12 +111,21 @@ from kosherd.client import DaemonClient
 client = DaemonClient()
 uid = pwd.getpwnam("dnskid").pw_uid
 client.set_user_can_install(uid, True)
-client.install_app_for(uid, "org.gnome.Calculator")
 client.install_app_for(uid, "nixpkgs#foot")
 PY
-for _ in $(seq 1 120); do
+# The Calculator and its GNOME runtime are about a gigabyte from Flathub.
+# One install, waited for once, left nothing to run when a download on a
+# CI runner failed part-way; up to three tries, each given five minutes,
+# with what kosherd said kept in the log.
+for attempt in 1 2 3; do
     flatpak info --system org.gnome.Calculator >/dev/null 2>&1 && break
-    sleep 5
+    python3 -c 'import pwd; from kosherd.client import DaemonClient
+DaemonClient().install_app_for(pwd.getpwnam("dnskid").pw_uid, "org.gnome.Calculator")' 2>&1 \
+        | tail -2 | sed "s/^/  calculator install, try $attempt: /"
+    for _ in $(seq 1 60); do
+        flatpak info --system org.gnome.Calculator >/dev/null 2>&1 && break
+        sleep 5
+    done
 done
 check_contains "it runs a Flatpak" "flatpak-ok" \
     as_session dnskid flatpak run --command=sh org.gnome.Calculator -c 'echo flatpak-ok'

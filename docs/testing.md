@@ -182,11 +182,25 @@ real system state: they create test users, change filter modes and toggle
 the guest account. Never point them at a machine you care about.
 
 ```sh
-just fedora-vm                 # boot the dev VM (once)
-just dev-install               # install the stack into it
-just test-vm                   # every suite
-just test-vm kosher-fedora 50  # one suite, by its number
+just dev-vm                    # boot master's set-up machine (the base just pr-test keeps)
+just deploy                    # this checkout's code into it, in seconds
+just test-vm kosher-dev        # every suite
+just test-vm kosher-dev 50     # one suite, by its number
 ```
+
+`just dev-vm` boots the machine a pull-request run leaves behind — master's
+image, installed and set up by the wizard — as an overlay that keeps its
+state from one boot to the next (`just dev-vm fresh` starts over).
+`just deploy` pushes kosherd, the apps, `os-image/files` and the policy
+schema into it under `bootc usr-overlay` and restarts the daemon and the
+filter: a change is on the machine seconds after it is saved, with no
+image build and no install. The one change a deploy cannot carry is one to
+the Containerfile itself (a package, a build step); `just build && just
+vm-upgrade` updates the machine to the built image for that.
+
+The older stage-1 road still works: `just fedora-vm` boots a plain Fedora
+cloud VM, `just dev-install` installs the stack into it, and
+`just test-vm kosher-fedora 50` runs a suite there.
 
 | Suite | Covers |
 |---|---|

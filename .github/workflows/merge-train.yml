@@ -22,6 +22,18 @@ name: Merge train
 # The `queued` label is the approval to merge. A workflow's own pushes and
 # merges start no other workflow, so after landing the train asks Checks
 # to release the result (version tag, release, the :edge image).
+#
+# The token. GitHub refuses a push by the workflow's own token when it
+# changes a workflow file, unless the file's new content already exists on
+# some branch; so a pull request that edits a workflow had to have master
+# merged in first, and two of them in one batch broke every train at
+# assembly. With a MERGE_TRAIN_TOKEN secret (a fine-grained token for this
+# repository: contents, pull requests and workflows, read and write), the
+# train/<run> push and the merges use it instead and carry any workflow
+# change. A merge by that token is an ordinary push to master, which starts
+# Checks by itself, so the train does not ask. Without the secret, the
+# train works as before. Each pull request is merged at the commit that
+# was tested (--match-head-commit): a push after assembly lands nothing.
 
 on:
   pull_request:
@@ -59,6 +71,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       prs: ${{ steps.build.outputs.prs }}
+      heads: ${{ steps.build.outputs.heads }}
       mode: ${{ steps.build.outputs.mode }}
       sha: ${{ steps.build.outputs.sha }}
     steps:
@@ -66,6 +79,8 @@ jobs:
         with:
           ref: master
           fetch-depth: 0
+          # The token the train/<run> push uses (see the top of the file).
+          token: ${{ secrets.MERGE_TRAIN_TOKEN || github.token }}
       - id: build
         env:
           GH_TOKEN: ${{ github.token }}
@@ -91,11 +106,14 @@ jobs:
           fi
           git checkout -B train origin/master
           prs=""
+          heads=""
           for n in $wanted; do
             git fetch -q origin "pull/$n/head:pr-$n"
             title="$(gh pr view "$n" --repo "$GITHUB_REPOSITORY" --json title --jq .title)"
             if git merge --no-ff --no-edit -m "Merge #$n: $title" "pr-$n"; then
               prs="$prs $n"
+              # The commit tested, which is the only one that may land.
+              heads="$heads $n:$(git rev-parse "pr-$n")"
             else
               git merge --abort
               gh pr edit "$n" --repo "$GITHUB_REPOSITORY" --remove-label queued --remove-label queued-solo
@@ -111,6 +129,7 @@ jobs:
           git push -q origin "HEAD:refs/heads/train/$GITHUB_RUN_ID"
           {
             echo "prs=$prs"
+            echo "heads=${heads# }"
             echo "mode=$mode"
             echo "sha=$(git rev-parse HEAD)"
           } >> "$GITHUB_OUTPUT"
@@ -162,13 +181,22 @@ jobs:
     steps:
       - env:
           GH_TOKEN: ${{ github.token }}
+          MERGE_TRAIN_TOKEN: ${{ secrets.MERGE_TRAIN_TOKEN }}
           PRS: ${{ needs.assemble.outputs.prs }}
+          HEADS: ${{ needs.assemble.outputs.heads }}
           MODE: ${{ needs.assemble.outputs.mode }}
           CHECKS: ${{ needs.checks.result }}
           VM: ${{ needs.vm.result }}
         run: |
           set -uo pipefail
           repo="$GITHUB_REPOSITORY"
+          # The commit of each pull request that the train tested.
+          head_of() {
+            local pair
+            for pair in $HEADS; do
+              [ "${pair%%:*}" = "$1" ] && { echo "${pair#*:}"; return; }
+            done
+          }
           run="[merge train $GITHUB_RUN_ID]($GITHUB_SERVER_URL/$repo/actions/runs/$GITHUB_RUN_ID)"
           landed=0
           # Whether this train moved the queue on; only then does it start
@@ -179,7 +207,10 @@ jobs:
             for n in $PRS; do
               # In the train's order; each was tested on top of the ones
               # before it, so the last merge leaves master as tested.
-              if gh pr merge "$n" --repo "$repo" --squash --delete-branch=false; then
+              # The merge, with the token that may carry a workflow change,
+              # and only at the commit that was tested.
+              if GH_TOKEN="${MERGE_TRAIN_TOKEN:-$GH_TOKEN}" gh pr merge "$n" --repo "$repo" \
+                   --squash --delete-branch=false --match-head-commit "$(head_of "$n")"; then
                 gh pr edit "$n" --repo "$repo" --remove-label queued --remove-label queued-solo || true
                 gh pr comment "$n" --repo "$repo" --body "Landed by $run: quick checks and the VM test passed with #${PRS// / #} on master." || true
                 landed=1
@@ -209,9 +240,10 @@ jobs:
           fi
           git_ref="train/$GITHUB_RUN_ID"
           gh api -X DELETE "repos/$repo/git/refs/heads/$git_ref" >/dev/null 2>&1 || true
-          if [ "$landed" = 1 ]; then
+          if [ "$landed" = 1 ] && [ -z "$MERGE_TRAIN_TOKEN" ]; then
             # The merges were the workflow's own and start nothing: release
-            # them the way a merge by hand would be.
+            # them the way a merge by hand would be. (A merge by the train's
+            # own token is a push, and starts Checks by itself.)
             gh workflow run ci.yml --repo "$repo" --ref master -f landed=true
           fi
           left="$(gh pr list --repo "$repo" --state open --search 'label:queued,queued-solo' --json number --jq 'length')"

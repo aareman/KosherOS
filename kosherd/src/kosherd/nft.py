@@ -30,6 +30,8 @@ Design (see docs/architecture.md):
 
 from __future__ import annotations
 
+import ipaddress
+
 from . import devenvproxy
 from . import syncthing as st
 from .dns import SAFESEARCH_ADDRESSES
@@ -141,11 +143,55 @@ DIRECT_TCP_PORTS = (465, 587, 993)
 SERVER_FIRST_TCP_PORTS = (21, 22, 25, 110, 143)
 # Git over SSH for accounts with developer tools on, to these hosts only.
 # dnsmasq adds their addresses to @git4/@git6 as they resolve (dns.py), as
-# it does for the whitelists. Port 22 is never open to any host: `ssh -D`
-# to a server of one's own is a tunnel around the filter. A git server of
-# the family's own is the administrator's call, through extra_ports.
+# it does for the whitelists. Port 22 is otherwise closed: `ssh -D` to a
+# server of one's own is a tunnel around the filter. The machines of the
+# family's own are the administrator's call, through the account's SSH
+# list (#257, below).
 GIT_SSH_HOSTS = ("github.com", "gitlab.com", "codeberg.org", "bitbucket.org")
 GIT_SSH_PORT = 22
+# SSH to other machines (#257): the machines an account may open port 22
+# to, and nothing else — a name (dnsmasq fills the account's own sets as
+# it resolves, as for the whitelists), an address or a range (in the sets
+# from the start), or `tailnet`, every machine on this computer's tailnet
+# (Tailscale's own ranges). Or anywhere, for the account an administrator
+# trusts with a way around the filter: the switch says so in words.
+SSH_PORT = 22
+TAILNET_RANGES4 = ("100.64.0.0/10",)
+TAILNET_RANGES6 = ("fd7a:115c:a1e0::/48",)
+
+
+def ssh_entry_kind(entry: str) -> str:
+    """What an SSH list entry is: "tailnet", "v4" or "v6" (an address or a
+    range), or "name"."""
+    entry = entry.strip().lower()
+    if entry == "tailnet":
+        return "tailnet"
+    try:
+        net = ipaddress.ip_network(entry, strict=False)
+    except ValueError:
+        return "name"
+    return "v4" if net.version == 4 else "v6"
+
+
+def ssh_set_names(uid: int) -> tuple[str, str]:
+    return f"ssh4_{uid}", f"ssh6_{uid}"
+
+
+def ssh_set_elements(hosts) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    """The addresses and ranges an account's list puts in its sets from the
+    start (names arrive later, from dnsmasq): (v4, v6)."""
+    v4: list[str] = []
+    v6: list[str] = []
+    for h in hosts:
+        kind = ssh_entry_kind(h)
+        if kind == "tailnet":
+            v4 += TAILNET_RANGES4
+            v6 += TAILNET_RANGES6
+        elif kind == "v4":
+            v4.append(str(ipaddress.ip_network(h.strip(), strict=False)))
+        elif kind == "v6":
+            v6.append(str(ipaddress.ip_network(h.strip(), strict=False)))
+    return tuple(dict.fromkeys(v4)), tuple(dict.fromkeys(v6))
 # UDP cannot be inspected at all. Below this a port is a named service and
 # the account gets only NTP; above it is where video calls live, and that
 # is a per-account switch (UserPolicy.video_calls), on by default.
@@ -288,6 +334,26 @@ def render(policy: Policy, *, dns_uid: int, mitm_uid: int | None = None,
         per_user += (
             f"        meta skuid {{ {elems} }} ip daddr @git4 tcp dport {GIT_SSH_PORT} accept\n"
             f"        meta skuid {{ {elems} }} ip6 daddr @git6 tcp dport {GIT_SSH_PORT} accept\n")
+    # SSH to other machines (#257): the account's listed machines, in sets
+    # of its own, or anywhere. Before the mode dispatch, like the extra
+    # ports; an unfiltered account has it open anyway, and one with no
+    # internet has nothing.
+    ssh_sets = ""
+    for u in sorted(policy.effective_users(), key=lambda u: u.uid):
+        if u.mode in UNFILTERED_MODES or u.mode == "none":
+            continue
+        if u.ssh_anywhere:
+            per_user += f"        meta skuid {owner_match(u.uid)} tcp dport {SSH_PORT} accept\n"
+        elif u.ssh_hosts:
+            s4, s6 = ssh_set_names(u.uid)
+            e4, e6 = ssh_set_elements(u.ssh_hosts)
+            ssh_sets += (f"    # SSH machines of uid {u.uid}: the listed addresses and ranges, and\n"
+                         f"    # the listed names as dnsmasq resolves them.\n"
+                         + _set_block(s4, "ipv4_addr", e4, interval=True) + "\n"
+                         + _set_block(s6, "ipv6_addr", e6, interval=True) + "\n")
+            per_user += (
+                f"        meta skuid {owner_match(u.uid)} ip daddr @{s4} tcp dport {SSH_PORT} accept\n"
+                f"        meta skuid {owner_match(u.uid)} ip6 daddr @{s6} tcp dport {SSH_PORT} accept\n")
     # Syncthing (#213), ahead of everything else per account: its ports
     # are open to the account's own Syncthing service — the socket's
     # cgroup is that unit's, which kosherd adds to @syncthing_out while
@@ -432,7 +498,7 @@ table {TABLE} {{
     # The git hosts' addresses (GIT_SSH_HOSTS), filled by dnsmasq.
 {_set_block("git4", "ipv4_addr")}
 {_set_block("git6", "ipv6_addr")}
-    # Syncthing's discovery servers and relay list (syncthing.HOSTS),
+{ssh_sets}    # Syncthing's discovery servers and relay list (syncthing.HOSTS),
     # filled by dnsmasq, and the cgroups of the Syncthing services that may
     # use its ports, filled by kosherd once each service runs (syncthing.py).
 {_set_block("st4", "ipv4_addr")}

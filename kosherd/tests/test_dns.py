@@ -289,3 +289,35 @@ def test_the_dnsfilter_resolver_port_is_labelled_for_dnsmasq():
     containerfile = (FILES.parent / "Containerfile").read_text()
     for proto in ("udp", "tcp"):
         assert f"semanage port -a -t dns_port_t -p {proto} {nft.DNSFILTER_DNS_PORT}" in containerfile
+
+
+# -- SSH to other machines (#257) ---------------------------------------------------
+
+def test_an_accounts_ssh_names_feed_its_own_sets():
+    from kosherd.policy import UserPolicy
+
+    u = UserPolicy(uid=1003, username="s", mode="filtered",
+                   ssh_hosts=["NAS.example.org", "10.0.0.5", "tailnet"])
+    out = dns.render(Policy(users=[u]))
+    assert "nftset=/nas.example.org/4#inet#kosher#ssh4_1003,6#inet#kosher#ssh6_1003" in out
+    assert "nftset=/10.0.0.5" not in out and "nftset=/tailnet" not in out
+
+
+def test_ssh_anywhere_and_unfiltered_accounts_get_no_ssh_set():
+    from kosherd.policy import UserPolicy
+
+    for u in (UserPolicy(uid=1003, username="s", mode="filtered", ssh_hosts=["nas.example.org"],
+                         ssh_anywhere=True),
+              UserPolicy(uid=1003, username="s", mode="unfiltered", ssh_hosts=["nas.example.org"])):
+        assert "ssh4_1003" not in dns.render(Policy(users=[u]))
+
+
+def test_a_whitelisted_name_on_the_ssh_list_fills_both_sets_from_one_line():
+    from kosherd.policy import UserPolicy
+
+    u = UserPolicy(uid=1003, username="s", mode="whitelist", whitelist=["nas.example.org"],
+                   ssh_hosts=["nas.example.org"])
+    lines = [l for l in dns.render(Policy(users=[u])).splitlines()
+             if l.startswith("nftset=/nas.example.org/")]
+    assert lines == ["nftset=/nas.example.org/4#inet#kosher#wl4,6#inet#kosher#wl6,"
+                     "4#inet#kosher#ssh4_1003,6#inet#kosher#ssh6_1003"]

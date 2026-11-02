@@ -144,6 +144,7 @@ ACTIONS = {
     # Allowing a blocked page from the activity view is the same grant as
     # approving a request for it.
     "AllowUrl": ACTION_MANAGE_FILTER,
+    "BypassUrl": ACTION_MANAGE_FILTER,
     "ListActivity": ACTION_READ_CONFIG,
     "ActivitySummary": ACTION_READ_CONFIG,
     "Usage": ACTION_READ_CONFIG,
@@ -281,7 +282,7 @@ ACTIONS = {
 
 # Methods that can weaken the filter: guardian password required when enabled.
 GUARDIAN_GATED = frozenset({
-    "SetFilterMode", "SetWhitelist", "SetWhitelistBundles", "SetUrlRules", "SetBlockedCategories", "ApplyProfile", "SaveProfile", "DeleteProfile", "ApproveRequest", "AllowUrl", "EditList",
+    "SetFilterMode", "SetWhitelist", "SetWhitelistBundles", "SetUrlRules", "SetBlockedCategories", "ApplyProfile", "SaveProfile", "DeleteProfile", "ApproveRequest", "AllowUrl", "BypassUrl", "EditList",
     "SetUserAdmin",
     "SetMediaLevel",
     "SetLanguageFilter", "SetYouTube", "SetCalm",
@@ -320,7 +321,7 @@ CHANGES = frozenset({
     "SetFilterMode", "SetWhitelist", "SetWhitelistBundles", "SetUrlRules",
     "SetBlockedCategories",
     "ApplyProfile", "SaveProfile", "DeleteProfile", "ApproveRequest",
-    "DismissRequest", "AllowUrl", "EditList", "SetMediaLevel",
+    "DismissRequest", "AllowUrl", "BypassUrl", "EditList", "SetMediaLevel",
     "SetLanguageFilter", "SetYouTube", "SetCalm", "SetUserAdmin", "SetLayout",
     "SetCoverStyle", "SetAdBlock", "SetAdBlockAllowed", "SetTimeLimits", "SetNetworkAccess",
     "SetDeveloperTools",
@@ -354,7 +355,7 @@ CHANGES = frozenset({
 PER_USER = frozenset({
     "SetFilterMode", "SetWhitelist", "SetWhitelistBundles", "SetUrlRules",
     "SetBlockedCategories",
-    "ApplyProfile", "SaveProfile", "AllowUrl", "SetMediaLevel",
+    "ApplyProfile", "SaveProfile", "AllowUrl", "BypassUrl", "SetMediaLevel",
     "SetLanguageFilter", "SetYouTube", "SetCalm", "SetUserAdmin", "SetLayout",
     "SetCoverStyle", "SetTimeLimits", "SetNetworkAccess", "SetDeveloperTools", "InstallAppFor",
     "RemoveUser", "ResetPassword", "SetUserApps",

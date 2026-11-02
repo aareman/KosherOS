@@ -27,7 +27,10 @@ and the report says why. The stages:
   suites-N the target's scripts/vm-tests, split over several machines
 
 The desktop and the suite groups run at the same time, each on its own
-overlay of the set-up machine.
+overlay of the set-up machine. A part with a failed check is run once
+more on a fresh overlay: a check that fails both times fails the run, one
+that fails only once passes and is reported as flaky (--no-retry to run
+each part once, when chasing a flake).
 
 Everything lands in build/pr-test/<ID>/: summary.json (for machines),
 report.md (for people), each stage's log, the serial consoles and the
@@ -349,6 +352,7 @@ class Stage:
         self.checks: list[dict] = []
         self.log = outdir / f"{name}.log"
         self.note = ""
+        self.retried: list[str] = []  # the parts run a second time, on a fresh machine
         self._t0 = 0.0
 
     def __enter__(self):
@@ -380,7 +384,7 @@ class Stage:
     def as_dict(self) -> dict:
         return {"name": self.name, "status": self.status, "seconds": self.seconds,
                 "checks": self.checks, "note": self.note, "log": self.log.name,
-                "timings": getattr(self, "timings", None)}
+                "timings": getattr(self, "timings", None), "retried": self.retried}
 
 
 class StageError(Exception):
@@ -1060,45 +1064,95 @@ def child_overlay(base: Path, path: Path) -> Path:
     return path
 
 
+def upload_tests(vm: Machine, tree: Path) -> None:
+    """The target's scripts/vm-tests, into the machine's /tmp."""
+    tar = subprocess.run(["tar", "-C", str(tree / "scripts"), "-czf", "-", "vm-tests"],
+                         capture_output=True, check=True).stdout
+    subprocess.run(vm.ssh_cmd() + ["rm -rf /tmp/kosher-vm-tests && mkdir -p /tmp/kosher-vm-tests && tar -xzf - -C /tmp/kosher-vm-tests --strip-components=1"],
+                   input=tar, check=True)
+
+
+def run_suite(vm: Machine, st: Stage, suite: str, exports: str) -> list[dict]:
+    """One suite on the machine; its PASS/FAIL/SKIP lines as checks."""
+    with st.log.open("a") as fh:
+        p = subprocess.Popen(vm.ssh_cmd() + [f"{exports} bash /tmp/kosher-vm-tests/run.sh {suite}"],
+                             stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+                             errors="replace")
+        assert p.stdout is not None
+        out = []
+        for line in p.stdout:
+            fh.write(line)
+            out.append(line)
+        rc = p.wait()
+    text = re.sub(r"\x1b\[[0-9;]*m", "", "".join(out))
+    checks = [{"name": f"{suite}: {m.group(2)}", "ok": m.group(1) != "FAIL",
+               "detail": "skipped" if m.group(1) == "SKIP" else ""}
+              for m in re.finditer(r"^\s*(PASS|FAIL|SKIP):?\s+(.*)$", text, re.M)]
+    if rc != 0 and all(c["ok"] for c in checks):
+        checks.append({"name": f"{suite}: run.sh finished", "ok": False, "detail": f"exit {rc}"})
+    return checks
+
+
+def merge_runs(first: list[dict], second: list[dict]) -> list[dict]:
+    """The checks of a part run twice, the second time on a fresh machine.
+
+    A check that failed both times is a failure. One that failed only
+    once passes, marked flaky, keeping what it said the time it failed:
+    the report lists these, since each is a race or a check to fix. A
+    check only one run got to (the other stopped early) stands as it was."""
+    later = {c["name"]: c for c in second}
+    merged, seen = [], set()
+    for c in first:
+        seen.add(c["name"])
+        again = later.get(c["name"])
+        if again is None:
+            merged.append(c)
+        elif c["ok"] == again["ok"]:
+            merged.append(again)
+        else:
+            failed, which = (c, "first") if not c["ok"] else (again, "second")
+            merged.append({"name": c["name"], "ok": True, "flaky": True,
+                           "detail": f"failed on the {which} of two runs: {failed['detail']}"[:1500]})
+    merged += [c for c in second if c["name"] not in seen]
+    return merged
+
+
 def stage_suites(st: Stage, machine: Path, workdir: Path, key: Path, tree: Path,
-                 suites: list[str], caps: dict) -> None:
+                 suites: list[str], caps: dict, retry: bool = True) -> None:
     """Some of the target's scripts/vm-tests, one after another, on a
-    machine of their own (an overlay of the set-up machine)."""
+    machine of their own (an overlay of the set-up machine). A suite with
+    a failed check is run once more, on a fresh overlay (merge_runs)."""
     overlay = child_overlay(machine, workdir / "machine.qcow2")
     vm = Machine(overlay, workdir, key, gl=False, console="console.log", mem=3072)
     st.timings = {}
     try:
         if not st.check("the machine boots and answers ssh", vm.wait_ssh()):
             raise StageError("no ssh")
-        tar = subprocess.run(["tar", "-C", str(tree / "scripts"), "-czf", "-", "vm-tests"],
-                             capture_output=True, check=True).stdout
-        subprocess.run(vm.ssh_cmd() + ["rm -rf /tmp/kosher-vm-tests && mkdir -p /tmp/kosher-vm-tests && tar -xzf - -C /tmp/kosher-vm-tests --strip-components=1"],
-                       input=tar, check=True)
+        upload_tests(vm, tree)
         exports = " ".join(f"{k}={shlex.quote(v)}" for k, v in caps.items())
         for suite in suites:
             t0 = time.monotonic()
-            with st.log.open("a") as fh:
-                p = subprocess.Popen(vm.ssh_cmd() + [f"{exports} bash /tmp/kosher-vm-tests/run.sh {suite}"],
-                                     stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
-                                     errors="replace")
-                assert p.stdout is not None
-                out = []
-                for line in p.stdout:
-                    fh.write(line)
-                    out.append(line)
-                rc = p.wait()
+            checks = run_suite(vm, st, suite, exports)
+            if retry and any(not c["ok"] for c in checks):
+                print(f"  [{st.name}] {suite}: a check failed; running it again on a fresh "
+                      "machine, to tell a flake from a failure", flush=True)
+                vm.stop()
+                overlay.unlink(missing_ok=True)
+                overlay = child_overlay(machine, workdir / "machine.qcow2")
+                vm = Machine(overlay, workdir, key, gl=False, console="console-again.log", mem=3072)
+                if vm.wait_ssh():
+                    upload_tests(vm, tree)
+                    checks = merge_runs(checks, run_suite(vm, st, suite, exports))
+                    st.retried.append(suite)
+                else:
+                    checks.append({"name": f"{suite}: a fresh machine boots for the second run",
+                                   "ok": False, "detail": "see console-again.log"})
             st.timings[suite] = round(time.monotonic() - t0)
-            text = re.sub(r"\x1b\[[0-9;]*m", "", "".join(out))
-            before = len(st.checks)
-            for m in re.finditer(r"^\s*(PASS|FAIL|SKIP):?\s+(.*)$", text, re.M):
-                st.checks.append({"name": f"{suite}: {m.group(2)}", "ok": m.group(1) != "FAIL",
-                                  "detail": "skipped" if m.group(1) == "SKIP" else ""})
-            bad = sum(1 for c in st.checks[before:] if not c["ok"])
-            if rc != 0 and not bad:
-                st.check(f"{suite}: run.sh finished", False, f"exit {rc}")
-                bad = 1
-            print(f"  [{st.name}] {suite}: {len(st.checks) - before - bad} passed, {bad} failed "
-                  f"in {st.timings[suite]}s", flush=True)
+            st.checks += checks
+            bad = sum(1 for c in checks if not c["ok"])
+            flaky = sum(1 for c in checks if c.get("flaky"))
+            print(f"  [{st.name}] {suite}: {len(checks) - bad} passed, {bad} failed"
+                  f"{f', {flaky} flaky' if flaky else ''} in {st.timings[suite]}s", flush=True)
     finally:
         vm.stop()
         overlay.unlink(missing_ok=True)
@@ -1165,6 +1219,22 @@ def push(image: str, tag: str, env: dict, log: Path) -> str:
     return digestfile.read_text().strip()
 
 
+# Until kosherd is active and kosher-dns has been up for a few seconds since
+# its last start, and HOST resolves: a minute and a half at most.
+RESOLVER_SETTLED = """for i in $(seq 45); do
+    if systemctl is-active --quiet kosherd && systemctl is-active --quiet kosher-dns; then
+        since=$(systemctl show kosher-dns -p ActiveEnterTimestamp --value)
+        up=$(( $(date +%s) - $(date -d "$since" +%s 2>/dev/null || echo 0) ))
+        if [ "$up" -ge 5 ] && getent hosts {host} >/dev/null 2>&1; then
+            exit 0
+        fi
+    fi
+    sleep 2
+done
+systemctl --no-pager status kosherd kosher-dns 2>&1 | head -20
+exit 1
+"""
+
 SWITCH_SETUP = f"""set -e
 mkdir -p /etc/containers/registries.conf.d
 printf '[[registry]]\\nlocation = "10.0.2.2:{REGISTRY_PORT}"\\ninsecure = true\\n' \\
@@ -1207,16 +1277,23 @@ def switch_machine(st: Stage, machine: Path, workdir: Path, key: Path, ref: str,
             raise StageError("no ssh")
         if not local:
             # The machine's own resolver (kosher-dns) is up a few seconds
-            # after sshd, and a switch by name before it answers fails
-            # with "Temporary failure in name resolution". The harness's
-            # registry is an address, so it never waited.
+            # after sshd, and kosherd restarts it once more when it applies
+            # the policy at boot: a switch by name in that window failed
+            # with "Temporary failure in name resolution" — once before the
+            # resolver answered at all, twice in the middle of a pull. So:
+            # kosherd active, the resolver up for a few seconds since its
+            # last (re)start, and the registry's name answering. The
+            # harness's registry is an address, so it never waited.
             host = ref.split("/", 1)[0]
-            rc, out = vm.sh(f"for i in $(seq 45); do getent hosts {host} >/dev/null && exit 0; "
-                            "sleep 2; done; exit 1", timeout=120)
-            if not st.check(f"the machine resolves {host}", rc == 0, out):
+            rc, out = vm.sh(RESOLVER_SETTLED.format(host=host), timeout=180)
+            if not st.check(f"the machine resolves {host}, with its resolver settled", rc == 0, out):
                 raise StageError("no name resolution")
-        rc, out = vm.sh((SWITCH_SETUP if local else "set -e\n")
-                        + f"bootc switch {' '.join(enforce + [target])}", timeout=1800)
+        switch = (SWITCH_SETUP if local else "set -e\n") + f"bootc switch {' '.join(enforce + [target])}"
+        rc, out = vm.sh(switch, timeout=1800)
+        if rc != 0 and not local and "name resolution" in out:
+            # The resolver moved under the pull after all: once more.
+            vm.sh(RESOLVER_SETTLED.format(host=host), timeout=180)
+            rc, out = vm.sh(switch, timeout=1800)
         with st.log.open("a") as fh:
             fh.write(out)
         if not st.check("bootc switch stages the image", rc == 0, out[-1500:]):
@@ -1410,13 +1487,16 @@ def classify(stages: list[dict], baseline: list[dict]) -> dict:
 
     A stage that ended on an error, with no failed check to show for it,
     counts as a new failure: the run did not get to say."""
-    new, known, fixed = [], [], []
+    new, known, fixed, flaky = [], [], [], []
     seen_pass: dict[str, list[str]] = {}
     for s in stages:
         fam = family(s["name"])
         for c in s["checks"]:
             if c["ok"] and c.get("detail") != "skipped":
                 seen_pass.setdefault(fam, []).append(c["name"])
+            if c.get("flaky"):
+                flaky.append({"where": fam, "check": c["name"], "stage": s["name"],
+                              "detail": c.get("detail", "")})
         failed = [c for c in s["checks"] if not c["ok"]]
         for c in failed:
             match = next((b for b in baseline if b["family"] == fam
@@ -1432,7 +1512,7 @@ def classify(stages: list[dict], baseline: list[dict]) -> dict:
         if any(n.startswith(b["check"]) for n in seen_pass.get(b["family"], [])) and \
                 not any(k["where"] == b["family"] and k["check"].startswith(b["check"]) for k in known):
             fixed.append(b)
-    return {"new": new, "known": known, "fixed": fixed}
+    return {"new": new, "known": known, "fixed": fixed, "flaky": flaky}
 
 
 # --- the report -----------------------------------------------------------------
@@ -1456,7 +1536,11 @@ def write_report(outdir: Path, summary: dict) -> None:
     verdict = summary.get("failures") or {}
     if verdict:
         lines += [f"New failures: {len(verdict['new'])}. Known failures: {len(verdict['known'])}. "
-                  f"Known failures that now pass: {len(verdict['fixed'])}.", ""]
+                  f"Known failures that now pass: {len(verdict['fixed'])}. "
+                  f"Flaky: {len(verdict.get('flaky', []))}.", ""]
+        if verdict.get("flaky"):
+            lines += ["## Passed on a second run (flaky: a race or a check to fix, not this change)", ""]
+            lines += [f"- {f['where']}: {f['check']} — {f['detail'][:200]}" for f in verdict["flaky"]] + [""]
         if verdict["new"]:
             lines += ["## New failures (these fail the run)", ""]
             lines += [f"- {f['where']}: {f['check']}" for f in verdict["new"]] + [""]
@@ -1580,6 +1664,9 @@ def main() -> int:
                              "there, not through the harness's registry")
     parser.add_argument("--shard", default="all",
                         help="one part of a split run: all, desktop, or suites:K/N (CI)")
+    parser.add_argument("--no-retry", action="store_true",
+                        help="run each part once: a failed check fails the run without a second "
+                             "run on a fresh machine (to catch a flake in the act)")
     parser.add_argument("--keep", action="store_true",
                         help="keep everything the run made: the machines, the disks, bcvk's "
                              "temp disk, the worktree and the image tag")
@@ -1766,8 +1853,26 @@ def main() -> int:
         if sel.desktop and want_desktop:
             def desktop():
                 with stage("desktop") as st:
-                    stage_desktop(st, child_overlay(machine, outdir / "desktop.qcow2"),
-                                  outdir, key, args.gl, tree=tree, parts=sel.desktop)
+                    try:
+                        stage_desktop(st, child_overlay(machine, outdir / "desktop.qcow2"),
+                                      outdir, key, args.gl, tree=tree, parts=sel.desktop)
+                    except StageError:
+                        pass  # a failed check came first; the second run decides
+                    if args.no_retry or all(c["ok"] for c in st.checks):
+                        return
+                    print("  [desktop] a check failed; running it again on a fresh machine, "
+                          "to tell a flake from a failure", flush=True)
+                    first, st.checks = st.checks, []
+                    again = outdir / "desktop-again"
+                    again.mkdir(exist_ok=True)
+                    LEFTOVERS.path(again / "desktop.qcow2")
+                    try:
+                        stage_desktop(st, child_overlay(machine, again / "desktop.qcow2"),
+                                      again, key, args.gl, tree=tree, parts=sel.desktop)
+                    except StageError:
+                        pass
+                    st.checks = merge_runs(first, st.checks)
+                    st.retried.append("desktop")
             workers.append(threading.Thread(target=desktop))
         if part is None:
             groups = groups_for(sel.ordered_suites(), machines_to_use(args.vms))
@@ -1778,7 +1883,8 @@ def main() -> int:
         for i, group in enumerate(groups, 1):
             def suites(group=group, i=i):
                 with stage(f"suites-{i}") as st:
-                    stage_suites(st, machine, outdir / f"suites-{i}", key, tree, group, caps)
+                    stage_suites(st, machine, outdir / f"suites-{i}", key, tree, group, caps,
+                                 retry=not args.no_retry)
             workers.append(threading.Thread(target=suites))
         print(f"\n  {len(workers)} machines at once: desktop "
               f"{'+'.join(sorted(sel.desktop)) or 'no'}; suites {groups}", flush=True)

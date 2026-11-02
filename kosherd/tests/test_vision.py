@@ -747,3 +747,152 @@ def test_a_face_is_left_out_of_a_found_figures_measurement(monkeypatch):
 def test_a_region_that_is_all_face_measures_as_nothing():
     photo = _skin_photo(skin_box=(0, 0, 300, 400))
     assert vision.skin_fraction(photo, (10, 10, 50, 50), exclude=[(0, 0, 300, 400)]) is None
+
+
+# -- a found figure measured over its own pixels (#274) ---------------------------
+
+def _framed_photo(size=(400, 300), box=(100, 40, 200, 220)):
+    """A figure's box with skin-toned 'shelves' down both sides of it and a
+    clothed figure in the middle: a face patch over a blue coat. Over the
+    whole box the shelves push the skin past the line for a found figure;
+    over the figure alone there is only the face."""
+    from PIL import Image, ImageDraw
+    import io
+
+    x, y, w, h = box
+    im = Image.new("RGB", size, (30, 90, 160))
+    draw = ImageDraw.Draw(im)
+    draw.rectangle((x, y, x + int(w * 0.12), y + h), fill=(214, 168, 120))       # warm wood
+    draw.rectangle((x + int(w * 0.88), y, x + w, y + h), fill=(214, 168, 120))   # warm wood
+    draw.rectangle((x + int(w * 0.42), y + 10, x + int(w * 0.58), y + 50), fill=(224, 172, 130))  # face
+    out = io.BytesIO(); im.save(out, "PNG")
+    return out.getvalue()
+
+
+def _mask_image(size, box, inner=(0.25, 0.0, 0.5, 1.0)):
+    """A segmenter's answer: the middle of the box is a person."""
+    from PIL import Image, ImageDraw
+
+    x, y, w, h = box
+    fx, fy, fw, fh = inner
+    m = Image.new("L", size, 0)
+    ImageDraw.Draw(m).rectangle((x + int(w * fx), y + int(h * fy),
+                                 x + int(w * (fx + fw)), y + int(h * (fy + fh))), fill=255)
+    return m
+
+
+class _Masks:
+    """A stand-in segmenter: answers with one FigureMask (or None)."""
+
+    def __init__(self, mask, skin=None):
+        from kosherd.persons import FigureMask
+
+        self.answer = FigureMask(mask, skin) if mask is not None else None
+        self.asked = 0
+
+    def mask(self, data):
+        self.asked += 1
+        return self.answer
+
+
+def test_a_found_figure_near_the_line_is_measured_over_its_own_pixels(monkeypatch):
+    # A shiur's rabbi at his desk: bookshelves behind him pass the skin
+    # gate, the box measures past the line, the figure alone does not.
+    from kosherd import persons
+
+    box = (100, 40, 200, 220)
+    photo = _framed_photo(box=box)
+    whole = vision.skin_fraction(photo, box)
+    assert vision.FOUND_SKIN_LIMIT <= whole < vision.MASK_CEILING, whole
+    masks = _Masks(_mask_image((400, 300), box))
+    monkeypatch.setattr(persons, "default_mask", lambda: masks)
+    assert not vision.shows_too_much(photo, box, found=True)
+    assert masks.asked == 1
+    # A box estimated from a face is measured again the same way.
+    assert whole >= vision.SKIN_LIMIT
+    assert not vision.shows_too_much(photo, box)
+    assert masks.asked == 2
+
+
+def test_a_bare_figure_is_still_caught_with_the_mask(monkeypatch):
+    # Taking the background out can only raise a bare figure's fraction.
+    from kosherd import persons
+
+    box = (100, 40, 200, 220)
+    photo = _skin_photo(skin_box=(165, 40, 235, 260), size=(400, 300))  # a bare middle
+    whole = vision.skin_fraction(photo, box)
+    assert vision.FOUND_SKIN_LIMIT <= whole < vision.MASK_CEILING, whole
+    monkeypatch.setattr(persons, "default_mask",
+                        lambda: _Masks(_mask_image((400, 300), box)))
+    assert vision.shows_too_much(photo, box, found=True)
+
+
+def test_a_mask_that_sees_no_figure_is_not_believed(monkeypatch):
+    # Marble, paint, a figure too small: the detector said a person, the
+    # segmenter saw nothing. The box's own measurement stands.
+    from kosherd import persons
+
+    box = (100, 40, 200, 220)
+    photo = _framed_photo(box=box)
+    from PIL import Image
+
+    monkeypatch.setattr(persons, "default_mask",
+                        lambda: _Masks(Image.new("L", (400, 300), 0)))
+    assert vision.shows_too_much(photo, box, found=True)
+    monkeypatch.setattr(persons, "default_mask", lambda: _Masks(None))  # no model
+    assert vision.shows_too_much(photo, box, found=True)
+
+
+def test_a_plainly_bare_box_does_not_ask_the_segmenter(monkeypatch):
+    from kosherd import persons
+
+    box = (100, 40, 200, 220)
+    photo = _skin_photo(skin_box=(100, 40, 300, 260), size=(400, 300))
+    assert vision.skin_fraction(photo, box) >= vision.MASK_CEILING
+    masks = _Masks(_mask_image((400, 300), box))
+    monkeypatch.setattr(persons, "default_mask", lambda: masks)
+    assert vision.shows_too_much(photo, box, found=True)
+    assert masks.asked == 0
+
+
+def test_in_a_monochrome_picture_the_segmenters_skin_is_the_skin(monkeypatch):
+    # A desaturated video frame reads as monochrome, where skin was a band
+    # of lightness that a white shirt and beige shelves fall into as well.
+    # The segmenter says which pixels are skin; over the person, a face and
+    # hands are far under the line, a bare figure far over it.
+    from PIL import Image, ImageDraw
+    import io
+
+    from kosherd import persons
+
+    box = (100, 40, 200, 220)
+    im = Image.new("RGB", (400, 300), (40, 40, 40))
+    draw = ImageDraw.Draw(im)
+    for row in range(40, 260):   # a photograph's spread of greys: a third in the band
+        g = 95 + (row - 40) % 85 if row < 120 else 20 + (row - 120) % 40
+        draw.line((100, row, 300, row), fill=(g, g, g))
+    out = io.BytesIO(); im.save(out, "PNG"); photo = out.getvalue()
+    assert vision.is_monochrome(photo)
+    assert vision.FOUND_SKIN_LIMIT <= vision.skin_fraction(photo, box) < vision.MASK_CEILING
+    person = _mask_image((400, 300), box)
+    face_only = _mask_image((400, 300), box, inner=(0.4, 0.05, 0.2, 0.15))
+    monkeypatch.setattr(persons, "default_mask", lambda: _Masks(person, face_only))
+    assert not vision.shows_too_much(photo, box, found=True)
+    bare = _mask_image((400, 300), box, inner=(0.25, 0.0, 0.5, 1.0))
+    monkeypatch.setattr(persons, "default_mask", lambda: _Masks(person, bare))
+    assert vision.shows_too_much(photo, box, found=True)
+
+
+def test_person_probability_is_everything_but_background():
+    np = pytest.importorskip("numpy")
+    from kosherd import persons
+
+    logits = np.zeros((2, 2, 6), dtype=np.float32)
+    logits[0, 0, 0] = 8.0     # surely background
+    logits[1, 1, 2] = 8.0     # surely body skin
+    p = persons.person_probability(logits)
+    assert p.shape == (2, 2)
+    assert p[0, 0] < 0.01 and p[1, 1] > 0.99
+    assert abs(p[0, 1] - 5 / 6) < 0.01, "six classes, nothing to choose between them"
+    skin = persons.skin_probability(logits)
+    assert skin[1, 1] > 0.99 and skin[0, 0] < 0.01

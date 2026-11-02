@@ -204,6 +204,22 @@ CORE = 0.7
 # where a skirt that stops at the thigh leaves most of the region skin.
 LEGS_SKIN_LIMIT = 0.30
 
+# A found figure's box is a rectangle; what is behind the figure is in it
+# too, and warm wood, beige walls and book spines pass the skin-colour
+# gate. A shiur's rabbi at his desk measured 0.186 over his box and was
+# refused (#274). When a found figure's measurement crosses the line but
+# the box is not plainly bare, the segmenter is asked which pixels are the
+# person (persons.PersonMask) and the skin is measured over those alone:
+# the same frame is 0.075. Over a figure that is bare, taking the
+# background out can only raise the fraction, so nothing is let off by
+# it. Above MASK_CEILING the box is bare whatever is behind the figure,
+# and the model is not asked; under MASK_MIN_COVER the segmenter saw no
+# figure where the detector did (marble, paint, a figure too small), and
+# its mask is not believed.
+MASK_CUT = 128          # of 255: how sure the segmenter must be of a pixel
+MASK_CEILING = 0.40
+MASK_MIN_COVER = 0.25
+
 
 def legs_box(body):
     """Where the legs are in an estimated body box: thighs to shins."""
@@ -376,17 +392,57 @@ def shows_too_much(image_bytes: bytes, body, reference: int | None = None,
     in a head-and-shoulders portrait it is a third of the detector's tight
     box — enough on its own to pass the line for a found figure, which
     would hide every clothed portrait on a news page. In a box guessed
-    from a face the face is a thirtieth of it and the exclusion is moot."""
+    from a face the face is a thirtieth of it and the exclusion is moot.
+
+    A figure whose box measures past the line, but not as plainly bare,
+    is measured again over its own pixels (see MASK_CEILING)."""
     limit = FOUND_SKIN_LIMIT if found else SKIN_LIMIT
-    fraction = skin_fraction(image_bytes, body, reference, exclude=faces)
-    if fraction is not None and fraction >= limit:
+    too_much, whole = _past_the_line(image_bytes, body, reference, found, faces, limit)
+    if not too_much or whole is None or whole >= MASK_CEILING:
+        return too_much
+    mask = _figure_mask(image_bytes, body)
+    if mask is None:
         return True
+    return _past_the_line(image_bytes, body, reference, found, faces, limit, within=mask)[0]
+
+
+def _past_the_line(image_bytes, body, reference, found, faces, limit, within=None):
+    """(past the line?, the fraction over the whole box)."""
+    fraction = skin_fraction(image_bytes, body, reference, exclude=faces, within=within)
+    if fraction is not None and fraction >= limit:
+        return True, fraction
     if found:
-        core = skin_fraction(image_bytes, core_box(body), reference, exclude=faces)
+        core = skin_fraction(image_bytes, core_box(body), reference, exclude=faces,
+                             within=within)
         if core is not None and core >= SKIN_LIMIT:
-            return True
-    legs = skin_fraction(image_bytes, legs_box(body), reference, exclude=faces)
-    return legs is not None and legs >= LEGS_SKIN_LIMIT
+            return True, fraction
+    legs = skin_fraction(image_bytes, legs_box(body), reference, exclude=faces, within=within)
+    return (legs is not None and legs >= LEGS_SKIN_LIMIT), fraction
+
+
+def _figure_mask(image_bytes: bytes, body):
+    """The segmenter's person mask, when it can be had and it agrees with
+    the detector that there is a figure in `body`; None otherwise."""
+    from . import persons as persons_mod
+
+    try:
+        from PIL import Image
+
+        mask = persons_mod.default_mask().mask(image_bytes)
+        if mask is None:
+            return None
+        person = mask.person
+        x, y, w, h = body
+        region = person.crop((x, y, min(x + w, person.width), min(y + h, person.height)))
+        if region.width < 8 or region.height < 8:
+            return None
+        sample = region.resize((min(96, region.width), min(96, region.height)),
+                               Image.Resampling.NEAREST)
+        data = list(sample.getdata())
+        cover = sum(1 for p in data if p >= MASK_CUT) / max(1, len(data))
+        return mask if cover >= MASK_MIN_COVER else None
+    except Exception:  # noqa: BLE001 - a measurement, never a crash
+        return None
 
 # A body-part detection this weak is not a verdict on its own, but it is
 # enough to say "there is a figure here" for the skin measurement.
@@ -406,12 +462,16 @@ def _union_grown(boxes, width, height, grow: float = 1.0):
 
 
 def skin_fraction(image_bytes: bytes, box, reference: int | None = None,
-                  exclude=()) -> float | None:
+                  exclude=(), within=None) -> float | None:
     """How much of `box` is skin-toned: by the classic YCbCr gate in a
     colour picture, by lightness in a monochrome photograph (see MONO_*),
     and nothing at all in a monochrome drawing — text, a terminal, code.
     Pixels inside any of the `exclude` boxes (faces) are not counted on
-    either side of the fraction; a region that is all excluded is None."""
+    either side of the fraction; a region that is all excluded is None.
+    `within` is the segmenter's FigureMask (persons.py): only pixels it
+    marks as a person, at MASK_CUT or above, are counted on either side,
+    and in a monochrome picture — where the lightness band is all the
+    colour gate has — what it marks as skin is what counts as skin."""
     try:
         import io
 
@@ -430,6 +490,7 @@ def skin_fraction(image_bytes: bytes, box, reference: int | None = None,
             sample_w, sample_h = min(96, region.width), min(96, region.height)
             region = region.resize((sample_w, sample_h), Image.Resampling.NEAREST)
             data = list(region.getdata())
+            keep = [True] * len(data)
             if exclude:
                 # Which samples fall inside an excluded box, in the
                 # sampled region's own coordinates.
@@ -437,23 +498,35 @@ def skin_fraction(image_bytes: bytes, box, reference: int | None = None,
                 holes = [(int((ex - x) * sx), int((ey - y) * sy),
                           int((ex + ew - x) * sx), int((ey + eh - y) * sy))
                          for ex, ey, ew, eh in exclude]
-                data = [px for i, px in enumerate(data)
-                        if not any(hx0 <= i % sample_w < hx1 and hy0 <= i // sample_w < hy1
-                                   for hx0, hy0, hx1, hy1 in holes)]
-                if not data:
-                    return None
-            if mono:
-                if not looks_photographic(Y for Y, _cb, _cr in data):
+                keep = [not any(hx0 <= i % sample_w < hx1 and hy0 <= i // sample_w < hy1
+                                for hx0, hy0, hx1, hy1 in holes)
+                        for i in range(len(data))]
+            skin_marks = None
+            if within is not None:
+                def sampled(mask):
+                    return list(mask.crop((x, y, right, bottom)).resize(
+                        (sample_w, sample_h), Image.Resampling.NEAREST).getdata())
+                person = sampled(within.person)
+                keep = [k and p >= MASK_CUT for k, p in zip(keep, person)]
+                if mono and within.skin is not None:
+                    skin_marks = sampled(within.skin)
+            counted = [px for px, k in zip(data, keep) if k]
+            if not counted:
+                return None
+            if skin_marks is not None:
+                skin = sum(1 for mark, k in zip(skin_marks, keep) if k and mark >= MASK_CUT)
+            elif mono:
+                if not looks_photographic(Y for Y, _cb, _cr in counted):
                     return 0.0
                 if reference is not None:
                     low, high = reference - MONO_SKIN_TOLERANCE, reference + MONO_SKIN_TOLERANCE
                 else:
                     low, high = MONO_SKIN_BAND
-                skin = sum(1 for (Y, _cb, _cr) in data if Y > 60 and low <= Y <= high)
+                skin = sum(1 for (Y, _cb, _cr) in counted if Y > 60 and low <= Y <= high)
             else:
-                skin = sum(1 for (Y, cb, cr) in data
+                skin = sum(1 for (Y, cb, cr) in counted
                            if Y > 60 and 77 <= cb <= 127 and 133 <= cr <= 173)
-            return skin / max(1, len(data))
+            return skin / max(1, len(counted))
     except Exception:  # noqa: BLE001 - a measurement, never a crash
         return None
 

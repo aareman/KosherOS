@@ -101,6 +101,27 @@ RUN curl -fsSL -o /tmp/keyd.tar.gz \
     && test -f /out/usr/lib/systemd/system/keyd.service \
     && test -f /out/usr/lib/sysusers.d/keyd.conf
 
+# The person segmenter (kosherd/persons.py, #274): Google's multiclass
+# selfie segmenter, Apache-2.0, which says per pixel whether it is a
+# person, and of a person whether skin, hair or clothes. Google ships it
+# as TFLite only, and the image runs onnxruntime, so it is converted here
+# with tf2onnx from the pinned original, in Fedora's parallel Python 3.12
+# because TensorFlow has no wheel for Fedora 44's own Python. 16 MB,
+# ~150 ms on a laptop CPU, asked only for a figure that measures near the
+# line, so an ordinary picture never pays for it.
+FROM ghcr.io/aareman/kosher-base-fedora:44-20261029@sha256:278ccc1c8af3d618b64accbba691bb14f82d371b2e13c86fa2ac7a447d1e03bb as segmenter-build
+ARG SEGMENTER_SHA256=c6748b1253a99067ef71f7e26ca71096cd449baefa8f101900ea23016507e0e0
+RUN dnf -y install python3.12 && dnf clean all \
+    && python3.12 -m venv /tmp/venv \
+    && /tmp/venv/bin/pip install --no-cache-dir -q "tensorflow-cpu==2.17.1" "tf2onnx==1.16.1" "onnx<1.17" \
+    && curl -fsSL -o /tmp/selfie_multiclass_256x256.tflite \
+         "https://storage.googleapis.com/mediapipe-models/image_segmenter/selfie_multiclass_256x256/float32/latest/selfie_multiclass_256x256.tflite" \
+    && echo "${SEGMENTER_SHA256}  /tmp/selfie_multiclass_256x256.tflite" | sha256sum -c - \
+    && mkdir -p /out \
+    && /tmp/venv/bin/python -m tf2onnx.convert --tflite /tmp/selfie_multiclass_256x256.tflite \
+         --output /out/selfie_multiclass.onnx --opset 14 \
+    && test -s /out/selfie_multiclass.onnx
+
 FROM ghcr.io/aareman/kosher-base-fedora-bootc:44-20261029@sha256:cbca5adc859a7c973aef49b5de1e43cc540409758f598674e3c5594099448a75
 
 # --- Packages ---------------------------------------------------------------
@@ -322,6 +343,8 @@ RUN mkdir -p /usr/share/kosher/models \
     && curl -fsSL -o /usr/share/kosher/models/yolox_nano.onnx \
          https://github.com/Megvii-BaseDetection/YOLOX/releases/download/0.1.1rc0/yolox_nano.onnx \
     && echo "c789161ed43c8269fcd4e67c67eeeb4e80c622da2eb296a20bc6007bd18a0b7d  /usr/share/kosher/models/yolox_nano.onnx" | sha256sum -c -
+# The person segmenter, converted above (kosherd/persons.py, #274).
+COPY --from=segmenter-build /out/selfie_multiclass.onnx /usr/share/kosher/models/selfie_multiclass.onnx
 # PyAV: FFmpeg's libraries as a wheel, with the H.264, VP9 and AV1 decoders
 # that Fedora's own ffmpeg-free leaves out. The proxy samples a few
 # keyframes from a clip and judges them like pictures (kosherd/videocheck).

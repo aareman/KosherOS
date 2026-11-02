@@ -2422,11 +2422,20 @@ def test_what_a_bypassed_page_asks_for_is_bypassed_with_it(addon):
     assert not elsewhere.metadata.get("kosher_bypass")
 
 
+def _headers_hook(filt, flow):
+    """responseheaders, whichever shape it has: it is synchronous on one
+    branch and a coroutine on another (the source-sampled video), and a
+    test of the bypass must pass on both."""
+    result = filt.responseheaders(flow)
+    if asyncio.iscoroutine(result):
+        asyncio.run(result)
+
+
 def test_a_bypassed_response_streams_through_unread(addon):
     for kind in ("text/html", "image/jpeg", "video/mp4"):
         flow = _hflow(kind)
         flow.metadata["kosher_bypass"] = True
-        _filt(addon, media="immodest").responseheaders(flow)
+        _headers_hook(_filt(addon, media="immodest"), flow)
         assert flow.response.stream is True, kind
 
 
@@ -2439,5 +2448,5 @@ def test_an_allowed_pages_pictures_are_still_held_to_be_judged(addon):
         [{"action": "allow", "pattern": "trusted.example"}])
     picture = _hflow("image/jpeg", url="https://trusted.example/p.jpg")
     picture.request.headers["referer"] = "https://trusted.example/"
-    filt.responseheaders(picture)
+    _headers_hook(filt, picture)
     assert not getattr(picture.response, "stream", False), "held, so it can be judged"

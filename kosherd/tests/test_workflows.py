@@ -375,9 +375,13 @@ def test_the_train_tests_a_batch_once_and_lands_it():
     # One train at a time, never cancelling the one running.
     assert "merge-train" in train["concurrency"]["group"]
     assert train["concurrency"]["cancel-in-progress"] is False
-    # The VM test is the same workflow a pull request would run.
+    # The VM test is the same workflow a pull request would run, and it
+    # runs only once the quick checks passed: a minute's wait on a green
+    # train, ten or more saved on one whose unit tests failed.
     assert jobs["vm"]["uses"] == "./.github/workflows/vm-test.yml"
+    assert jobs["vm"]["needs"] == ["assemble", "checks"]
     assert jobs["land"]["needs"] == ["assemble", "checks", "vm"]
+    assert jobs["land"]["if"].startswith("always()"), "a skipped VM test still lands or splits"
     land = jobs["land"]["steps"][0]["run"]
     # master takes pull requests only, with a linear history.
     assert "gh pr merge" in land and "--squash" in land

@@ -551,6 +551,8 @@ INTROSPECTION_XML = """
 # without a D-Bus bus; see tests/test_access.py.
 ACTIONS = access.ACTIONS
 UID_AWARE = access.UID_AWARE
+# keyd's unit on systemd's bus (the name escaped as systemd does: "." is _2e).
+KEYD_UNIT_PATH = "/org/freedesktop/systemd1/unit/keyd_2eservice"
 
 # Methods that run `bootc`, answered from a worker thread instead of the
 # main loop. Every bootc command waits for the one sysroot lock, and an
@@ -881,7 +883,38 @@ class Daemon:
             connection.signal_subscribe(
                 "org.freedesktop.login1", iface, member, path, None,
                 Gio.DBusSignalFlags.NONE, lambda *_a: self._refresh_keyboard(), None)
+        # keyd starts from the computer's own config alone (its unit's
+        # ExecStartPre empties /run/keyd), so a start that lands after a
+        # person signed in, or a restart after its panic keys, dropped their
+        # files until the next session change asked for them again (#276).
+        # systemd says when the unit comes up; the right set goes back then.
+        try:
+            connection.call_sync(
+                "org.freedesktop.systemd1", "/org/freedesktop/systemd1",
+                "org.freedesktop.systemd1.Manager", "Subscribe", None, None,
+                Gio.DBusCallFlags.NONE, 5000, None)
+        except GLib.Error as e:
+            log.warning("keyboard: could not ask systemd for keyd's state: %s", e.message)
+        connection.signal_subscribe(
+            "org.freedesktop.systemd1", "org.freedesktop.DBus.Properties",
+            "PropertiesChanged", KEYD_UNIT_PATH, None,
+            Gio.DBusSignalFlags.NONE, self._keyd_unit_changed, None)
         self._refresh_keyboard()
+
+    def _keyd_unit_changed(self, _conn, _sender, _path, _iface, _signal, params, _data) -> None:
+        """keyd's unit changed state. Up again means its config directory
+        holds the computer's file alone: put the person's back. Once now,
+        and again a moment later, because the unit is active the instant
+        keyd's process starts, a beat before it answers a reload."""
+        try:
+            changed = params.unpack()[1]
+        except (IndexError, TypeError, ValueError):
+            return
+        if changed.get("ActiveState") != "active":
+            return
+        self._refresh_keyboard()
+        for delay in (1000, 3000):
+            GLib.timeout_add(delay, lambda: (self._refresh_keyboard(), False)[1])
 
     # ---- time limits: the minute tick and logind -------------------------
 

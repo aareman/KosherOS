@@ -428,6 +428,10 @@ class Keyboards:
         # The Advanced switch (#230). Off, keyd is not running: nothing is
         # accepted and nothing is written for it.
         self.enabled = True
+        # A reload keyd did not take (it was still starting, say): the
+        # files on disk are right but keyd has not read them, so the next
+        # refresh reloads even though nothing on disk needs changing.
+        self._reload_owed = False
 
     def base_config(self) -> str:
         try:
@@ -577,7 +581,7 @@ class Keyboards:
         if not self.enabled:
             return False
         wanted = self.wanted(active_uid)
-        if self.live() == wanted:
+        if self.live() == wanted and not self._reload_owed:
             if self.bound_uid is not None and self.bound_uid != active_uid:
                 # Same files, but someone else's app bindings on top.
                 self._keyd("bind", "reset")
@@ -590,7 +594,9 @@ class Keyboards:
             if result is not None:
                 log.warning("keyboard: keyd reload failed: %s",
                             (result.stderr or result.stdout or "").strip())
+            self._reload_owed = True
             return False
+        self._reload_owed = False
         log.info("keyboard: in force for %s",
                  "uid %d" % active_uid if active_uid in self.configs else "nobody")
         return True

@@ -16,6 +16,7 @@ on:
 permissions:
   contents: write # the release
   packages: read
+  actions: write  # the docs rebuild it asks Checks for
 
 concurrency:
   group: release

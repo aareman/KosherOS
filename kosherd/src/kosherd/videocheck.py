@@ -154,14 +154,24 @@ def sample_frames(data: bytes, max_frames: int = SAMPLE_FRAMES,
                     log.debug("seek failed", exc_info=True)
                     break
         if not frames:
-            # No index to seek by (a transport-stream segment, a fragment):
-            # walk the keyframes from the start and keep a spread of them.
+            # No index to seek by (a transport-stream segment, a fragment),
+            # or seeks that found nothing: walk the keyframes from the
+            # start and keep a spread of them. On a fresh container, not
+            # the one the seeks used: a segment with its one keyframe at
+            # the start had every seek land past it, the demuxer ran out,
+            # and the drained decoder answered EOF to every packet of the
+            # walk — "undecodable", and every HLS and DASH segment refused
+            # at the modesty levels (#271).
             candidates = []
             try:
-                for frame in container.decode(stream):
-                    candidates.append(frame)
-                    if len(candidates) >= max_frames * 4:
-                        break
+                with av.open(io.BytesIO(data)) as fresh:
+                    walked = [s for s in fresh.streams if s.type == "video"][0]
+                    walked.thread_type = "AUTO"
+                    walked.codec_context.skip_frame = "NONKEY"
+                    for frame in fresh.decode(walked):
+                        candidates.append(frame)
+                        if len(candidates) >= max_frames * 4:
+                            break
             except Exception:  # noqa: BLE001 - keep what was decoded
                 log.debug("decode stopped early", exc_info=True)
             if candidates:

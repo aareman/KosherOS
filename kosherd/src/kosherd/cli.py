@@ -316,14 +316,14 @@ def cmd_rules(args) -> int:
         rules = user.get("rules", [])
         print(f"{len(rules)} rule(s) for {user['username']} (mode: {user['mode']})")
         for i, r in enumerate(rules, 1):
-            print(f"  {i}. {r['action']:5} {r['pattern']}")
+            print(f"  {i}. {r['action']:6} {r['pattern']}")
         if rules and user["mode"] != "filtered":
             print("  note: rules only apply in filtered mode", file=sys.stderr)
         return 0
 
     user = next((u for u in c.get_policy()["users"] if u["uid"] == args.uid), None)
     rules = list(user.get("rules", [])) if user else []
-    if args.action in ("allow", "block"):
+    if args.action in ("allow", "block", "bypass"):
         rules.append({"action": args.action, "pattern": args.pattern})
     elif args.action == "remove":
         index = int(args.pattern) - 1
@@ -1471,9 +1471,11 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("mode", choices=policy_mod.MODES)
     s.set_defaults(func=cmd_adopt)
 
-    s = sub.add_parser("rules", help="URL allow/block rules (inspect mode)")
+    s = sub.add_parser("rules", help="URL rules: block, allow or bypass (filtered mode)")
     s.add_argument("uid", type=int)
-    s.add_argument("action", choices=["list", "allow", "block", "remove", "clear"])
+    s.add_argument("action", choices=["list", "allow", "block", "bypass", "remove", "clear"],
+                   help="allow opens the page but still filters its pictures, video "
+                        "and words; bypass filters nothing on it")
     s.add_argument("pattern", nargs="?", default="",
                    help="URL pattern, or the rule number for 'remove'")
     s.add_argument("--guardian-password")

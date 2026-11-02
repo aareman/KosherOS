@@ -437,6 +437,9 @@ def change_sentence(event: dict, users_by_uid: dict | None = None) -> tuple[str,
     elif method == "AllowUrl":
         what = f"{who} may now reach {host_of(str(arg(1) or ''))}" + \
             (" (whole site)" if arg(2) else "")
+    elif method == "BypassUrl":
+        what = f"{who} now reaches {host_of(str(arg(1) or ''))} with nothing filtered" + \
+            (" (whole site)" if arg(2) else "")
     elif method == "ApproveRequest":
         what = "A request was allowed"
     elif method == "DismissRequest":

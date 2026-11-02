@@ -15,6 +15,15 @@ Rules are an ordered list; the FIRST match decides, so specific rules go
 above general ones. If nothing matches, the request is allowed — inspect
 mode sits on top of the family-DNS baseline, so it filters rather than
 whitelists unless the admin ends the list with a `block *`.
+
+A rule's action is one of three levels (#273):
+
+    block    the page is refused
+    allow    the page opens whatever the category lists and the content
+             scorer say, but its pictures, video and words are still
+             filtered like any other page's
+    bypass   nothing on it is filtered: the proxy passes it through as it
+             came, for a site the administrator trusts outright
 """
 
 from __future__ import annotations
@@ -25,7 +34,8 @@ from urllib.parse import urlsplit
 
 ALLOW = "allow"
 BLOCK = "block"
-ACTIONS = (ALLOW, BLOCK)
+BYPASS = "bypass"
+ACTIONS = (ALLOW, BLOCK, BYPASS)
 
 
 class RuleError(ValueError):

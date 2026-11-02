@@ -51,7 +51,7 @@ try:
     from kosherd import videocheck as videocheck_mod
     from kosherd import vision as vision_mod
     from kosherd.uidmap import UidLookup
-    from kosherd.urlrules import BLOCK, decide, parse_rules
+    from kosherd.urlrules import BLOCK, BYPASS, decide, parse_rules
 except ImportError:  # pragma: no cover - only when interpreters differ
     # mitmproxy may run under a different interpreter than the one kosherd
     # is installed for. Discover site-packages instead of hardcoding a
@@ -76,7 +76,7 @@ except ImportError:  # pragma: no cover - only when interpreters differ
     from kosherd import videocheck as videocheck_mod
     from kosherd import vision as vision_mod
     from kosherd.uidmap import UidLookup
-    from kosherd.urlrules import BLOCK, decide, parse_rules
+    from kosherd.urlrules import BLOCK, BYPASS, decide, parse_rules
 
 RULES_PATH = Path("/var/lib/kosher-mitm/rules.json")
 log = logging.getLogger("kosher-filter")
@@ -952,6 +952,18 @@ class KosherFilter:
         return self.categories.blocked_categories_of(
             host, self.policy.blocked_categories_for(uid))
 
+    @staticmethod
+    def _referer_bypassed(rules, flow) -> bool:
+        """Whether the page this request comes from is bypassed (#273): a
+        bypassed page's own pictures, scripts and calls are left alone with
+        it. Browsers send a same-site Referer in full and another site's
+        as its origin alone, so a whole-site rule reaches a page's pictures
+        wherever they come from, and a one-page rule its same-site ones."""
+        referer = flow.request.headers.get("referer") or ""
+        if not referer or not rules:
+            return False
+        return decide(rules, referer)[0] == BYPASS
+
     def _uid_of(self, flow) -> int | None:
         """Who made this connection: the LISTENER PORT it arrived on.
 
@@ -1134,6 +1146,16 @@ class KosherFilter:
             self._block(flow, url, "", why=f"rule:{pattern}")
             return
 
+        # A bypass rule (#273) is the administrator's word that nothing on
+        # these pages is to be filtered: no categories, no judging of the
+        # page, its pictures, its video or its words. The response hooks
+        # see the mark and pass the answer through as it came. A page's
+        # own pictures and scripts come on later requests, so a request
+        # made by a bypassed page (its Referer) is bypassed with it.
+        if action == BYPASS or self._referer_bypassed(rules, flow):
+            flow.metadata["kosher_bypass"] = True
+            return
+
         # An explicit allow rule beats the category lists, so an admin can
         # permit one site from a category they otherwise block.
         if pattern is None:
@@ -1181,6 +1203,10 @@ class KosherFilter:
         if uid is None:
             # Not a filtered account's connection (see response): nothing
             # to inspect, so nothing to hold.
+            flow.response.stream = True
+            return
+        if flow.metadata.get("kosher_bypass"):
+            # A bypass rule (#273): through as it came, body unread.
             flow.response.stream = True
             return
         content_type = (flow.response.headers.get("content-type") or "").lower()

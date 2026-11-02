@@ -112,6 +112,12 @@ INTROSPECTION_XML = """
       <arg direction="in" type="b" name="whole_site"/>
       <arg direction="in" type="s" name="guardian_password"/>
     </method>
+    <method name="BypassUrl">
+      <arg direction="in" type="i" name="uid"/>
+      <arg direction="in" type="s" name="url"/>
+      <arg direction="in" type="b" name="whole_site"/>
+      <arg direction="in" type="s" name="guardian_password"/>
+    </method>
     <method name="ListActivity">
       <arg direction="in" type="i" name="since"/>
       <arg direction="in" type="i" name="uid"/>
@@ -1421,9 +1427,27 @@ class Daemon:
         log.info("allowed uid %d to %s from the activity log", uid, host)
         return None
 
-    def _grant(self, user, url: str, whole_site: bool) -> str:
+    def impl_BypassUrl(self, uid: int, url: str, whole_site: bool,
+                       _guardian_pw: str):
+        """Let a page, or a whole site, through with nothing on it filtered
+        (#273): the level above allowing, for a site the administrator
+        trusts outright. Only a filtered account reads pages, so only there
+        is there anything to bypass."""
+        user = self.policy.account(uid)
+        if user is None:
+            raise PolicyError(f"uid {uid} is not managed")
+        if user.mode != "filtered":
+            raise PolicyError("only a filtered account's pages are read; "
+                              "there is nothing to bypass in this mode")
+        host = self._grant(user, url, whole_site, action="bypass")
+        log.info("uid %d now reaches %s with nothing filtered", uid, host)
+        return None
+
+    def _grant(self, user, url: str, whole_site: bool, action: str = "allow") -> str:
         """Open one page or one site for an account, in the terms of its
-        mode: a whitelist entry, or an allow rule ahead of the rest."""
+        mode: a whitelist entry, or a rule ahead of the rest. A rule the
+        account already has for the same pattern is replaced, so allowing
+        and then bypassing a site leaves one rule, not two."""
         from urllib.parse import urlsplit
 
         parts = urlsplit(url)
@@ -1436,12 +1460,12 @@ class Daemon:
                 user.whitelist = sorted({*user.whitelist, host})
         else:
             pattern = host if whole_site else _url_pattern(url)
-            if not any(r.get("pattern") == pattern and r.get("action") == "allow"
+            if not any(r.get("pattern") == pattern and r.get("action") == action
                        for r in user.rules):
                 # Ahead of the existing rules: a rule added after the one
                 # that blocked the page would never be reached.
-                user.rules = [{"action": "allow", "pattern": pattern},
-                              *user.rules]
+                user.rules = [{"action": action, "pattern": pattern},
+                              *[r for r in user.rules if r.get("pattern") != pattern]]
         self._save_and_apply()
         return host
 

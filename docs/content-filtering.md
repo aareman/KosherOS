@@ -200,14 +200,25 @@ judged like any other site's.
 ## Page rules
 
 A page rule is the one thing a parent writes by hand, and most families
-never need to. Rules are an ordered allow and block list, first match wins,
-matched without regard to case, scheme or a leading `www`. A bare host
-covers the whole site, `*.host` includes subdomains, and `host/dir/*` covers
-a directory. An unmatched request is allowed, so a trailing `block *` makes
-an account deny-by-default.
+never need to. Rules are an ordered list, first match wins, matched without
+regard to case, scheme or a leading `www`. A bare host covers the whole
+site, `*.host` includes subdomains, and `host/dir/*` covers a directory. An
+unmatched request is allowed, so a trailing `block *` makes an account
+deny-by-default.
 
-Rules are edited on the person's page in the admin app, or with
-`kosherctl rules`.
+A rule does one of three things. *Block* refuses the page. *Allow* opens it
+whatever the category lists and the content scorer say, but the page is
+still a page: its pictures and video are judged, and its words are cleaned,
+like any other. *Bypass* is the level above that, for a site the
+administrator trusts outright: nothing on it is filtered, and the proxy
+passes it through as it came. A bypassed page's own pictures and scripts
+are left alone with it wherever they are served from, because the browser
+names the page they came from. Safe search is still forced on a bypassed
+search engine.
+
+Rules are edited on the person's page in the admin app, where a rule's
+level can be changed in place, or with `kosherctl rules`. The Allow button
+on a blocked page in the activity view offers the same levels.
 
 ## Judging a page by its words
 

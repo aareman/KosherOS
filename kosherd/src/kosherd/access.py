@@ -123,6 +123,9 @@ ACTIONS = {
     # Beyond the web: video calls (UDP the filter cannot read) and extra
     # ports. Opening either widens what the account reaches.
     "SetNetworkAccess": ACTION_MANAGE_FILTER,
+    # SSH to other machines (#257): a tunnel the filter cannot read, to
+    # the listed machines or anywhere. Widens what the account reaches.
+    "SetSsh": ACTION_MANAGE_FILTER,
     # Developer tools: the Nix daemon and the registries, directly. On
     # widens what the account reaches, so dual-controlled like a filter.
     "SetDeveloperTools": ACTION_MANAGE_FILTER,
@@ -281,7 +284,7 @@ GUARDIAN_GATED = frozenset({
     "SetMediaLevel",
     "SetLanguageFilter", "SetYouTube", "SetCalm",
     "SetGuestConfig", "DisableGuardian", "Enrol", "Unenrol",
-    "SetAdBlock", "SetTimeLimits", "SetChannel", "TryImage", "Rollback", "SetNetworkAccess",
+    "SetAdBlock", "SetTimeLimits", "SetChannel", "TryImage", "Rollback", "SetNetworkAccess", "SetSsh",
     "SetDeveloperTools", "SetBuildSources",
     "SetBootMenuPassword",
     "SetUserAppAccess", "SetUserBlockedAppKinds", "SetUserBlockedApps",

@@ -56,6 +56,12 @@ proxy could not read them:
   web* on the account's page, for a program that is neither web nor mail.
   The filter's own ports, and Syncthing's (see [Syncthing](#syncthing)), can
   never be granted this way. Empty by default.
+- **SSH to other machines**, under that heading on the account's page: the
+  machines an account may connect to over SSH — a name, an address, a
+  range, or `tailnet` for every machine on this computer's tailnet — and
+  nothing else. Port 22 is otherwise closed, because an SSH tunnel reaches
+  anything. *Anywhere* opens it to every machine, for an account an
+  administrator trusts with that, and the switch says so.
 - **Video calls.** Zoom, Meet and school calls send picture and sound over
   UDP to high ports, which cannot be inspected. That is allowed by default
   so calls work without a visit to the admin app. The switch on the

@@ -374,9 +374,9 @@ class UserDetailPage(Adw.NavigationPage):
         # there — fifteen toggles that change nothing. The approved list
         # takes their place.
         if user["mode"] == "whitelist":
-            return [self._mode_group(user), self._network_group(user), self._approved_sites_group(user),
+            return [self._mode_group(user), self._network_group(user), self._ssh_group(user), self._approved_sites_group(user),
                     self._pages_group(user)]
-        return [self._mode_group(user), self._network_group(user), self._categories_group(user),
+        return [self._mode_group(user), self._network_group(user), self._ssh_group(user), self._categories_group(user),
                 self._pages_group(user)]
 
     def _approved_sites_group(self, user: dict) -> Adw.PreferencesGroup:
@@ -552,8 +552,59 @@ class UserDetailPage(Adw.NavigationPage):
 
         ports_row.connect("apply", on_apply)
         group.add(ports_row)
-        hint_under(group, ("Allow additional ports for specific apps, such as port 22 for SSH. Leave "
-            "blank unless an app needs an extra connection."))
+        hint_under(group, ("Allow additional ports for specific apps. Leave blank unless an app "
+            "needs an extra connection. SSH has its own setting below."))
+        return group
+
+    def _ssh_group(self, user: dict) -> Adw.PreferencesGroup:
+        """SSH to other machines (#257): the listed ones, or anywhere.
+
+        An SSH connection cannot be read, and a tunnel through one reaches
+        anything: the list is the control, and the switch says in words
+        what it opens.
+        """
+        group = Adw.PreferencesGroup(
+            title="SSH to other machines",
+            description="Machines this account may connect to over SSH.")
+        if user["mode"] not in ("filtered", "dnsfilter", "whitelist"):
+            group.add(Adw.ActionRow(
+                title="Unavailable in this mode",
+                subtitle="SSH is open in Unfiltered mode and closed with no internet.",
+                subtitle_lines=2))
+            return group
+
+        hosts_row = Adw.EntryRow(title="These machines", show_apply_button=True,
+                                 text=", ".join(user.get("ssh_hosts", [])))
+
+        def on_apply(row):
+            hosts = [h.strip().lower() for h in row.get_text().split(",") if h.strip()]
+            self._gated(lambda pw: self.win.client.set_ssh(
+                user["uid"], bool(user.get("ssh_anywhere", False)), hosts, pw),
+                f"{user['username']}: SSH machines " + (", ".join(hosts) if hosts else "cleared"))
+
+        hosts_row.connect("apply", on_apply)
+        group.add(hosts_row)
+
+        anywhere = Adw.SwitchRow(
+            title="Anywhere",
+            subtitle=("Opens SSH to every machine. An SSH connection cannot be filtered, and a "
+                      "tunnel through one reaches anything."),
+            subtitle_lines=4,
+            active=bool(user.get("ssh_anywhere", False)))
+
+        def on_anywhere(row, _param):
+            wanted = row.get_active()
+            if wanted == bool(user.get("ssh_anywhere", False)):
+                return
+            self._gated(lambda pw: self.win.client.set_ssh(
+                user["uid"], wanted, list(user.get("ssh_hosts", [])), pw),
+                f"{user['username']}: SSH anywhere {'on' if wanted else 'off'}")
+
+        anywhere.connect("notify::active", on_anywhere)
+        group.add(anywhere)
+        hint_under(group, ("A machine is a name, an address or a range, separated by commas: "
+            "server.example.com, 192.168.1.20, 10.0.0.0/8. The word tailnet means every "
+            "machine on this computer's tailnet."))
         return group
 
     def _categories_group(self, user: dict) -> Adw.PreferencesGroup:

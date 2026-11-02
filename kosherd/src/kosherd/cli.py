@@ -259,6 +259,27 @@ def cmd_network(args) -> int:
     return 0
 
 
+def cmd_ssh(args) -> int:
+    """kosherctl ssh UID [--hosts nas.example.org,10.0.0.5,tailnet|none] [--anywhere on|off]"""
+    c = _client()
+    user = next((u for u in c.get_policy().get("users", []) if u.get("uid") == args.uid), None)
+    if user is None:
+        print(f"uid {args.uid} is not managed", file=sys.stderr)
+        return 1
+    hosts = list(user.get("ssh_hosts", []))
+    anywhere = bool(user.get("ssh_anywhere", False))
+    if args.hosts is not None:
+        hosts = [] if args.hosts.strip().lower() in ("", "none") else \
+            [h.strip() for h in args.hosts.split(",") if h.strip()]
+    if args.anywhere:
+        anywhere = args.anywhere == "on"
+    if args.hosts is not None or args.anywhere:
+        c.set_ssh(args.uid, anywhere, hosts, _guardian_pw(args))
+    where = "anywhere" if anywhere else (", ".join(hosts) if hosts else "no other machine")
+    print(f"uid {args.uid}: ssh to {where}")
+    return 0
+
+
 def cmd_set_whitelist(args) -> int:
     _client().set_whitelist(args.uid, args.domains, _guardian_pw(args))
     print(f"uid {args.uid}: {len(args.domains)} domains")
@@ -1370,6 +1391,14 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("--extra-ports", help="comma-separated TCP ports, or 'none'")
     s.add_argument("--guardian-password")
     s.set_defaults(func=cmd_network)
+
+    s = sub.add_parser("ssh", help="which other machines an account may ssh to (#257)")
+    s.add_argument("uid", type=int)
+    s.add_argument("--hosts", help="comma-separated names, addresses, ranges or 'tailnet'; "
+                                   "or 'none'")
+    s.add_argument("--anywhere", choices=["on", "off"])
+    s.add_argument("--guardian-password")
+    s.set_defaults(func=cmd_ssh)
 
     s = sub.add_parser("set-mode", help="change a user's filter mode")
     s.add_argument("uid", type=int)

@@ -324,3 +324,14 @@ def test_a_second_run_can_be_switched_off():
     assert '"--no-retry"' in src
     assert "retry=not args.no_retry" in src
     assert 'if args.no_retry or all(c["ok"] for c in st.checks):' in src
+def test_a_switch_to_the_release_repository_is_held_to_the_signature_policy():
+    # As kosherd's own updates are (updates.py); the harness's unsigned
+    # images (the local registry, kosher-linux-ci) cannot be, and 80-hardening
+    # [F10] looks only at a machine on the release repository.
+    src = (ROOT / "scripts/pr-test.py").read_text()
+    assert 'RELEASE_IMAGE = "ghcr.io/aareman/kosher-linux"' in src
+    assert 'enforce = ["--enforce-container-sigpolicy"] if ref == RELEASE_IMAGE else []' in src
+    assert pr_test.parse_registry_image("ghcr.io/aareman/kosher-linux:edge@sha256:" + "0" * 64)[0] \
+        == pr_test.RELEASE_IMAGE
+    assert pr_test.parse_registry_image("ghcr.io/aareman/kosher-linux-ci:x-1@sha256:" + "0" * 64)[0] \
+        != pr_test.RELEASE_IMAGE

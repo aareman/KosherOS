@@ -335,6 +335,10 @@ class DemoClient:
         self.policy["adblock"]["enabled"] = enabled
         self._change(None, "SetAdBlock", [enabled])
 
+    def set_adblock_allowed(self, hosts, pw=""):
+        self.policy["adblock"]["allowed"] = sorted(set(hosts))
+        self._change(None, "SetAdBlockAllowed", [list(hosts)])
+
     def my_layout(self): return self._user(1002).get("layout", "classic")
 
     def set_my_layout(self, layout):

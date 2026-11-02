@@ -2268,6 +2268,65 @@ def _tailscale_filter(addon, allowed):
     return filt
 
 
+# -- a checkout's fraud check (#265) ------------------------------------------
+
+def test_the_cache_adds_the_never_blocked_hosts_to_the_exceptions(addon, tmp_path):
+    # kosherd writes the payment and fraud-check hosts under a key of their
+    # own, so the reason is on record; the proxy treats them as it treats
+    # the tailnet's names. An older rules file without the key still loads.
+    path = _rules_file(tmp_path, {
+        "1001": {"rules": [], "blocked_categories": ["ads"],
+                 "system_allowed": ["tailscale.com"],
+                 "never_blocked": ["*.online-metrix.net", "*.signifyd.com"]},
+        "1002": {"rules": [], "system_allowed": ["tailscale.com"]},
+    })
+    cache = addon.PolicyCache(path)
+    assert cache.system_allowed_for(1001) == ("tailscale.com", "*.online-metrix.net",
+                                              "*.signifyd.com")
+    assert cache.system_allowed_for(1002) == ("tailscale.com",)
+
+
+def _checkout_filter(addon, allowed):
+    filt = addon.KosherFilter.__new__(addon.KosherFilter)
+    filt.uids = type("U", (), {"uid_for_connection": staticmethod(lambda *a, **k: 1001)})()
+    policy = _request_policy(blocked=["ads"])
+    type(policy).system_allowed_for = staticmethod(lambda uid: tuple(allowed))
+    filt.policy = policy
+    filt.categories = type("C", (), {
+        "blocked_categories_of": staticmethod(
+            lambda host, blocked: {"ads"} if "ads" in blocked and (
+                host.endswith("online-metrix.net") or host == "ads.example") else set()),
+        "categories_of": staticmethod(lambda host: set()),
+    })()
+    filt.siterules = type("S", (), {"reason": staticmethod(lambda url: None)})()
+    filt.blocklist = _stub_blocklist()
+    filt._block = lambda flow, url, because, why="": setattr(
+        flow, "response", type("R", (), {"status_code": 403, "why": why})())
+    return filt
+
+
+def test_the_fraud_check_is_refused_as_ads_without_the_exception(addon):
+    # What happened: the category step answered 403 to the script Lowe's
+    # needs to approve the card, and the order failed after the cart was
+    # consumed.
+    filt = _checkout_filter(addon, ())
+    flow = _request_flow("https://h.online-metrix.net/fp/tags.js?org_id=k8vif92e")
+    filt.request(flow)
+    assert flow.response is not None and flow.response.why == "category:ads"
+
+
+def test_with_the_exception_the_fraud_check_goes_through_and_ads_do_not(addon):
+    filt = _checkout_filter(addon, ("*.online-metrix.net", "*.signifyd.com"))
+    for url in ("https://h.online-metrix.net/fp/tags.js?org_id=k8vif92e",
+                "https://w2txo5aa.g.aa.online-metrix.net/viICygdAAIuM94iX"):
+        flow = _request_flow(url)
+        filt.request(flow)
+        assert flow.response is None, url
+    flow = _request_flow("https://ads.example/banner.js")
+    filt.request(flow)
+    assert flow.response is not None and flow.response.why == "category:ads"
+
+
 def test_signed_out_tailscales_sites_are_blocked_as_a_proxy(addon):
     filt = _tailscale_filter(addon, ())
     flow = _request_flow("https://login.tailscale.com/a/abc123")

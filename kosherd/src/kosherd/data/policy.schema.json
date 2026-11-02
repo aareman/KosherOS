@@ -306,6 +306,14 @@
           "type": "boolean",
           "default": true,
           "description": "Block advertising and tracker domains at the machine's resolvers for every account, like a Pi-hole. Reaches every browser and app because all DNS is forced through the local resolvers. Absent means on."
+        },
+        "allowed": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "description": "Hosts the ad blocker leaves reachable although the tracker lists carry them, beyond the built-in payment-security set: a host, or *.host for the host and everything under it. The proxy's category step steps aside for them too. Guardian-gated to add."
         }
       }
     },

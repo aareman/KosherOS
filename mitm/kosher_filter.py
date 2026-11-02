@@ -353,8 +353,14 @@ class PolicyCache:
                 language[uid] = entry.get("language_filter", "off")
                 youtube[uid] = dict(entry.get("youtube", {}))
                 calm[uid] = dict(entry.get("calm", {}))
-                system_allowed[uid] = tuple(str(n).lower()
-                                            for n in entry.get("system_allowed", []))
+                # `never_blocked` (#265): the payment and fraud-check hosts
+                # a checkout needs, which the tracker lists carry. Same
+                # standing as the tailnet's names: no category blocks
+                # them, the page is still read and scored.
+                system_allowed[uid] = tuple(
+                    str(n).lower()
+                    for n in [*entry.get("system_allowed", []),
+                              *entry.get("never_blocked", [])])
                 if uid == BUILDER_UID and entry.get("developers") is not None:
                     build_developers = buildsources_mod.load_developers(entry["developers"])
             except Exception as e:  # noqa: BLE001 - one bad entry must not break all

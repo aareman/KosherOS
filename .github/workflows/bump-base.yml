@@ -57,7 +57,10 @@ jobs:
       - name: A pull request, queued
         if: steps.pin.outputs.changed == 'true' && inputs.branch == ''
         env:
-          GH_TOKEN: ${{ github.token }}
+          # The workflow token may not open pull requests ("GitHub Actions
+          # is not permitted to create or approve pull requests"): the
+          # train's own token does, as it does for workflow changes (#262).
+          GH_TOKEN: ${{ secrets.MERGE_TRAIN_TOKEN || github.token }}
         run: |
           branch="chore/bump-base-$(date -u +%Y%m%d)"
           git config user.name "KosherOS base bump"

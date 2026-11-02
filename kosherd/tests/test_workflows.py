@@ -414,3 +414,13 @@ def test_the_vm_harness_never_needs_sudo():
     assert clean.returncode == 0, clean.stdout + clean.stderr
     dirty = subprocess.run(check + ["vm"], cwd=ROOT, capture_output=True, text=True)
     assert dirty.returncode == 1 and "_sudo" in dirty.stdout
+
+
+def test_the_weekly_release_may_ask_for_the_docs_rebuild():
+    # Its last step dispatches ci.yml for the Releases page; the first run
+    # made the release and then failed there, "Resource not accessible by
+    # integration", for want of this permission.
+    roundup = yaml.safe_load((ROOT / ".github/workflows/roundup.yml").read_text())
+    assert roundup["permissions"]["actions"] == "write"
+    runs = "\n".join(step.get("run", "") for step in roundup["jobs"]["roundup"]["steps"])
+    assert "gh workflow run ci.yml" in runs

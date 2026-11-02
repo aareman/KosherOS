@@ -16,7 +16,8 @@ import tempfile
 from pathlib import Path
 
 from . import categories as categories_mod
-from . import buildsources, containers, dns, mitmca, nft, nixdaemon, syncthing, tailnet
+from . import (buildsources, containers, dns, mitmca, nft, nixdaemon, paymentsecurity,
+               syncthing, tailnet)
 from . import search as search_mod
 from .policy import INSPECTED_MODES, SAFESEARCH_MODES, UNFILTERED_MODES, Policy
 
@@ -98,6 +99,11 @@ def write_mitm_rules(policy: Policy, tailnet_allowed: tuple[str, ...] | None = N
             "youtube": user.youtube,
             "calm": getattr(user, "calm", {}),
             "system_allowed": list(tailnet_allowed),
+            # Payment and fraud-check hosts a checkout needs, which the
+            # tracker lists carry (#265): no category blocks them, for
+            # every filtered account. Same standing as system_allowed in
+            # the proxy; a key of its own so the reason is on record.
+            "never_blocked": paymentsecurity.combined(policy.adblock_allowed),
         }
     listen_ports = sorted(ports.values())
     if nixdaemon.build_gid() is not None:

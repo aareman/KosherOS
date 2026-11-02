@@ -197,6 +197,11 @@ class DaemonClient:
         """Ads and trackers blocked at the resolvers, for every account."""
         self._call("Profiles", "SetAdBlock", "(bs)", enabled, guardian_password)
 
+    def set_adblock_allowed(self, hosts: list[str], guardian_password: str = "") -> None:
+        """Hosts the ad blocker leaves reachable although the tracker lists
+        carry them (#265), beyond the built-in payment-security set."""
+        self._call("Profiles", "SetAdBlockAllowed", "(ass)", list(hosts), guardian_password)
+
     def set_developer_tools(self, uid: int, enabled: bool, guardian_password: str = "") -> None:
         """May the account use the Nix daemon and the package registries
         itself (nix, devbox, devenv from a shell)?"""

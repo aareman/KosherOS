@@ -164,6 +164,10 @@ INTROSPECTION_XML = """
       <arg direction="in" type="b" name="enabled"/>
       <arg direction="in" type="s" name="guardian_password"/>
     </method>
+    <method name="SetAdBlockAllowed">
+      <arg direction="in" type="as" name="hosts"/>
+      <arg direction="in" type="s" name="guardian_password"/>
+    </method>
     <method name="GetMyLayout">
       <arg direction="out" type="s" name="layout"/>
     </method>
@@ -1629,6 +1633,27 @@ class Daemon:
         is also where immodest imagery arrives uninvited.
         """
         self.policy.adblock = bool(enabled)
+        self._save_and_apply()
+        return None
+
+    def impl_SetAdBlockAllowed(self, hosts: list[str], _guardian_pw: str):
+        """Hosts the ad blocker leaves reachable although the tracker lists
+        carry them (#265), replacing the previous additions. The built-in
+        payment-security set is not part of this and cannot be shortened
+        here. The proxy's category step steps aside for them too.
+
+        Guardian-gated: each entry is a host every account can then reach.
+        Every entry is checked before anything changes, so a bad one
+        leaves the list as it was.
+        """
+        from . import paymentsecurity
+
+        try:
+            extra = [paymentsecurity.normalize(h) for h in hosts]
+        except ValueError as e:
+            raise PolicyError(str(e)) from None
+        self.policy.adblock_allowed = sorted(
+            {h for h in extra if not paymentsecurity.is_builtin(h)})
         self._save_and_apply()
         return None
 

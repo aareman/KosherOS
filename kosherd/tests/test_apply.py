@@ -14,6 +14,11 @@ import pytest
 from kosherd import apply as apply_mod
 from kosherd.apply import ApplyError, apply_policy, write_mitm_rules
 from kosherd.policy import Policy, UserPolicy
+from kosherd import paymentsecurity
+
+# Every filtered account's entry carries the payment and fraud-check hosts
+# no category blocks (#265).
+_NEVER_BLOCKED = list(paymentsecurity.PAYMENT_SECURITY_HOSTS)
 
 
 @pytest.fixture(autouse=True)
@@ -223,10 +228,12 @@ def test_only_inspected_users_rules_reach_the_proxy(tmp_path, monkeypatch):
     assert rules_written(tmp_path) == {
         "1001": {"port": 30000, "rules": block, "blocked_categories": [],
                  "media_level": "none", "cover_style": "frost", "language_filter": "off",
-                 "youtube": {}, "calm": {}, "system_allowed": []},
+                 "youtube": {}, "calm": {}, "system_allowed": [],
+                 "never_blocked": _NEVER_BLOCKED},
         "1003": {"port": 30001, "rules": [], "blocked_categories": [],
                  "media_level": "none", "cover_style": "frost", "language_filter": "off",
-                 "youtube": {}, "calm": {}, "system_allowed": []}}
+                 "youtube": {}, "calm": {}, "system_allowed": [],
+                 "never_blocked": _NEVER_BLOCKED}}
     listen = (tmp_path / "mitm" / "listen.env").read_text()
     assert listen == ("MITM_MODES=--mode transparent@127.0.0.1:30000 "
                       "--mode transparent@127.0.0.1:30001\n")
@@ -300,7 +307,8 @@ def test_categories_alone_are_enough_to_reach_the_proxy(tmp_path, monkeypatch):
     assert rules_written(tmp_path) == {
         "1001": {"port": 30000, "rules": [], "blocked_categories": ["adult"],
                  "media_level": "none", "cover_style": "frost", "language_filter": "off",
-                 "youtube": {}, "calm": {}, "system_allowed": []}}
+                 "youtube": {}, "calm": {}, "system_allowed": [],
+                 "never_blocked": _NEVER_BLOCKED}}
 
 
 def test_a_media_level_alone_reaches_the_proxy(tmp_path, monkeypatch):

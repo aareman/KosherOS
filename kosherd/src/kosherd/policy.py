@@ -454,6 +454,12 @@ class Policy:
     # by default; not content filtering, so it applies to unfiltered
     # accounts too, and turning it off is the guardian-gated act.
     adblock: bool = True
+    # Hosts the ad blocker leaves reachable although the tracker lists
+    # carry them (#265): what an administrator added to the built-in
+    # payment-security set (paymentsecurity.py). The proxy's category step
+    # steps aside for them too. Guardian-gated to add, like switching the
+    # ad blocker off.
+    adblock_allowed: list[str] = field(default_factory=list)
     # Automatic updates (#19): the schedule, and whether the people signed
     # in are told once when a downloaded update waits for a restart.
     auto_updates: str = DEFAULT_AUTO_UPDATES
@@ -550,7 +556,9 @@ class Policy:
             "source": self.source,
             "users": [u.to_dict() for u in self.users],
             "guardian": {"enabled": self.guardian_enabled},
-            "adblock": {"enabled": self.adblock},
+            "adblock": {"enabled": self.adblock,
+                        **({"allowed": list(self.adblock_allowed)}
+                           if self.adblock_allowed else {})},
             "updates": {"auto": self.auto_updates, "notify": self.update_notify},
             **({"advanced": self.advanced()} if self.advanced() else {}),
             **({"custom_profiles": list(self.custom_profiles)}
@@ -605,6 +613,7 @@ class Policy:
             ],
             guardian_enabled=doc["guardian"]["enabled"],
             adblock=bool(doc.get("adblock", {}).get("enabled", True)),
+            adblock_allowed=list(doc.get("adblock", {}).get("allowed", [])),
             auto_updates=(doc.get("updates") or {}).get("auto", DEFAULT_AUTO_UPDATES),
             update_notify=bool((doc.get("updates") or {}).get("notify", True)),
             tailscale=(doc.get("advanced") or {}).get("tailscale"),

@@ -662,10 +662,51 @@ def cmd_cover(args) -> int:
 
 
 def cmd_adblock(args) -> int:
+    """kosherctl adblock on | off | allowed | allow HOST... | disallow HOST...
+
+    Ads and trackers blocked at the resolvers for every account. `allow`
+    names a host the blocker leaves reachable although the tracker lists
+    carry it (#265): a checkout's fraud check looks like a tracker, and a
+    shop that cannot run it declines the order. The payment-security hosts
+    are built in; this is for the next one.
+    """
+    from . import paymentsecurity
+
     c = _client()
-    on = args.state == "on"
-    c.set_adblock(on, _guardian_pw(args) if not on else "")
-    print(f"ad and tracker blocking {'on' if on else 'off'} for every account")
+    if args.action in ("on", "off"):
+        on = args.action == "on"
+        c.set_adblock(on, _guardian_pw(args) if not on else "")
+        print(f"ad and tracker blocking {'on' if on else 'off'} for every account")
+        return 0
+    extra = list((c.get_policy().get("adblock") or {}).get("allowed", []))
+    if args.action == "allowed":
+        print("Left reachable by the ad blocker, and by the proxy's category lists:")
+        print("Built in (payment and fraud checks a checkout needs):")
+        for host in paymentsecurity.PAYMENT_SECURITY_HOSTS:
+            print(f"  {host}")
+        print("Added:" if extra else "Added: none")
+        for host in extra:
+            print(f"  {host}")
+        return 0
+    if not args.hosts:
+        print(f"name at least one host to {args.action}", file=sys.stderr)
+        return 2
+    try:
+        hosts = [paymentsecurity.normalize(h) for h in args.hosts]
+    except ValueError as e:
+        print(e, file=sys.stderr)
+        return 2
+    if args.action == "allow":
+        wanted = list(dict.fromkeys([*extra, *hosts]))
+    else:
+        builtin = [h for h in hosts if paymentsecurity.is_builtin(h)]
+        if builtin:
+            print(f"{', '.join(builtin)} is built in and cannot be removed; "
+                  "a URL rule blocks it for one account", file=sys.stderr)
+            return 2
+        wanted = [h for h in extra if h not in hosts]
+    c.set_adblock_allowed(wanted, _guardian_pw(args))
+    print("The ad blocker also leaves reachable: " + (", ".join(wanted) or "nothing else"))
     return 0
 
 
@@ -1504,7 +1545,10 @@ def main(argv: list[str] | None = None) -> int:
     s.set_defaults(func=cmd_language)
 
     s = sub.add_parser("adblock", help="block ads and trackers for every account (like a Pi-hole)")
-    s.add_argument("state", choices=["on", "off"])
+    s.add_argument("action", choices=["on", "off", "allowed", "allow", "disallow"],
+                   help="on/off for everyone; allowed lists the hosts it leaves reachable; "
+                        "allow/disallow HOST... change that list")
+    s.add_argument("hosts", nargs="*")
     s.add_argument("--guardian-password")
     s.set_defaults(func=cmd_adblock)
 

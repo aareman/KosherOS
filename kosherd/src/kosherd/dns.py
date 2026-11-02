@@ -260,7 +260,8 @@ def render_category_blocks(policy: Policy, bundle, tailnet: tuple[str, ...] = ()
         lines.append(f"# Blocking {', '.join(sorted(rendered))} for users "
                      "the proxy does not see.")
     for domain in bundle.domains_in(rendered):
-        if _never_blocked(domain, (*tailnet, *RESOLVER_NEVER_BLOCKED)):
+        if _never_blocked(domain, (*tailnet, *RESOLVER_NEVER_BLOCKED,
+                                   *_adblock_never_blocked(policy))):
             continue
         # 0.0.0.0 rather than NXDOMAIN: a browser shows a connection error
         # instead of retrying elsewhere.
@@ -271,6 +272,14 @@ def render_category_blocks(policy: Policy, bundle, tailnet: tuple[str, ...] = ()
 
 def _never_blocked(domain: str, allowed) -> bool:
     return any(_covers(name.removeprefix("*."), domain) for name in allowed)
+
+
+def _adblock_never_blocked(policy) -> tuple[str, ...]:
+    """The payment and fraud-check hosts no resolver refuses (#265): the
+    built-in set and the administrator's additions. `getattr`, because the
+    tests hand these renderers bare policy stubs."""
+    from . import paymentsecurity
+    return tuple(paymentsecurity.combined(getattr(policy, "adblock_allowed", ())))
 
 
 # -- the tailnet --------------------------------------------------------------
@@ -343,7 +352,15 @@ def render_adblock(policy: Policy, bundle) -> str:
     if not policy.adblock:
         lines.append("# Ad blocking is switched off.")
         return "\n".join(lines) + "\n"
+    # A checkout's fraud check is fingerprinting too, so the tracker lists
+    # carry it; refused, the order fails after the cart is consumed (#265).
+    # Those hosts, and what an administrator added, stay resolvable.
+    reachable = _adblock_never_blocked(policy)
     domains = bundle.domains_in({ADBLOCK_CATEGORY})
-    lines.append(f"# {len(domains)} advertising and tracker domains, for every account.")
-    lines += [f"address=/{domain}/" for domain in domains]
+    kept = [d for d in domains if not _never_blocked(d, reachable)]
+    lines.append(f"# {len(kept)} advertising and tracker domains, for every account.")
+    if len(kept) != len(domains):
+        lines.append(f"# {len(domains) - len(kept)} left reachable: payment and "
+                     "fraud-check hosts a checkout needs (paymentsecurity.py).")
+    lines += [f"address=/{domain}/" for domain in kept]
     return "\n".join(lines) + "\n"

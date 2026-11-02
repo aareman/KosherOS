@@ -170,6 +170,9 @@ def test_the_guardian_gate_covers_every_filter_weakening_method():
                 # (#179): a filter setting like the others.
                 "DisableGuardian",
                 "Enrol", "Unenrol", "SetAdBlock", "SetTimeLimits",
+                # A host the ad blocker leaves reachable is a host every
+                # account can reach (#265).
+                "SetAdBlockAllowed",
                 # Beyond the web: video calls and extra ports widen reach.
                 "SetNetworkAccess",
                 # SSH to other machines (#257): a tunnel the filter cannot read.

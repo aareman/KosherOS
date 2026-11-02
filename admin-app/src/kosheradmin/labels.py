@@ -449,6 +449,8 @@ def change_sentence(event: dict, users_by_uid: dict | None = None) -> tuple[str,
         what = f"Word list edited ({_list_title(arg(0))})"
     elif method == "SetAdBlock":
         what = "Ads and trackers " + ("blocked for everyone" if arg(0) else "no longer blocked")
+    elif method == "SetAdBlockAllowed":
+        what = "Sites the ad blocker leaves reachable changed"
     elif method == "SetDeveloperTools":
         what = f"{who}: developer tools {'on' if arg(1) else 'off'}"
     elif method == "SetBuildSources":

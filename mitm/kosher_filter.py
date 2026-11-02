@@ -1066,10 +1066,12 @@ class KosherFilter:
         finally:
             self._timed(flow, started)
 
-    def responseheaders(self, flow: http.HTTPFlow) -> None:
+    async def responseheaders(self, flow: http.HTTPFlow) -> None:
+        # Async for one case: a clip sampled through its source waits for
+        # its verdict here, before a byte of the body streams.
         started = time.perf_counter()
         try:
-            self._responseheaders(flow)
+            await self._responseheaders(flow)
         finally:
             self._timed(flow, started)
 
@@ -1168,7 +1170,7 @@ class KosherFilter:
 
     # ---- what to hold and what to let through as it arrives ----------------
 
-    def _responseheaders(self, flow: http.HTTPFlow) -> None:
+    async def _responseheaders(self, flow: http.HTTPFlow) -> None:
         """Decide, from the headers alone, whether the body must be held.
 
         mitmproxy buffers every response body before `response` runs unless
@@ -1192,6 +1194,8 @@ class KosherFilter:
                 flow.response.stream = True
             elif decision == "refuse":
                 self._refuse_video(flow, before_body=True)
+            elif decision == "sample":
+                await self._sample_video(flow, uid)
             return  # "hold": sampled in response()
         if _is_image(flow):
             if YouTube.is_moving_thumbnail(flow.request.pretty_host or "",
@@ -1852,17 +1856,69 @@ class KosherFilter:
         if cached is not None:
             return "refuse" if vision_mod.hides(level, cached) else "stream"
         length = _content_length(flow)
-        if length is not None and length > videocheck_mod.VIDEO_MAX_BYTES:
-            return uncheckable  # too big to hold for sampling
-        # Held whether or not it starts at byte 0. A range from the middle
-        # used to be refused outright, and a browser that asks for a clip
-        # in pieces — Firefox does, and cancels its first request as soon
-        # as it has the header — never got the clip judged and then got
-        # every piece refused: "breaking and stuck". A fragment of a
-        # fragmented file (DASH, a WebM cluster) decodes on its own and is
-        # judged; a slice of a plain file cannot be read, and _video_settle
-        # treats that as unchecked.
+        whole = total if total is not None else length
+        if _first > 0 or (whole is not None and whole > videocheck_mod.VIDEO_MAX_BYTES):
+            # A piece of a file, or a file too big to hold: neither can be
+            # judged from what arrives. A player that asks in pieces
+            # (Firefox from the first request, every DASH player) and a
+            # long file as one MP4 (a shiur) were refused outright at the
+            # modesty levels (#271). When the source serves ranges, the
+            # clip is judged THROUGH it instead — a few fetches at spread
+            # points, once per file (videocheck.sample_remote) — and then
+            # this response, and every piece after it, streams.
+            ranges = flow.response.status_code == 206 or \
+                "bytes" in (flow.response.headers.get("accept-ranges") or "").lower()
+            if whole is not None and ranges:
+                return "sample"
+            return uncheckable
         return "hold"
+
+    def _range_fetcher(self, flow: http.HTTPFlow):
+        """GETs of byte ranges of this clip, made by the proxy itself with
+        the request's own identity headers (the browser's agent, where it
+        came from), never its cookies: the files are public, and the
+        proxy's connection is its own, outside the account's filter."""
+        import urllib.request
+
+        url = flow.request.pretty_url
+        carried = ("user-agent", "referer", "origin", "accept", "accept-language")
+        base = {k: v for k, v in flow.request.headers.items() if k.lower() in carried}
+
+        def fetch(start: int, end: int) -> bytes:
+            request = urllib.request.Request(url, headers={**base, "Range": f"bytes={start}-{end}"})
+            with urllib.request.urlopen(request, timeout=10) as response:
+                if response.status != 206:
+                    raise OSError(f"the source answered a range with HTTP {response.status}")
+                return response.read()
+
+        return fetch
+
+    def _sample_video_key(self, flow: http.HTTPFlow) -> tuple[str, int]:
+        _first, total = _range_info(flow)
+        return videocheck_mod.key(flow.request.pretty_url, total), int(total or 0)
+
+    async def _sample_video(self, flow: http.HTTPFlow, uid: int) -> None:
+        """Judge the clip through its source, then stream or refuse this
+        response before its body."""
+        level = self.policy.media_level_for(uid)
+        clip_key, size = self._sample_video_key(flow)
+        verdict = await self._checker().verdict_remote_async(
+            self._range_fetcher(flow), size, clip_key)
+        self._settle_before_body(flow, level, verdict)
+
+    def _settle_before_body(self, flow: http.HTTPFlow, level: str, verdict) -> None:
+        if verdict is None:
+            if level in VIDEO_STRICT_LEVELS:
+                self._refuse_video(flow, before_body=True)
+                return
+            flow.response.headers["x-kosheros"] = "video-unchecked"
+            flow.response.stream = True
+            return
+        if vision_mod.hides(level, verdict):
+            self._refuse_video(flow, before_body=True)
+            return
+        flow.response.headers["x-kosheros"] = f"video-checked={verdict.level}"
+        flow.response.stream = True
 
     def _refuse_video(self, flow: http.HTTPFlow, before_body: bool = False) -> None:
         log.info("refused video %s", flow.request.pretty_url)
@@ -1926,6 +1982,11 @@ class KosherFilter:
             return
         level = self.policy.media_level_for(uid)
         _first, total = _range_info(flow)
+        if decision == "sample":
+            clip_key, size = self._sample_video_key(flow)
+            verdict = self._checker().verdict_remote(self._range_fetcher(flow), size, clip_key)
+            self._video_settle(flow, uid, level, verdict)
+            return
         verdict = self._checker().verdict(
             flow.response.content or b"", videocheck_mod.key(flow.request.pretty_url, total))
         self._video_settle(flow, uid, level, verdict)
@@ -1943,6 +2004,12 @@ class KosherFilter:
             return
         level = self.policy.media_level_for(uid)
         _first, total = _range_info(flow)
+        if decision == "sample":
+            clip_key, size = self._sample_video_key(flow)
+            verdict = await self._checker().verdict_remote_async(
+                self._range_fetcher(flow), size, clip_key)
+            self._video_settle(flow, uid, level, verdict)
+            return
         verdict = await self._checker().verdict_async(
             flow.response.content or b"", videocheck_mod.key(flow.request.pretty_url, total))
         self._video_settle(flow, uid, level, verdict)

@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import copy
 import errno
+import ipaddress
 import json
 import logging
 import re
@@ -25,12 +26,17 @@ gi.require_version("Gio", "2.0")
 from gi.repository import Gio, GLib
 
 from . import (BUS_NAME, OBJECT_PATH, access, appaccess, appkinds, apps, auth,
-               keyboard, onepassword, policy as policy_mod, syncthing, ytsearch)
+               keyboard, onepassword, policy as policy_mod, syncthing, ytsearch, nft)
 from .apply import apply_policy
 from .apps import AppError
 from .guardian import Guardian, GuardianError
 from .policy import INSPECTED_MODES, MODES, Policy, PolicyError, UserPolicy
 from .session import SessionStore
+
+# A machine name for the SSH list: labels of letters, digits and hyphens,
+# with at least one dot (a short name has nothing to resolve it here).
+SSH_NAME_RE = re.compile(r"(?=.{1,253}$)[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?"
+                         r"(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)+")
 from . import timelimits
 from .timekeeper import TICK_SECONDS, Session, Timekeeper
 
@@ -158,6 +164,10 @@ INTROSPECTION_XML = """
       <arg direction="in" type="b" name="enabled"/>
       <arg direction="in" type="s" name="guardian_password"/>
     </method>
+    <method name="SetAdBlockAllowed">
+      <arg direction="in" type="as" name="hosts"/>
+      <arg direction="in" type="s" name="guardian_password"/>
+    </method>
     <method name="GetMyLayout">
       <arg direction="out" type="s" name="layout"/>
     </method>
@@ -208,6 +218,12 @@ INTROSPECTION_XML = """
       <arg direction="in" type="i" name="uid"/>
       <arg direction="in" type="b" name="video_calls"/>
       <arg direction="in" type="s" name="extra_ports_json"/>
+      <arg direction="in" type="s" name="guardian_password"/>
+    </method>
+    <method name="SetSsh">
+      <arg direction="in" type="i" name="uid"/>
+      <arg direction="in" type="b" name="anywhere"/>
+      <arg direction="in" type="s" name="hosts_json"/>
       <arg direction="in" type="s" name="guardian_password"/>
     </method>
     <method name="ApplyProfile">
@@ -1620,6 +1636,27 @@ class Daemon:
         self._save_and_apply()
         return None
 
+    def impl_SetAdBlockAllowed(self, hosts: list[str], _guardian_pw: str):
+        """Hosts the ad blocker leaves reachable although the tracker lists
+        carry them (#265), replacing the previous additions. The built-in
+        payment-security set is not part of this and cannot be shortened
+        here. The proxy's category step steps aside for them too.
+
+        Guardian-gated: each entry is a host every account can then reach.
+        Every entry is checked before anything changes, so a bad one
+        leaves the list as it was.
+        """
+        from . import paymentsecurity
+
+        try:
+            extra = [paymentsecurity.normalize(h) for h in hosts]
+        except ValueError as e:
+            raise PolicyError(str(e)) from None
+        self.policy.adblock_allowed = sorted(
+            {h for h in extra if not paymentsecurity.is_builtin(h)})
+        self._save_and_apply()
+        return None
+
     def impl_SetTimeLimits(self, uid: int, settings_json: str, _guardian_pw: str):
         """How long, and when, an account may be signed in.
 
@@ -1737,6 +1774,39 @@ class Daemon:
         user = self._managed(uid)
         user.video_calls = bool(video_calls)
         user.extra_ports = sorted(set(ports))
+        self._save_and_apply()
+
+    def impl_SetSsh(self, uid: int, anywhere: bool, hosts_json: str, _guardian_pw: str):
+        """SSH to other machines (#257): the listed ones, or anywhere.
+
+        Guardian-gated like every widening of what an account reaches. An
+        SSH connection cannot be read, and a tunnel through one reaches
+        anything, so the list is the control: a name, an address, a range
+        or `tailnet`. Anywhere is the administrator's call, in words.
+        """
+        try:
+            hosts = json.loads(hosts_json or "[]")
+        except ValueError:
+            raise PolicyError("SSH machines must be a JSON list of strings") from None
+        if not isinstance(hosts, list) or not all(isinstance(h, str) for h in hosts):
+            raise PolicyError("SSH machines must be a JSON list of strings")
+        hosts = list(dict.fromkeys(h.strip().lower() for h in hosts if h.strip()))
+        if len(hosts) > 50:
+            raise PolicyError("at most 50 SSH machines")
+        for h in hosts:
+            kind = nft.ssh_entry_kind(h)
+            if kind == "name":
+                if not SSH_NAME_RE.fullmatch(h):
+                    raise PolicyError(f"{h!r} is not a machine name, an address, a range or 'tailnet'")
+            elif kind in ("v4", "v6"):
+                net = ipaddress.ip_network(h, strict=False)
+                if net.prefixlen == 0:
+                    raise PolicyError("every address is the Anywhere switch, not a machine")
+                if net.is_loopback:
+                    raise PolicyError("this computer is not another machine")
+        user = self._managed(uid)
+        user.ssh_anywhere = bool(anywhere)
+        user.ssh_hosts = hosts
         self._save_and_apply()
         return None
 

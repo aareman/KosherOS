@@ -14,7 +14,7 @@ from __future__ import annotations
 import logging
 import re
 
-from .policy import INSPECTED_MODES, SAFESEARCH_MODES, Policy
+from .policy import UNFILTERED_MODES, INSPECTED_MODES, SAFESEARCH_MODES, Policy
 
 WHITELIST_CONF = "/etc/kosher/dnsmasq.d/whitelist.conf"
 SAFESEARCH_CONF = "/etc/kosher/dnsmasq.d/safesearch.conf"
@@ -133,6 +133,18 @@ def render(policy: Policy, tailnet: tuple[str, ...] = ()) -> str:
     # reaches on 443 without the proxy (nft.py, syncthing.py, #213).
     from .syncthing import HOSTS as SYNCTHING_HOSTS
     syncthing_domains = sorted(SYNCTHING_HOSTS)
+    # Each account's SSH machines by name (#257) -> its own ssh4_N/ssh6_N,
+    # for the accounts nft.py gives those sets.
+    from .nft import ssh_entry_kind, ssh_set_names
+    ssh_groups = []
+    for u in sorted(policy.effective_users(), key=lambda u: u.uid):
+        if u.mode in UNFILTERED_MODES or u.mode == "none" or getattr(u, "ssh_anywhere", False):
+            continue
+        names = sorted({h.strip().lower().removeprefix("*.")
+                        for h in getattr(u, "ssh_hosts", ()) if ssh_entry_kind(h) == "name"})
+        if names:
+            ssh_groups.append((f"# SSH machines of uid {u.uid} -> ssh4_{u.uid}/ssh6_{u.uid}",
+                               ssh_set_names(u.uid), names))
 
     # One directive per name, naming every set the name belongs in. dnsmasq
     # uses only the single nftset= line with the longest matching domain, so
@@ -146,6 +158,7 @@ def render(policy: Policy, tailnet: tuple[str, ...] = ()) -> str:
         ("# User whitelists -> wl4/wl6", ("wl4", "wl6"), user_domains),
         ("# Git over SSH for developer accounts -> git4/git6", ("git4", "git6"), git_domains),
         ("# Syncthing's discovery and relay list -> st4/st6", ("st4", "st6"), syncthing_domains),
+        *ssh_groups,
     )
     lines = [
         f"# Rendered by kosherd from policy revision {policy.revision}. DO NOT EDIT.",
@@ -247,7 +260,8 @@ def render_category_blocks(policy: Policy, bundle, tailnet: tuple[str, ...] = ()
         lines.append(f"# Blocking {', '.join(sorted(rendered))} for users "
                      "the proxy does not see.")
     for domain in bundle.domains_in(rendered):
-        if _never_blocked(domain, (*tailnet, *RESOLVER_NEVER_BLOCKED)):
+        if _never_blocked(domain, (*tailnet, *RESOLVER_NEVER_BLOCKED,
+                                   *_adblock_never_blocked(policy))):
             continue
         # 0.0.0.0 rather than NXDOMAIN: a browser shows a connection error
         # instead of retrying elsewhere.
@@ -258,6 +272,14 @@ def render_category_blocks(policy: Policy, bundle, tailnet: tuple[str, ...] = ()
 
 def _never_blocked(domain: str, allowed) -> bool:
     return any(_covers(name.removeprefix("*."), domain) for name in allowed)
+
+
+def _adblock_never_blocked(policy) -> tuple[str, ...]:
+    """The payment and fraud-check hosts no resolver refuses (#265): the
+    built-in set and the administrator's additions. `getattr`, because the
+    tests hand these renderers bare policy stubs."""
+    from . import paymentsecurity
+    return tuple(paymentsecurity.combined(getattr(policy, "adblock_allowed", ())))
 
 
 # -- the tailnet --------------------------------------------------------------
@@ -330,7 +352,15 @@ def render_adblock(policy: Policy, bundle) -> str:
     if not policy.adblock:
         lines.append("# Ad blocking is switched off.")
         return "\n".join(lines) + "\n"
+    # A checkout's fraud check is fingerprinting too, so the tracker lists
+    # carry it; refused, the order fails after the cart is consumed (#265).
+    # Those hosts, and what an administrator added, stay resolvable.
+    reachable = _adblock_never_blocked(policy)
     domains = bundle.domains_in({ADBLOCK_CATEGORY})
-    lines.append(f"# {len(domains)} advertising and tracker domains, for every account.")
-    lines += [f"address=/{domain}/" for domain in domains]
+    kept = [d for d in domains if not _never_blocked(d, reachable)]
+    lines.append(f"# {len(kept)} advertising and tracker domains, for every account.")
+    if len(kept) != len(domains):
+        lines.append(f"# {len(domains) - len(kept)} left reachable: payment and "
+                     "fraud-check hosts a checkout needs (paymentsecurity.py).")
+    lines += [f"address=/{domain}/" for domain in kept]
     return "\n".join(lines) + "\n"

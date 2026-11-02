@@ -115,6 +115,8 @@ ACTIONS = {
     # Machine-wide ad and tracker blocking at the resolvers. Turning it off
     # weakens what reaches the screen, so it is guardian-gated.
     "SetAdBlock": ACTION_MANAGE_FILTER,
+    # A host the ad blocker leaves reachable, for every account (#265).
+    "SetAdBlockAllowed": ACTION_MANAGE_FILTER,
     # How long and when an account may be signed in. Loosening a limit
     # weakens the protection like any other filter change, so it takes
     # the same road: a filter action, guardian-gated.
@@ -123,6 +125,9 @@ ACTIONS = {
     # Beyond the web: video calls (UDP the filter cannot read) and extra
     # ports. Opening either widens what the account reaches.
     "SetNetworkAccess": ACTION_MANAGE_FILTER,
+    # SSH to other machines (#257): a tunnel the filter cannot read, to
+    # the listed machines or anywhere. Widens what the account reaches.
+    "SetSsh": ACTION_MANAGE_FILTER,
     # Developer tools: the Nix daemon and the registries, directly. On
     # widens what the account reaches, so dual-controlled like a filter.
     "SetDeveloperTools": ACTION_MANAGE_FILTER,
@@ -281,7 +286,8 @@ GUARDIAN_GATED = frozenset({
     "SetMediaLevel",
     "SetLanguageFilter", "SetYouTube", "SetCalm",
     "SetGuestConfig", "DisableGuardian", "Enrol", "Unenrol",
-    "SetAdBlock", "SetTimeLimits", "SetChannel", "TryImage", "Rollback", "SetNetworkAccess",
+    "SetAdBlock", "SetAdBlockAllowed", "SetTimeLimits", "SetChannel", "TryImage", "Rollback",
+    "SetNetworkAccess", "SetSsh",
     "SetDeveloperTools", "SetBuildSources",
     "SetBootMenuPassword",
     "SetUserAppAccess", "SetUserBlockedAppKinds", "SetUserBlockedApps",
@@ -316,7 +322,8 @@ CHANGES = frozenset({
     "ApplyProfile", "SaveProfile", "DeleteProfile", "ApproveRequest",
     "DismissRequest", "AllowUrl", "EditList", "SetMediaLevel",
     "SetLanguageFilter", "SetYouTube", "SetCalm", "SetUserAdmin", "SetLayout",
-    "SetCoverStyle", "SetAdBlock", "SetTimeLimits", "SetNetworkAccess", "SetDeveloperTools",
+    "SetCoverStyle", "SetAdBlock", "SetAdBlockAllowed", "SetTimeLimits", "SetNetworkAccess",
+    "SetDeveloperTools",
     "SetBuildSources",
     "SetBootMenuPassword", "SetGuestConfig", "CreateUser",
     "AdoptUser", "RemoveUser", "ResetPassword", "SetUserApps", "RemoveApp", "RemoveUnusedApps",

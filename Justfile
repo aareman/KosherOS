@@ -2,7 +2,8 @@
 # or automatic with direnv): it brings python/pytest, just, nft, qemu,
 # cloud-localds, podman and the git hooks.
 #
-#   Inner loop  (seconds):  just test | just render | just deploy-kosherd
+#   Inner loop  (seconds):  just test | just render | just deploy
+#   Dev VM      (once):     just dev-vm                              master's machine, set up
 #   Stage-1 VM  (minutes):  just fedora-vm && just dev-install
 #   Image loop  (minutes):  just build && just vm-upgrade        a running VM
 #                           just vm-rootless && just try         a fresh disk
@@ -210,6 +211,23 @@ dev-install VM="kosher-fedora":
     rsync -a --exclude .git --exclude build --exclude .devenv --exclude .direnv \
         -e "{{vmssh}}" . {{VM}}:/tmp/kosher-linux/
     {{vmssh}} {{VM}} "sudo bash /tmp/kosher-linux/scripts/dev-install.sh"
+
+# Master's set-up machine (the base `just pr-test` keeps), booted for
+# keeps: a window, a root shell on 127.0.0.1:2223, state kept across
+# boots. Code goes in with `just deploy`. Verbs: `just dev-vm ssh`,
+# `status`, `down`, `fresh` (start over from the base).
+[group('dev vm')]
+dev-vm *ARGS:
+    scripts/dev-vm.sh {{ if ARGS == "" { "up" } else { ARGS } }}
+
+# Everything this checkout changes, into the running VM, in seconds:
+# kosherd, the apps, os-image/files and the schema under bootc usr-overlay
+# (gone at the next reboot: a dev push's lifetime), then the daemon and
+# the filter restarted. A change to the Containerfile itself needs
+# `just build && just vm-upgrade`. Then: just test-vm kosher-dev 20
+[group('dev vm')]
+deploy VM="kosher-dev":
+    scripts/deploy.sh {{VM}}
 
 # Sub-second inner loop: push local kosherd code + schema into a VM and
 # restart it. Works on the stock VM (kosher-fedora, via sudo) and on the

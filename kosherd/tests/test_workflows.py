@@ -292,6 +292,10 @@ def test_every_pull_request_that_reaches_the_machine_is_tested_in_a_vm():
     assert "podman push --digestfile" in built, "the runners switch to the image by digest"
     assert "skopeo inspect" in built and ":edge" in built, \
         "a change to nothing in the image tests master's own"
+    # ...only once Checks has built it: a train in the ten minutes after an
+    # image-changing merge once tested new suites against the old image.
+    assert 'git merge-base --is-ancestor "$last" "$built_at"' in built
+    assert "org.opencontainers.image.version" in built
     assert build["outputs"]["image"]
     vm = document["jobs"]["vm"]
     assert vm["needs"] == ["changes", "build"]
@@ -424,3 +428,27 @@ def test_the_weekly_release_may_ask_for_the_docs_rebuild():
     assert roundup["permissions"]["actions"] == "write"
     runs = "\n".join(step.get("run", "") for step in roundup["jobs"]["roundup"]["steps"])
     assert "gh workflow run ci.yml" in runs
+def test_the_train_lands_only_the_commit_it_tested_and_may_carry_a_workflow_change():
+    # A push to a queued pull request after assembly used to land untested
+    # (plain `gh pr merge`); and the workflow's own token cannot push a
+    # workflow file's new content, so a MERGE_TRAIN_TOKEN secret, when
+    # there is one, does the push and the merges instead.
+    train = _train()
+    assemble = train["jobs"]["assemble"]
+    checkout = assemble["steps"][0]
+    assert checkout["with"]["token"] == "${{ secrets.MERGE_TRAIN_TOKEN || github.token }}"
+    build = assemble["steps"][1]["run"]
+    assert 'heads="$heads $n:$(git rev-parse "pr-$n")"' in build
+    assert "heads" in assemble["outputs"]
+    land = train["jobs"]["land"]["steps"][0]
+    assert land["env"]["MERGE_TRAIN_TOKEN"] == "${{ secrets.MERGE_TRAIN_TOKEN }}"
+    run = land["run"]
+    assert '--match-head-commit "$(head_of "$n")"' in run
+    assert 'GH_TOKEN="${MERGE_TRAIN_TOKEN:-$GH_TOKEN}" gh pr merge' in run
+    # Labels and comments stay with the workflow's token: a label by the
+    # train's own token would wake another train.
+    assert 'GH_TOKEN="${MERGE_TRAIN_TOKEN:-$GH_TOKEN}" gh pr edit' not in run
+    # A merge by the token is a push and releases itself; only the
+    # workflow's own merges need the ask.
+    assert '[ "$landed" = 1 ] && [ -z "$MERGE_TRAIN_TOKEN" ]' in run
+    assert "gh workflow run ci.yml" in run and "landed=true" in run

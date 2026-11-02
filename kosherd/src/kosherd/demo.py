@@ -335,6 +335,10 @@ class DemoClient:
         self.policy["adblock"]["enabled"] = enabled
         self._change(None, "SetAdBlock", [enabled])
 
+    def set_adblock_allowed(self, hosts, pw=""):
+        self.policy["adblock"]["allowed"] = sorted(set(hosts))
+        self._change(None, "SetAdBlockAllowed", [list(hosts)])
+
     def my_layout(self): return self._user(1002).get("layout", "classic")
 
     def set_my_layout(self, layout):
@@ -431,6 +435,12 @@ class DemoClient:
         u["video_calls"] = bool(video_calls)
         u["extra_ports"] = sorted(set(int(p) for p in extra_ports))
         self._change(uid, "SetNetworkAccess", [uid, bool(video_calls), u["extra_ports"]])
+
+    def set_ssh(self, uid, anywhere, hosts, pw=""):
+        u = self._user(uid)
+        u["ssh_anywhere"] = bool(anywhere)
+        u["ssh_hosts"] = [str(h) for h in hosts]
+        self._change(uid, "SetSsh", [uid, bool(anywhere), u["ssh_hosts"]])
 
     def set_time_limits(self, uid, settings, pw=""):
         self._user(uid)["time"] = timelimits.parse(settings)

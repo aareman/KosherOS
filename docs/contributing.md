@@ -102,16 +102,23 @@ just store-demo                 # the same for the Store
 just docs serve                 # this site, with live reload
 ```
 
-For anything that touches a running service, there is a stock Fedora VM
-that takes about a minute to set up and a second to update:
+For anything that touches a running service, there is a machine that
+stays up — master's image, installed and set up, the base `just pr-test`
+keeps — and a change is on it seconds after it is saved:
 
 ```sh
-just fedora-vm        # fetch and boot the test VM (plain QEMU/KVM)
-just dev-install      # install the whole filter stack into it
-just deploy-kosherd   # push local kosherd code into the VM and restart it
-just fedora-vm ssh    # a shell in the VM
-just test-vm          # the integration suites, inside the VM
+just dev-vm                 # boot it (a window, a root shell on 127.0.0.1:2223)
+just deploy                 # this checkout's code into it, services restarted
+just test-vm kosher-dev 20  # a suite, inside it
+just dev-vm ssh             # a shell in it
+just dev-vm fresh           # start over from the base
 ```
+
+The one change a deploy cannot carry is one to the Containerfile itself:
+`just build && just vm-upgrade` updates the machine to the built image.
+The older road, a stock Fedora cloud VM with the stack installed into it,
+is still there: `just fedora-vm && just dev-install`, then
+`just deploy-kosherd` and `just test-vm`.
 
 Changes to the image itself go through a build:
 

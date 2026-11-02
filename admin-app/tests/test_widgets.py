@@ -121,6 +121,9 @@ class FakeClient:
     def set_network_access(self, uid, video_calls, extra_ports, guardian_password=""):
         self.calls.append(("set_network_access", uid, video_calls, list(extra_ports)))
 
+    def set_ssh(self, uid, anywhere, hosts, guardian_password=""):
+        self.calls.append(("set_ssh", uid, anywhere, list(hosts)))
+
     def set_developer_tools(self, uid, enabled, guardian_password=""):
         self.calls.append(("set_developer_tools", uid, enabled))
 
@@ -3355,3 +3358,35 @@ def test_extras_are_inert_outside_filtered_internet():
     group = page.calm_row.get_ancestor(Adw.PreferencesGroup)
     assert not group.get_sensitive()
     assert "Filtered internet" in group.get_description()
+
+
+# -- SSH to other machines (#257) ---------------------------------------------------
+
+def test_a_filtered_account_gets_the_ssh_machines_row_and_the_anywhere_switch():
+    _win, page = _detail_for(a_user(mode="filtered", ssh_hosts=["nas.example.org"]))
+    assert _row_named(page, "These machines").get_text() == "nas.example.org"
+    row = _row_named(page, "Anywhere")
+    assert not row.get_active()
+    assert "cannot be filtered" in row.get_subtitle()
+
+
+def test_ssh_anywhere_on_calls_the_daemon_with_the_machines_kept():
+    win, page = _detail_for(a_user(mode="filtered", ssh_hosts=["nas.example.org"]))
+    _row_named(page, "Anywhere").set_active(True)
+    drain()
+    assert ("set_ssh", 1001, True, ["nas.example.org"]) in win.client.calls
+
+
+def test_applying_the_ssh_machines_calls_the_daemon_with_them_tidied():
+    win, page = _detail_for(a_user(mode="filtered"))
+    row = _row_named(page, "These machines")
+    row.set_text("NAS.example.org, 10.0.0.0/8 , tailnet")
+    row.emit("apply")
+    drain()
+    assert ("set_ssh", 1001, False, ["nas.example.org", "10.0.0.0/8", "tailnet"]) in win.client.calls
+
+
+def test_an_unfiltered_account_is_told_ssh_is_already_open():
+    _win, page = _detail_for(a_user(mode="unfiltered"))
+    with pytest.raises(AssertionError):
+        _row_named(page, "These machines")

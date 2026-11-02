@@ -56,6 +56,12 @@ proxy could not read them:
   web* on the account's page, for a program that is neither web nor mail.
   The filter's own ports, and Syncthing's (see [Syncthing](#syncthing)), can
   never be granted this way. Empty by default.
+- **SSH to other machines**, under that heading on the account's page: the
+  machines an account may connect to over SSH — a name, an address, a
+  range, or `tailnet` for every machine on this computer's tailnet — and
+  nothing else. Port 22 is otherwise closed, because an SSH tunnel reaches
+  anything. *Anywhere* opens it to every machine, for an account an
+  administrator trusts with that, and the switch says so.
 - **Video calls.** Zoom, Meet and school calls send picture and sound over
   UDP to high ports, which cannot be inspected. That is allowed by default
   so calls work without a visit to the admin app. The switch on the
@@ -381,6 +387,26 @@ sits on the Protection page under "Applies to everyone", because one
 resolver cannot answer differently per account. It does not do cosmetic
 filtering, first-party ads served from the site's own domain, or ads inside
 YouTube's player, which the YouTube limits handle.
+
+### What it never blocks: a checkout's fraud check
+
+A shop does not approve a card on the number alone. Before the order is
+accepted, a script from a fraud service (ThreatMetrix, Signifyd, Forter,
+Riskified and the like) fingerprints the browser, the payment processor
+loads its own fraud signals, and the card's bank may open a "confirm it is
+you" frame. Those scripts look exactly like trackers, so every tracker
+list carries them. Refused, the order fails after the cart has been
+consumed, with nothing on the page to say why.
+
+So the ad blocker leaves those hosts resolvable, and the proxy's category
+lists step aside for them for every filtered account. Only the category
+lists: a page from one of them is still read and scored, and a page rule
+can still block it. `kosherctl adblock allowed` shows the built-in set.
+For the next one, `kosherctl adblock allow HOST` adds a host (or
+`*.host` for everything under it) for every account; it takes the guardian
+password, like switching the blocker off, and `kosherctl adblock disallow`
+takes it back. The built-in entries cannot be removed; a family that must
+block one does it with a page rule on the account.
 
 ## Asking for a page, and the activity log
 

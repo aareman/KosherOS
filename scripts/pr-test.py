@@ -1219,6 +1219,22 @@ def push(image: str, tag: str, env: dict, log: Path) -> str:
     return digestfile.read_text().strip()
 
 
+# Until kosherd is active and kosher-dns has been up for a few seconds since
+# its last start, and HOST resolves: a minute and a half at most.
+RESOLVER_SETTLED = """for i in $(seq 45); do
+    if systemctl is-active --quiet kosherd && systemctl is-active --quiet kosher-dns; then
+        since=$(systemctl show kosher-dns -p ActiveEnterTimestamp --value)
+        up=$(( $(date +%s) - $(date -d "$since" +%s 2>/dev/null || echo 0) ))
+        if [ "$up" -ge 5 ] && getent hosts {host} >/dev/null 2>&1; then
+            exit 0
+        fi
+    fi
+    sleep 2
+done
+systemctl --no-pager status kosherd kosher-dns 2>&1 | head -20
+exit 1
+"""
+
 SWITCH_SETUP = f"""set -e
 mkdir -p /etc/containers/registries.conf.d
 printf '[[registry]]\\nlocation = "10.0.2.2:{REGISTRY_PORT}"\\ninsecure = true\\n' \\
@@ -1261,16 +1277,23 @@ def switch_machine(st: Stage, machine: Path, workdir: Path, key: Path, ref: str,
             raise StageError("no ssh")
         if not local:
             # The machine's own resolver (kosher-dns) is up a few seconds
-            # after sshd, and a switch by name before it answers fails
-            # with "Temporary failure in name resolution". The harness's
-            # registry is an address, so it never waited.
+            # after sshd, and kosherd restarts it once more when it applies
+            # the policy at boot: a switch by name in that window failed
+            # with "Temporary failure in name resolution" — once before the
+            # resolver answered at all, twice in the middle of a pull. So:
+            # kosherd active, the resolver up for a few seconds since its
+            # last (re)start, and the registry's name answering. The
+            # harness's registry is an address, so it never waited.
             host = ref.split("/", 1)[0]
-            rc, out = vm.sh(f"for i in $(seq 45); do getent hosts {host} >/dev/null && exit 0; "
-                            "sleep 2; done; exit 1", timeout=120)
-            if not st.check(f"the machine resolves {host}", rc == 0, out):
+            rc, out = vm.sh(RESOLVER_SETTLED.format(host=host), timeout=180)
+            if not st.check(f"the machine resolves {host}, with its resolver settled", rc == 0, out):
                 raise StageError("no name resolution")
-        rc, out = vm.sh((SWITCH_SETUP if local else "set -e\n")
-                        + f"bootc switch {' '.join(enforce + [target])}", timeout=1800)
+        switch = (SWITCH_SETUP if local else "set -e\n") + f"bootc switch {' '.join(enforce + [target])}"
+        rc, out = vm.sh(switch, timeout=1800)
+        if rc != 0 and not local and "name resolution" in out:
+            # The resolver moved under the pull after all: once more.
+            vm.sh(RESOLVER_SETTLED.format(host=host), timeout=180)
+            rc, out = vm.sh(switch, timeout=1800)
         with st.log.open("a") as fh:
             fh.write(out)
         if not st.check("bootc switch stages the image", rc == 0, out[-1500:]):

@@ -292,6 +292,10 @@ def test_every_pull_request_that_reaches_the_machine_is_tested_in_a_vm():
     assert "podman push --digestfile" in built, "the runners switch to the image by digest"
     assert "skopeo inspect" in built and ":edge" in built, \
         "a change to nothing in the image tests master's own"
+    # ...only once Checks has built it: a train in the ten minutes after an
+    # image-changing merge once tested new suites against the old image.
+    assert 'git merge-base --is-ancestor "$last" "$built_at"' in built
+    assert "org.opencontainers.image.version" in built
     assert build["outputs"]["image"]
     vm = document["jobs"]["vm"]
     assert vm["needs"] == ["changes", "build"]

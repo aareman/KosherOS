@@ -113,10 +113,28 @@ jobs:
           # app's tests, copied in but never installed, are not on.
           if ! git diff --name-only "$since" HEAD | grep -E -q \
                '^(os-image/|(kosherd|admin-app|store-app|setup-app|myfilter-app|welcome-app|look-app)/(src/|pyproject)|search-app/(kosher_search/|pyproject)|mitm/|branding/|policy/|scripts/fetch-categories\.py|scripts/curated-sites\.json|scripts/check-searxng-settings\.py|scripts/version\.py)'; then
-            digest="$(skopeo inspect --format '{{.Digest}}' "docker://$MASTER_IMAGE:edge")"
-            echo "nothing the image is built from changed: testing master's :edge ($digest)"
-            echo "image=$MASTER_IMAGE:edge@$digest" >> "$GITHUB_OUTPUT"
-            exit 0
+            # :edge is master's image only once Checks has built it, some
+            # ten minutes after a merge that changes the image; a train in
+            # that window once tested new suites against the old image.
+            # The version label names the merge :edge was built at, and
+            # master's last change to the image must be in that merge's
+            # past. Otherwise this builds, as for a change to the image.
+            have="$(skopeo inspect --format '{{index .Labels "org.opencontainers.image.version"}}' "docker://$MASTER_IMAGE:edge")"
+            built_at="$(git rev-list -n1 "v$have" 2>/dev/null || true)"
+            last="$(git log -1 --format=%H origin/master -- os-image kosherd/src kosherd/pyproject.toml \
+                      admin-app/src admin-app/pyproject.toml store-app/src store-app/pyproject.toml \
+                      setup-app/src setup-app/pyproject.toml myfilter-app/src myfilter-app/pyproject.toml \
+                      welcome-app/src welcome-app/pyproject.toml look-app/src look-app/pyproject.toml \
+                      search-app/kosher_search search-app/pyproject.toml mitm branding policy \
+                      scripts/fetch-categories.py scripts/curated-sites.json \
+                      scripts/check-searxng-settings.py scripts/version.py)"
+            if [ -n "$built_at" ] && git merge-base --is-ancestor "$last" "$built_at"; then
+              digest="$(skopeo inspect --format '{{.Digest}}' "docker://$MASTER_IMAGE:edge")"
+              echo "nothing the image is built from changed, and :edge ($have) has master's image: testing it ($digest)"
+              echo "image=$MASTER_IMAGE:edge@$digest" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            echo "nothing the image is built from changed, but :edge ($have) is behind master's image (${last::12}): building"
           fi
           version="$(python3 scripts/version.py show)"
           podman build --build-arg "KOSHER_VERSION=$version" \

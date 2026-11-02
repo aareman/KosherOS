@@ -166,7 +166,11 @@ jobs:
 
   vm:
     name: VM test of the train
-    needs: [assemble]
+    # After the quick checks, not beside them: they take a minute, the VM
+    # test ten or more, and a train whose unit tests failed used to run
+    # the whole VM test anyway before saying so. A failed check skips the
+    # VM test and the train lands or splits at once.
+    needs: [assemble, checks]
     if: needs.assemble.outputs.prs != ''
     uses: ./.github/workflows/vm-test.yml
     with:

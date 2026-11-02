@@ -823,3 +823,58 @@ def test_set_running_enables_or_disables_keyd():
 
     with pytest.raises(KeymapError, match="not found"):
         set_running(True, run=fails)
+
+
+# -- keyd's unit coming up puts the person's files back (#276) ---------------------
+
+def test_keyd_coming_up_again_puts_the_persons_files_back(monkeypatch):
+    """keyd's unit starts from the computer's config alone; a start after
+    a sign-in, or a restart after its panic keys, dropped the person's
+    files until the next session change. kosherd now refreshes when
+    systemd says the unit is active: at once, and again a moment later,
+    since the unit is active before keyd answers a reload."""
+    gi = pytest.importorskip("gi")
+    gi.require_version("Gio", "2.0")
+    from gi.repository import GLib
+
+    from kosherd import daemon as daemon_mod
+
+    refreshed, scheduled = [], []
+    fake = type("D", (), {"_refresh_keyboard": lambda self: refreshed.append(1)})()
+    monkeypatch.setattr(daemon_mod.GLib, "timeout_add",
+                        lambda delay, fn: scheduled.append((delay, fn)))
+    changed = GLib.Variant("(sa{sv}as)", (
+        "org.freedesktop.systemd1.Unit", {"ActiveState": GLib.Variant("s", "active")}, []))
+    daemon_mod.Daemon._keyd_unit_changed(fake, None, None, None, None, None, changed, None)
+    assert refreshed == [1]
+    assert [d for d, _ in scheduled] == [1000, 3000]
+    for _, fn in scheduled:
+        assert fn() is False, "a one-shot timeout"
+    assert refreshed == [1, 1, 1]
+
+    # On its way down, nothing: the files would only be wiped again.
+    stopping = GLib.Variant("(sa{sv}as)", (
+        "org.freedesktop.systemd1.Unit", {"ActiveState": GLib.Variant("s", "deactivating")}, []))
+    daemon_mod.Daemon._keyd_unit_changed(fake, None, None, None, None, None, stopping, None)
+    assert refreshed == [1, 1, 1]
+
+
+def test_a_reload_keyd_did_not_take_is_owed_to_the_next_refresh(kb):
+    """keyd's unit is active a beat before its socket answers, so the
+    reload right after it comes up can fail while the files on disk are
+    already right. The next refresh must reload anyway (#276)."""
+    from types import SimpleNamespace
+
+    kb.set(1001, {"default.conf": CAPS}, active_uid=1001)
+    real = kb.run
+    kb.run = lambda argv, **kw: (SimpleNamespace(returncode=1, stdout="", stderr="no socket")
+                                 if argv[1] == "reload" else real(argv, **kw))
+    for f in kb.system_dir.glob("*.conf"):
+        f.unlink()          # keyd's own start emptied its directory
+    assert kb.refresh(1001) is False
+    assert kb.live() == kb.wanted(1001), "the files were written back"
+    kb.run = real
+    before = len(kb.fake.calls)
+    assert kb.refresh(1001) is True, "the same files, but keyd never read them"
+    assert kb.fake.calls[before:] == [["reload"]]
+    assert kb.refresh(1001) is False, "and once it took, nothing more"

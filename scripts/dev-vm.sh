@@ -133,7 +133,7 @@ case "${1:-}" in
         if running; then
             ssh -F "$ssh_config" -o ConnectTimeout=3 kosher-dev systemctl poweroff 2>/dev/null || true
             for _ in $(seq 30); do running || break; sleep 1; done
-            running && kill "$(cat "$pidfile")" 2>/dev/null || true
+            if running; then kill "$(cat "$pidfile")" 2>/dev/null || true; fi
             echo stopped
         else
             echo "not running"

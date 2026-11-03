@@ -135,16 +135,21 @@ def render(policy: Policy, tailnet: tuple[str, ...] = ()) -> str:
     syncthing_domains = sorted(SYNCTHING_HOSTS)
     # Each account's SSH machines by name (#257) -> its own ssh4_N/ssh6_N,
     # for the accounts nft.py gives those sets.
-    from .nft import ssh_entry_kind, ssh_set_names
+    # A name with a port goes into that port's sets (ssh4_N_222).
+    from .nft import ssh_entry, ssh_entry_kind, ssh_ports, ssh_set_names
     ssh_groups = []
     for u in sorted(policy.effective_users(), key=lambda u: u.uid):
         if u.mode in UNFILTERED_MODES or u.mode == "none" or getattr(u, "ssh_anywhere", False):
             continue
-        names = sorted({h.strip().lower().removeprefix("*.")
-                        for h in getattr(u, "ssh_hosts", ()) if ssh_entry_kind(h) == "name"})
-        if names:
-            ssh_groups.append((f"# SSH machines of uid {u.uid} -> ssh4_{u.uid}/ssh6_{u.uid}",
-                               ssh_set_names(u.uid), names))
+        hosts = getattr(u, "ssh_hosts", ())
+        for port in ssh_ports(hosts):
+            names = sorted({host.removeprefix("*.")
+                            for host, p in map(ssh_entry, hosts)
+                            if p == port and ssh_entry_kind(host) == "name"})
+            if names:
+                s4, s6 = ssh_set_names(u.uid, port)
+                ssh_groups.append((f"# SSH machines of uid {u.uid} -> {s4}/{s6}",
+                                   (s4, s6), names))
 
     # One directive per name, naming every set the name belongs in. dnsmasq
     # uses only the single nftset= line with the longest matching domain, so

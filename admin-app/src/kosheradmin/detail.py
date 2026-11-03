@@ -604,7 +604,8 @@ class UserDetailPage(Adw.NavigationPage):
         group.add(anywhere)
         hint_under(group, ("A machine is a name, an address or a range, separated by commas: "
             "server.example.com, 192.168.1.20, 10.0.0.0/8. The word tailnet means every "
-            "machine on this computer's tailnet."))
+            "machine on this computer's tailnet. For SSH on a port other than 22, add it "
+            "after a colon: git.example.com:222."))
         return group
 
     def _categories_group(self, user: dict) -> Adw.PreferencesGroup:

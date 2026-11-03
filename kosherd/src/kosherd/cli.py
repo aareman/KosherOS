@@ -260,7 +260,8 @@ def cmd_network(args) -> int:
 
 
 def cmd_ssh(args) -> int:
-    """kosherctl ssh UID [--hosts nas.example.org,10.0.0.5,tailnet|none] [--anywhere on|off]"""
+    """kosherctl ssh UID [--hosts nas.example.org,git.example.org:222,10.0.0.5,tailnet|none]
+    [--anywhere on|off]"""
     c = _client()
     user = next((u for u in c.get_policy().get("users", []) if u.get("uid") == args.uid), None)
     if user is None:
@@ -1435,8 +1436,8 @@ def main(argv: list[str] | None = None) -> int:
 
     s = sub.add_parser("ssh", help="which other machines an account may ssh to (#257)")
     s.add_argument("uid", type=int)
-    s.add_argument("--hosts", help="comma-separated names, addresses, ranges or 'tailnet'; "
-                                   "or 'none'")
+    s.add_argument("--hosts", help="comma-separated names, addresses, ranges or 'tailnet', "
+                                   "each with :PORT if not 22; or 'none'")
     s.add_argument("--anywhere", choices=["on", "off"])
     s.add_argument("--guardian-password")
     s.set_defaults(func=cmd_ssh)

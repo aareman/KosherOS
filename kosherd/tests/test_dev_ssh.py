@@ -1,4 +1,5 @@
-"""Dev disks must be reachable as root; production disks must not run sshd.
+"""Dev disks must be reachable as root; production disks run sshd only for
+the accounts an administrator let sign in over SSH (sshin.py).
 
 Both from ONE image. The build used to `systemctl disable sshd` and the dev
 disk config asked bootc-image-builder to enable it again, which it never
@@ -16,11 +17,20 @@ DROPIN = ROOT / "os-image/files/usr/lib/systemd/system/sshd.service.d/kosher-dev
 DEV_CONFIG = (ROOT / "os-image/dev-config.toml").read_text()
 
 
-def test_sshd_is_enabled_in_the_image_but_gated_on_a_root_key():
+def test_sshd_is_enabled_in_the_image_but_gated_on_a_root_key_or_kosherds_file():
+    from kosherd import sshin
+
     assert "systemctl disable sshd" not in CONTAINERFILE
     assert "systemctl enable sshd.service" in CONTAINERFILE
-    text = DROPIN.read_text()
-    assert "ConditionPathExists=/root/.ssh/authorized_keys" in text
+    conditions = [l for l in DROPIN.read_text().splitlines() if l.startswith("Condition")]
+    # Either one starts it (the | prefix); with neither, sshd stays off.
+    assert conditions == ["ConditionPathExists=|/root/.ssh/authorized_keys",
+                          f"ConditionPathExists=|{sshin.CONF_PATH}"]
+
+
+def test_an_ssh_sign_in_meets_the_same_time_limits_as_the_login_screen():
+    assert "for f in gdm-password gdm-autologin login sshd; do" in CONTAINERFILE
+    assert "grep -q pam_time /etc/pam.d/sshd" in CONTAINERFILE
 
 
 def test_the_dev_disk_injects_a_root_key_and_relies_on_nothing_else():

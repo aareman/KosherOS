@@ -127,6 +127,9 @@ class FakeClient:
     def set_developer_tools(self, uid, enabled, guardian_password=""):
         self.calls.append(("set_developer_tools", uid, enabled))
 
+    def set_ssh_in(self, uid, enabled, guardian_password=""):
+        self.calls.append(("set_ssh_in", uid, enabled))
+
     def boot_menu_protected(self):
         return self._overrides.get("boot_menu", True)
 
@@ -2815,6 +2818,23 @@ def test_switching_developer_tools_on_calls_the_daemon():
     _row_named(page, "Developer tools").set_active(True)
     drain()
     assert ("set_developer_tools", 1001, True) in win.client.calls
+
+
+def test_sign_in_over_ssh_is_offered_only_with_developer_tools_on():
+    _win, page = _detail_for(a_user(mode="filtered"))
+    with pytest.raises(AssertionError):
+        _row_named(page, "Sign in over SSH")
+    _win, page = _detail_for(a_user(mode="filtered", developer_tools=True))
+    row = _row_named(page, "Sign in over SSH")
+    assert not row.get_active()
+    assert "~/.ssh/authorized_keys" in row.get_subtitle()
+
+
+def test_switching_sign_in_over_ssh_on_calls_the_daemon():
+    win, page = _detail_for(a_user(mode="filtered", developer_tools=True))
+    _row_named(page, "Sign in over SSH").set_active(True)
+    drain()
+    assert ("set_ssh_in", 1001, True) in win.client.calls
 
 
 # -- the boot menu password row (#129) ------------------------------------------

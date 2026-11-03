@@ -131,6 +131,9 @@ ACTIONS = {
     # Developer tools: the Nix daemon and the registries, directly. On
     # widens what the account reaches, so dual-controlled like a filter.
     "SetDeveloperTools": ACTION_MANAGE_FILTER,
+    # Signing in to the account over SSH from another machine: what comes
+    # in over the connection is not read by the filter.
+    "SetSshIn": ACTION_MANAGE_FILTER,
     # Where a Nix build may download from, beyond the built-in hosts.
     "SetBuildSources": ACTION_MANAGE_FILTER,
     # The boot menu: the way round every other protection, so setting its
@@ -289,7 +292,7 @@ GUARDIAN_GATED = frozenset({
     "SetGuestConfig", "DisableGuardian", "Enrol", "Unenrol",
     "SetAdBlock", "SetAdBlockAllowed", "SetTimeLimits", "SetChannel", "TryImage", "Rollback",
     "SetNetworkAccess", "SetSsh",
-    "SetDeveloperTools", "SetBuildSources",
+    "SetDeveloperTools", "SetSshIn", "SetBuildSources",
     "SetBootMenuPassword",
     "SetUserAppAccess", "SetUserBlockedAppKinds", "SetUserBlockedApps",
     "SetUserAppApproval", "SetSyncthingLan", "SetSyncthingEnabled",
@@ -324,7 +327,7 @@ CHANGES = frozenset({
     "DismissRequest", "AllowUrl", "BypassUrl", "EditList", "SetMediaLevel",
     "SetLanguageFilter", "SetYouTube", "SetCalm", "SetUserAdmin", "SetLayout",
     "SetCoverStyle", "SetAdBlock", "SetAdBlockAllowed", "SetTimeLimits", "SetNetworkAccess",
-    "SetDeveloperTools",
+    "SetDeveloperTools", "SetSshIn",
     "SetBuildSources",
     "SetBootMenuPassword", "SetGuestConfig", "CreateUser",
     "AdoptUser", "RemoveUser", "ResetPassword", "SetUserApps", "RemoveApp", "RemoveUnusedApps",
@@ -357,7 +360,7 @@ PER_USER = frozenset({
     "SetBlockedCategories",
     "ApplyProfile", "SaveProfile", "AllowUrl", "BypassUrl", "SetMediaLevel",
     "SetLanguageFilter", "SetYouTube", "SetCalm", "SetUserAdmin", "SetLayout",
-    "SetCoverStyle", "SetTimeLimits", "SetNetworkAccess", "SetDeveloperTools", "InstallAppFor",
+    "SetCoverStyle", "SetTimeLimits", "SetNetworkAccess", "SetDeveloperTools", "SetSshIn", "InstallAppFor",
     "RemoveUser", "ResetPassword", "SetUserApps",
     "SetUserCanInstall", "SetUserAppAccess", "SetUserBlockedAppKinds",
     "SetUserBlockedApps", "SetCaptiveMode", "SetUserAppApproval", "SetSyncthingLan",

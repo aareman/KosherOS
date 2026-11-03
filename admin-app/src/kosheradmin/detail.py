@@ -1346,7 +1346,31 @@ class UserDetailPage(Adw.NavigationPage):
 
         row.connect("notify::active", on_toggle)
         group.add(row)
+        if user.get("developer_tools"):
+            group.add(self._ssh_in_row(user))
         return group
+
+    def _ssh_in_row(self, user: dict) -> Adw.SwitchRow:
+        """Signing in to this account from another machine over SSH. Keys
+        only, so the sentence says where the key goes."""
+        row = Adw.SwitchRow(
+            title="Sign in over SSH",
+            subtitle="Lets this account be used from another computer over SSH. "
+                     "Anything brought in that way isn't checked by the filter. "
+                     "Passwords aren't accepted: add the other computer's key to "
+                     "~/.ssh/authorized_keys in this account.",
+            subtitle_lines=5,
+            active=bool(user.get("ssh_in", False)))
+
+        def on_toggle(switch, _param):
+            wanted = switch.get_active()
+            if wanted == bool(user.get("ssh_in", False)):
+                return
+            self._gated(lambda pw: self.win.client.set_ssh_in(user["uid"], wanted, pw),
+                        f"{user['username']}: sign in over SSH {'on' if wanted else 'off'}")
+
+        row.connect("notify::active", on_toggle)
+        return row
 
     def _syncthing_group(self, user: dict) -> Adw.PreferencesGroup:
         """Syncthing for this account (#213). A supervised account needs it

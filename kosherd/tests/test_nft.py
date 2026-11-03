@@ -429,14 +429,81 @@ def test_ssh_entries_are_told_apart():
         (("100.64.0.0/10", "10.1.2.0/24"), ("fd7a:115c:a1e0::/48",))
 
 
+def test_an_ssh_entry_may_name_its_port():
+    assert nft.ssh_entry("git.example.org") == ("git.example.org", 22)
+    assert nft.ssh_entry(" Git.Example.org:222 ") == ("git.example.org", 222)
+    assert nft.ssh_entry("10.0.0.7:2222") == ("10.0.0.7", 2222)
+    assert nft.ssh_entry("tailnet:2222") == ("tailnet", 2222)
+    # IPv6 takes a port only in brackets; bare, its colons are the address.
+    assert nft.ssh_entry("fd00::5") == ("fd00::5", 22)
+    assert nft.ssh_entry("[fd00::5]:222") == ("fd00::5", 222)
+    assert nft.ssh_entry("[fd00::5]") == ("fd00::5", 22)
+    for bad in ("git.example.org:", "git.example.org:ssh", "git.example.org:0",
+                "git.example.org:65536", "[fd00::5]222"):
+        with pytest.raises(ValueError):
+            nft.ssh_entry(bad)
+    assert nft.ssh_entry_kind("git.example.org:222") == "name"
+    assert nft.ssh_entry_kind("[fd00::5]:222") == "v6"
+    assert nft.ssh_ports(["a.example.org:2222", "b.example.org", "c.example.org:222"]) == [22, 222, 2222]
+
+
+def test_a_named_port_opens_that_machine_on_it_and_nothing_more():
+    out = nft.render(_ssh_policy(hosts=["nas.example.org", "git.example.org:222", "10.0.0.7:222"]),
+                     dns_uid=989, mitm_uid=988)
+    output = out.split("chain output")[1].split("chain input")[0]
+    # Port 22 keeps its sets and names, as before ports could be named.
+    assert "meta skuid 1000 ip daddr @ssh4_1000 tcp dport 22 accept" in output
+    v4 = "meta skuid 1000 ip daddr @ssh4_1000_222 tcp dport 222 accept"
+    v6 = "meta skuid 1000 ip6 daddr @ssh6_1000_222 tcp dport 222 accept"
+    assert v4 in output and v6 in output
+    assert output.index(v4) < output.index("meta skuid vmap")
+    s22 = out.split("set ssh4_1000 {")[1].split("}")[0]
+    s222 = out.split("set ssh4_1000_222 {")[1].split("}")[0]
+    assert "10.0.0.7/32" in s222 and "10.0.0.7" not in s22
+    # Past the proxy for that machine's port only: 222 elsewhere still goes
+    # into the proxy, and 22's machines need nothing (22 is never redirected).
+    nat = out.split("chain dns_redirect")[1].split("chain output")[0]
+    assert v4 in nat and v6 in nat
+    redirect = next(l for l in nat.splitlines() if "redirect to :" in l and "dport !=" in l)
+    assert nat.index(v4) < nat.index(redirect)
+    assert "@ssh4_1000 " not in nat
+    assert "222" not in redirect
+
+
+def test_without_a_named_port_the_nat_chain_is_untouched():
+    out = nft.render(_ssh_policy(hosts=["nas.example.org"]), dns_uid=989, mitm_uid=988)
+    nat = out.split("chain dns_redirect")[1].split("chain output")[0]
+    assert "ssh4_" not in nat
+
+
 @pytest.mark.skipif(shutil.which("nft") is None, reason="nft binary not installed")
 def test_the_ssh_ruleset_passes_nft_check(tmp_path):
     f = tmp_path / "kosher.nft"
     f.write_text(nft.render(_ssh_policy(hosts=["nas.example.org", "192.168.1.20", "10.0.0.0/8",
-                                               "tailnet", "fd00::5"]), dns_uid=989, mitm_uid=988))
+                                               "tailnet", "fd00::5", "git.example.org:222",
+                                               "10.0.0.7:2222", "[fd00::6]:222"]),
+                            dns_uid=989, mitm_uid=988))
     res = subprocess.run(
         ["unshare", "-rn", "nft", "--check", "-f", str(f)], capture_output=True, text=True
     )
     if "unshare" in res.stderr and res.returncode != 0:
         pytest.skip(f"cannot create user/net namespace here: {res.stderr.strip()}")
     assert res.returncode == 0, res.stderr
+
+
+def test_the_daemon_takes_a_port_but_never_the_webs_or_dnss(monkeypatch):
+    import json
+
+    from kosherd.daemon import Daemon
+    from kosherd.policy import PolicyError
+
+    daemon = Daemon.__new__(Daemon)
+    daemon.policy = _ssh_policy()
+    monkeypatch.setattr(Daemon, "_save_and_apply", lambda self: None)
+    daemon.impl_SetSsh(1000, False, json.dumps(["Git.Example.org:222", "[fd00::5]:2222"]), "")
+    assert daemon.policy.user(1000).ssh_hosts == ["git.example.org:222", "[fd00::5]:2222"]
+    for bad in ("git.example.org:443", "git.example.org:80", "10.0.0.5:53",
+                "git.example.org:99999", "127.0.0.1:222", "short:222"):
+        with pytest.raises(PolicyError):
+            daemon.impl_SetSsh(1000, False, json.dumps([bad]), "")
+    assert daemon.policy.user(1000).ssh_hosts == ["git.example.org:222", "[fd00::5]:2222"]

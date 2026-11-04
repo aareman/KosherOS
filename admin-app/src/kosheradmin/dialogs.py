@@ -97,12 +97,14 @@ class WhitelistDialog(Adw.Dialog):
 
 
 # A rule's three levels (#273), in the order a person steps a page up:
-# what the row says, its icon, the icon's colour.
+# the word on its drop-down, what the row says under the pattern, its
+# icon, the icon's colour. The drop-down's word stays short: a sentence
+# there took the row's width and wrapped the pattern a letter a line.
 RULE_LEVELS = {
-    "block": ("Blocked", "action-unavailable-symbolic", "error"),
-    "allow": ("Allowed · pictures, video and words still filtered",
+    "block": ("Blocked", "Blocked", "action-unavailable-symbolic", "error"),
+    "allow": ("Allowed", "Allowed · pictures, video and words still filtered",
               "emblem-ok-symbolic", "success"),
-    "bypass": ("Bypassed · nothing filtered", "security-low-symbolic", "warning"),
+    "bypass": ("Bypassed", "Bypassed · nothing filtered", "security-low-symbolic", "warning"),
 }
 
 
@@ -115,7 +117,7 @@ class RulesDialog(Adw.Dialog):
     """
 
     def __init__(self, win, title: str, rules: list[dict], on_save):
-        super().__init__(title=title, content_width=580, content_height=660)
+        super().__init__(title=title, content_width=860, content_height=760)
         self.win = win
         self.rules = [dict(r) for r in rules]
 
@@ -203,7 +205,7 @@ class RulesDialog(Adw.Dialog):
             self.list_box.append(row)
             return
         for index, rule in enumerate(self.rules):
-            subtitle, icon_name, style = RULE_LEVELS.get(
+            _word, subtitle, icon_name, style = RULE_LEVELS.get(
                 rule["action"], RULE_LEVELS["allow"])
             row = Adw.ActionRow(title=rule["pattern"], subtitle=subtitle,
                                 use_markup=False)
@@ -213,6 +215,8 @@ class RulesDialog(Adw.Dialog):
             # The level, changeable in place: blocked, allowed, bypassed.
             level = Gtk.DropDown.new_from_strings([lv[0] for lv in RULE_LEVELS.values()])
             level.set_valign(Gtk.Align.CENTER)
+            # One width for all three, so the arrows line up down the list.
+            level.set_size_request(130, -1)
             level.set_tooltip_text("What this rule does")
             level.set_selected(list(RULE_LEVELS).index(
                 rule["action"] if rule["action"] in RULE_LEVELS else "allow"))

@@ -368,6 +368,23 @@ def test_the_rules_dialog_builds_with_rules():
     assert len(dialog.rules) == 2
 
 
+def test_a_rules_level_drop_down_says_one_word_and_the_row_says_the_rest():
+    # A sentence on the drop-down took the row's width and wrapped the
+    # pattern one letter a line.
+    win = FakeWindow()
+    rules = [{"action": "allow", "pattern": "youtube.com/watch*"},
+             {"action": "bypass", "pattern": "docs.python.org"}]
+    dialog = dialogs.RulesDialog(win, "Page rules", rules, lambda new: None)
+    drain()
+    drop = next(w for w in _walk(dialog.get_child()) if isinstance(w, Gtk.DropDown))
+    model = drop.get_model()
+    words = [model.get_string(i) for i in range(model.get_n_items())]
+    assert words == ["Blocked", "Allowed", "Bypassed"]
+    row = _row_named(dialog.get_child(), "youtube.com/watch*")
+    assert row.get_subtitle() == "Allowed · pictures, video and words still filtered"
+    assert dialog.get_content_width() >= 800
+
+
 def test_the_save_preset_dialog_needs_a_name():
     win = FakeWindow()
     dialog = dialogs.SavePresetDialog(win, a_user())

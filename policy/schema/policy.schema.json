@@ -603,11 +603,11 @@
           "items": {
             "type": "string",
             "minLength": 1,
-            "maxLength": 253
+            "maxLength": 261
           },
           "maxItems": 50,
           "uniqueItems": true,
-          "description": "Machines this account may connect to over SSH, and no others: a name, an address, a range (CIDR), or 'tailnet' for every machine on this computer's tailnet. Empty by default: port 22 is closed, since an SSH tunnel reaches anything."
+          "description": "Machines this account may connect to over SSH, and no others: a name, an address, a range (CIDR), or 'tailnet' for every machine on this computer's tailnet, each on port 22 or the port it names (git.example.org:222, [fd00::5]:222). Empty by default: port 22 is closed, since an SSH tunnel reaches anything."
         },
         "ssh_anywhere": {
           "type": "boolean",

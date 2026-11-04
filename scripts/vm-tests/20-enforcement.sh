@@ -209,6 +209,66 @@ else
     fi
 fi
 
+section "SSH to a machine on a port of its own"
+# A Forgejo whose SSH is on 222: `host:222` on the list opens that port to
+# that machine alone. The machine is a network namespace on a veth pair
+# (TEST-NET-2, not a LAN range) whose listener greets first, as sshd does.
+# Straight through, the greeting arrives at once; sent into the proxy, it
+# never does, because the proxy waits for the client to speak first.
+id sshkid >/dev/null 2>&1 || useradd -m sshkid
+kosherctl get-policy 2>/dev/null | grep -q '"sshkid"' \
+    || kosherctl adopt sshkid filtered >/dev/null 2>&1
+kctl set-mode "$(id -u sshkid)" filtered >/dev/null
+ssh_uid=$(id -u sshkid)
+cleanup_sshns() {
+    ip netns pids sshport 2>/dev/null | xargs -r kill 2>/dev/null
+    ip netns del sshport 2>/dev/null
+    ip link del vsshport 2>/dev/null
+}
+cleanup_sshns
+if ip netns add sshport && ip link add vsshport type veth peer name vsshportp \
+        && ip link set vsshportp netns sshport \
+        && ip addr add 198.51.100.1/24 dev vsshport && ip link set vsshport up \
+        && ip netns exec sshport ip addr add 198.51.100.2/24 dev vsshportp \
+        && ip netns exec sshport ip addr add 198.51.100.3/24 dev vsshportp \
+        && ip netns exec sshport ip link set vsshportp up; then
+    ip netns exec sshport python3 -c '
+import socket, threading
+s = socket.socket()
+s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+s.bind(("0.0.0.0", 222))
+s.listen(16)
+while True:
+    conn, _ = s.accept()
+    conn.sendall(b"SSH-2.0-kosher-test\r\n")
+    threading.Timer(5, conn.close).start()
+' &
+    sleep 1
+    greeted() {   # greeted <host>: did the listener's greeting reach sshkid?
+        as sshkid python3 -c '
+import socket, sys
+c = socket.create_connection((sys.argv[1], 222), 4)
+c.settimeout(4)
+sys.exit(0 if c.recv(64).startswith(b"SSH-2.0-kosher-test") else 1)
+' "$1" >/dev/null 2>&1
+    }
+    check "with nothing listed, port 222 does not reach the machine" 1 greeted 198.51.100.2
+    kctl ssh "$ssh_uid" --hosts 198.51.100.2:222 >/dev/null
+    sleep 1
+    check_contains "the machine is in the account's set for port 222" "198.51.100.2" \
+        nft list set inet kosher "ssh4_${ssh_uid}_222"
+    check "listed as 198.51.100.2:222, the machine answers on 222" 0 greeted 198.51.100.2
+    check "and port 222 on another machine still does not" 1 greeted 198.51.100.3
+    check_contains "port 443 cannot be named with a machine" "web or DNS" \
+        kctl ssh "$ssh_uid" --hosts 198.51.100.2:443
+    kctl ssh "$ssh_uid" --hosts none >/dev/null
+    sleep 1
+    check "with the list cleared, port 222 no longer reaches the machine" 1 greeted 198.51.100.2
+else
+    bad "could not make the test network for SSH on its own port"
+fi
+cleanup_sshns
+
 section "Captive portal"
 check "a temporary window can be opened" 0 kosherctl captive "$(id -u nokid)" 1
 check "the window lets that user out"    0 fetch_as nokid https://example.com

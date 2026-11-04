@@ -1858,7 +1858,8 @@ class Daemon:
         self._save_and_apply()
 
     def impl_SetSsh(self, uid: int, anywhere: bool, hosts_json: str, _guardian_pw: str):
-        """SSH to other machines (#257): the listed ones, or anywhere.
+        """SSH to other machines (#257): the listed ones, or anywhere. An
+        entry may name its port (`git.example.org:222`); 22 otherwise.
 
         Guardian-gated like every widening of what an account reaches. An
         SSH connection cannot be read, and a tunnel through one reaches
@@ -1875,12 +1876,19 @@ class Daemon:
         if len(hosts) > 50:
             raise PolicyError("at most 50 SSH machines")
         for h in hosts:
-            kind = nft.ssh_entry_kind(h)
+            try:
+                host, port = nft.ssh_entry(h)
+            except ValueError as e:
+                raise PolicyError(str(e)) from None
+            if port in nft.SSH_PORTS_REFUSED:
+                raise PolicyError(f"{h!r}: port {port} is the web or DNS, which the filter reads; "
+                                  "it cannot be opened to a machine")
+            kind = nft.ssh_entry_kind(host)
             if kind == "name":
-                if not SSH_NAME_RE.fullmatch(h):
+                if not SSH_NAME_RE.fullmatch(host):
                     raise PolicyError(f"{h!r} is not a machine name, an address, a range or 'tailnet'")
             elif kind in ("v4", "v6"):
-                net = ipaddress.ip_network(h, strict=False)
+                net = ipaddress.ip_network(host, strict=False)
                 if net.prefixlen == 0:
                     raise PolicyError("every address is the Anywhere switch, not a machine")
                 if net.is_loopback:

@@ -60,7 +60,10 @@ proxy could not read them:
   machines an account may connect to over SSH — a name, an address, a
   range, or `tailnet` for every machine on this computer's tailnet — and
   nothing else. Port 22 is otherwise closed, because an SSH tunnel reaches
-  anything. *Anywhere* opens it to every machine, for an account an
+  anything. A server whose SSH listens on another port takes the port after a
+  colon, `git.example.com:222` (an IPv6 address in brackets, `[fd00::5]:222`).
+  That port is opened to that machine only; there's no need to open it to
+  every server under *Extra ports*. The web's and DNS's ports can't be named. *Anywhere* opens it to every machine, for an account an
   administrator trusts with that, and the switch says so.
 - **Video calls.** Zoom, Meet and school calls send picture and sound over
   UDP to high ports, which cannot be inspected. That is allowed by default

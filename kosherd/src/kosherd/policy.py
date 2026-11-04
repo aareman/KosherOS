@@ -310,6 +310,11 @@ class UserPolicy:
     # everyone through kosherd, and an account that only browses never
     # needs a build daemon that fetches as a system user.
     developer_tools: bool = False
+    # May the account be signed in to from another machine over SSH, with a
+    # key in its own ~/.ssh/authorized_keys (sshin.py)? Only with developer
+    # tools on, and off by default: what arrives over the connection is not
+    # read by the filter.
+    ssh_in: bool = False
     # Apps an administrator approved for this account alone (#213). Most
     # apps are approved for the whole computer in catalog.json; the few in
     # appaccess.INDIVIDUAL_APPROVAL (Syncthing) need it per account on a
@@ -376,6 +381,8 @@ class UserPolicy:
             d["ssh_anywhere"] = True
         if self.developer_tools:
             d["developer_tools"] = True
+        if self.ssh_in:
+            d["ssh_in"] = True
         if self.approved_apps:
             d["approved_apps"] = sorted(set(self.approved_apps))
         if self.syncthing_lan:
@@ -536,6 +543,11 @@ class Policy:
     def developer_accounts(self) -> list["UserPolicy"]:
         return [u for u in self.effective_users() if u.developer_tools and u.mode != "none"]
 
+    def ssh_in_accounts(self) -> list["UserPolicy"]:
+        """The accounts that may be signed in to over SSH: developer tools
+        on, some internet, and the switch on."""
+        return [u for u in self.developer_accounts() if u.ssh_in]
+
     def build_sources(self) -> list[str]:
         """Every host a Nix build may download from: the built-in list and
         the administrator's additions (#199)."""
@@ -605,6 +617,7 @@ class Policy:
                     ssh_hosts=[str(h) for h in u.get("ssh_hosts", [])],
                     ssh_anywhere=bool(u.get("ssh_anywhere", False)),
                     developer_tools=bool(u.get("developer_tools", False)),
+                    ssh_in=bool(u.get("ssh_in", False)),
                     approved_apps=list(u.get("approved_apps", [])),
                     syncthing_lan=bool(u.get("syncthing_lan", False)),
                     profile=u.get("profile") or None,

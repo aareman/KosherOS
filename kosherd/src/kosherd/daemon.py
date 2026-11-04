@@ -2621,16 +2621,43 @@ class Daemon:
             raise PolicyError(f"{ref} is not installed for any account")
         return owner
 
-    def impl_ListAppUpdates(self):
+    def _nix_updates_known(self) -> dict[int, list[dict]]:
+        """What the last check found for each account's nixpkgs apps.
+        Finding out means evaluating nixpkgs, seconds of work and the
+        channel's news from the network, so only CheckAppUpdates does it;
+        ListAppUpdates, which the Store reads when it opens, answers from
+        here."""
+        return self.__dict__.setdefault("_nix_updates", {})
+
+    def _check_nix_updates(self, uid: int) -> list[dict]:
+        """The Store's nixpkgs apps in the caller's own profile that the
+        channel has a newer build of (nixapps.updates): kept for
+        ListAppUpdates and UpdateAllApps until the next check."""
+        if uid <= 0:
+            return []
+        refs = {r for r in apps.accountapps.installed(uid) if apps.nixapps.is_nix(r)}
+        names = {a["ref"]: a.get("name") or "" for a in apps.load_catalog().get("apps", [])}
+        found = apps.nixapps.updates(uid, refs, names, as_root=not self._developer(uid))
+        self._nix_updates_known()[uid] = found
+        return found
+
+    def _forget_nix_update(self, uid: int, ref: str) -> None:
+        known = self._nix_updates_known().get(uid)
+        if known:
+            known[:] = [u for u in known if u["ref"] != ref]
+
+    def impl_ListAppUpdates(self, *, _uid: int):
         try:
             found = apps.available_updates()
         except Exception as e:  # noqa: BLE001 - "could not look" is an empty list, said
             log.warning("could not list app updates: %s", e)
             found = []
+        found += self._nix_updates_known().get(_uid, [])
         return GLib.Variant("(s)", (json.dumps(found),))
 
-    def impl_CheckAppUpdates(self):
-        """Fetch the remote's news first, then list what can be updated.
+    def impl_CheckAppUpdates(self, *, _uid: int):
+        """Fetch the remote's news first, then list what can be updated:
+        Flathub's for every Flatpak, nixpkgs' for the caller's own apps.
 
         Slower than ListAppUpdates — it goes to the network — which is why
         it is what a person asks for by pressing a button, and the cheap
@@ -2641,6 +2668,10 @@ class Daemon:
         except Exception as e:  # noqa: BLE001 - "could not look" is an empty list, said
             log.warning("could not check for app updates: %s", e)
             found = []
+        try:
+            found += self._check_nix_updates(_uid)
+        except Exception as e:  # noqa: BLE001 - nix could not say; the Flatpaks still can
+            log.warning("could not check nixpkgs apps of uid %d for updates: %s", _uid, e)
         return GLib.Variant("(s)", (json.dumps(found),))
 
     def impl_UpdateApp(self, ref: str, *, _uid: int):
@@ -2650,11 +2681,14 @@ class Daemon:
         if apps.accountapps.is_account_app(ref):
             owner = self._nix_owner(ref, _uid)
             self.app_manager.update(ref, uid=owner, as_root=not self._developer(owner))
+            self._forget_nix_update(owner, ref)
         else:
             self.app_manager.update(ref)
         return None
 
-    def impl_UpdateAllApps(self):
+    def impl_UpdateAllApps(self, *, _uid: int):
+        """Every Flatpak with a newer build, and the caller's own nixpkgs
+        apps the last check found newer builds of."""
         queued = 0
         pending = self.app_manager.pending
         for entry in apps.available_updates():
@@ -2662,6 +2696,15 @@ class Daemon:
                 continue
             try:
                 self.app_manager.update(entry["ref"])
+                queued += 1
+            except apps.AppError as e:
+                log.warning("could not queue %s: %s", entry["ref"], e)
+        for entry in list(self._nix_updates_known().get(_uid, [])):
+            if entry["ref"] in pending:
+                continue
+            try:
+                self.app_manager.update(entry["ref"], uid=_uid, as_root=not self._developer(_uid))
+                self._forget_nix_update(_uid, entry["ref"])
                 queued += 1
             except apps.AppError as e:
                 log.warning("could not queue %s: %s", entry["ref"], e)

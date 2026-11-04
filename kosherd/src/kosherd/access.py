@@ -311,7 +311,9 @@ UID_AWARE = frozenset({"Unlock", "Lock", "Status", "VerifyGuardian", "InstallApp
                        # A nixpkgs app is in one account's profile: what is
                        # installed, and whose copy to update or remove,
                        # depends on who is asking.
-                       "ListInstalled", "UpdateApp", "RemoveApp"})
+                       "ListInstalled", "UpdateApp", "RemoveApp",
+                       # ...and whether one of them has a newer build.
+                       "ListAppUpdates", "CheckAppUpdates", "UpdateAllApps"})
 
 # Calls that change how the machine is set up, written to the activity log
 # with the admin who made them so "who changed this?" has an answer. Reads,

@@ -26,7 +26,8 @@ gi.require_version("Gio", "2.0")
 from gi.repository import Gio, GLib
 
 from . import (BUS_NAME, OBJECT_PATH, access, appaccess, appkinds, apps, auth,
-               keyboard, onepassword, policy as policy_mod, syncthing, ytsearch, nft)
+               keyboard, onepassword, policy as policy_mod, syncthing, urlrules, ytsearch,
+               nft)
 from .apply import apply_policy
 from .apps import AppError
 from .guardian import Guardian, GuardianError
@@ -716,18 +717,6 @@ def _url_pattern(url: str) -> str:
 
 # How much of a site a grant from the activity log covers.
 GRANT_SCOPES = ("page", "folder", "site")
-
-
-def folder_of(url: str) -> str | None:
-    """The folder a page is in, as a rule: example.com/a/b/page ->
-    example.com/a/b/*. None for a page at the top of its site, whose
-    folder is the whole site."""
-    from urllib.parse import urlsplit
-
-    parts = urlsplit(url)
-    host = (parts.hostname or "").lower().strip(".").removeprefix("www.")
-    folder = (parts.path or "/").rsplit("/", 1)[0]
-    return f"{host}{folder}/*" if host and folder else None
 
 
 # Where ostree keeps each deployment's tree. A deployment's own
@@ -1541,7 +1530,7 @@ class Daemon:
                 user.whitelist = sorted({*user.whitelist, host})
         else:
             pattern = {"site": host, "page": _url_pattern(url),
-                       "folder": folder_of(url) or host}[scope]
+                       "folder": urlrules.folder_of(url) or host}[scope]
             if not any(r.get("pattern") == pattern and r.get("action") == action
                        for r in user.rules):
                 # Ahead of the existing rules: a rule added after the one

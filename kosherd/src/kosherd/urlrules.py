@@ -123,3 +123,13 @@ def decide(rules: list[Rule], url: str) -> tuple[str, str | None]:
         if rule.matches(host, path):
             return rule.action, rule.pattern
     return ALLOW, None
+
+
+def folder_of(url: str) -> str | None:
+    """The folder a page is in, as a rule: example.com/a/b/page ->
+    example.com/a/b/*. None for a page at the top of its site, whose
+    folder is the whole site."""
+    parts = urlsplit(url)
+    host = (parts.hostname or "").lower().strip(".").removeprefix("www.")
+    folder = (parts.path or "/").rsplit("/", 1)[0]
+    return f"{host}{folder}/*" if host and folder else None

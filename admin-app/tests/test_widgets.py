@@ -124,6 +124,9 @@ class FakeClient:
     def set_ssh(self, uid, anywhere, hosts, guardian_password=""):
         self.calls.append(("set_ssh", uid, anywhere, list(hosts)))
 
+    def grant_url(self, uid, url, level, scope, guardian_password=""):
+        self.calls.append(("grant_url", uid, url, level, scope))
+
     def set_developer_tools(self, uid, enabled, guardian_password=""):
         self.calls.append(("set_developer_tools", uid, enabled))
 
@@ -376,7 +379,7 @@ def test_a_rules_level_drop_down_says_one_word_and_the_row_says_the_rest():
     drop = next(w for w in _walk(dialog.get_child()) if isinstance(w, Gtk.DropDown))
     model = drop.get_model()
     words = [model.get_string(i) for i in range(model.get_n_items())]
-    assert words == ["Blocked", "Allowed", "Bypassed"]
+    assert words == ["Blocked", "Allowed", "Pictures", "Bypassed"]
     row = _row_named(dialog.get_child(), "youtube.com/watch*")
     assert row.get_subtitle() == "Allowed · pictures, video and words still filtered"
     assert dialog.get_content_width() >= 800
@@ -1121,8 +1124,8 @@ def test_the_overview_shows_what_was_blocked_today_with_allow():
     allowed = {}
 
     class Recording(FakeClient):
-        def allow_url(self, uid, url, whole, pw):
-            allowed.update(uid=uid, url=url, whole=whole)
+        def grant_url(self, uid, url, level, scope, pw):
+            allowed.update(uid=uid, url=url, level=level, scope=scope)
 
     now = int(time.time())
     events = [an_event(t=now - 5), an_event(t=now - 8, kind="pictures",
@@ -1136,12 +1139,47 @@ def test_the_overview_shows_what_was_blocked_today_with_allow():
     titles = [r.get_title() for r in _rows(page.blocked_group)]
     assert titles == ["roblox.com/games", "Pictures hidden on shop.example/d"]
     menus = _menu_buttons(page.blocked_group)
-    assert len(menus) == 1
+    assert [m.get_label() for m in menus] == ["Allow", "Allow pictures"]
     page_btn = next(b for b in _buttons(menus[0].get_popover())
                     if b.get_label() == "Allow this page")
     page_btn.emit("clicked")
     drain()
-    assert allowed == {"uid": 1001, "url": "https://roblox.com/games", "whole": False}
+    assert allowed == {"uid": 1001, "url": "https://roblox.com/games",
+                       "level": "allow", "scope": "page"}
+
+
+def test_allow_pictures_offers_the_page_its_folder_and_the_site():
+    granted = []
+
+    class Recording(FakeClient):
+        def grant_url(self, uid, url, level, scope, pw):
+            granted.append((uid, url, level, scope))
+
+    now = int(time.time())
+    url = "https://shop.example/library/article/123"
+    win = FakeWindow(Recording(activity=[an_event(t=now - 8, kind="pictures", url=url, why="")]))
+    user = a_user()
+    win.policy = {"revision": 1, "users": [user], "guardian": {"enabled": False},
+                  "guest": {"enabled": False}, "adblock": {"enabled": True}}
+    page = detail.UserDetailPage(win, user)
+    drain()
+    menu = next(m for m in _menu_buttons(page.blocked_group) if m.get_label() == "Allow pictures")
+    labels_ = [b.get_label() for b in _buttons(menu.get_popover())]
+    assert labels_ == ["Show pictures on this page",
+                       "Show pictures everywhere in /library/article/",
+                       "Show pictures on all of shop.example"]
+    for b in _buttons(menu.get_popover()):
+        b.emit("clicked")
+        drain()
+    assert [g[2:] for g in granted] == [("pictures", "page"), ("pictures", "folder"),
+                                        ("pictures", "site")]
+
+
+def test_a_page_at_the_top_of_its_site_has_no_folder_to_offer():
+    from kosheradmin import dialogs as dialogs_
+    assert dialogs_._folder_label("https://shop.example/d") is None
+    assert dialogs_._folder_label("https://shop.example/") is None
+    assert dialogs_._folder_label("https://shop.example/a/b") == "/a/"
 
 
 def test_the_overview_says_when_nothing_was_blocked():

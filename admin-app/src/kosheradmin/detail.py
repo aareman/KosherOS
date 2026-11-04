@@ -28,7 +28,8 @@ from . import labels  # noqa: E402
 from .common import (banner_slot, avatar, chip, clear, confirm, error_text, mode_badge,  # noqa: E402
                      pointer_cursors, run_async, small_button, tag)
 from .dialogs import (ApproveChannelDialog, RulesDialog, SavePresetDialog,  # noqa: E402
-                      WhitelistDialog, allow_menu, confirm_remove_user, request_row)
+                      WhitelistDialog, allow_menu, confirm_remove_user, pictures_menu,
+                      request_row)
 from .feed import fold  # noqa: E402
 from .schedule import ScheduleGrid, legend  # noqa: E402
 
@@ -355,6 +356,9 @@ class UserDetailPage(Adw.NavigationPage):
         elif kind == activity_mod.PICTURES:
             row.set_title(f"Pictures hidden on {labels.short_url(url)}")
             row.set_subtitle("Page shown with pictures covered" + again)
+            if url:
+                row.add_suffix(pictures_menu(self.win, user["uid"], user["username"], url,
+                                             on_done=self.win.reload))
         elif kind == activity_mod.VIDEO:
             row.set_title(f"Blocked video on {labels.short_url(url) or 'a page'}")
             row.set_subtitle("Blocked by video filtering" + again)

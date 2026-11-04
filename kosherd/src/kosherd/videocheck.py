@@ -266,11 +266,9 @@ class VideoChecker:
             return cached
         if not self.available:
             return None
-        loop = asyncio.get_running_loop()
-        future = loop.run_in_executor(self.images._executor(), self.judge_bytes,
-                                      data, clip_key)
         try:
-            return await asyncio.wait_for(asyncio.shield(future), self.timeout)
+            return await asyncio.wait_for(
+                self.images.run_async(self.judge_bytes, data, clip_key), self.timeout)
         except asyncio.TimeoutError:
             log.info("a clip took longer than %.0f s to judge; refused", self.timeout)
             return None

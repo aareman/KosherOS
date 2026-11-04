@@ -937,6 +937,9 @@ class ImageFilter:
         self._recent: list[float] = []
         self._said_slow = False
         self._published = None
+        self._async_slots = None
+        self._prepare_slots = None
+        self._prepare_pool = None
 
     def status(self) -> dict:
         """What to tell an admin about picture checking on this machine."""
@@ -1096,29 +1099,91 @@ class ImageFilter:
         """
         import asyncio
 
-        known, sha = self._prejudge(image_bytes)
-        if known is not None or sha is None:
-            return known
-        loop = asyncio.get_running_loop()
-        future = loop.run_in_executor(self._executor(), self.judge_bytes,
-                                      image_bytes, sha)
-        deadline = self.timeout * (ANIMATION_FRAMES if looks_animated(image_bytes) else 1)
+        if len(image_bytes) < MIN_IMAGE_BYTES:
+            return ImageVerdict(CLEAN, ())
+        started = time.monotonic()
         try:
-            return await asyncio.wait_for(asyncio.shield(future), deadline)
+            known, sha, animated = await asyncio.wait_for(
+                self._run_async(self._prepare_image, image_bytes, preparation=True),
+                self.timeout)
+            if known is not None or sha is None:
+                return known
+            deadline = self.timeout * (ANIMATION_FRAMES if animated else 1)
+            remaining = deadline - (time.monotonic() - started)
+            if remaining <= 0:
+                return None
+            return await asyncio.wait_for(
+                self.run_async(self._judge_if_needed, image_bytes, sha), remaining)
         except asyncio.TimeoutError:
-            self._record(self.timeout * 1000)
+            # Queue time is not detector time. A waiter that expires must
+            # never become CPU work later, or make the machine look slow
+            # simply because a page requested many pictures at once.
             return None
         except Exception:  # noqa: BLE001 - a broken picture is not a verdict
             log.debug("judgement failed", exc_info=True)
             return None
 
+    def _prepare_image(self, image_bytes):
+        # Hashing, SQLite locks/I/O and image headers all belong off the
+        # network loop. A separate single worker keeps cached images from
+        # waiting behind inference; admission bounds its submissions too.
+        known, sha = self._prejudge(image_bytes)
+        animated = looks_animated(image_bytes) if sha is not None else False
+        return known, sha, animated
+
+    def _judge_if_needed(self, image_bytes, sha):
+        # A copy of this picture may have finished while this one waited
+        # for a worker. Do not run the same inference again.
+        cached = self.cache.get(sha)
+        if cached is not None:
+            return cached
+        if self.degraded:
+            return None
+        return self.judge_bytes(image_bytes, sha)
+
     async def run_async(self, fn, *args):
-        """Run CPU work (covering a picture, sampling a video) on the same
-        small pool, off the event loop."""
+        """Admit CPU work only when a worker is free.
+
+        Waiting stays in asyncio, where a cancelled/timed-out request can
+        leave without ever submitting a job. A running job owns its slot
+        until the actual thread finishes, even when its caller leaves.
+        This bounds executor submissions across images, covers and clips.
+        """
+        return await self._run_async(fn, *args)
+
+    async def _run_async(self, fn, *args, preparation=False):
         import asyncio
+        from concurrent.futures import ThreadPoolExecutor
 
         loop = asyncio.get_running_loop()
-        return await loop.run_in_executor(self._executor(), fn, *args)
+        if preparation:
+            if self._prepare_slots is None:
+                self._prepare_slots = asyncio.Semaphore(1)
+                self._prepare_pool = ThreadPoolExecutor(
+                    max_workers=1, thread_name_prefix="kosher-image-cache",
+                    initializer=_lower_priority)
+            slots = self._prepare_slots
+            executor = self._prepare_pool
+        else:
+            if self._async_slots is None:
+                self._async_slots = asyncio.Semaphore(self._workers)
+            slots = self._async_slots
+            executor = self._executor()
+        await slots.acquire()
+        try:
+            future = executor.submit(fn, *args)
+        except BaseException:
+            slots.release()
+            raise
+
+        def finished(_):
+            try:
+                loop.call_soon_threadsafe(slots.release)
+            except RuntimeError:
+                pass  # the proxy's event loop has already shut down
+
+        future.add_done_callback(finished)
+        return await asyncio.shield(asyncio.wrap_future(future, loop=loop))
 
     @staticmethod
     def _person_aware(image_bytes, detections, verdict) -> ImageVerdict:

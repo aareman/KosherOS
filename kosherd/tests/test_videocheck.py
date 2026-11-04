@@ -50,6 +50,11 @@ class _Images:
         self.cache = cache
         self.judged = 0
         self._pool = None
+        self._workers = 1
+        self._async_slots = None
+
+    run_async = vision.ImageFilter.run_async
+    _run_async = vision.ImageFilter._run_async
 
     def judge_bytes(self, frame, sha=None):
         self.judged += 1

@@ -51,6 +51,27 @@ could not settle the question:
    a picture is judged, and a worker that outlives the deadline still
    caches its verdict for next time.
 
+Pictures, covers and video checks share worker admission. Requests wait
+as asynchronous tasks until a worker is free, rather than filling the
+executor with jobs. An image or clip that times out while waiting never
+starts detection later. A running check keeps its worker slot until the
+thread actually finishes, even if its request has already timed out.
+Repeated images check the verdict cache again after waiting, so the same
+picture is not judged again unnecessarily. Queue wait is not counted as
+detector time when deciding whether this machine is too slow.
+
+Image hashing, verdict-cache reads and image-header inspection also run
+off the proxy's event loop, on a separate single worker with bounded
+admission. This lets cached pictures return while detection is busy and
+prevents a burst of cache lookups from delaying other connections. The
+image deadline includes time spent waiting for and doing this preparation.
+
+There is no whole-page gate: individual checked images arrive as they
+finish, while the proxy continues handling text, scripts and other
+connections. This applies to CSS backgrounds and images created by site
+scripts as well as images in the original HTML, without rewriting their
+addresses or requiring an extra browser script.
+
 The detector returns labelled regions rather than one score, which is what
 makes the ladder meaningful: exposure maps to `nsfw`, covered but
 prominent to `suggestive`, weaker signals to `immodest`. A face on its own

@@ -867,6 +867,35 @@ def _detail(mode="filtered", users=None, **kw):
     return page, win, user
 
 
+# -- a change reloads the page where the person was -----------------------------------
+
+def test_a_rebuild_keeps_the_tab_and_asks_each_tab_back_to_its_place(monkeypatch):
+    page, _win, user = _detail()
+    page.stack.set_visible_child_name("filtering")
+    placed = []
+    monkeypatch.setattr(detail, "_scroll_when_laid_out",
+                        lambda adj, value: placed.append((adj, value)))
+    adj = page._tab_scrolls()["filtering"]
+    adj.configure(400, 0, 2000, 10, 100, 500)
+    page.rebuild(dict(user, media_level="all"))
+    assert page.stack.get_visible_child_name() == "filtering"
+    assert [v for _a, v in placed] == [400]
+    assert placed[0][0] == page._tab_scrolls()["filtering"], "the new tab's, not the old"
+
+
+def test_a_fresh_tab_is_scrolled_once_it_is_tall_enough():
+    adj = Gtk.Adjustment(value=0, lower=0, upper=0, step_increment=10,
+                         page_increment=100, page_size=500)
+    detail._scroll_when_laid_out(adj, 400)
+    assert adj.get_value() == 0, "nothing laid out yet"
+    adj.configure(0, 0, 600, 10, 100, 500)   # partly laid out: as far as it goes
+    assert adj.get_value() == 100
+    adj.configure(adj.get_value(), 0, 2000, 10, 100, 500)
+    assert adj.get_value() == 400
+    adj.configure(0, 0, 3000, 10, 100, 500)  # later growth is left alone
+    assert adj.get_value() == 0
+
+
 def test_the_detail_page_has_eight_tabs_and_starts_on_the_overview():
     page, _w, _u = _detail()
     names = []

@@ -62,6 +62,46 @@ def hint_under(group: Adw.PreferencesGroup, text: str) -> Gtk.Label:
     return label
 
 
+def _first_scroller(widget) -> Gtk.ScrolledWindow | None:
+    """The scrolled window inside a tab (an Adw.PreferencesPage has one)."""
+    if isinstance(widget, Gtk.ScrolledWindow):
+        return widget
+    child = widget.get_first_child()
+    while child is not None:
+        found = _first_scroller(child)
+        if found is not None:
+            return found
+        child = child.get_next_sibling()
+    return None
+
+
+def _scroll_when_laid_out(adj: Gtk.Adjustment, value: float) -> None:
+    """Scroll a fresh page to `value` once it is tall enough to be there:
+    a page just built has no height until it is laid out. A page that came
+    back shorter gets as close as it can, and is let go after a moment so
+    a later change in its height never moves it under the person."""
+    state = {"handler": None}
+
+    def let_go() -> bool:
+        if state["handler"] is not None:
+            adj.disconnect(state["handler"])
+            state["handler"] = None
+        return False
+
+    def place(*_args) -> None:
+        reachable = adj.get_upper() - adj.get_page_size()
+        if reachable <= 0:
+            return
+        adj.set_value(min(value, reachable))
+        if reachable >= value:
+            let_go()
+
+    state["handler"] = adj.connect("changed", place)
+    place()
+    if state["handler"] is not None:
+        GLib.timeout_add(2000, let_go)
+
+
 def default_blocks() -> set[str]:
     """Categories every filtering account blocks unless somebody unblocks
     them. Labelled on the grid so a parent knows those are not the ones to
@@ -80,10 +120,28 @@ class UserDetailPage(Adw.NavigationPage):
         self._build(user)
 
     def rebuild(self, user: dict) -> None:
+        """The page again from a fresh policy, on the same tab and at the
+        same place in each tab. Every change reloads the page, and a tab
+        that jumped back to its top after each switch read as being sent
+        somewhere else."""
         selected = self.stack.get_visible_child_name()
+        offsets = {name: adj.get_value() for name, adj in self._tab_scrolls().items()}
         self._build(user)
         if selected:
             self.stack.set_visible_child_name(selected)
+        for name, adj in self._tab_scrolls().items():
+            if offsets.get(name):
+                _scroll_when_laid_out(adj, offsets[name])
+
+    def _tab_scrolls(self) -> dict[str, Gtk.Adjustment]:
+        """Each tab's vertical scroll position, by tab name."""
+        found = {}
+        for name, _title, _icon in TABS:
+            page = self.stack.get_child_by_name(name)
+            scroller = _first_scroller(page) if page is not None else None
+            if scroller is not None:
+                found[name] = scroller.get_vadjustment()
+        return found
 
     # -- frame --------------------------------------------------------------------
 

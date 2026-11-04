@@ -1351,8 +1351,9 @@ class Daemon:
                 "a list that needs more than that is not finished, and "
                 "should be fixed for everybody rather than here")
         lists.save_delta(list_name, add=add, remove=list(remove))
-        # The proxy and the search service reload on their own, but the
-        # resolver's category blocks are rendered from the policy.
+        # The proxy and the search service load the lists when they start;
+        # apply restarts them because the lists changed (apply.py,
+        # _restart_if_changed), and renders the resolver's category blocks.
         self._save_and_apply()
         log.info("edited %s: +%s -%s", list_name, len(add), len(remove))
         return None

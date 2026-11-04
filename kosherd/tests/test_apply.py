@@ -74,6 +74,8 @@ def env(tmp_path, monkeypatch):
     monkeypatch.setattr(apply_mod, "ADBLOCK_OPEN_PATH",
                         tmp_path / "dnsmasq-open" / "adblock.conf")
     monkeypatch.setattr(apply_mod, "MITM_DIR", tmp_path / "mitm")
+    monkeypatch.setattr(apply_mod, "STARTED_DIR", tmp_path / "started")
+    monkeypatch.setattr(apply_mod.lists, "OVERRIDE_DIR", tmp_path / "lists")
     monkeypatch.setattr(apply_mod, "MITM_RULES_PATH", tmp_path / "mitm" / "rules.json")
     monkeypatch.setattr(apply_mod, "SEARCH_DIR", tmp_path / "search")
     monkeypatch.setattr(apply_mod, "SEARCH_POLICY_PATH",
@@ -176,6 +178,46 @@ def test_proxy_runs_only_while_someone_is_inspected(env):
     apply_policy(policy_with("filtered", "whitelist"))
     assert env.matching("restart", "kosher-mitm.service")
     assert not env.matching("stop", "kosher-mitm.service")
+
+
+def test_a_change_the_proxy_reads_from_its_file_does_not_restart_it(env):
+    # Every change used to restart the proxy (and search): seconds before
+    # the admin app heard back, and every account's web down meanwhile.
+    # Its rules file is re-read as it changes.
+    first = policy_with("filtered")
+    apply_policy(first)
+    assert len(env.matching("restart", "kosher-mitm.service")) == 1
+    first.users[0].media_level = "all"
+    first.users[0].rules = [{"action": "block", "pattern": "example.com"}]
+    apply_policy(first)
+    assert len(env.matching("restart", "kosher-mitm.service")) == 1
+    assert len(env.matching("restart", "kosher-search.service")) == 1
+    assert len(env.matching("restart", "kosher-searxng.service")) == 1
+
+
+def test_a_new_listener_restarts_the_proxy(env):
+    # A new filtered account needs a port of its own: read only at start.
+    apply_policy(policy_with("filtered"))
+    apply_policy(policy_with("filtered", "filtered"))
+    assert len(env.matching("restart", "kosher-mitm.service")) == 2
+
+
+def test_edited_lists_restart_the_proxy_and_the_search_front_end(env, tmp_path):
+    apply_policy(policy_with("filtered"))
+    (tmp_path / "lists").mkdir()
+    (tmp_path / "lists" / "wordlist.json").write_text("{}")
+    apply_policy(policy_with("filtered"))
+    assert len(env.matching("restart", "kosher-mitm.service")) == 2
+    assert len(env.matching("restart", "kosher-search.service")) == 2
+    assert len(env.matching("restart", "kosher-searxng.service")) == 1, "reads no lists"
+
+
+def test_a_proxy_that_is_not_running_is_started(env, monkeypatch):
+    apply_policy(policy_with("filtered"))
+    stopped = FakeRun(fail=["is-active --quiet kosher-mitm"])
+    monkeypatch.setattr(apply_mod.subprocess, "run", stopped)
+    apply_policy(policy_with("filtered"))
+    assert stopped.matching("restart", "kosher-mitm.service")
 
 
 def test_proxy_is_stopped_when_nobody_is_filtered(env):

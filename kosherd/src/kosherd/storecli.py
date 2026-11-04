@@ -4,8 +4,9 @@
     kosher install <app>...     install, by name or id, and watch it happen
     kosher remove <app>...      remove (an administrator's action)
     kosher list                 what is installed
-    kosher update               ask the store for news and say what has an update
-    kosher upgrade [<app>...]   take the updates, all of them or the named ones
+    kosher update [--local]     ask the store for news and say what has an update
+    kosher upgrade [--local] [<app>...]
+                                take the updates, all of them or the named ones
     kosher info <app>           what the Store knows about an app
 
 `kosherctl store` is the operator's tool and says exactly what the daemon
@@ -15,6 +16,12 @@ account installs what it may have, and a nixpkgs app lands in its own
 profile. An app may be named by its Store id (org.gnome.Chess,
 nixpkgs#gh), by its name ("Claude Code"), or by enough of either to be
 unambiguous (chess, claude).
+
+A nixpkgs app the Store installed is checked against the channel like a
+Flatpak against Flathub. `--local` widens update and upgrade to the rest
+of the person's own nix profile — what a developer put there with `nix
+profile add` — which is theirs, not the Store's, so the daemon is not
+asked: nix runs in their own shell.
 """
 
 from __future__ import annotations
@@ -22,6 +29,8 @@ from __future__ import annotations
 import argparse
 import sys
 from typing import Callable
+
+from . import nixapps
 
 # The ref the daemon reports the leftover-runtime cleanup under (client.py
 # and apps.py say the same; Gio stays deferred here, as in cli.py).
@@ -247,41 +256,77 @@ def cmd_clean(args, client, wait=_wait_for) -> int:
     return 0 if wait(client, [CLEANUP_REF]) else 1
 
 
-def cmd_update(args, client, wait=_wait_for) -> int:
-    found = client.check_app_updates()
-    if not found:
-        print("everything installed from the Store is up to date")
-        return 0
+def _own_updates(client, found: list[dict]) -> list[dict]:
+    """--local: the person's own nix profile packages with a newer build,
+    less what the Store already answered for."""
+    store = {a["ref"] for a in found} | set(client.list_installed())
+    try:
+        own = nixapps.own_updates()
+    except nixapps.NixAppError as e:
+        print(f"could not check your own nix profile: {e}", file=sys.stderr)
+        return []
+    return [u for u in own if u["ref"] not in store]
+
+
+def _print_updates(found: list[dict]) -> None:
     for app in found:
         version = app.get("version") or app.get("commit") or ""
         latest = app.get("latest") or ""
         print(f"  {app['ref']:<40} {_words(app):<24} {version}" + (f" -> {latest}" if latest else ""))
-    print(f"{len(found)} can be upgraded: kosher upgrade")
+
+
+def cmd_update(args, client, wait=_wait_for) -> int:
+    local = getattr(args, "local", False)
+    found = client.check_app_updates()
+    own = _own_updates(client, found) if local else []
+    if not found and not own:
+        print("everything installed from the Store is up to date"
+              + (", and so is your own nix profile" if local else ""))
+        return 0
+    _print_updates(found)
+    if own:
+        print("your own nix profile (not the Store's):")
+        _print_updates(own)
+    total = len(found) + len(own)
+    print(f"{total} can be upgraded: kosher upgrade" + (" --local" if own else ""))
     return 0
 
 
 def cmd_upgrade(args, client, wait=_wait_for) -> int:
+    local = getattr(args, "local", False)
     found = client.list_app_updates()
+    own = _own_updates(client, found) if local else []
     if args.apps:
         refs = []
         for word in args.apps:
-            app = _pick(word, found)
+            app = _pick(word, found + own)
             if app is None:
                 return 1
             refs.append(app["ref"])
     else:
-        refs = [a["ref"] for a in found]
+        refs = [a["ref"] for a in found + own]
     if not refs:
-        print("nothing to upgrade (kosher update asks the store for news)")
+        print("nothing to upgrade (kosher update asks the store for news"
+              + ("" if local else "; --local looks at your own nix profile too") + ")")
         return 0
-    for ref in refs:
+    mine = {a["ref"] for a in own}
+    store_refs = [r for r in refs if r not in mine]
+    for ref in store_refs:
         try:
             client.update_app(ref)
         except Exception as e:  # noqa: BLE001
             print(f"{ref}: {_said(e)}", file=sys.stderr)
             return 1
         print(f"upgrading {ref}")
-    return 0 if wait(client, refs) else 1
+    ok = wait(client, store_refs) if store_refs else True
+    for ref in refs:
+        if ref not in mine:
+            continue
+        print(f"upgrading {ref} (your own nix profile)")
+        if nixapps.own_upgrade(ref) != 0:
+            print(f"{ref}: nix could not upgrade it", file=sys.stderr)
+            ok = False
+    return 0 if ok else 1
 
 
 COMMANDS: dict[str, Callable] = {
@@ -301,8 +346,12 @@ def build_parser() -> argparse.ArgumentParser:
     s = sub.add_parser("remove", help="remove apps (an administrator's action)")
     s.add_argument("apps", nargs="+")
     sub.add_parser("list", help="what is installed")
-    sub.add_parser("update", help="ask the store for news and say what has an update")
+    s = sub.add_parser("update", help="ask the store for news and say what has an update")
+    s.add_argument("--local", action="store_true",
+                   help="also the packages in your own nix profile that are not the Store's")
     s = sub.add_parser("upgrade", help="take the updates: all of them, or the named apps")
+    s.add_argument("--local", action="store_true",
+                   help="also upgrade your own nix profile packages, with nix, as you")
     s.add_argument("apps", nargs="*")
     s = sub.add_parser("info", help="what the Store knows about an app")
     s.add_argument("app")

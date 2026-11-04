@@ -65,11 +65,12 @@ def test_the_daemon_offers_the_check_to_anyone_who_may_use_the_store():
 def test_the_daemon_answers_with_json_and_never_raises(monkeypatch):
     daemon = Daemon.__new__(Daemon)
     monkeypatch.setattr(apps, "refresh_updates", lambda: [{"ref": "org.x.App", "name": "App"}])
-    assert json.loads(daemon.impl_CheckAppUpdates().unpack()[0]) == [
+    monkeypatch.setattr(daemon, "_check_nix_updates", lambda uid: [])
+    assert json.loads(daemon.impl_CheckAppUpdates(_uid=1000).unpack()[0]) == [
         {"ref": "org.x.App", "name": "App"}]
 
     def boom():
         raise RuntimeError("flatpak is unwell")
 
     monkeypatch.setattr(apps, "refresh_updates", boom)
-    assert json.loads(daemon.impl_CheckAppUpdates().unpack()[0]) == []
+    assert json.loads(daemon.impl_CheckAppUpdates(_uid=1000).unpack()[0]) == []

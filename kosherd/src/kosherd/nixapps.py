@@ -137,24 +137,26 @@ def _link_profile_as(profile: Path, pw) -> None:
     os.lchown(link, pw.pw_uid, pw.pw_gid)
 
 
-def _argv(uid: int, *nix_args: str, as_root: bool = False) -> list[str]:
+def _argv(uid: int, *nix_args: str, as_root: bool = False, profile: bool = True) -> list[str]:
     """`nix ...` as the account, with a clean environment of its own — or,
     for an account without developer tools (#123), as root into that
     account's profile: the daemon refuses such an account directly, and
     the Store is its only way to install.
 
     runuser alone would hand nix root's HOME, and the profile would land
-    in /root. --impure is what lets NIXPKGS_ALLOW_UNFREE through.
+    in /root. --impure is what lets NIXPKGS_ALLOW_UNFREE through. A
+    command that only evaluates (`nix eval`) takes no --profile.
     """
     pw = pwd.getpwuid(uid)
     if as_root:
-        profile = profile_dir(uid)
-        _make_dirs_as(profile.parent, pw)
-        _link_profile_as(profile, pw)
-        return [
-            "env", "NIXPKGS_ALLOW_UNFREE=1", f"NIX_SSL_CERT_FILE={CA_BUNDLE}",
-            "nix", *nix_args, "--profile", str(profile),
-        ]
+        argv = ["env", "NIXPKGS_ALLOW_UNFREE=1", f"NIX_SSL_CERT_FILE={CA_BUNDLE}",
+                "nix", *nix_args]
+        if profile:
+            target = profile_dir(uid)
+            _make_dirs_as(target.parent, pw)
+            _link_profile_as(target, pw)
+            argv += ["--profile", str(target)]
+        return argv
     return [
         "runuser", "-u", pw.pw_name, "--",
         "env", "-i",
@@ -230,6 +232,155 @@ def upgrade(ref: str, uid: int, on_progress, as_root: bool = False) -> None:
     on_progress(ref, 0, "Updating…")
     _run(ref, _argv(uid, "profile", "upgrade", "--impure", name, as_root=as_root), on_progress)
     _desktop(uid)
+
+
+# -- what has a newer build ----------------------------------------------------
+
+def _profile_paths(manifest: dict) -> dict[str, tuple[str, list[str]]]:
+    """{ref: (element name, store paths)} for the nixpkgs packages in a
+    profile manifest that `nix profile upgrade` can move: the ones
+    installed from an unlocked `nixpkgs#…` reference. A package pinned to
+    one revision has no "latest" and is left out."""
+    elements = manifest.get("elements")
+    if isinstance(elements, dict):
+        items = elements.items()
+    elif isinstance(elements, list):
+        items = ((str(i), e) for i, e in enumerate(elements) if isinstance(e, dict))
+    else:
+        return {}
+    found = {}
+    for name, element in items:
+        if not (name and isinstance(element, dict) and element.get("active", True)):
+            continue
+        if element.get("originalUrl") not in ("flake:nixpkgs", "nixpkgs"):
+            continue
+        attribute = element.get("attrPath") or name
+        if attribute.startswith(("legacyPackages.", "packages.")):
+            attribute = attribute.split(".", 2)[-1]
+        found[PREFIX + attribute] = (name, list(element.get("storePaths") or []))
+    return found
+
+
+def _latest_expr(attributes: list[str]) -> str:
+    """One nix expression for every package at once: its current store
+    path and version in the channel the registry points at. A package
+    nixpkgs no longer has, or cannot evaluate, is null."""
+    names = " ".join(json.dumps(a) for a in attributes)
+    return (
+        'let flake = builtins.getFlake "nixpkgs"; '
+        'pkgs = flake.legacyPackages.${builtins.currentSystem}; lib = flake.lib; '
+        'look = attr: let d = lib.attrByPath (lib.splitString "." attr) null pkgs; '
+        'r = builtins.tryEval (if d == null then null else '
+        '{ out = d.outPath; version = d.version or ""; pname = d.pname or d.name; }); '
+        'in if r.success then r.value else null; '
+        f'in builtins.listToAttrs (map (a: {{ name = a; value = look a; }}) [ {names} ])'
+    )
+
+
+def latest(attributes: list[str], nix: list[str]) -> dict[str, dict | None]:
+    """{attribute: {out, version, pname} | None} from the channel, with `nix`
+    the command prefix to run (`_argv(uid, as_root=…, profile=False)` in the
+    daemon, a plain `nix` for a person's own shell). Goes to the network for
+    the channel's news, which is why a check asks for it and a window
+    opening does not."""
+    if not attributes:
+        return {}
+    res = subprocess.run([*nix, "eval", "--impure", "--json", "--expr", _latest_expr(attributes)],
+                         capture_output=True, text=True, timeout=600)
+    if res.returncode != 0:
+        reason = next((l for l in reversed(res.stderr.splitlines()) if l.startswith("error")),
+                      res.stderr.strip() or f"nix exited {res.returncode}")
+        raise NixAppError(reason.removeprefix("error:").strip())
+    return json.loads(res.stdout or "{}")
+
+
+def _main_output(paths: list[str]) -> str:
+    """The package's own path among its outputs: '…-tmux-3.7c' rather than
+    '…-tmux-3.7c-man', which is the shortest name."""
+    return min(paths, key=lambda p: (len(p.rsplit("/", 1)[-1]), p))
+
+
+def _installed_version(store_path: str, pname: str) -> str:
+    """'…-opencode-2.1.4' with pname 'opencode' -> '2.1.4'."""
+    name = store_path.rsplit("/", 1)[-1]
+    name = name[33:] if len(name) > 33 and name[32] == "-" else name
+    return name[len(pname) + 1:] if pname and name.startswith(pname + "-") else name
+
+
+def _short(store_path: str) -> str:
+    return store_path.rsplit("/", 1)[-1][:12]
+
+
+def compare(profile: dict[str, tuple[str, list[str]]], channel: dict[str, dict | None],
+            names: dict[str, str] | None = None) -> list[dict]:
+    """Which installed packages the channel has a different build of:
+    [{ref, name, version, commit, latest}], the shape the Store's Updates
+    shelf reads for Flatpaks. `version` and `commit` are what is
+    installed; `latest` is what an upgrade would bring — the new version,
+    or, when the channel rebuilt the same version (a dependency moved),
+    the new build's hash, as a Flatpak's `latest` is its new commit."""
+    found = []
+    for ref, (_element, paths) in profile.items():
+        current = channel.get(ref[len(PREFIX):])
+        if not current or not paths or current["out"] in paths:
+            continue
+        main = _main_output(paths)
+        installed = _installed_version(main, current.get("pname") or "")
+        newer = current.get("version") or ""
+        found.append({
+            "ref": ref,
+            "name": (names or {}).get(ref) or package(ref),
+            "version": installed,
+            "commit": _short(main),
+            "latest": newer if newer and newer != installed else _short(current["out"]),
+        })
+    return sorted(found, key=lambda e: e["name"].lower())
+
+
+def updates(uid: int, refs: set[str], names: dict[str, str] | None = None,
+            as_root: bool = False) -> list[dict]:
+    """The Store's nixpkgs apps in this account's profile that the channel
+    has a newer build of. `refs` says which of the profile's packages are
+    the Store's (the rest are the developer's own, `kosher --local`)."""
+    try:
+        manifest = json.loads((profile_dir(uid) / "manifest.json").read_text())
+    except (OSError, ValueError):
+        return []
+    profile = {ref: entry for ref, entry in _profile_paths(manifest).items() if ref in refs}
+    if not profile:
+        return []
+    attributes = [ref[len(PREFIX):] for ref in profile]
+    channel = latest(attributes, _argv(uid, as_root=as_root, profile=False))
+    return compare(profile, channel, names)
+
+
+def own_updates() -> list[dict]:
+    """For a person's own shell (`kosher update --local`): every unlocked
+    nixpkgs package in their profile with a newer build, the Store's and
+    their own alike. Runs nix as whoever calls."""
+    try:
+        manifest = json.loads(Path.home().joinpath(
+            ".local/state/nix/profiles/profile/manifest.json").read_text())
+    except (OSError, ValueError):
+        return []
+    profile = _profile_paths(manifest)
+    if not profile:
+        return []
+    nix = ["env", "NIXPKGS_ALLOW_UNFREE=1", f"NIX_SSL_CERT_FILE={CA_BUNDLE}", "nix"]
+    return compare(profile, latest([ref[len(PREFIX):] for ref in profile], nix))
+
+
+def own_upgrade(ref: str) -> int:
+    """`nix profile upgrade` of one of the person's own packages, in their
+    shell, output and all. The exit code is nix's."""
+    try:
+        manifest = json.loads(Path.home().joinpath(
+            ".local/state/nix/profiles/profile/manifest.json").read_text())
+    except (OSError, ValueError):
+        manifest = {}
+    element = _profile_paths(manifest).get(ref, (package(ref), []))[0]
+    return subprocess.call(["env", "NIXPKGS_ALLOW_UNFREE=1", f"NIX_SSL_CERT_FILE={CA_BUNDLE}",
+                            "nix", "profile", "upgrade", "--impure", element])
 
 
 def exists(ref: str) -> bool | None:

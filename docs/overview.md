@@ -77,8 +77,8 @@ internet, music and so on) or single apps; the blocks apply to running as well a
 An account opened to the store never sees an app rated for nudity, sexual themes, bad
 language, gambling, drugs or graphic violence, or a tool for getting around the filter, unless
 a parent approves it by name. The Store keeps apps current: an Updates shelf is always there,
-with a Check for updates button that asks Flathub, one button per app and one for all of
-them. Installed lists everything on the machine and Installing shows what is in hand. A guest
+with a Check for updates button that asks Flathub, and nixpkgs for the account's own apps,
+one button per app and one for all of them. Installed lists everything on the machine and Installing shows what is in hand. A guest
 account can be switched on, given its own kind of internet, and is wiped at sign-out.
 
 **A window for the person being filtered.** *My Filter* is a read-only app on every account

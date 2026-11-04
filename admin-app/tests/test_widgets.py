@@ -3427,3 +3427,71 @@ def test_an_unfiltered_account_is_told_ssh_is_already_open():
     _win, page = _detail_for(a_user(mode="unfiltered"))
     with pytest.raises(AssertionError):
         _row_named(page, "These machines")
+
+
+# -- the example pictures under the Pictures settings -------------------------------
+
+def _media_preview(**kw):
+    from kosheradmin.mediapreview import MediaPreview
+
+    page, win, user = _detail(**kw)
+    previews = [w for w in _walk(page) if isinstance(w, MediaPreview)]
+    return page, win, (previews[0] if previews else None)
+
+
+def test_the_pictures_tab_shows_the_example_pictures_for_the_saved_choice():
+    _page, _w, preview = _media_preview(media_level="immodest", cover_style="skin")
+    assert preview is not None
+    assert len(preview.tiles) == 4
+    assert preview.states == ("shown", "shown", "covered", "hidden")
+    assert preview.cover_style == "skin"
+    assert all(t.picture.get_paintable() is not None for t in preview.tiles)
+
+
+def test_the_example_pictures_follow_the_level_as_it_is_chosen():
+    page, win, preview = _media_preview(media_level="none")
+    win.client.set_media_level = lambda *a: None
+    row = _row_named(page, "Pictures and video")
+    from kosherd.policy import MEDIA_LEVELS
+
+    seen = {}
+    for level in MEDIA_LEVELS:
+        row.set_selected(MEDIA_LEVELS.index(level))
+        seen[level] = preview.states
+    assert seen["none"] == ("shown",) * 4
+    assert seen["nsfw"] == ("shown", "shown", "shown", "hidden")
+    assert seen["immodest"] == ("shown", "shown", "covered", "hidden")
+    # A person with nothing to cover is hidden whole; scenery stays.
+    assert seen["people"] == ("shown", "hidden", "covered", "hidden")
+    assert seen["all"] == ("hidden",) * 4
+    assert preview.caption.get_label() == "Every picture from the web is replaced with a grey box."
+
+
+def test_the_covering_style_changes_how_the_covered_picture_is_drawn():
+    page, win, preview = _media_preview(media_level="immodest", cover_style="frost")
+    win.client.set_cover_style = lambda *a: None
+    assert "frosted over" in preview.caption.get_label()
+    _row_named(page, "Picture covering style").set_selected(labels.COVER_ORDER.index("skin"))
+    assert preview.cover_style == "skin"
+    assert "skin painted grey" in preview.caption.get_label()
+    assert preview.states[2] == "covered"
+
+
+def test_skin_paints_only_the_skin_and_frost_covers_the_whole_figure():
+    from kosheradmin import mediapreview as mp
+
+    plain = mp.svg_for("short-sleeves", mp.SHOWN)
+    skin = mp.svg_for("short-sleeves", mp.COVERED, "skin")
+    frost = mp.svg_for("short-sleeves", mp.COVERED, "frost")
+    assert mp.SKIN in plain and mp.SKIN_FILL not in plain
+    # Every skin shape is painted grey; the t-shirt keeps its colour.
+    assert mp.SKIN not in skin and skin.count(mp.SKIN_FILL) >= 5
+    assert "#f59e0b" in skin
+    assert "frost-area" in frost and mp.SKIN_FILL not in frost
+    assert mp.svg_for("explicit", mp.HIDDEN) == mp.svg_for("scenery", mp.HIDDEN)
+    assert mp.HIDDEN_GREY in mp.svg_for("scenery", mp.HIDDEN)
+
+
+def test_no_example_pictures_where_pictures_are_not_filtered():
+    _page, _w, preview = _media_preview(mode="unfiltered")
+    assert preview is None

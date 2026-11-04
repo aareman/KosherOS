@@ -30,6 +30,7 @@ from .common import (banner_slot, avatar, chip, clear, confirm, error_text, mode
 from .dialogs import (ApproveChannelDialog, RulesDialog, SavePresetDialog,  # noqa: E402
                       WhitelistDialog, allow_menu, confirm_remove_user, request_row)
 from .feed import fold  # noqa: E402
+from .mediapreview import MediaPreview  # noqa: E402
 from .schedule import ScheduleGrid, legend  # noqa: E402
 
 TABS = (("overview", "Overview", "view-list-symbolic"),
@@ -782,6 +783,11 @@ class UserDetailPage(Adw.NavigationPage):
             self._gated(lambda pw: self.win.client.set_media_level(user["uid"], new_level, pw),
                         f"Pictures: {labels.MEDIA_LABELS[new_level].lower()}")
 
+        # The example pictures follow the choice at once, before it is saved.
+        preview = MediaPreview(level if level in MEDIA_LEVELS else "none",
+                               user.get("cover_style", "frost"))
+        media_row.connect("notify::selected", lambda combo, _p: preview.preview(
+            level=MEDIA_LEVELS[combo.get_selected()]))
         media_row.connect("notify::selected", on_media)
         # NOT greyed out outside filtered mode: this setting also decides
         # whether image search results are shown at all, in every mode.
@@ -812,6 +818,8 @@ class UserDetailPage(Adw.NavigationPage):
                 lambda: self.win.client.set_cover_style(user["uid"], new_style),
                 done_msg=f"Covered pictures: {labels.COVER_LABELS[new_style].lower()}")
 
+        cover_row.connect("notify::selected", lambda combo, _p: preview.preview(
+            style=labels.COVER_ORDER[combo.get_selected()]))
         cover_row.connect("notify::selected", on_cover)
         if user["mode"] in ("none", "unfiltered") or level in ("none", "all"):
             cover_row.set_sensitive(False)
@@ -850,7 +858,15 @@ class UserDetailPage(Adw.NavigationPage):
                             ("Bad language", language_hint)):
             if hint:
                 hint_under(group, f"{title}: {hint}")
-        return [group]
+        if user["mode"] in ("none", "unfiltered"):
+            return [group]  # pictures are not filtered at all, so nothing to show
+        example = Adw.PreferencesGroup(title="Example")
+        card = Gtk.Box()
+        card.add_css_class("card")
+        card.append(preview)
+        example.add(card)
+        self.media_preview = preview
+        return [group, example]
 
     # -- youtube -------------------------------------------------------------------
 

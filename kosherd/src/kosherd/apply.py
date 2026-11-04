@@ -18,7 +18,7 @@ from pathlib import Path
 
 from . import categories as categories_mod
 from . import (buildsources, containers, dns, lists, mitmca, nft, nixdaemon,
-               paymentsecurity, syncthing, tailnet)
+               paymentsecurity, sshin, syncthing, tailnet)
 from . import search as search_mod
 from .policy import INSPECTED_MODES, SAFESEARCH_MODES, UNFILTERED_MODES, Policy
 
@@ -185,6 +185,36 @@ def write_nix_users(policy: Policy) -> bool:
     return True
 
 
+def write_ssh_in(policy: Policy, run=subprocess.run) -> bool:
+    """Tell sshd who may sign in (sshin.py). Returns whether anything
+    changed, in which case sshd was restarted: started for the first
+    account, stopped with the last unless root has a key (a dev disk).
+    Sessions already open are their own scopes and survive a restart.
+    A machine without sshd's drop-in directory is left alone.
+    """
+    path = sshin.CONF_PATH
+    if not path.parent.is_dir():
+        return False
+    content = sshin.render(policy)
+    try:
+        current = path.read_text()
+    except OSError:
+        current = None
+    if current == content:
+        return False
+    if content is None:
+        path.unlink(missing_ok=True)
+    else:
+        # sshd refuses a group- or world-writable file; 0600 like the rest.
+        _write_atomic(path, content, mode=0o600)
+    # restart, not try-restart: the unit's condition is what starts or
+    # stops it, and a stopped sshd must start for the first account.
+    res = run(["systemctl", "restart", sshin.SERVICE], capture_output=True, text=True)
+    if res.returncode != 0:
+        log.warning("could not restart sshd: %s", (res.stderr or "").strip())
+    return True
+
+
 def _write_atomic(path: Path, content: str, mode: int = 0o644) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp = tempfile.mkstemp(dir=path.parent)
@@ -324,6 +354,10 @@ def apply_policy(policy: Policy) -> None:
         subprocess.run(["systemctl", "stop", MITM_SERVICE], capture_output=True, text=True)
 
     write_nix_users(policy)
+    try:
+        write_ssh_in(policy)
+    except Exception:  # noqa: BLE001 - never leave the rest unapplied
+        log.exception("could not tell sshd who may sign in")
 
     write_search_policy(policy)
     # Search is only useful to somebody whose results need filtering; an

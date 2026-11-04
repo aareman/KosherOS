@@ -751,16 +751,17 @@ RUN python3 -m pip install --prefix=/usr --no-deps \
 # Time limits at the door. kosherd renders /etc/security/time.conf from
 # the policy (when each account may sign in; an account whose daily time
 # is used up is refused outright); pam_time in the account stack is what
-# reads it. It goes into the login-screen and console services directly —
+# reads it. It goes into the login-screen, console and SSH services directly —
 # password-auth is authselect's, and editing that file breaks `authselect
 # check`. On a refusal, pam_exec notes it in the activity log so the
 # parent sees "sign-in refused, 21:14" beside everything else.
-RUN for f in gdm-password gdm-autologin login; do \
+RUN for f in gdm-password gdm-autologin login sshd; do \
         [ -f "/etc/pam.d/$f" ] && ! grep -q pam_time "/etc/pam.d/$f" && \
         sed -i '0,/^account/{s|^account|account    [success=1 default=bad] pam_time.so\naccount    optional pam_exec.so quiet /usr/bin/kosher-time-refused\n&|}' "/etc/pam.d/$f"; \
     done \
     && grep -q pam_time /etc/pam.d/gdm-password \
     && grep -q kosher-time-refused /etc/pam.d/gdm-password \
+    && grep -q pam_time /etc/pam.d/sshd \
     # Text consoles are for administrators (F8 in #33, #186). Every getty,
     # on the screen's Ctrl+Alt+F2 to F6 and on a serial line, signs in
     # through the `login` service, so that is where the line is drawn: at

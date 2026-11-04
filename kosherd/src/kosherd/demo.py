@@ -375,7 +375,13 @@ class DemoClient:
 
     def set_developer_tools(self, uid, enabled, pw=""):
         self._user(uid)["developer_tools"] = bool(enabled)
+        if not enabled:
+            self._user(uid).pop("ssh_in", None)
         self._change(uid, "SetDeveloperTools", [uid, bool(enabled)])
+
+    def set_ssh_in(self, uid, enabled, pw=""):
+        self._user(uid)["ssh_in"] = bool(enabled)
+        self._change(uid, "SetSshIn", [uid, bool(enabled)])
 
     def set_build_sources(self, hosts, pw=""):
         self.policy.setdefault("developer", {})["build_sources_extra"] = sorted(set(hosts))

@@ -616,7 +616,8 @@ table {TABLE} {{
         meta l4proto {{ icmp, ipv6-icmp }} accept
         udp dport {{ 68, 546 }} accept
         udp dport 5353 accept
-{syncthing_in}        # Dev convenience; the production image ships with sshd disabled.
+{syncthing_in}        # SSH sign-in: sshd runs only for a dev disk's root key or an account
+        # with "Sign in over SSH" on, and takes keys only (sshin.py).
         tcp dport 22 accept
     }}
 

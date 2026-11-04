@@ -103,6 +103,26 @@ refused, because an SSH connection can carry a tunnel around the filter. For a
 git server of the family's own, an administrator can add port 22 under *Extra
 ports*, which opens SSH to every server for that account.
 
+With developer tools on, a second switch appears: **Sign in over SSH**. On,
+the account can be used from another computer with `ssh`. Only keys are
+accepted, never a password, so the person adds the other computer's public
+key to `~/.ssh/authorized_keys` in this account, at this computer:
+
+```
+mkdir -p ~/.ssh
+curl -s https://github.com/NAME.keys >> ~/.ssh/authorized_keys
+```
+
+or by pasting the line from the other computer's `~/.ssh/id_ed25519.pub`.
+The SSH server runs only while at least one account has the switch on, and
+lets in only those accounts. It keeps the account's time limits. Anything the
+account does here over SSH goes through its own filter, and `ssh -L` works.
+`ssh -R` and tunnels are refused, because a listener here would reach out
+from the other computer unfiltered. Files copied in over the connection are
+not checked, which is why the switch is guardian-gated. Turning developer
+tools off turns this off too. From a terminal it's
+`kosherctl ssh-in UID on`.
+
 What the switch cannot stop is a copy of Nix the account downloads itself.
 nix-portable, for one, is a single file on GitHub that brings its own Nix
 and needs no user namespaces, and the binary cache it fetches from

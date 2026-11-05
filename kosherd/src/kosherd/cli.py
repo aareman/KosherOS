@@ -1065,6 +1065,33 @@ class _Console:
             raise EOFError("the console closed mid-setup")
         return line.strip("\r\n")
 
+def _ask_timezone(console: "_Console") -> None:
+    """The installer does not ask where the computer is, so this does: the
+    internet's guess or the zone it has now, kept with Enter."""
+    from kosherd import timezones
+
+    listed = timezones.zones()
+    default = timezones.guess() or timezones.current()
+    here = timezones.zone_for(default, listed)
+    console.say(f"Time zone: {here.label} ({here.id})")
+    console.say("Press Enter to keep it, or type a city or a time zone name "
+                "(like Jerusalem or Europe/London).\n")
+    while True:
+        answer = console.ask(f"Time zone [{default}]: ").strip()
+        chosen = timezones.resolve(answer) if answer else default
+        if chosen:
+            break
+        console.say("  That is not a time zone this computer knows. Try a city, "
+                    "like Jerusalem, or a name like America/New_York.")
+    try:
+        timezones.set_zone(chosen)
+    except Exception as e:  # noqa: BLE001 - setup goes on; Settings can change it
+        console.say(f"  The time zone could not be set: {e}")
+        console.say("  It can be changed later in Settings.\n")
+        return
+    console.say(f"Time zone set to {timezones.zone_for(chosen, listed).label}.\n")
+
+
 def cmd_setup(args) -> int:
     """Text-mode first-boot setup, for when the graphical wizard cannot run.
 
@@ -1086,6 +1113,10 @@ def cmd_setup(args) -> int:
             print("--username requires --password-stdin", file=sys.stderr)
             return 1
         password = sys.stdin.readline().rstrip("\n")
+        if args.timezone:
+            from kosherd import timezones
+
+            timezones.set_zone(args.timezone)
         uid = c.create_first_admin(args.username, args.full_name or args.username,
                                    password)
         # The boot menu takes the administrator's password (#129), as the
@@ -1107,6 +1138,7 @@ def cmd_setup(args) -> int:
         console.say(f"The administrator account '{who}' already exists; "
                     "continuing with the remaining steps.\n")
     else:
+        _ask_timezone(console)
         console.say("Create the administrator account for this computer.")
         console.say("It manages profiles, filtering and apps. It has no root access.\n")
         try:
@@ -1662,6 +1694,8 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("--password-stdin", action="store_true",
                    help="read the password from stdin (with --username)")
     s.add_argument("--guardian-password", default="")
+    s.add_argument("--timezone", default="",
+                   help="set this time zone (with --username), e.g. Asia/Jerusalem")
     s.set_defaults(func=cmd_setup)
 
     sub.add_parser(

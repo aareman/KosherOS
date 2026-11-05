@@ -9,6 +9,7 @@
 contents = """
 clearpart --all --initlabel --disklabel=gpt
 autopart --type=lvm --noswap
+# A placeholder; the first-boot wizard asks for the real time zone.
 timezone America/New_York --utc
 keyboard us
 lang en_US.UTF-8

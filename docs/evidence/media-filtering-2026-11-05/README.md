@@ -265,3 +265,16 @@ raw captures are under the main checkout's `build/public-media-before`,
 historical `build/amazon-browser-after`. This directory contains only small
 public evidence artifacts; no personal browsing data or CA private key is
 included.
+
+## Inspection test follow-up
+
+Test revision `6247526` replaces the body-branding predicate with TLS signer
+checks. A positive control verifies the filtered peer against the guest CA;
+the uninspected peer must be readable and must not verify against that CA.
+The ordinary verified HTTP request must still complete without a 403. This
+checks guest interception directly without mistaking outer-host branding for it.
+
+The revised test ran against the retained `fd9a0cf` runtime image: **17 passed,
+0 failed, 1 skipped** (19/19 including harness boot/skip accounting). The earlier
+failed run remains in the historical evidence. Tailscale remains unresolved;
+the host's own TS2021 diagnostic reproduces EOF independently of the VM.

@@ -2,7 +2,7 @@
   "schema_version": 1,
   "date": "2026-11-05",
   "product_commit": "fd9a0cfe5199c36856202886aa804d52db089bf7",
-  "overall": "CI and final desktop, hardening and developer reruns pass. Inspection retains one failure and the final-image core follow-up reproduces seven Tailscale-dependent failures. The full VM gate is not green.",
+  "overall": "CI and final desktop, hardening and developer reruns pass. The inspection test now passes after replacing its branding predicate with a guest TLS signer check. Seven Tailscale-dependent core failures remain unresolved.",
   "ci": {
     "run_id": 42098317257,
     "url": "https://github.com/aareman/KosherOS/actions/runs/42098317257",
@@ -559,7 +559,32 @@
       "path": "image-perf-fd9a0cf-suites-9-10/suites-1.log",
       "bytes": 6062,
       "sha256": "bc6a68916addf06d0317b33abb7fe23d0975b38c3f3f2b9e97dd1cac0ffedcc4"
+    },
+    {
+      "path": "image-perf-inspect-signer/report.md",
+      "sha256": "26734025b7cbdfaf1a507a885ae79a405e327ae8543574fbdbcd810c27406995",
+      "bytes": 4106
+    },
+    {
+      "path": "image-perf-inspect-signer/suites-1.log",
+      "sha256": "f9d809f8eb7cc2c171ec5ce55494eb167ddc8e8e5615f973e3adeb7d088419a7",
+      "bytes": 1535
     }
   ],
-  "counts_note": "VM harness totals include setup checks and non-failing skip markers. Actual shell-suite passed/failed/skipped counts are listed separately; a harness pass count does not mean every shell check executed."
+  "counts_note": "VM harness totals include setup checks and non-failing skip markers. Actual shell-suite passed/failed/skipped counts are listed separately; a harness pass count does not mean every shell check executed.",
+  "inspection_test_fix": {
+    "test_commit": "6247526",
+    "runtime_image_commit": "fd9a0cf",
+    "shell_passed": 17,
+    "shell_failed": 0,
+    "shell_skipped": 1,
+    "harness_passed": 19,
+    "harness_total": 19,
+    "method": "Positive control verifies filtered peer certificate against guest CA; uninspected peer must be readable and must not verify against that CA. HTTP response must complete and not be403. Outer-host branding is no longer treated as guest interception."
+  },
+  "privacy_audit": {
+    "commits_reviewed": 12,
+    "private_workflow_markers_in_commit_history": 0,
+    "private_workflow_markers_in_pr_body_comments_reviews": 0
+  }
 }

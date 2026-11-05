@@ -106,16 +106,16 @@
       scheduleLayout(); schedulePoll();
     });
     var resize = new ResizeObserver(scheduleLayout);
-    function refresh(img) {
+    function refresh(img, restart) {
       var item = states.get(img), url = source(img);
       if (!url) { if (item) forget(img); return; }
       if (!item) {
         var badge = document.createElement("span"); badge.className = "badge"; badge.hidden = true;
         shadow.appendChild(badge);
-        item = { badge: badge, url: "", state: "waiting", started: 0, settled: false };
+        item = { badge: badge, url: "", state: "waiting", started: 0, settled: false, generation: 0 };
         states.set(img, item); intersection.observe(img); resize.observe(img);
       }
-      if (item.url !== url) { item.url = url; item.started = 0; item.settled = false; setState(item, "waiting"); }
+      if (item.url !== url || restart === true) { item.url = url; item.generation++; item.started = 0; item.settled = false; setState(item, "waiting"); }
       scheduleLayout(); schedulePoll();
     }
     function scan(root) {
@@ -137,7 +137,7 @@
         if (bytes + size > 18000) return;
         bytes += size;
         if (!item.started) item.started = Date.now();
-        wanted.push({ item: item, url: item.url });
+        wanted.push({ item: item, url: item.url, generation: item.generation });
       });
       if (!wanted.length || document.hidden) return;
       polling = true;
@@ -149,7 +149,7 @@
         var images = {}; try { if (req.status === 200) images = JSON.parse(req.responseText).images || {}; } catch (e) {}
         wanted.forEach(function (entry) {
           var item = entry.item, state = images[entry.url];
-          if (item.url !== entry.url) return; // source changed during the request
+          if (item.url !== entry.url || item.generation !== entry.generation) return;
           if (state && Object.prototype.hasOwnProperty.call(labels, state)) {
             setState(item, state); item.settled = state !== "checking";
           }
@@ -163,7 +163,11 @@
       records.forEach(function (r) {
         if (r.type === "attributes") {
           if (r.target.hasAttribute("data-kosheros-ui")) return;
-          if (r.target.tagName === "IMG" || r.attributeName === "style") refresh(r.target);
+          if (r.target.tagName === "IMG") {
+            // Assigning the same src can start a fresh request. Its previous
+            // terminal badge must not suppress polling for the new load.
+            refresh(r.target, r.attributeName !== "style" && !r.target.complete);
+          } else if (r.attributeName === "style") refresh(r.target);
           else if (r.target.tagName === "SOURCE" && r.target.parentElement) scan(r.target.parentElement);
         } else {
           r.addedNodes.forEach(scan);

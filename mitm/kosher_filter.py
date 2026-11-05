@@ -1141,6 +1141,9 @@ class KosherFilter:
 
         uid = self._uid_of(flow)
         flow.metadata["kosher_uid"] = uid
+        # A new request must not inherit a settled badge while it waits for
+        # upstream headers. Keep the previous result only for a possible 304.
+        self._image_status(flow, None)
 
         # A Nix build is held to the strictest developer account's filter
         # (#199); bare addresses are refused below as for everyone.
@@ -1246,6 +1249,13 @@ class KosherFilter:
             # A bypass rule (#273): through as it came, body unread.
             flow.response.stream = True
             return
+        if flow.response.status_code == 304 and (
+                _is_image(flow) or "kosher_previous_image_status" in flow.metadata):
+            # The browser reuses its cached representation. There are no
+            # pixels here to judge, and an empty body is not an exempt icon.
+            self._restore_image_status(flow)
+            flow.response.stream = True
+            return
         content_type = (flow.response.headers.get("content-type") or "").lower()
         if content_type.startswith(PLAYLIST_TYPES):
             return  # small text; response() decides
@@ -1257,10 +1267,11 @@ class KosherFilter:
                 await self._refuse_video_async(flow, before_body=True)
             return  # "hold": sampled in response()
         if _is_image(flow):
+            level = self.policy.media_level_for(uid)
+            flow.metadata["kosher_image_status_level"] = level
             if YouTube.is_moving_thumbnail(flow.request.pretty_host or "",
                                            getattr(flow.request, "path", "") or ""):
                 return  # response() decides: it may be a video in a picture
-            level = self.policy.media_level_for(uid)
             if level == "none":
                 flow.response.stream = True
             elif self._recently_clean(flow, level):
@@ -1825,7 +1836,7 @@ class KosherFilter:
             pass
         return ""
 
-    def _image_status(self, flow: http.HTTPFlow, state: str) -> None:
+    def _image_status(self, flow: http.HTTPFlow, state: str | None) -> None:
         uid = flow.metadata.get("kosher_uid")
         origin = self._image_origin(flow.request.headers.get("referer") or "")
         if uid is None or not origin:
@@ -1833,10 +1844,33 @@ class KosherFilter:
         url = flow.request.pretty_url.split("#", 1)[0]
         if len(url) > 2048:
             return
-        statuses = self.__dict__.setdefault("_image_statuses", OrderedDict())
         key = (uid, origin, url)
-        statuses[key] = (time.monotonic(), state)
+        if state is None:
+            previous = self.__dict__.get("_image_statuses", {}).pop(key, None)
+            if previous and previous[1] != "checking":
+                flow.metadata["kosher_previous_image_status"] = (key, previous)
+            return
+        statuses = self.__dict__.setdefault("_image_statuses", OrderedDict())
+        level = flow.metadata.get("kosher_image_status_level")
+        if level is None:
+            level = self.policy.media_level_for(uid)
+        statuses[key] = (time.monotonic(), state, level)
         statuses.move_to_end(key)
+        while len(statuses) > self.MAX_IMAGE_STATUSES:
+            statuses.popitem(last=False)
+
+    def _restore_image_status(self, flow: http.HTTPFlow) -> None:
+        previous = flow.metadata.pop("kosher_previous_image_status", None)
+        if previous is None:
+            return
+        key, entry = previous
+        if (time.monotonic() - entry[0] > self.IMAGE_STATUS_TTL
+                or entry[2] != self.policy.media_level_for(key[0])):
+            return
+        statuses = self.__dict__.setdefault("_image_statuses", OrderedDict())
+        if key in statuses:
+            return  # a concurrent request has already published newer state
+        statuses[key] = entry
         while len(statuses) > self.MAX_IMAGE_STATUSES:
             statuses.popitem(last=False)
 
@@ -1855,6 +1889,7 @@ class KosherFilter:
             return
         origin = self._image_origin(flow.request.pretty_url)
         now = time.monotonic()
+        level = self.policy.media_level_for(uid)
         statuses = self.__dict__.get("_image_statuses", {})
         result = {}
         for url in urls:
@@ -1862,7 +1897,7 @@ class KosherFilter:
                 continue
             url = url.split("#", 1)[0]
             entry = statuses.get((uid, origin, url))
-            if entry and now - entry[0] <= self.IMAGE_STATUS_TTL:
+            if entry and now - entry[0] <= self.IMAGE_STATUS_TTL and entry[2] == level:
                 result[url] = entry[1]
         flow.response = http.Response.make(200, json.dumps({"images": result}).encode(),
             {"Content-Type": "application/json", "Cache-Control": "no-store"})
@@ -2061,6 +2096,7 @@ class KosherFilter:
         import asyncio
 
         level = self.policy.media_level_for(uid)
+        flow.metadata["kosher_image_status_level"] = level
         if level == "none":
             return
         action = self._image_initial_action(flow, uid, level)

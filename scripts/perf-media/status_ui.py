@@ -8,6 +8,7 @@ from pathlib import Path
 
 from PIL import Image
 from playwright.async_api import async_playwright
+from browser import capture_screenshot
 
 
 async def main(args):
@@ -18,11 +19,24 @@ async def main(args):
     image = buffer.getvalue()
     states = {'http://media-ui.test/first.png': 'checking'}
     urls = []
+    reload = {'hold': False}
+    reload_started, reload_release, reload_polled = (asyncio.Event() for _ in range(3))
+    status_reply = {'hold': False}
+    status_started, status_release = asyncio.Event(), asyncio.Event()
+    reload_url = 'http://media-ui.test/first.png'
     html = '''<html><head><script defer src="/__kosheros__/filter.js" data-kosheros-language="off" data-kosheros-images="1" data-kosheros-token="fixture"></script></head><body><h1>Image status browser check</h1><button id="link" onclick="window.clicked=true" style="border:0;padding:0"><img id="photo" width="320" height="180" src="/first.png"></button></body></html>'''
     async with async_playwright() as pw:
         browser = await pw.chromium.connect_over_cdp(args.cdp)
         page = await browser.contexts[0].new_page()
         await page.bring_to_front()
+        session = await page.context.new_cdp_session(page)
+        capture_errors = []
+
+        async def capture(name):
+            error = await capture_screenshot(session, args.output / name)
+            if error:
+                capture_errors.append(error)
+
         errors = []
         page.on('pageerror', lambda error: errors.append(str(error)))
         try:
@@ -36,10 +50,23 @@ async def main(args):
                     body = request.request.post_data
                     assert len(body) <= 20_000
                     requested = json.loads(body)['urls']
-                    await request.fulfill(json={'images': {url: states[url] for url in requested if url in states}})
+                    reply = {'images': {url: states[url] for url in requested if url in states}}
+                    if status_reply['hold'] and reload_url in requested:
+                        status_reply['hold'] = False
+                        status_started.set()
+                        await asyncio.wait_for(status_release.wait(), timeout=15)
+                    elif reload['hold'] and reload_url in requested:
+                        reload_polled.set()
+                    await request.fulfill(json=reply)
                 elif '.png' in url:
+                    if reload['hold'] and url == reload_url:
+                        states.pop(url, None)  # proxy invalidates at request start
+                        reload_started.set()
+                        await asyncio.wait_for(reload_release.wait(), timeout=15)
+                        states[url] = 'unavailable'
                     await asyncio.sleep(.1)
-                    await request.fulfill(content_type='image/png', body=image)
+                    await request.fulfill(content_type='image/png', body=image,
+                                          headers={'Cache-Control': 'no-store'})
                 else:
                     await request.fulfill(content_type='text/html; charset=utf-8', body=html)
             await page.route('http://media-ui.test/**', route)
@@ -51,26 +78,47 @@ async def main(args):
             pending = await badge.bounding_box()
             assert pending['width'] <= 24 and pending['height'] <= 16
             before = await page.locator('#photo').bounding_box()
-            await page.screenshot(path=str(args.output / 'checking.png'))
+            await capture('checking.png')
             states['http://media-ui.test/first.png'] = 'filtered'
             await badge.filter(has_text='Filtered').wait_for()
             assert await page.locator('#photo').bounding_box() == before
             assert await page.locator('#photo').get_attribute('src') == '/first.png'
             await page.locator('#link').click()
             assert await page.evaluate('window.clicked')
-            await page.screenshot(path=str(args.output / 'filtered.png'))
+            await capture('filtered.png')
             states['http://media-ui.test/approved.png'] = 'checked'
             await page.locator('#photo').evaluate('(img) => img.src="/approved.png"')
             approved = page.locator('[data-kosheros-ui="images"] .badge[data-state="checked"]')
             await approved.wait_for(state='attached')
             assert not await approved.is_visible()
             assert await page.locator('#photo').bounding_box() == before
-            await page.screenshot(path=str(args.output / 'approved.png'))
+            await capture('approved.png')
+            # Hold a terminal reply for the current generation. A different
+            # fetch mode makes Chromium refetch the same URL instead of using
+            # the active element's decoded-image cache for a no-op src setter.
+            states[reload_url] = 'checked'
+            status_reply['hold'] = True
+            await page.locator('#photo').evaluate('(img) => img.src="/first.png"')
+            await asyncio.wait_for(status_started.wait(), timeout=5)
+            reload['hold'] = True
+            await page.locator('#photo').evaluate('(img) => {img.crossOrigin="anonymous";img.src=img.src}')
+            await asyncio.wait_for(reload_started.wait(), timeout=5)
+            status_release.set()  # stale "checked" must not settle this load
+            await asyncio.wait_for(reload_polled.wait(), timeout=5)
+            await page.locator('[data-kosheros-ui="images"] .badge[data-state="waiting"]').wait_for()
+            assert not await page.locator('#photo').evaluate('(img) => img.complete')
+            assert await page.locator('#photo').bounding_box() == before
+            await capture('same-url-pending.png')
+            reload_release.set()
+            await badge.filter(has_text='Not checked · hidden').wait_for()
+            assert await page.locator('#photo').get_attribute('src') == reload_url
+            assert await page.locator('#photo').bounding_box() == before
+            reload['hold'] = False
             states['http://media-ui.test/second.png'] = 'unavailable'
             await page.locator('#photo').evaluate('(img) => img.src="/second.png"')
             await badge.filter(has_text='Not checked · hidden').wait_for()
             assert await page.locator('#photo').bounding_box() == before
-            await page.screenshot(path=str(args.output / 'unavailable.png'))
+            await capture('unavailable.png')
             states['http://media-ui.test/background.png'] = 'hidden'
             await page.evaluate('''() => {
                 const tile = document.createElement('div'); tile.id = 'background';
@@ -78,7 +126,7 @@ async def main(args):
                 document.body.appendChild(tile);
             }''')
             await badge.filter(has_text='Hidden').wait_for()
-            await page.screenshot(path=str(args.output / 'background.png'))
+            await capture('background.png')
             await page.locator('#background').evaluate('(tile) => tile.remove()')
             await page.locator('#photo').evaluate('(img) => img.remove()')
             await page.wait_for_function('!document.querySelector("[data-kosheros-ui]").shadowRoot.querySelector(".badge")')
@@ -111,7 +159,11 @@ async def main(args):
             }''')
             await badge.filter(has_text='Checked').wait_for(state='attached')
             assert not await badge.is_visible()
-            (args.output / 'result.txt').write_text('PASS: subtle pending indicator; approved images have no visible badge; filtered/unavailable/background labels; unchanged image URL/layout; click-through; removal cleanup; bounded long-URL batches; late-visible images checked.\n')
+            (args.output / 'result.txt').write_text('PASS: subtle pending indicator; approved images have no visible badge; same-URL reload ignores a stale in-flight checked reply, resumes pending polling and reaches its new result; filtered/unavailable/background labels; unchanged image URL/layout; click-through; removal cleanup; bounded long-URL batches; late-visible images checked.\n')
+            (args.output / 'result.json').write_text(json.dumps({
+                'assertions': 'passed', 'page_errors': errors,
+                'capture_errors': capture_errors,
+            }, indent=2))
             print((args.output / 'result.txt').read_text())
         except Exception:
             (args.output / 'failure.json').write_text(json.dumps({
@@ -119,7 +171,7 @@ async def main(args):
                 'page': await page.content(),
                 'status': await page.evaluate('({hidden:document.hidden,ready:document.readyState,badges:document.querySelector("[data-kosheros-ui]")?.shadowRoot.innerHTML})'),
             }, indent=2))
-            await page.screenshot(path=str(args.output / 'failure.png'))
+            await capture('failure.png')
             raise
         finally:
             await page.close()

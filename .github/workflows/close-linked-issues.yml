@@ -1,0 +1,39 @@
+name: Close finished issues
+
+# An issue is closed once a pull request linked to it has been merged and
+# no linked pull request is still open (scripts/close-linked-issues.py).
+# GitHub does this itself for a "Closes #N" merged by a person, but not for
+# a merge made by the workflow token (the merge train without
+# MERGE_TRAIN_TOKEN, whose merges start no other workflow either) or a link
+# made by hand. So it runs when a pull request closes, and every hour.
+
+on:
+  pull_request_target:
+    types: [closed]
+  schedule:
+    - cron: "17 * * * *"
+  workflow_dispatch:
+
+permissions:
+  issues: write
+  pull-requests: read
+
+concurrency:
+  group: close-linked-issues
+  cancel-in-progress: false
+
+jobs:
+  close:
+    # A pull request closed without merging finishes nothing.
+    if: github.event_name != 'pull_request_target' || github.event.pull_request.merged
+    runs-on: ubuntu-latest
+    steps:
+      # The default branch's script, never the pull request's: this runs
+      # with a token that can close issues.
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+      - name: Close the issues whose work has landed
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 scripts/close-linked-issues.py

@@ -45,7 +45,11 @@ async def main(args):
             await page.route('http://media-ui.test/**', route)
             await page.goto('http://media-ui.test/', wait_until='load')
             badge = page.locator('[data-kosheros-ui="images"] .badge')
-            await badge.filter(has_text='Checking…').wait_for()
+            await page.locator('[data-kosheros-ui="images"] .badge[data-state="checking"]').wait_for()
+            assert await badge.inner_text() == '…'
+            assert await badge.get_attribute('aria-label') == 'Checking…'
+            pending = await badge.bounding_box()
+            assert pending['width'] <= 24 and pending['height'] <= 16
             before = await page.locator('#photo').bounding_box()
             await page.screenshot(path=str(args.output / 'checking.png'))
             states['http://media-ui.test/first.png'] = 'filtered'
@@ -55,6 +59,13 @@ async def main(args):
             await page.locator('#link').click()
             assert await page.evaluate('window.clicked')
             await page.screenshot(path=str(args.output / 'filtered.png'))
+            states['http://media-ui.test/approved.png'] = 'checked'
+            await page.locator('#photo').evaluate('(img) => img.src="/approved.png"')
+            approved = page.locator('[data-kosheros-ui="images"] .badge[data-state="checked"]')
+            await approved.wait_for(state='attached')
+            assert not await approved.is_visible()
+            assert await page.locator('#photo').bounding_box() == before
+            await page.screenshot(path=str(args.output / 'approved.png'))
             states['http://media-ui.test/second.png'] = 'unavailable'
             await page.locator('#photo').evaluate('(img) => img.src="/second.png"')
             await badge.filter(has_text='Not checked · hidden').wait_for()
@@ -73,6 +84,7 @@ async def main(args):
             await page.wait_for_function('!document.querySelector("[data-kosheros-ui]").shadowRoot.querySelector(".badge")')
             assert set(urls) <= {'http://media-ui.test/', 'http://media-ui.test/favicon.ico',
                                 'http://media-ui.test/first.png', 'http://media-ui.test/second.png',
+                                'http://media-ui.test/approved.png',
                                 'http://media-ui.test/background.png',
                                 'http://media-ui.test/__kosheros__/filter.js',
                                 'http://media-ui.test/__kosheros__/image-status'}
@@ -85,6 +97,7 @@ async def main(args):
                 document.body.appendChild(grid);
             }''', long_urls)
             await page.wait_for_function('document.querySelector("[data-kosheros-ui]").shadowRoot.querySelectorAll(".badge[data-state=checked]").length===12')
+            assert await page.locator('[data-kosheros-ui="images"] .badge:visible').count() == 0
             await page.locator('#batch').evaluate('(el) => el.remove()')
             states['http://media-ui.test/lazy.png'] = 'checked'
             await page.evaluate('''() => {
@@ -96,8 +109,9 @@ async def main(args):
                 const original=Date.now;Date.now=()=>original()+40000;
                 document.querySelector('#lazy').scrollIntoView();
             }''')
-            await badge.filter(has_text='Checked').wait_for()
-            (args.output / 'result.txt').write_text('PASS: checking, filtered, unavailable, inline background hidden; unchanged image URL/layout; underlying click; automatic removal cleanup; bounded long-URL batches; late-visible images checked.\n')
+            await badge.filter(has_text='Checked').wait_for(state='attached')
+            assert not await badge.is_visible()
+            (args.output / 'result.txt').write_text('PASS: subtle pending indicator; approved images have no visible badge; filtered/unavailable/background labels; unchanged image URL/layout; click-through; removal cleanup; bounded long-URL batches; late-visible images checked.\n')
             print((args.output / 'result.txt').read_text())
         except Exception:
             (args.output / 'failure.json').write_text(json.dumps({

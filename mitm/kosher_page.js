@@ -49,7 +49,7 @@
     var shadow = host.attachShadow({ mode: "open" });
     var style = document.createElement("style");
     if (me && me.nonce) style.nonce = me.nonce;
-    style.textContent = ":host{position:fixed;inset:0;pointer-events:none;z-index:2147483646}.badge{position:absolute;pointer-events:none;font:11px/1.4 system-ui,sans-serif;padding:2px 6px;border-radius:4px;background:rgba(22,28,35,.82);color:#fff;white-space:nowrap;box-shadow:0 1px 3px #0003}.badge[data-state=checking],.badge[data-state=waiting]{background:rgba(22,28,35,.68)}";
+    style.textContent = ":host{position:fixed;inset:0;pointer-events:none;z-index:2147483646}.badge{position:absolute;pointer-events:none;font:11px/1.4 system-ui,sans-serif;padding:2px 6px;border-radius:4px;background:rgba(22,28,35,.82);color:#fff;white-space:nowrap;box-shadow:0 1px 3px #0003}.badge[data-state=checking],.badge[data-state=waiting]{padding:0 4px;font-size:12px;line-height:14px;background:rgba(22,28,35,.45);box-shadow:none}";
     shadow.appendChild(style);
     document.documentElement.appendChild(host);
 
@@ -73,14 +73,22 @@
     }
     function setState(item, state) {
       item.state = state;
-      item.badge.textContent = labels[state] || labels.unknown;
+      var pending = state === "waiting" || state === "checking";
+      var label = labels[state] || labels.unknown;
+      item.badge.textContent = pending ? "…" : label;
+      item.badge.setAttribute("role", "img");
+      item.badge.setAttribute("aria-label", label);
       item.badge.setAttribute("data-state", state);
+      if (state === "checked" || state === "not_checked") item.badge.hidden = true;
     }
     function layout() {
       layoutQueued = false;
       visible.forEach(function (img) {
         var item = states.get(img);
         if (!img.isConnected) { forget(img); return; }
+        if (item.state === "checked" || item.state === "not_checked") {
+          item.badge.hidden = true; item.displayed = false; return;
+        }
         var rect = img.getBoundingClientRect();
         var show = rect.width >= 80 && rect.height >= 48;
         item.displayed = show;

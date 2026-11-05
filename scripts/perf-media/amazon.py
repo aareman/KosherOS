@@ -114,7 +114,7 @@ async def capture(browser, url, output, seconds, require_image_status=False):
         actions.append('clicked next carousel button')
         await asyncio.sleep(3)
     raw=await page.evaluate('''() => ({metrics:window.__mediaEvidence,title:document.title,url:location.href,navigation:performance.getEntriesByType('navigation')[0]?.toJSON(),images:[...document.images].map(i=>{let r=i.getBoundingClientRect();return {src:i.src,currentSrc:i.currentSrc,alt:i.alt,srcset:i.srcset,complete:i.complete,naturalWidth:i.naturalWidth,naturalHeight:i.naturalHeight,width:r.width,height:r.height,visible:r.width>0&&r.height>0&&r.bottom>0&&r.top<innerHeight}}),backgrounds:[...document.querySelectorAll('*')].map(e=>{const image=getComputedStyle(e).backgroundImage;const r=e.getBoundingClientRect();return {image,width:r.width,height:r.height,visible:r.width>0&&r.height>0&&r.bottom>0&&r.top<innerHeight}}).filter(e=>e.image!=='none'),bodyText:document.body.innerText.slice(0,2500)})''')
-    raw['image_status_ui']=await page.evaluate('''() => ({hosts:document.querySelectorAll('[data-kosheros-ui="images"]').length,badges:[...document.querySelectorAll('[data-kosheros-ui="images"]')].flatMap(host=>[...(host.shadowRoot?.querySelectorAll('.badge')||[])].map(b=>({state:b.getAttribute('data-state'),label:b.textContent,visible:!b.hidden})))})''')
+    raw['image_status_ui']=await page.evaluate(bench.IMAGE_STATUS_SNAPSHOT)
     raw['http_responses']=responses
     raw['actions']=actions
     raw['carousel_controls']=controls
@@ -140,6 +140,7 @@ async def capture(browser, url, output, seconds, require_image_status=False):
         'proxy_errors':len(stats['errors']),'actions':actions,
         'image_status_ui_hosts':raw['image_status_ui']['hosts'],
         'visible_image_status_labels':dict(Counter(b['label'] for b in raw['image_status_ui']['badges'] if b['visible'])),
+        'final_tracked_image_status_states':dict(Counter(b['state'] for b in raw['image_status_ui']['badges'] if b['was_displayed'])),
         'observed_image_status_states':sorted({b['state'] for event in raw['metrics']['imageStatuses'] for b in event['badges'] if b['state']}),
         'status_api_http_codes':dict(Counter(r['status'] for r in stats['status_api_responses'])),
         'has_captcha_text':any(text in raw['bodyText'].lower() for text in ('enter the characters','robot check','verify that you'))}
@@ -151,9 +152,12 @@ async def capture(browser, url, output, seconds, require_image_status=False):
             failures.append('expected exactly one production image-status UI')
         if not any(r['status']==200 for r in stats['status_api_responses']):
             failures.append('production image-status API never succeeded')
-        visible=[b for b in raw['image_status_ui']['badges'] if b['visible']]
-        if not visible or any(b['state'] in ('waiting','checking','unknown') for b in visible):
-            failures.append('visible image-status badges did not settle')
+        active=[b for b in raw['image_status_ui']['badges'] if b['visible'] or
+                (b['was_displayed'] and b['state'] in ('checked','not_checked'))]
+        if not active or any(b['state'] in ('waiting','checking','unknown') for b in active):
+            failures.append('observed image-status states did not settle')
+        if any(b['visible'] and b['state'] in ('checked','not_checked') for b in raw['image_status_ui']['badges']):
+            failures.append('approved images still display a final status badge')
         if 'waiting' not in summary['observed_image_status_states']:
             failures.append('initial waiting state was not observed')
     summary['validation_errors']=failures

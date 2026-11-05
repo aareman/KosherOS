@@ -27,6 +27,11 @@ from playwright.async_api import async_playwright
 
 HERE = Path(__file__).resolve().parent
 
+# A settled approved badge is deliberately hidden. Remember whether layout
+# positioned it while pending so correctness still covers images that were
+# observed, without demanding status for never-visible lazy content.
+IMAGE_STATUS_SNAPSHOT = '''() => ({hosts:document.querySelectorAll('[data-kosheros-ui="images"]').length,badges:[...document.querySelectorAll('[data-kosheros-ui="images"]')].flatMap(host=>[...(host.shadowRoot?.querySelectorAll('.badge')||[])].map(b=>({state:b.getAttribute('data-state'),label:b.textContent,visible:!b.hidden&&b.getClientRects().length>0,was_displayed:!!b.style.transform,title:b.title,accessible_label:b.getAttribute('aria-label')})))})'''
+
 
 def percentile(values, fraction):
     return round(sorted(values)[int((len(values)-1)*fraction)], 2) if values else None
@@ -188,9 +193,14 @@ def validate(raw, proxy, scenario, placeholder_colors=None):
             errors.append('production image-status UI did not initialize')
         if 200 not in proxy['status_api_http_codes']:
             errors.append('production image-status API did not succeed')
-        visible = [badge for badge in ui['badges'] if badge['visible']]
-        if not visible or any(badge['state'] in ('waiting', 'checking', 'unknown') for badge in visible):
-            errors.append('visible production image-status badges did not settle')
+        # Offscreen unfinished images stop polling. Include hidden approvals
+        # so an all-approved viewport still proves completed status handling.
+        active = [badge for badge in ui['badges'] if badge['visible'] or
+                  (badge['was_displayed'] and badge['state'] in ('checked', 'not_checked'))]
+        if not active or any(badge['state'] in ('waiting', 'checking', 'unknown') for badge in active):
+            errors.append('observed production image-status states did not settle')
+        if any(badge['visible'] and badge['state'] in ('checked', 'not_checked') for badge in ui['badges']):
+            errors.append('approved images still display a final status badge')
     return {'valid': not errors, 'errors': errors, 'geometry_preserved': geometry_ok,
             'verified_hidden_tiles': hidden_ok, 'verified_covers': covers_ok}
 
@@ -315,7 +325,7 @@ async def trial(browser, origin, args, label, root, scenario, repeat):
             const result={src:i.currentSrc||i.src,complete:i.complete,width:i.naturalWidth,height:i.naturalHeight,render_width:rect.width,render_height:rect.height};
             try{const c=document.createElement('canvas');c.width=c.height=9;const x=c.getContext('2d');x.drawImage(i,301,246,9,9,0,0,9,9);result.pixels=[...x.getImageData(0,0,9,9).data]}catch(e){result.pixel_error=String(e)}
             return result}),videos:[...document.querySelectorAll('video')].map(v=>({src:v.currentSrc||v.src,readyState:v.readyState,networkState:v.networkState,width:v.videoWidth,height:v.videoHeight,error:v.error?{code:v.error.code,message:v.error.message}:null}))})'''))
-        raw['image_status_ui'] = await page.evaluate('''() => ({hosts:document.querySelectorAll('[data-kosheros-ui="images"]').length,badges:[...document.querySelectorAll('[data-kosheros-ui="images"]')].flatMap(host=>[...(host.shadowRoot?.querySelectorAll('.badge')||[])].map(b=>({state:b.getAttribute('data-state'),label:b.textContent,visible:!b.hidden})))})''')
+        raw['image_status_ui'] = await page.evaluate(IMAGE_STATUS_SNAPSHOT)
         raw['dispatches'] = dispatches
         raw['http_responses'] = responses
         await page.screenshot(path=str(out / 'browser.png'))
@@ -355,6 +365,7 @@ async def trial(browser, origin, args, label, root, scenario, repeat):
             'media_results':dict(Counter(r['result'] for r in proxy['responses'])),
             'image_status_ui_hosts':raw['image_status_ui']['hosts'],
             'visible_image_status_labels':dict(Counter(b['label'] for b in raw['image_status_ui']['badges'] if b['visible'])),
+            'observed_image_status_states':dict(Counter(b['state'] for b in raw['image_status_ui']['badges'] if b['was_displayed'])),
             'status_api_http_codes':dict(Counter(proxy['status_api_http_codes'])),
             'video_states':raw['videos'], 'validation':validation}
         (out/'browser.json').write_text(json.dumps(raw,indent=2))

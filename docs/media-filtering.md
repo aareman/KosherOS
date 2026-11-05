@@ -383,11 +383,13 @@ machine already short of it, to cache something SQLite handles.
 
 ## Image status on a page
 
-The page script labels visible images and single inline CSS backgrounds at
-least 80×48 CSS pixels: waiting, checking, checked, filtered, hidden, or not
-checked. A failed check is labelled "Not checked · hidden". A small image
-exempted by policy is labelled "Not checked", not "Checked". Missing observations
-expire to "Status unavailable"; they are never presented as a successful check.
+The page script puts a small static ellipsis on visible images and single inline
+CSS backgrounds at least 80×48 CSS pixels while they wait or are checked. The
+indicator disappears when an image is allowed through, including policy-exempt
+images; an exemption remains distinct from a completed check in the status API.
+Filtered or hidden images keep their label. A failed check is labelled
+"Not checked · hidden". Missing observations expire to "Status unavailable";
+they are never presented as a successful check.
 
 Labels do not alter image URLs, layout or click targets. The script batches
 status requests while the tab is visible, stops polling settled images and

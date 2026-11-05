@@ -2,6 +2,7 @@
 import io
 import json
 
+import pytest
 from PIL import Image
 
 from test_mitm_addon import addon as addon
@@ -12,7 +13,8 @@ def request_status(addon, filt, urls, host='shop.example', uid=1001, token=True)
     flow = _flow(f'https://{host}{addon.IMAGE_STATUS_PATH}', method='POST',
                  body=json.dumps({'urls': urls}).encode())
     if token:
-        flow.request.headers[addon.PAGE_TOKEN_HEADER] = filt._page_token(uid, host)
+        flow.request.headers[addon.PAGE_TOKEN_HEADER] = filt._page_token(
+            uid, flow.request.pretty_host)
     assert filt._serve_page_filter(flow, uid)
     return flow.response
 
@@ -40,6 +42,34 @@ def test_missing_referrer_and_expired_observations_are_not_exposed(addon, monkey
     now = addon.time.monotonic()
     monkeypatch.setattr(addon.time, 'monotonic', lambda: now + filt.IMAGE_STATUS_TTL + 1)
     assert json.loads(request_status(addon, filt, [image.request.pretty_url]).content)['images'] == {}
+
+
+@pytest.mark.parametrize('source, other', [
+    ('[::1]:9000', '[::1:9000]'),
+    ('[::1:9000]', '[::1]:9000'),
+    ('shop.example:0', 'shop.example'),
+])
+def test_image_status_distinguishes_ipv6_addresses_and_explicit_ports(addon, source, other):
+    filt = _filter(addon, media='immodest')
+    image = _flow('https://cdn.example/photo.jpg',
+                  headers={'referer': f'https://{source}/item'})
+    filt._image_status(image, 'filtered')
+    own = request_status(addon, filt, [image.request.pretty_url], host=source)
+    unrelated = request_status(addon, filt, [image.request.pretty_url], host=other)
+    assert own.status_code == unrelated.status_code == 200
+    assert json.loads(own.content)['images'] == {image.request.pretty_url: 'filtered'}
+    assert json.loads(unrelated.content)['images'] == {}
+
+
+@pytest.mark.parametrize('host', ['shop.example', '[::1]'])
+def test_image_status_default_port_is_the_same_origin(addon, host):
+    filt = _filter(addon, media='immodest')
+    image = _flow('https://cdn.example/photo.jpg',
+                  headers={'referer': f'https://{host}:443/item'})
+    filt._image_status(image, 'checked')
+    response = request_status(addon, filt, [image.request.pretty_url], host=host)
+    assert response.status_code == 200
+    assert json.loads(response.content)['images'] == {image.request.pretty_url: 'checked'}
 
 
 def test_image_status_memory_and_request_size_are_bounded(addon):

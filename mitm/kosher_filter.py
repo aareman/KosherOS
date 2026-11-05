@@ -1797,7 +1797,10 @@ class KosherFilter:
                 port = parts.port
                 default = 443 if parts.scheme == "https" else 80
                 host = parts.hostname.lower()
-                return f"{parts.scheme}://{host}" + (f":{port}" if port and port != default else "")
+                if ":" in host:
+                    host = f"[{host}]"  # keep IPv6 addresses distinct from ports
+                return f"{parts.scheme}://{host}" + (
+                    f":{port}" if port is not None and port != default else "")
         except ValueError:
             pass
         return ""

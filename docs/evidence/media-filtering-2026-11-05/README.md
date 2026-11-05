@@ -86,6 +86,70 @@ DOM are valid color/geometry evidence; this was not a clean performance run.
 The harness now creates a fresh temporary profile per run to prevent restored
 tabs from contributing traffic.
 
+## Follow-up status reload regression
+
+The later `310b0bd` fix clears a previous image observation when a new network
+request starts. A valid image HTTP 304 restores the prior state only within its
+TTL and at the same media level; video refusal is unchanged. The page script
+restarts pending status for a new load of the same URL and ignores replies from
+an earlier image generation. Decision metadata retains the media level used for
+that decision, so a subsequent level change cannot relabel it as a new check.
+
+[Focused browser evidence](status-reload-browser.json) records a real same-URL
+refetch triggered by changing fetch mode while an older status response is held.
+The fixed script ignored that stale checked reply, polled again and reached the
+new unavailable state. Removing only the generation guard reproduced the bug.
+All UI assertions passed with no page errors, and **57 focused proxy/page tests**
+passed with Node enabled. Four screenshot captures timed out and are explicitly
+recorded; this regression's evidence is the browser assertions and negative
+control, not missing screenshots. These checks use synthetic responses and do
+not add performance measurements to the preceding source revision.
+
+## Complete browser comparison with the subtle UI — Performance mode
+
+[All 16 trials and provenance](performance-current.json) compare baseline
+`506ebba` with `5468b17`, including the subtle loading indicator and removal of
+approved badges. Two pairs per scenario ran in balanced AB/BA order, for 20
+seconds each, with fresh proxy/verdict caches. No VM or image build ran during
+the comparison. Start and end power settings for every trial were Performance;
+all power guards, screenshots and correctness checks passed. These results
+remain separate from the earlier low-power run. The subsequent status-cache
+reload fix has separate functional checks and is not included in these timings.
+
+Values are medians of the two per-trial metrics on each side. The unrelated
+request probe measures `fetch()` to response headers; it does not read the body.
+Two pairs are descriptive evidence, not a statistical-significance claim.
+
+| Scenario | Maximum proxy pause, ms | Maximum unrelated request, ms | Page load, ms | Maximum frame gap during load, ms |
+|---|---:|---:|---:|---:|
+| 36 hidden images | 229.03 → 23.00 | 463.25 → 25.75 | 717.55 → 636.60 | 91.65 → 33.40 |
+| 6 images with intrinsic layout | 156.57 → 23.64 | 53.75 → 21.25 | 216.45 → 169.35 | 16.75 → 16.75 |
+| 36 covered images | 153.26 → 26.28 | 246.15 → 24.85 | 1190.80 → 1211.30 | 58.40 → 33.40 |
+| Image inference + 2 videos | 78.07 → 30.15 | 142.20 → 30.20 | 2863.90 → 2313.35 | 50.05 → 99.95 |
+
+Maximum proxy pauses fell **61–90%**. Hidden-image and inference page loads
+fell **11.3%** and **19.2%**; cover-page load increased **1.7%**. Browser timing
+still has tradeoffs: inference's maximum loading-frame gap increased from
+50.05 to 99.95 ms, and its maximum click-to-next-rAF latency increased from
+42.65 to 62.10 ms. Click-to-next-rAF p95 changed by at most 0.2 ms across the
+four scenarios. It is not presentation latency or INP; no slow Event Timing
+interactions were reported, which does not establish zero latency.
+
+Whole-window unrelated-request p95 was mixed: hidden 13.80 → 16.05 ms,
+intrinsic 6.65 → 11.80 ms, covers 17.70 → 12.65 ms, and inference 18.20 →
+18.35 ms. Short Performance-mode loads occupy a small fraction of the
+20-second sample, so that percentile can omit the initial burst; both p95 and
+maximums are retained. The raw ping durations have no timestamps, so a
+loading-only ping percentile cannot reliably be reconstructed.
+
+Across all trials, **456/456 image dimensions** and **144/144 expected covers**
+were verified. Both clips decoded in every inference trial. The candidate
+passed all 36 synthetic images in each inference run; the baseline passed
+26 and 28, hiding 10 and 8 after timeouts. Candidate inference pages had 36
+checked states and no visible settled badges. This is improved completion under
+load, not identical output or a test of model accuracy. All per-trial values,
+observed ranges, output counts and source hashes are retained in the JSON.
+
 ## Preliminary low-power pipeline measurements — older UI
 
 [Validated paired trials](preliminary-low-power-pairs.json) contain only the
@@ -107,7 +171,7 @@ preliminary descriptive evidence, not a statistical-significance claim.
 
 | Scenario | Pairs | Ping p95, ms | Proxy loop maximum, ms | Input-to-next-frame p95, ms | Page load, s |
 |---|---:|---:|---:|---:|---:|
-| 36 hidden images | 2 | 1116.2 → 61.7 | 850.4 → 192.1 | 9.6 → 9.3 | 3.13 → 3.16 |
+| 36 hidden images | 2 | 1116.2 → 61.7 | 850.4 → 192.1 | 9.60 → 9.35 | 3.13 → 3.16 |
 | 6 images with intrinsic layout | 2 | 36.4 → 28.1 | 802.1 → 189.1 | 6.2 → 6.3 | 1.15 → 0.92 |
 | 36 covered images | 2 | 1416.5 → 131.0 | 729.7 → 190.0 | 16.6 → 30.8 | 6.10 → 5.33 |
 | Image inference + 2 videos | 2 | 1129.3 → 131.6 | 717.1 → 178.9 | 18.2 → 22.2 | 4.71 → 5.09 |
@@ -148,7 +212,8 @@ successful completion of the user's new-portal login.
 See [the harness instructions](../../../scripts/perf-media/README.md). Full
 raw captures are under the main checkout's `build/public-media-before`,
 `build/public-media-subtle`, `build/public-media-colors-subtle`,
-`build/image-status-browser-subtle`, `build/image-perf-browser-verified` and
+`build/image-status-browser-subtle`, `build/image-perf-browser-verified`,
+`build/image-perf-browser-current-performance` and
 historical `build/amazon-browser-after`. This directory contains only small
 public evidence artifacts; no personal browsing data or CA private key is
 included.

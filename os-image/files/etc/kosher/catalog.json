@@ -93,6 +93,7 @@
     { "ref": "org.gnome.baobab", "name": "Disk Usage Analyzer", "summary": "See what is filling the disk", "categories": ["Utility", "FileTools"] },
     { "ref": "nixpkgs#syncthing", "name": "Syncthing", "summary": "Keep folders the same on your computers and phone", "categories": ["Utility", "FileTools"] },
     { "ref": "com.github.tchx84.Flatseal", "name": "Flatseal", "summary": "Review what each app is allowed to do", "categories": ["Utility", "Security"] },
+    { "ref": "upstream#hex", "name": "Hex", "summary": "Hold a key, speak, and it types what you said", "categories": ["Utility", "Accessibility"], "description": "Hex turns speech into text on this computer. Hold the shortcut, talk, let go, and your words are typed wherever the cursor is: an email, a document, a chat. The speech is recognised on the computer itself, not on a server. This is Anomaly's own build, fetched from Anomaly and checked against their signature.", "developer": "Anomaly", "license": "MIT", "homepage": "https://anoma.ly/hex" },
     { "ref": "org.gnome.Characters", "name": "Characters", "summary": "Find a letter or symbol", "categories": ["Utility"] },
 
     { "ref": "org.kde.gcompris", "name": "GCompris", "summary": "Learning games for young children", "categories": ["Education"] },

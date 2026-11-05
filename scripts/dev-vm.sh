@@ -8,6 +8,9 @@
 #   dev-vm.sh down     power off; the machine keeps its state for the next up
 #   dev-vm.sh fresh    throw the machine away; the next up starts from the base again
 #
+# QMP listens on build/dev-vm/qmp.sock, for screenshots (screendump) and
+# keystrokes (send-key) and clicks (input-send-event) when the machine runs with KOSHER_DISPLAY=none.
+#
 # The machine is an overlay of the base `just pr-test` keeps in
 # ~/.cache/kosher-pr-test (KOSHER_PR_TEST_CACHE): master's image, installed
 # and set up by the wizard. The base is never written. No base yet? Any
@@ -95,7 +98,9 @@ cmd_up() {
         qemu-img create -q -f qcow2 -b "$base" -F qcow2 "$machine"
     fi
     write_ssh_config
-    local display=(-device virtio-vga -display "${KOSHER_DISPLAY:-gtk}")
+    # The tablet makes the pointer absolute, so a QMP click lands where a
+    # screenshot shows the button.
+    local display=(-device virtio-vga -device virtio-tablet-pci -display "${KOSHER_DISPLAY:-gtk}")
     [ -z "${DEV_VM_HEADLESS:-}" ] || display=(-display none)
     qemu-system-x86_64 \
         -enable-kvm -cpu host -m 4096 -smp 4 \
@@ -103,6 +108,7 @@ cmd_up() {
         -netdev user,id=n0,hostfwd=tcp:127.0.0.1:"$port"-:22 \
         -device virtio-net-pci,netdev=n0 \
         "${display[@]}" -serial "file:$vm_dir/console.log" \
+        -qmp unix:"$vm_dir/qmp.sock",server=on,wait=off \
         -daemonize -pidfile "$pidfile"
     echo -n "booting"
     for _ in $(seq 90); do

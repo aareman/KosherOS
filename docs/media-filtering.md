@@ -75,8 +75,9 @@ addresses or requiring an extra browser script.
 The live response hooks also prepare video cache decisions, HTTP decompression,
 image headers, placeholders, and covers off the network loop. Covers have a
 ten-second finalisation budget, including admission and cache-key preparation,
-so a normal burst can finish its covers. HTTP decompression and same-size
-placeholders have separate two-second budgets. Work that cannot finish hides
+so a normal burst can finish its covers. Same-size placeholders also have a
+ten-second budget because their average-colour decoding competes with inference
+on a slow CPU. HTTP decompression has a separate two-second budget. Work that cannot finish hides
 the image rather than waiting indefinitely or exposing it. Status publication
 and image activity logging are advisory and have separate short deadlines.
 

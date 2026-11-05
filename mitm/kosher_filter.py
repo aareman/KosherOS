@@ -2002,10 +2002,11 @@ class KosherFilter:
     # cover. Let those finish without hiding normal images, while keeping
     # the wait bounded when a worker is stuck. Includes key preparation.
     IMAGE_COVER_TIMEOUT = 10.0
-    # A normal media burst must retain each image's dimensions. This
-    # separate budget lets cheap fallback work finish while inference is
-    # busy; only a stalled preparation worker falls back to the fixed PNG.
-    IMAGE_PLACEHOLDER_TIMEOUT = 2.0
+    # Whole-image average sampling decodes pixels, and the low-priority
+    # preparation worker competes with active inference on slow CPUs.
+    # Give a burst the same bounded finishing window as covers so valid
+    # pictures keep their dimensions rather than collapsing to 1x1.
+    IMAGE_PLACEHOLDER_TIMEOUT = 10.0
     IMAGE_ADVISORY_TIMEOUT = 0.25
 
     def _cover_or_hide(self, body: bytes, verdict, style: str,

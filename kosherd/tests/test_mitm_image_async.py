@@ -194,7 +194,10 @@ def test_placeholder_burst_preserves_dimensions_after_preparation_delay(addon, m
         nonlocal first
         if first:
             first = False
-            time.sleep(0.3)  # A short queue delay must not collapse the grid.
+            # Real-model browser evidence exceeded the old two-second
+            # placeholder deadline under CPU contention. Keep geometry
+            # even when the preparation queue takes longer than that.
+            time.sleep(2.2)
         return placeholder(body)
 
     monkeypatch.setattr(addon.imageedit_mod, "placeholder_for", delayed)

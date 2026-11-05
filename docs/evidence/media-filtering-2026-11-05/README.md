@@ -211,6 +211,7 @@ and disposable child disks:
 | Inspection | 13 passed, 1 failed, 1 skipped |
 | Hardening | 46 passed, 5 skipped |
 | Developer | 82 passed |
+| Core follow-up | 70/77 harness checks passed; seven Tailscale-dependent failures |
 
 The suite harness additionally counts boot and non-failing skip markers; its
 inspection/hardening/developer totals are respectively 15/16, 52/52 and 83/83.
@@ -223,9 +224,11 @@ passed in the final reruns.
 
 The earlier full run on `84d5760` remains recorded as failed: desktop 83/85 and
 suites 318/338, including seven Tailscale-dependent failures. Its control
-registration connection closed on this filtered host. Those Tailscale checks
-were not rerun on the final revision, and this is not a claim that the full VM
-gate is green. These were prepared-disk upgrade tests, not fresh installations;
+registration connection closed on this filtered host. The subsequent core rerun on the final revision reproduced all seven
+Tailscale-dependent failures (70/77 harness checks passed). Captured registration
+errors report EOF while reading response headers, not certificate verification
+failures. The exact cause of the closure remains unresolved; the full VM gate
+is not green. These were prepared-disk upgrade tests, not fresh installations;
 the artifact corrects the earlier report's misleading master-cache label.
 
 The local adapter imported only the host's public inspection CA into disposable

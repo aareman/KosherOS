@@ -2,7 +2,7 @@
   "schema_version": 1,
   "date": "2026-11-05",
   "product_commit": "fd9a0cfe5199c36856202886aa804d52db089bf7",
-  "overall": "CI and final desktop, hardening and developer reruns pass. The selected inspection rerun retains one known local failure; this record does not claim every VM test passed or that all ten suites were rerun on the final commit.",
+  "overall": "CI and final desktop, hardening and developer reruns pass. Inspection retains one failure and the final-image core follow-up reproduces seven Tailscale-dependent failures. The full VM gate is not green.",
   "ci": {
     "run_id": 42098317257,
     "url": "https://github.com/aareman/KosherOS/actions/runs/42098317257",
@@ -348,6 +348,15 @@
         "path": "image-perf-fd9a0cf-suites-8-10/public-aws-origin-initial.log"
       },
       "path": "image-perf-fd9a0cf-suites-1-10/suites-1/public-aws-origin.log"
+    },
+    "core_followup": {
+      "source_commit": "fd9a0cfe5199c36856202886aa804d52db089bf7",
+      "image_id": "37c4697c30de151369abf7867773f99d45ae6ba1c21e1d3965686cff9563b708",
+      "result": "failed",
+      "harness_passed": 70,
+      "harness_total": 77,
+      "scope": "Final-image core suite rerun with corrected guest trust. Seven Tailscale-dependent failures recur. Captured registration errors report EOF reading response headers, not certificate verification failures; this does not establish the exact cause of the connection closure.",
+      "registration_eof_lines": 19
     }
   },
   "guest_trust_diagnosis": {
@@ -535,6 +544,21 @@
       "path": "image-perf-fd9a0cf-suites-1-10/suites-1/uninspected-public-fixture.json",
       "bytes": 503,
       "sha256": "30ed3f2eb2a529cd04744e9a8f4b1d25aeb4e55afe889cafada6bdc67bca7867"
+    },
+    {
+      "path": "image-perf-fd9a0cf-suites-9-10/report.md",
+      "bytes": 5357,
+      "sha256": "7923db91df9d68713d7c14093066f54c1a28973d8df7f2688333c1c208402f8e"
+    },
+    {
+      "path": "image-perf-fd9a0cf-suites-9-10/summary.json",
+      "bytes": 20709,
+      "sha256": "5be458183239ebfb3342896c2e32f46071a9630bd4ba114c4ef966197955b239"
+    },
+    {
+      "path": "image-perf-fd9a0cf-suites-9-10/suites-1.log",
+      "bytes": 6062,
+      "sha256": "bc6a68916addf06d0317b33abb7fe23d0975b38c3f3f2b9e97dd1cac0ffedcc4"
     }
   ],
   "counts_note": "VM harness totals include setup checks and non-failing skip markers. Actual shell-suite passed/failed/skipped counts are listed separately; a harness pass count does not mean every shell check executed."

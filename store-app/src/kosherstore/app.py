@@ -187,6 +187,10 @@ class AppCard(Gtk.Box):
                           max_width_chars=18)
         title.add_css_class("heading")
         title.set_tooltip_text(app.get("name", self.ref))
+        # An ellipsizing label may shrink to its first letter: beside a
+        # long tag ("Official build") Hex showed as "H…". A short name
+        # keeps all of itself; a long one still gives way to the tag.
+        title.set_width_chars(min(len(app.get("name", self.ref)), 4))
         if detailed:
             title.set_ellipsize(Pango.EllipsizeMode.NONE)
             title.set_wrap(True)

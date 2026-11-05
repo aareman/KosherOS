@@ -147,7 +147,15 @@ def test_removal_takes_the_program_and_keeps_settings_and_models(tmp_path, dev):
     root = tmp_path / ".local/share/hex"
     (root / "settings.json").write_text("{}")
     (root / "models").mkdir()
+    icons = tmp_path / ".local/share/icons/hicolor"
+    (icons / "64x64/apps").mkdir(parents=True)
+    (icons / "64x64/apps/anomaly.hex.png").write_bytes(b"\x89PNG tEXt X-Hex-Managed=true")
+    (icons / "64x64/apps/other.png").write_bytes(b"\x89PNG")
+    (icons / "48x48/apps").mkdir(parents=True)
+    (icons / "48x48/apps/anomaly.hex.png").write_bytes(b"\x89PNG from someone else")
     hexapp.remove(tmp_path)
+    assert not (icons / "64x64/apps/anomaly.hex.png").exists()
+    assert (icons / "64x64/apps/other.png").exists() and (icons / "48x48/apps/anomaly.hex.png").exists()
     assert hexapp.installed_version(tmp_path) is None
     assert not (tmp_path / ".local/bin/hex").is_symlink()
     assert not (root / "versions").exists() and not (root / "install.json").exists()

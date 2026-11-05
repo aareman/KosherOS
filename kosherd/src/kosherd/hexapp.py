@@ -329,3 +329,11 @@ def remove(home: Path) -> None:
             p.unlink()
     if (root / "versions").is_dir() and not (root / "versions").is_symlink():
         shutil.rmtree(root / "versions", ignore_errors=True)
+    # The icons Hex writes into the account's theme when nothing else
+    # ships them, marked inside the PNG, as Anomaly's uninstaller finds them.
+    for icon in (home / ".local/share/icons/hicolor").glob("*/apps/anomaly.hex.png"):
+        try:
+            if not icon.is_symlink() and MANAGED.encode() in icon.read_bytes():
+                icon.unlink()
+        except OSError:
+            pass

@@ -197,7 +197,44 @@ performance. Some pages had large frame gaps. Signed-out YouTube showed no
 recommendation thumbnails. These legacy observations are not the current UI
 screenshots or the paired measurements above.
 
-## Reproduction and local raw files
+## Final local validation and AWS transport
+
+[Local validation and artifact identities](local-validation.json) record the
+final product revision `fd9a0cf`, its built image and verified image switch.
+CI passed **3,120 device tests** (15 skipped), **24 portal tests**, and 88.33%
+coverage. The local `just pr-test` reruns used the exact image, QEMU from devenv,
+and disposable child disks:
+
+| Final local check | Actual checks |
+|---|---|
+| Desktop | 85 passed |
+| Inspection | 13 passed, 1 failed, 1 skipped |
+| Hardening | 46 passed, 5 skipped |
+| Developer | 82 passed |
+
+The suite harness additionally counts boot and non-failing skip markers; its
+inspection/hardening/developer totals are respectively 15/16, 52/52 and 83/83.
+The remaining inspection failure is retained as failed. A separately captured
+equivalent public fixture on the final image confirms that an account absent
+from guest proxy rules receives an HTTP 404 containing the **outer host's**
+filter script. The test expects an untouched origin response. Allowed HTTPS,
+blocked URLs, Firefox filtering, Docker Hub pulls, and all 1Password CLI checks
+passed in the final reruns.
+
+The earlier full run on `84d5760` remains recorded as failed: desktop 83/85 and
+suites 318/338, including seven Tailscale-dependent failures. Its control
+registration connection closed on this filtered host. Those Tailscale checks
+were not rerun on the final revision, and this is not a claim that the full VM
+gate is green. These were prepared-disk upgrade tests, not fresh installations;
+the artifact corrects the earlier report's misleading master-cache label.
+
+The local adapter imported only the host's public inspection CA into disposable
+guests and selected the guest system CA bundle for proxy upstream verification.
+A dedicated check changed filtered HTTPS from 502 to 200 while a blocked URL
+remained 403, with `ssl_insecure=false`. Host trust and policy were unchanged.
+The local QEMU preflight compatibility edit and guest adapter are excluded from
+the PR. Test VMs and the isolated browser were shut down after validation.
+
 
 The subsequently reported new AWS portal error was a proxy HTTP/2
 `ConnectionTerminated` / GOAWAY failure. The targeted workaround negotiates
@@ -208,6 +245,14 @@ hosts still offered HTTP/2. Fourteen focused tests passed. An anonymous,
 verified HTTP/1.1 request to the public origin returned 302. No private workflow
 URL, cookies or login was used. This verifies the transport workaround, not
 successful completion of the user's new-portal login.
+
+The final packaged proxy also passed a public-origin GET from a filtered guest
+account: HTTP **302**, curl exit 0, TLS verification result 0, and an addon hash
+matching `fd9a0cf`. No query, cookies or redirect following was used. That probe
+observes the client connection and successful response; upstream ALPN was
+verified separately by the ClientHello checks above.
+
+## Reproduction and local raw files
 
 See [the harness instructions](../../../scripts/perf-media/README.md). Full
 raw captures are under the main checkout's `build/public-media-before`,

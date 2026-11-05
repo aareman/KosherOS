@@ -1,0 +1,541 @@
+{
+  "schema_version": 1,
+  "date": "2026-11-05",
+  "product_commit": "fd9a0cfe5199c36856202886aa804d52db089bf7",
+  "overall": "CI and final desktop, hardening and developer reruns pass. The selected inspection rerun retains one known local failure; this record does not claim every VM test passed or that all ten suites were rerun on the final commit.",
+  "ci": {
+    "run_id": 42098317257,
+    "url": "https://github.com/aareman/KosherOS/actions/runs/42098317257",
+    "source_commit": "fd9a0cfe5199c36856202886aa804d52db089bf7",
+    "result": "success",
+    "device_tests": {
+      "passed": 3120,
+      "skipped": 15,
+      "coverage_percent": 88.33
+    },
+    "portal_tests": {
+      "passed": 24
+    },
+    "jobs": [
+      {
+        "name": "Shell scripts",
+        "conclusion": "success"
+      },
+      {
+        "name": "Unit tests",
+        "conclusion": "success"
+      },
+      {
+        "name": "Apps compile",
+        "conclusion": "success"
+      },
+      {
+        "name": "What changed",
+        "conclusion": "success"
+      },
+      {
+        "name": "Build OS image",
+        "conclusion": "skipped"
+      },
+      {
+        "name": "The VM test's base disk",
+        "conclusion": "skipped"
+      },
+      {
+        "name": "Release this version",
+        "conclusion": "skipped"
+      },
+      {
+        "name": "Docs site",
+        "conclusion": "skipped"
+      }
+    ]
+  },
+  "earlier_full_vm_run": {
+    "local_directory": "image-perf-final",
+    "source_commit": "84d57601c42bb4a33db113ec08e97e00625c152a",
+    "image_id": "df70f29f539d0968e667e8f79ab51992e9e228c902520236f6bec13a9a732717",
+    "result": "failed",
+    "mode": "fast",
+    "seconds": 2443,
+    "stages": [
+      {
+        "stage": "preflight",
+        "result": "passed",
+        "checks_passed": 3,
+        "checks_total": 3,
+        "failures": []
+      },
+      {
+        "stage": "build",
+        "result": "passed",
+        "checks_passed": 1,
+        "checks_total": 1,
+        "failures": []
+      },
+      {
+        "stage": "switch",
+        "result": "passed",
+        "checks_passed": 5,
+        "checks_total": 5,
+        "failures": []
+      },
+      {
+        "stage": "desktop",
+        "result": "failed",
+        "checks_passed": 83,
+        "checks_total": 85,
+        "failures": [
+          "an ordinary site loads, through the proxy",
+          "Firefox's traffic goes through the filter"
+        ]
+      },
+      {
+        "stage": "suites-1",
+        "result": "failed",
+        "checks_passed": 318,
+        "checks_total": 338,
+        "failures": [
+          "10-core: sign-in with the guardian password gave no login address:     )",
+          "10-core: and kosherctl tailscale status shows it is waiting there (no 'login.tailscale.com' in: not signed in (NeedsLogin))",
+          "10-core: with a sign-in waiting, the proxy is told Tailscale's names (no '\"*.tailscale.com\"' in: ...tcha.com\",       \"*.arkoselabs.com\",       \"*.funcaptcha.com\"     ]   },   \"builder\": {     \"port\": 29999,     \"developers\": [],     \"rules\": [],     \"blocked_categories\": [],     \"media_level\": \"none\",     \"cover_style\": \"frost\",     \"language_filter\": \"off\",     \"youtube\": {},     \"calm\": {}   } })",
+          "10-core: and they are in the system set (no 'nftset=/tailscale.com/' in: ...and relay list -> st4/st6 nftset=/discovery-v4.syncthing.net/4#inet#kosher#st4,6#inet#kosher#st6 nftset=/discovery-v6.syncthing.net/4#inet#kosher#st4,6#inet#kosher#st6 nftset=/discovery.syncthing.net/4#inet#kosher#st4,6#inet#kosher#st6 nftset=/relays.syncthing.net/4#inet#kosher#st4,6#inet#kosher#st6)",
+          "10-core: with a sign-in waiting, nokid could not reach login.tailscale.com (blocked)",
+          "10-core: with a sign-in waiting, wlkid could not reach login.tailscale.com (unreachable)",
+          "10-core: with a sign-in waiting, dnskid could not reach login.tailscale.com (unreachable)",
+          "50-inspect: an allowed URL loads with TLS trusted (got 502)",
+          "50-inspect: uninspected user got '404' (expected a real response)",
+          "80-hardening: [F10] a rootless pull from Docker Hub is still allowed (exit 1, expected 0)",
+          "90-developer: inside a Flatpak the filter's certificate is not trusted: issuer=CN=mitmproxy, O=mitmproxy Verify return code: 0 (ok) curl=502",
+          "90-developer: the CLI is in the account's profile (exit 1, expected 0)",
+          "90-developer: kosherd keeps a setgid copy, root:onepassword-cli (no '2755 root onepassword-cli' in: stat: cannot statx '/run/wrappers/bin/op': No such file or directory)",
+          "90-developer: and keeps the build it came from (a GC root) (exit 1, expected 0)",
+          "90-developer: a login shell's op is the copy (no '/run/wrappers/bin/op' in: )",
+          "90-developer: a build could not fetch from GitHub:        > </body>",
+          "90-developer: an added host was still refused:        > </body>",
+          "90-developer: with two developer accounts example.com was not refused for wlkid:            <p>Certificate verify failed: unable to get local issuer certificate</p>",
+          "90-developer: a filtered developer's build could not fetch example.com:            <p>Certificate verify failed: unable to get local issuer certificate</p>",
+          "90-developer: unexpected result for example.org:            <p>Certificate verify failed: unable to get local issuer certificate</p>"
+        ]
+      }
+    ],
+    "harness_failure_classification": {
+      "new": 22,
+      "known": 0,
+      "fixed": 0,
+      "flaky": 0
+    },
+    "scope": "Earlier complete selected desktop and ten-suite run; retained as failed. Its cached base was an older prepared PR image at b4e085ad5 despite the report calling it master. All five image-switch checks passed before running source 84d5760. This was not a fresh installation or a clean-master upgrade.",
+    "failed_checks_total": 22,
+    "triage": "Many failures involved upstream certificate trust or external network/install dependencies. They are not all declared resolved or unrelated to the PR; see narrower final-product reruns below.",
+    "prepared_base_commit": "b4e085ad5f6ce2e75cf2573085cf8e6c07e80152",
+    "wait_caps": [
+      "NIX_CONFIG='connect-timeout = 5\\ndownload-attempts = 1'"
+    ]
+  },
+  "final_product_vm": {
+    "desktop": {
+      "local_directory": "image-perf-fd9a0cf-desktop",
+      "source_commit": "fd9a0cfe5199c36856202886aa804d52db089bf7",
+      "image_id": "37c4697c30de151369abf7867773f99d45ae6ba1c21e1d3965686cff9563b708",
+      "result": "passed",
+      "mode": "fast",
+      "seconds": 451,
+      "stages": [
+        {
+          "stage": "preflight",
+          "result": "passed",
+          "checks_passed": 3,
+          "checks_total": 3,
+          "failures": []
+        },
+        {
+          "stage": "build",
+          "result": "passed",
+          "checks_passed": 1,
+          "checks_total": 1,
+          "failures": []
+        },
+        {
+          "stage": "switch",
+          "result": "passed",
+          "checks_passed": 5,
+          "checks_total": 5,
+          "failures": []
+        },
+        {
+          "stage": "desktop",
+          "result": "passed",
+          "checks_passed": 85,
+          "checks_total": 85,
+          "failures": []
+        }
+      ],
+      "harness_failure_classification": {
+        "new": 0,
+        "known": 0,
+        "fixed": 0,
+        "flaky": 0
+      },
+      "wait_caps": [
+        "NIX_CONFIG='connect-timeout = 5\\ndownload-attempts = 1'"
+      ]
+    },
+    "inspect": {
+      "local_directory": "image-perf-fd9a0cf-suites-8-10",
+      "source_commit": "fd9a0cfe5199c36856202886aa804d52db089bf7",
+      "image_id": "37c4697c30de151369abf7867773f99d45ae6ba1c21e1d3965686cff9563b708",
+      "result": "failed",
+      "mode": "fast",
+      "seconds": 98,
+      "stages": [
+        {
+          "stage": "preflight",
+          "result": "passed",
+          "checks_passed": 3,
+          "checks_total": 3,
+          "failures": []
+        },
+        {
+          "stage": "suites-1",
+          "result": "failed",
+          "checks_passed": 15,
+          "checks_total": 16,
+          "failures": [
+            "50-inspect: uninspected user got '404' (expected a real response)"
+          ]
+        }
+      ],
+      "harness_failure_classification": {
+        "new": 1,
+        "known": 0,
+        "fixed": 0,
+        "flaky": 0
+      },
+      "actual_suite_selection": [
+        "50-inspect"
+      ],
+      "shell_suite_counts": {
+        "passed": 13,
+        "failed": 1,
+        "skipped": 1
+      },
+      "remaining_failure": "The uninspected fixture request returned HTTP 404 and failed the test predicate that also rejects KosherOS text in the body. A separate final-image public-fixture probe confirms a dnsfilter account absent from guest proxy rules receives a normal 404 response containing the outer host filter script. This explains the local failure; the original failing inspect response body was not retained. The harness still classifies this failure as new, and the inspect rerun remains failed.",
+      "confirmed_behavior": [
+        "Allowed HTTPS returned 200 with TLS verification.",
+        "Configured blocked URL returned 403 and the KosherOS block page."
+      ],
+      "wait_caps": [
+        "NIX_CONFIG='connect-timeout = 5\\ndownload-attempts = 1'"
+      ],
+      "followup_public_fixture": {
+        "url": "https://example.com/blocked/page",
+        "account": "dnskid",
+        "mode": "dnsfilter",
+        "http_status": 404,
+        "tls_verify_result": 0,
+        "curl_exit": 0,
+        "body_bytes": 762,
+        "body_sha256": "cfbe896974dfd63492f012ad51ce0dc8e572647950d71103cfc45aca1ed0add8",
+        "script_paths": [
+          "/__kosheros__/filter.js"
+        ],
+        "guest_proxy_has_account_entry": false,
+        "case_insensitive_kosheros_marker": true,
+        "scope": "public fixture; no cookies or redirects; token-bearing body intentionally omitted",
+        "path": "image-perf-fd9a0cf-suites-1-10/suites-1/uninspected-public-fixture.json",
+        "relation_to_failed_test": "Equivalent public request on the final image after the developer suite; not the original failed inspect response body."
+      }
+    },
+    "hardening": {
+      "local_directory": "image-perf-fd9a0cf-suites-5-10",
+      "source_commit": "fd9a0cfe5199c36856202886aa804d52db089bf7",
+      "image_id": "37c4697c30de151369abf7867773f99d45ae6ba1c21e1d3965686cff9563b708",
+      "result": "passed",
+      "mode": "fast",
+      "seconds": 159,
+      "actual_suite_selection": [
+        "80-hardening"
+      ],
+      "shell_suite_counts": {
+        "passed": 46,
+        "failed": 0,
+        "skipped": 5
+      },
+      "stages": [
+        {
+          "stage": "preflight",
+          "result": "passed",
+          "checks_passed": 3,
+          "checks_total": 3,
+          "failures": []
+        },
+        {
+          "stage": "suites-1",
+          "result": "passed",
+          "checks_passed": 52,
+          "checks_total": 52,
+          "failures": []
+        }
+      ],
+      "harness_failure_classification": {
+        "new": 0,
+        "known": 0,
+        "fixed": 0,
+        "flaky": 0
+      },
+      "wait_caps": [
+        "NIX_CONFIG='connect-timeout = 5\\ndownload-attempts = 1'"
+      ]
+    },
+    "developer": {
+      "local_directory": "image-perf-fd9a0cf-suites-1-10",
+      "source_commit": "fd9a0cfe5199c36856202886aa804d52db089bf7",
+      "image_id": "37c4697c30de151369abf7867773f99d45ae6ba1c21e1d3965686cff9563b708",
+      "result": "passed",
+      "mode": "fast",
+      "seconds": 422,
+      "actual_suite_selection": [
+        "90-developer"
+      ],
+      "shell_suite_counts": {
+        "passed": 82,
+        "failed": 0,
+        "skipped": 0
+      },
+      "stages": [
+        {
+          "stage": "preflight",
+          "result": "passed",
+          "checks_passed": 3,
+          "checks_total": 3,
+          "failures": []
+        },
+        {
+          "stage": "suites-1",
+          "result": "passed",
+          "checks_passed": 83,
+          "checks_total": 83,
+          "failures": []
+        }
+      ],
+      "harness_failure_classification": {
+        "new": 0,
+        "known": 0,
+        "fixed": 0,
+        "flaky": 0
+      },
+      "wait_caps": [
+        "NIX_CONFIG='connect-timeout = 5\\ndownload-attempts = 1'"
+      ]
+    },
+    "public_aws_origin": {
+      "result": "passed",
+      "url": "https://us-east-1.signin.aws/",
+      "http_status": 302,
+      "tls_verify_result": 0,
+      "client_http_version": "2",
+      "curl_exit": 0,
+      "guest_account_mode": "filtered",
+      "packaged_filter_sha256": "e788c509fbd379712d29994d23ad3ff7a15f2e460c265cbbfcf66e293c579a2e",
+      "packaged_filter_matches_pinned_commit": true,
+      "scope": "Public-origin GET through the packaged proxy only. No query, cookies, redirect following or private sign-in flow. Curl reports client-side HTTP/2; this probe does not directly observe the proxy upstream ALPN or establish private login success.",
+      "initial_probe": {
+        "result": "inconclusive",
+        "http_status": 0,
+        "curl_exit": 55,
+        "reason": "Broken pipe amid test-fixture proxy restarts; not evidence of successful public-origin access or private sign-in.",
+        "path": "image-perf-fd9a0cf-suites-8-10/public-aws-origin-initial.log"
+      },
+      "path": "image-perf-fd9a0cf-suites-1-10/suites-1/public-aws-origin.log"
+    }
+  },
+  "guest_trust_diagnosis": {
+    "before_http_status": 502,
+    "after_verified_http_status": 200,
+    "configured_blocked_http_status": 403,
+    "ssl_insecure": false,
+    "cause": "The host intercepts outgoing TLS. The guest proxy used bundled certifi roots and did not trust the outer host public CA, despite the guest system store having it. The disposable guest was configured to use its system CA bundle for upstream verification.",
+    "runtime": {
+      "Pillow": "13.0.0",
+      "AVIF": true
+    },
+    "proof": "image-perf-filtered-ca-check/diagnosis.log",
+    "scope": "Standalone disposable guest diagnostic used to explain the nested-TLS environment failure; distinct from the pinned final-product suite reruns."
+  },
+  "test_adaptations": {
+    "committed_to_product": false,
+    "host_policy_or_trust_changed": false,
+    "adapter": "/tmp/kosher-pr-test-with-host-ca.py",
+    "scope": [
+      "Import only the public host inspection CA into disposable guest trust; retain TLS verification.",
+      "Refresh the disposable guest Flatpak CA mirror.",
+      "Point the guest proxy upstream CA option at the system CA bundle and explicitly retain ssl_insecure=false.",
+      "Use the prepared PR disk only through disposable child overlays, with image identity checked; no fresh-install or clean-master-upgrade claim.",
+      "Additional local adapter instrumentation captures disposable guest application-install results and a public AWS origin GET."
+    ],
+    "prepared_final_cache": {
+      "source_commit": "fd9a0cfe5199c36856202886aa804d52db089bf7",
+      "image_id": "37c4697c30de151369abf7867773f99d45ae6ba1c21e1d3965686cff9563b708",
+      "digest": "sha256:f3214605049ea880384fe4f192d7b928de3c770e47f70df2889880bcae4bf72e",
+      "source_run": "image-perf-fd9a0cf-desktop"
+    },
+    "local_qemu_harness_change": {
+      "path": "scripts/rootless-disk.sh",
+      "scope": "Uncommitted host-harness compatibility change accepts an executable KOSHER_BCVK_QEMU path from the development environment in the existing QEMU preflight check. It is not part of the pinned product commit.",
+      "local_sha256": "9ac0765c567345370bb27a038b7972c239a717dcf119090ba09530998d031c47",
+      "pinned_commit_sha256": "934c52df1f980d14fb90c69744133b872396cb0e63171c2200dff28a5b89827f"
+    }
+  },
+  "privacy": "This summary contains only public-origin/fixture diagnostics and local report identities. No private AWS workflow handles, query strings, authentication cookies or credentials are included.",
+  "artifact_paths": "Paths without a leading slash are relative to the main checkout build directory. SHA256 values identify the local reports read for this summary; raw logs are not copied into this document.",
+  "artifacts": [
+    {
+      "path": "image-perf-fd9a0cf-ci/run.json",
+      "bytes": 5829,
+      "sha256": "6209447b4083ae8cc883cfe6372c05f2aaf3813969d7df69f6e6e78c0d98a2c3"
+    },
+    {
+      "path": "image-perf-fd9a0cf-ci/unit-tests.log",
+      "bytes": 58033,
+      "sha256": "54da26abd43d9cadcf7403b7215b0e21ed38a69e43d5ac68be84d6c39cb78be8"
+    },
+    {
+      "path": "image-perf-final/summary.json",
+      "bytes": 78415,
+      "sha256": "fa5be3ef04cd9cb900caf27a1a6dcf43314fa88fe2b0b2d9dee11020f7997535"
+    },
+    {
+      "path": "image-perf-final/report.md",
+      "bytes": 5970,
+      "sha256": "f74da944a9cad2b409ac1f23f58b84f47beaa535a66ff71ebf4273c31e9ef413"
+    },
+    {
+      "path": "image-perf-final/desktop.log",
+      "bytes": 9794,
+      "sha256": "b010d67aee1b85767904cf3580490dbbb00753af335c93dc3548429ac9692e31"
+    },
+    {
+      "path": "image-perf-final/suites-1.log",
+      "bytes": 28820,
+      "sha256": "9f9bd7aa0648e5021bac1d563676892ddd40bff0831849f01786af0112b53b0f"
+    },
+    {
+      "path": "image-perf-final/switch.log",
+      "bytes": 11853,
+      "sha256": "8f1e0a3c2ad1952820581596162ca7641949d70b6a4b40f09fc5b26ff419c366"
+    },
+    {
+      "path": "image-perf-fd9a0cf-desktop/summary.json",
+      "bytes": 25774,
+      "sha256": "c276f7b940e20872eceadcb9944a9f19e8e49821e7be25e16efe1250e77e0ae3"
+    },
+    {
+      "path": "image-perf-fd9a0cf-desktop/report.md",
+      "bytes": 4075,
+      "sha256": "2f4606b0e562bb0c43f4d764854d8c9caed3fa592dca9ed71cf56ef10b5fbb10"
+    },
+    {
+      "path": "image-perf-fd9a0cf-desktop/desktop.log",
+      "bytes": 9962,
+      "sha256": "8d2f6db5a49c120487e3d5b93c82dd6ef2c9e9dcb1042019fdbd66a59387b5c7"
+    },
+    {
+      "path": "image-perf-fd9a0cf-desktop/switch.log",
+      "bytes": 11066,
+      "sha256": "0a42eec17991c289596aca7b59f0af903392b201ed209006b4705e16e6b66477"
+    },
+    {
+      "path": "image-perf-fd9a0cf-suites-8-10/summary.json",
+      "bytes": 9550,
+      "sha256": "a9f44ab860f4e6b31aa371b372998cf6844ede22adbb5dff088f9510d76b1eff"
+    },
+    {
+      "path": "image-perf-fd9a0cf-suites-8-10/report.md",
+      "bytes": 4124,
+      "sha256": "be9d5abbd3d58dd9cd44d01cd196663476de80e9740aead25c5e142932bc1870"
+    },
+    {
+      "path": "image-perf-fd9a0cf-suites-8-10/suites-1.log",
+      "bytes": 1324,
+      "sha256": "16a64f66bf84f607b5882ceb77b2798613e12bc17b0c31f85f7f0222d310172f"
+    },
+    {
+      "path": "image-perf-filtered-ca-check/diagnosis.log",
+      "bytes": 3127,
+      "sha256": "d7fad12a80840175e2064788847d0af75a1daaf439a76eb92f0939d2808c6897"
+    },
+    {
+      "path": "image-perf-final/proxy-upstream-ca-diagnosis.log",
+      "bytes": 773,
+      "sha256": "a94143c784a1743c854d2de5e3bce3fa7d59c7900e4060ad628cd47e57f032f6"
+    },
+    {
+      "path": "image-perf-fd9a0cf-suites-8-10/suites-1/host-ca.log",
+      "bytes": 279,
+      "sha256": "ffa007e225d20fad7708f70cde68303fe70c93eb80ce2268f0f08771df6498e2"
+    },
+    {
+      "path": "image-perf-fd9a0cf-cache/base-pr-fd9a0cf/meta.json",
+      "bytes": 732,
+      "sha256": "2ae635d15ad6cddad0654786c75cd3f5370dbe6e6f905da57fee269430b48168"
+    },
+    {
+      "path": "/tmp/kosher-pr-test-with-host-ca.py",
+      "bytes": 9215,
+      "sha256": "2ecb9d0d9c3ac62d8a2d9b605b02c3a078aba979334ea3da34df1a8604161afc",
+      "scope": "Snapshot of local-only adapter at evidence generation; earlier runs used earlier versions as diagnostic capture was added."
+    },
+    {
+      "path": "image-perf-fd9a0cf-suites-5-10/summary.json",
+      "bytes": 15252,
+      "sha256": "02cb4a909c61d1041f5d518147d2cf69b8540906abe180f6db99b11f3ff84ecf"
+    },
+    {
+      "path": "image-perf-fd9a0cf-suites-5-10/report.md",
+      "bytes": 4012,
+      "sha256": "b0445e1dfee25bed39d9e78988552e1e5574b7dad6673923fb342570efe99d4e"
+    },
+    {
+      "path": "image-perf-fd9a0cf-suites-5-10/suites-1.log",
+      "bytes": 4547,
+      "sha256": "6370b59e747605b1fdf4715418a83b3b7a0d9b6a35cd687312aceaab64d8060b"
+    },
+    {
+      "path": "image-perf-fd9a0cf-suites-8-10/public-aws-origin-initial.log",
+      "bytes": 303,
+      "sha256": "0041155ced8f4eb413e6728fe1fafbd3ec450c58014931678430a7071ee13b0e"
+    },
+    {
+      "path": "image-perf-fd9a0cf-suites-1-10/summary.json",
+      "bytes": 18786,
+      "sha256": "22518fc37e9c0dd56f1091877d2db38e26ca72bfc8c0906e442e608bb48c7d73"
+    },
+    {
+      "path": "image-perf-fd9a0cf-suites-1-10/report.md",
+      "bytes": 4012,
+      "sha256": "6aabf67ee3e3c111e9713f3a63b08d4b4c9353066c09f8c48c2c9241a57a7374"
+    },
+    {
+      "path": "image-perf-fd9a0cf-suites-1-10/suites-1.log",
+      "bytes": 5507,
+      "sha256": "99084c0395e5bf65dc478b49cf9a85c5d1203835d50d4841bdd3a0ec59f28c9b"
+    },
+    {
+      "path": "image-perf-fd9a0cf-suites-1-10/suites-1/public-aws-origin.log",
+      "bytes": 380,
+      "sha256": "8d7619744775a8f73c04b8f1230313c936fe92d467a2076bc00383d1453c459f"
+    },
+    {
+      "path": "image-perf-fd9a0cf-suites-1-10/suites-1/app-finished.log",
+      "bytes": 2328,
+      "sha256": "ab55aaec2bca9eea042f204256c930e134b80d5b67717806eebd9efa640bce84"
+    },
+    {
+      "path": "image-perf-fd9a0cf-suites-1-10/suites-1/uninspected-public-fixture.json",
+      "bytes": 503,
+      "sha256": "30ed3f2eb2a529cd04744e9a8f4b1d25aeb4e55afe889cafada6bdc67bca7867"
+    }
+  ],
+  "counts_note": "VM harness totals include setup checks and non-failing skip markers. Actual shell-suite passed/failed/skipped counts are listed separately; a harness pass count does not mean every shell check executed."
+}

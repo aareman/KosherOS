@@ -1020,6 +1020,26 @@ class KosherFilter:
         match = re.search(r"@[^@]*:(\d+)\b", spec)
         return int(match.group(1)) if match else None
 
+    def tls_start_server(self, data) -> None:
+        """Avoid the reported upstream HTTP/2 GOAWAY failure on AWS sign-in.
+
+        Only the origin transport changes; TLS verification and all request
+        and response filtering still run. Other hosts keep normal ALPN.
+        """
+        server = data.conn
+        if data.is_dtls or server is not data.context.server:
+            return  # do not change DTLS or an HTTPS upstream proxy connection
+        host = server.sni
+        if host is None:
+            host = data.context.client.sni or (server.address or ("",))[0]
+        if not isinstance(host, str) or host.lower().rstrip(".") != "us-east-1.signin.aws":
+            return
+        server.alpn_offers = (b"http/1.1",)
+        # Script hooks may run before TLSConfig creates SSL.Connection or
+        # after it. Update an existing connection too, before its handshake.
+        if data.ssl_conn is not None:
+            data.ssl_conn.set_alpn_protos([b"http/1.1"])
+
     # ---- usage: how much went through and how long the filter took --------
 
     def running(self) -> None:

@@ -146,7 +146,7 @@ def test_the_covers_edge_is_a_few_pixels_not_a_band_the_figure_shows_through():
             assert max(r, g, b) - min(r, g, b) < 24, (y, (r, g, b))
 
 
-def test_a_placeholder_is_the_pictures_size_and_neutral():
+def test_a_placeholder_keeps_size_and_only_a_flat_approximate_color():
     import io
 
     from PIL import Image
@@ -156,6 +156,125 @@ def test_a_placeholder_is_the_pictures_size_and_neutral():
     tile = imageedit.placeholder_for(out.getvalue())
     with Image.open(io.BytesIO(tile)) as im:
         assert im.size == (123, 45)
-        assert im.getpixel((0, 0)) == imageedit.PLACEHOLDER_GREY
+        rgb = im.convert("RGB")
+        color = rgb.getpixel((0, 0))
+        assert all(low == high for low, high in rgb.getextrema()), "no spatial detail"
+        assert all(abs(got - wanted) <= 32 for got, wanted in zip(color, (200, 30, 30)))
+        assert max(color) - min(color) < 170, "slightly mute the source saturation"
     assert imageedit.placeholder_for(b"not a picture") is None
-    assert imageedit.placeholder(123, 45) is tile, "cached by size"
+    assert imageedit.placeholder(123, 45, color) is tile, "cached by size and color"
+
+
+def test_placeholder_color_is_whole_image_average_not_a_sampled_detail():
+    image = Image.new("RGB", (128, 64), (240, 0, 0))
+    image.paste((0, 0, 240), (64, 0, 128, 64))
+    out = io.BytesIO()
+    image.save(out, "PNG")
+    with Image.open(io.BytesIO(imageedit.placeholder_for(out.getvalue()))) as tile:
+        rgb = tile.convert("RGB")
+        assert rgb.size == image.size
+        assert all(low == high for low, high in rgb.getextrema())
+        color = rgb.getpixel((0, 0))
+        assert all(abs(got - wanted) <= 8 for got, wanted in zip(color, (120, 0, 120)))
+
+
+def test_same_size_different_colors_do_not_share_a_placeholder():
+    tiles = []
+    for color in ((240, 0, 0), (0, 0, 240)):
+        out = io.BytesIO()
+        Image.new("RGB", (120, 80), color).save(out, "PNG")
+        tiles.append(imageedit.placeholder_for(out.getvalue()))
+    assert tiles[0] != tiles[1]
+
+
+def test_placeholder_transparency_does_not_reveal_invisible_pixel_color():
+    out = io.BytesIO()
+    Image.new("RGBA", (40, 30), (255, 0, 0, 0)).save(out, "PNG")
+    with Image.open(io.BytesIO(imageedit.placeholder_for(out.getvalue()))) as tile:
+        red, green, blue = tile.convert("RGB").getpixel((0, 0))
+        assert red == green == blue
+        assert abs(red - imageedit.PLACEHOLDER_GREY[0]) <= 8
+
+
+def test_undecodable_pixels_keep_dimensions_with_neutral_fallback(monkeypatch):
+    out = io.BytesIO()
+    Image.new("RGB", (120, 80), (200, 30, 30)).save(out, "PNG")
+
+    def broken(_):
+        raise ValueError("truncated pixels")
+
+    imageedit._placeholder_sources.clear()
+    monkeypatch.setattr(imageedit, "_placeholder_color", broken)
+    with Image.open(io.BytesIO(imageedit.placeholder_for(out.getvalue()))) as tile:
+        assert tile.size == (120, 80)
+        assert tile.convert("RGB").getpixel((0, 0)) == imageedit.PLACEHOLDER_GREY
+
+
+def test_cover_cache_hit_survives_concurrent_eviction_and_keeps_accounting():
+    from collections import OrderedDict
+    from concurrent.futures import ThreadPoolExecutor
+    import threading
+
+    cache = imageedit.CoverCache(max_bytes=16)
+    for key in ("first", "b", "c", "d"):
+        cache.put(key, b"1234")
+    read, release, writing, written = (threading.Event() for _ in range(4))
+
+    class PausingLookup(OrderedDict):
+        def get(self, key):
+            value = super().get(key)
+            if key == "first" and not read.is_set():
+                read.set()
+                assert release.wait(2)
+            return value
+
+    cache._items = PausingLookup(cache._items)
+
+    def evict():
+        writing.set()
+        cache.put("new", b"5678")
+        written.set()
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        hit = pool.submit(cache.get, "first")
+        try:
+            assert read.wait(2)
+            eviction = pool.submit(evict)
+            assert writing.wait(2)
+            # Without synchronization the insertion can evict "first"
+            # between lookup and LRU promotion, making the cache hit fail.
+            written.wait(0.05)
+        finally:
+            release.set()
+        assert hit.result(timeout=2) == b"1234"
+        eviction.result(timeout=2)
+        assert cache.get("first") == b"1234"
+        assert cache.get("b") is None
+
+        def replace(worker):
+            for i in range(100):
+                key = f"key-{i % 5}"
+                cache.put(key, bytes([worker]) * (1 + i % 4))
+                cache.get(key)
+                assert len(cache) <= 16
+        list(pool.map(replace, range(4)))
+
+    assert cache._size == sum(map(len, cache._items.values()))
+    assert 0 <= cache._size <= cache.max_bytes
+
+
+def test_placeholder_reuses_the_color_without_redecoding_pixels(monkeypatch):
+    imageedit._placeholder_sources.clear()
+    out = io.BytesIO()
+    Image.new("RGB", (120, 80), (40, 120, 200)).save(out, "PNG")
+    original = imageedit._placeholder_color
+    calls = []
+
+    def sample(image):
+        calls.append(image.size)
+        return original(image)
+
+    monkeypatch.setattr(imageedit, "_placeholder_color", sample)
+    first = imageedit.placeholder_for(out.getvalue())
+    assert imageedit.placeholder_for(out.getvalue()) is first
+    assert calls == [(120, 80)]

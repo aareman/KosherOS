@@ -17,6 +17,7 @@ not.
 from __future__ import annotations
 
 import io
+import hashlib
 import logging
 from collections import OrderedDict
 
@@ -46,12 +47,15 @@ FLATTEN = 0.5
 # the bottom, and a ring of skin tone all round that read as "a pink box".
 # A cover's edge only has to not look cut out; a few pixels do that.
 FEATHER_MAX = 6
-# The tile that stands in for a picture hidden whole: neutral, and the same
-# size as the picture, so the page keeps its layout instead of collapsing
-# the box to a pixel and jumping when the rest of the images arrive.
+# A hidden picture keeps its size and one coarse average color. The tile
+# carries no shape or spatial detail. Neutral is only the decode fallback.
 PLACEHOLDER_GREY = (214, 214, 214)
 PLACEHOLDER_MAX_SIDE = 4096
-_placeholders: dict[tuple[int, int], bytes] = {}
+PLACEHOLDER_SAMPLE_SIDE = 16
+PLACEHOLDER_COLOR_STEP = 16
+PLACEHOLDER_SATURATION = 0.85
+_placeholders: dict[tuple[int, int, tuple[int, int, int]], bytes] = {}
+_placeholder_sources: OrderedDict[str, tuple[int, int, tuple[int, int, int]]] = OrderedDict()
 # Noise under the blur, so the cover cannot be undone by deconvolution.
 NOISE = 0.10
 
@@ -201,30 +205,79 @@ def encode(image, fmt: str) -> bytes:
 
 
 def placeholder_for(image_bytes: bytes) -> bytes | None:
-    """A flat neutral PNG the size of this picture, or None if its size
-    cannot be read. Reads only the header; the tiles are cached by size,
-    since a shop's grid repeats one size a hundred times."""
+    """A solid average-color PNG, with no image detail and the same size.
+
+    Decoding/sampling belongs on the preparation worker. JPEG draft mode
+    reduces decoder work before the tiny sample is made; all formats are
+    reduced before conversion/compositing. An undecodable image with a
+    readable size gets a neutral tile; an unreadable size returns None.
+    """
+    source_key = hashlib.sha256(image_bytes).hexdigest()
+    known = _placeholder_sources.get(source_key)
+    if known is not None:
+        _placeholder_sources.move_to_end(source_key)
+        return placeholder(*known)
     try:
         from PIL import Image
 
         with Image.open(io.BytesIO(image_bytes)) as im:
             width, height = im.size
+            sampled = True
+            try:
+                color = _placeholder_color(im)
+            except Exception:  # noqa: BLE001 - broken pixels still hide safely
+                log.debug("could not sample placeholder color", exc_info=True)
+                color = PLACEHOLDER_GREY
+                sampled = False
     except Exception:  # noqa: BLE001 - unreadable: the caller has a 1x1
         return None
     if width <= 1 or height <= 1:
         return None
     width, height = min(width, PLACEHOLDER_MAX_SIDE), min(height, PLACEHOLDER_MAX_SIDE)
-    return placeholder(width, height)
+    # Remember only dimensions and one color, never source pixels. Repeated
+    # thumbnails can then reuse the sample without another format decode.
+    if sampled:
+        _placeholder_sources[source_key] = (width, height, color)
+        if len(_placeholder_sources) > 256:
+            _placeholder_sources.popitem(last=False)
+    return placeholder(width, height, color)
 
 
-def placeholder(width: int, height: int) -> bytes:
-    key = (width, height)
+def _placeholder_color(image) -> tuple[int, int, int]:
+    from PIL import Image, ImageStat
+
+    image.draft("RGB", (PLACEHOLDER_SAMPLE_SIDE, PLACEHOLDER_SAMPLE_SIDE))
+    image.thumbnail((PLACEHOLDER_SAMPLE_SIDE, PLACEHOLDER_SAMPLE_SIDE),
+                    Image.Resampling.BOX)
+    if "A" in image.getbands() or "transparency" in image.info:
+        sample = image.convert("RGBA")
+        background = Image.new("RGBA", sample.size, (*PLACEHOLDER_GREY, 255))
+        sample = Image.alpha_composite(background, sample).convert("RGB")
+    else:
+        sample = image.convert("RGB")
+    mean = ImageStat.Stat(sample).mean
+    # Keep the image's broad hue without making a large blocked tile as
+    # vivid as a small saturated detail in its source.
+    lightness = sum(value * weight for value, weight in zip(mean, (0.2126, 0.7152, 0.0722)))
+    mean = [lightness + PLACEHOLDER_SATURATION * (value - lightness) for value in mean]
+    step = PLACEHOLDER_COLOR_STEP
+    return tuple(min(255, int((value + step / 2) // step) * step) for value in mean)
+
+
+def placeholder(width: int, height: int,
+                color: tuple[int, int, int] = PLACEHOLDER_GREY) -> bytes:
+    key = (width, height, color)
     tile = _placeholders.get(key)
     if tile is None:
         from PIL import Image
 
         out = io.BytesIO()
-        Image.new("RGB", key, PLACEHOLDER_GREY).save(out, "PNG", compress_level=1)
+        # One palette entry is enough for a flat tile. A one-bit PNG
+        # encodes far fewer bytes than RGB while preserving size and color,
+        # so a cold grid of large hidden pictures costs much less CPU.
+        image = Image.new("P", (width, height), 0)
+        image.putpalette(list(color) * 2)
+        image.save(out, "PNG", bits=1, compress_level=1)
         tile = out.getvalue()
         if len(_placeholders) >= 256:
             _placeholders.pop(next(iter(_placeholders)))
@@ -293,26 +346,32 @@ class CoverCache:
     the judgement; this only remembers the pixels for a little while."""
 
     def __init__(self, max_bytes: int = 24 * 1024 * 1024):
+        import threading
+
         self.max_bytes = max_bytes
         self._items: OrderedDict[str, bytes] = OrderedDict()
         self._size = 0
+        self._lock = threading.Lock()
 
     def get(self, key: str) -> bytes | None:
-        data = self._items.get(key)
-        if data is not None:
-            self._items.move_to_end(key)
-        return data
+        with self._lock:
+            data = self._items.get(key)
+            if data is not None:
+                self._items.move_to_end(key)
+            return data
 
     def put(self, key: str, data: bytes) -> None:
         if len(data) > self.max_bytes // 4:
             return
-        if key in self._items:
-            self._size -= len(self._items.pop(key))
-        self._items[key] = data
-        self._size += len(data)
-        while self._size > self.max_bytes and self._items:
-            _k, old = self._items.popitem(last=False)
-            self._size -= len(old)
+        with self._lock:
+            if key in self._items:
+                self._size -= len(self._items.pop(key))
+            self._items[key] = data
+            self._size += len(data)
+            while self._size > self.max_bytes and self._items:
+                _k, old = self._items.popitem(last=False)
+                self._size -= len(old)
 
     def __len__(self) -> int:
-        return len(self._items)
+        with self._lock:
+            return len(self._items)

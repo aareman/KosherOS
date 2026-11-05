@@ -332,7 +332,14 @@ RUN python3 -m pip install --prefix=/usr mitmproxy
 # product whose premise is that it works on a weak machine with nothing
 # leaving the house. onnxruntime and Pillow come with it; Pillow is also
 # what covers a detected region instead of blanking the whole picture.
-RUN python3 -m pip install --prefix=/usr nudenet onnxruntime pillow \
+# Fedora's Pillow may omit AVIF even though its version satisfies pip.
+# Amazon/Prime carousels use AVIF under .jpg URLs: the full pipeline needs
+# that decoder for resizing, person/skin refinement, covers and placeholders.
+# Install the tested upstream wheel explicitly rather than accepting the
+# codec-limited RPM. Fail the build if the decoder is unavailable.
+RUN python3 -m pip install --prefix=/usr --ignore-installed --only-binary=:all: "pillow==13.0.0" \
+    && python3 -c 'import io; from PIL import Image, features; assert features.check("avif"), "Pillow AVIF decoder is required"; b=io.BytesIO(); Image.new("RGB", (8, 8)).save(b, "AVIF"); b.seek(0); im=Image.open(b); im.load(); assert im.size == (8, 8)'
+RUN python3 -m pip install --prefix=/usr nudenet onnxruntime \
     || echo "WARNING: no image model; picture filtering will hide pictures"
 # A person detector beside it (kosherd/persons.py): the nudity model labels
 # parts and has no class for legs, so a skirt photographed from the hips

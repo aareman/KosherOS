@@ -591,7 +591,7 @@ def hides(media_level: str, verdict: ImageVerdict) -> bool:
 # logic: a family test found a swimsuit thumbnail still "clean" after the
 # skin rule shipped, because its clean verdict from earlier was still in
 # the cache.
-JUDGEMENT_VERSION = 8  # 8: any face anchors the skin rule; weak person guesses over bare regions
+JUDGEMENT_VERSION = 9  # 9: AVIF receives full refinement; unreadable images are not clean
 
 
 def digest(data: bytes) -> str:
@@ -709,8 +709,9 @@ def _unpack(text: str) -> tuple:
     return tuple(boxes)
 
 
-# What OpenCV (NudeNet's reader) can open on its own; anything else is
-# re-encoded to JPEG before detection.
+# Conservative formats passed directly to OpenCV (NudeNet's reader).
+# Codec support varies by build; other Pillow-readable formats are
+# normalized to JPEG before detection even if this OpenCV can read them.
 CV2_FORMATS = frozenset({"JPEG", "PNG", "WEBP", "BMP", "TIFF"})
 
 
@@ -721,10 +722,11 @@ def prepare(image_bytes: bytes) -> tuple[bytes, float]:
     Small pictures blind the model: on ~200px search thumbnails the
     detector missed a swimsuit photo entirely — not even the face.
     Upscaling to ~640 on the short side before detection restores most of
-    it, for a few milliseconds of Pillow. And NudeNet reads the file with
-    OpenCV, which cannot open a GIF or an AVIF at all: every GIF was "could
-    not judge" and hidden, static or not. Those become a JPEG of the
-    (first) frame. Anything else goes through untouched.
+    it, for a few milliseconds of Pillow. NudeNet reads the file with
+    OpenCV, whose codecs vary by build. Formats outside the conservative
+    pass-through set, including GIF and AVIF, become a JPEG of the first
+    frame when Pillow can read them. Other pictures go through untouched
+    when no upscaling is needed.
     """
     scale = 1.0
     try:
@@ -940,6 +942,8 @@ class ImageFilter:
         self._async_slots = None
         self._prepare_slots = None
         self._prepare_pool = None
+        self._inflight = {}
+        self._closed = False
 
     def status(self) -> dict:
         """What to tell an admin about picture checking on this machine."""
@@ -1104,7 +1108,7 @@ class ImageFilter:
         started = time.monotonic()
         try:
             known, sha, animated = await asyncio.wait_for(
-                self._run_async(self._prepare_image, image_bytes, preparation=True),
+                self.prepare_async(self._prepare_image, image_bytes),
                 self.timeout)
             if known is not None or sha is None:
                 return known
@@ -1113,7 +1117,8 @@ class ImageFilter:
             if remaining <= 0:
                 return None
             return await asyncio.wait_for(
-                self.run_async(self._judge_if_needed, image_bytes, sha), remaining)
+                self.run_async(self._judge_if_needed, image_bytes, sha,
+                               share_key=("image", sha)), remaining)
         except asyncio.TimeoutError:
             # Queue time is not detector time. A waiter that expires must
             # never become CPU work later, or make the machine look slow
@@ -1141,21 +1146,37 @@ class ImageFilter:
             return None
         return self.judge_bytes(image_bytes, sha)
 
-    async def run_async(self, fn, *args):
+    async def prepare_async(self, fn, *args):
+        """Run cache/header/response preparation off the network loop.
+
+        Admission is bounded separately from detection, so a busy model
+        cannot prevent a cache hit or a safe fallback. Callers apply their
+        request deadline; expired waiters never submit work.
+        """
+        return await self._run_async(fn, *args, preparation=True)
+
+    async def run_async(self, fn, *args, share_key=None):
         """Admit CPU work only when a worker is free.
 
         Waiting stays in asyncio, where a cancelled/timed-out request can
         leave without ever submitting a job. A running job owns its slot
         until the actual thread finishes, even when its caller leaves.
         This bounds executor submissions across images, covers and clips.
+        A share_key joins identical running work without occupying another
+        worker. Namespace keys by operation; the function and arguments
+        must produce the same result for every caller of that key.
         """
-        return await self._run_async(fn, *args)
+        return await self._run_async(fn, *args, share_key=share_key)
 
-    async def _run_async(self, fn, *args, preparation=False):
+    async def _run_async(self, fn, *args, preparation=False, share_key=None):
         import asyncio
         from concurrent.futures import ThreadPoolExecutor
 
+        if self._closed:
+            raise RuntimeError("image filter is closed")
         loop = asyncio.get_running_loop()
+        if share_key is not None and share_key in self._inflight:
+            return await asyncio.shield(self._inflight[share_key])
         if preparation:
             if self._prepare_slots is None:
                 self._prepare_slots = asyncio.Semaphore(1)
@@ -1170,23 +1191,56 @@ class ImageFilter:
             slots = self._async_slots
             executor = self._executor()
         await slots.acquire()
+        # Another copy may have obtained a worker while we waited. Join
+        # its result in asyncio, never by parking a detector thread.
+        if share_key is not None and share_key in self._inflight:
+            slots.release()
+            return await asyncio.shield(self._inflight[share_key])
         try:
             future = executor.submit(fn, *args)
         except BaseException:
             slots.release()
             raise
 
+        result = asyncio.wrap_future(future, loop=loop)
+        # A timed-out request may be the last observer of a running job.
+        # Retrieve its eventual exception even then; awaiting the future
+        # still raises it normally for callers that remain interested.
+        def observe(done):
+            if not done.cancelled():
+                done.exception()
+
+        result.add_done_callback(observe)
+        if share_key is not None:
+            self._inflight[share_key] = result
+
+        def release():
+            slots.release()
+            if share_key is not None:
+                self._inflight.pop(share_key, None)
+
         def finished(_):
             try:
-                loop.call_soon_threadsafe(slots.release)
+                loop.call_soon_threadsafe(release)
             except RuntimeError:
                 pass  # the proxy's event loop has already shut down
 
         future.add_done_callback(finished)
-        return await asyncio.shield(asyncio.wrap_future(future, loop=loop))
+        return await asyncio.shield(result)
+
+    def close(self, *, wait=False):
+        """Stop accepting work; let already-running checks finish safely.
+
+        The proxy must not block its event loop during shutdown. Tests and
+        command-line tools can request wait=True from outside that loop.
+        """
+        self._closed = True
+        for pool in (self._prepare_pool, self._pool):
+            if pool is not None:
+                pool.shutdown(wait=wait, cancel_futures=True)
 
     @staticmethod
-    def _person_aware(image_bytes, detections, verdict) -> ImageVerdict:
+    def _person_aware(image_bytes, detections, verdict) -> ImageVerdict | None:
         """Whole figures, not fragments.
 
         Two family-test findings: a covered detection left the rest of the
@@ -1210,7 +1264,11 @@ class ImageFilter:
             with Image.open(io.BytesIO(image_bytes)) as im:
                 size = im.size
         except Exception:  # noqa: BLE001
-            return verdict
+            # The base detector can decode formats this Pillow build
+            # cannot. That is only a partial judgement: missing AVIF used
+            # to skip every skin/person refinement and cache CLEAN.
+            log.debug("image cannot be opened for refinement", exc_info=True)
+            return None
         faces = [d.box for d in detections
                  if d.label in FACES and d.score >= MIN_CONFIDENCE]
         if verdict.level != CLEAN and faces:

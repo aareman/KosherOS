@@ -75,12 +75,18 @@ def available() -> bool:
     return True
 
 
-def key(url: str, total_bytes: int | None) -> str:
+def key(url: str, total_bytes: int | None, *, content_range: str | None = None) -> str:
     """The cache key for a clip: its address without any fragment, its
     total size when known (a re-encoded clip at the same address is a new
-    clip), and the judgement version so a fix reaches cached verdicts."""
+    clip), the response's byte range, and the judgement version.
+
+    Distinct ranges may contain different frames, or just an initialization
+    segment. Neither their cache entries nor running checks are shared.
+    The range marker also invalidates older, whole-URL cache entries.
+    """
     base = url.split("#", 1)[0]
-    raw = f"{base}|{total_bytes if total_bytes is not None else '?'}|v{JUDGEMENT_VERSION}"
+    raw = (f"{base}|{total_bytes if total_bytes is not None else '?'}"
+           f"|range={content_range or 'full'}|v{JUDGEMENT_VERSION}")
     return hashlib.sha256(raw.encode()).hexdigest()
 
 
@@ -256,19 +262,62 @@ class VideoChecker:
         except Exception:  # noqa: BLE001 - includes the timeout
             return None
 
-    async def verdict_async(self, data: bytes, clip_key: str) -> ImageVerdict | None:
-        """The same, without holding the event loop; the worker finishes
-        and caches even when the deadline passes."""
+    async def _prepare_async(self, clip_key: str):
+        cached = await self.images.prepare_async(self.cached, clip_key)
+        if cached is not None:
+            return cached, True
+        ready = self._available
+        if ready is None:
+            # Cold decoder/model startup can be expensive. Give it a
+            # detector slot, leaving the cache/fallback worker available.
+            ready = await self.images.run_async(
+                lambda: self.available, share_key=("video-availability", id(self)))
+        return None, ready
+
+    def _judge_if_needed(self, data: bytes, clip_key: str):
+        # Another copy may have completed while this one waited for a
+        # worker. Recheck on that worker, never on the network loop.
+        cached = self.cached(clip_key)
+        return cached if cached is not None else self.judge_bytes(data, clip_key)
+
+    async def precheck_async(self, clip_key: str):
+        """Cached verdict and decoder availability, within a short deadline.
+
+        Used before deciding whether to stream or buffer a response. A
+        stalled cache is uncheckable, subject to the account's usual rule.
+        """
         import asyncio
 
-        cached = self.cached(clip_key)
-        if cached is not None:
-            return cached
-        if not self.available:
-            return None
         try:
             return await asyncio.wait_for(
-                self.images.run_async(self.judge_bytes, data, clip_key), self.timeout)
+                self._prepare_async(clip_key),
+                min(self.timeout, self.images.timeout))
+        except Exception:  # noqa: BLE001 - inability to check is not a verdict
+            log.debug("clip preparation failed or timed out", exc_info=True)
+            return None, False
+
+    async def verdict_async(self, data: bytes, clip_key: str) -> ImageVerdict | None:
+        """Judge off the event loop, including cache reads and decoder setup.
+
+        Preparation and admission share the clip's deadline. A running
+        worker finishes and caches even when its caller stops waiting.
+        """
+        import asyncio
+
+        started = time.monotonic()
+        try:
+            cached, ready = await asyncio.wait_for(
+                self._prepare_async(clip_key), self.timeout)
+            if cached is not None:
+                return cached
+            if not ready:
+                return None
+            remaining = self.timeout - (time.monotonic() - started)
+            if remaining <= 0:
+                return None
+            return await asyncio.wait_for(
+                self.images.run_async(self._judge_if_needed, data, clip_key,
+                                      share_key=("video", clip_key)), remaining)
         except asyncio.TimeoutError:
             log.info("a clip took longer than %.0f s to judge; refused", self.timeout)
             return None

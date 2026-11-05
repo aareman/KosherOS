@@ -72,6 +72,32 @@ connections. This applies to CSS backgrounds and images created by site
 scripts as well as images in the original HTML, without rewriting their
 addresses or requiring an extra browser script.
 
+The live response hooks also prepare video cache decisions, HTTP decompression,
+image headers, placeholders, and covers off the network loop. Covers have a
+ten-second finalisation budget, including admission and cache-key preparation,
+so a normal burst can finish its covers. HTTP decompression and same-size
+placeholders have separate two-second budgets. Work that cannot finish hides
+the image rather than waiting indefinitely or exposing it. Status publication
+and image activity logging are advisory and have separate short deadlines.
+
+A fully hidden image becomes one solid colour sampled from its whole image,
+slightly desaturated and quantised. It retains its dimensions (capped at 4096)
+without retaining shapes or spatial detail. One-bit palette PNG encoding and
+bounded caches keep repeated tiles cheap. If the pixels cannot be read, the
+fallback is opaque neutral grey; the old translucent red fallback was a bug.
+
+Concurrent identical images and clips share an in-progress check. Cancelling
+one browser request does not cancel a check another request needs, and a running
+worker keeps its admission slot until it actually finishes. A duplicate that
+was still waiting rechecks the cache before starting detection.
+
+This bounds filtering work and keeps unrelated proxy connections responsive;
+it is not a promise that every image will be shown during overload. Checks that
+miss their deadline still hide safely. Browser responsiveness also depends on
+model CPU use, page scripts, decoding, and the machine's power settings. The
+reproducible browser benchmark in `scripts/perf-media/` measures those effects
+separately from the worker regression tests.
+
 The detector returns labelled regions rather than one score, which is what
 makes the ladder meaningful: exposure maps to `nsfw`, covered but
 prominent to `suggestive`, weaker signals to `immodest`. A face on its own
@@ -155,12 +181,44 @@ times the size. The covered pixels are remembered for a while, so a reload
 or the same photo on the next page is not frosted again. If the picture
 cannot be edited at all, it is hidden rather than passed through.
 
+### Image formats
+
+The image path recognises every `image/*` content type. For generic
+`application/octet-stream` or `binary/octet-stream` responses it also checks
+the URL extension, including SVG, ICO, APNG, TIFF, JPEG XL and HEIC/HEIF.
+Recognition does not imply decoder support: an unsupported format still
+reaches image policy instead of streaming through as an unchecked download.
+The ordinary size exemption still applies below `all`; an image requiring
+judgement is hidden when it cannot be decoded.
+
+Local synthetic-file checks exercised Pillow decoding, detector input
+preparation, NudeNet's image reader, placeholders and covers. JPEG, PNG,
+WebP, GIF, BMP, ICO and TIFF passed. The packaged Pillow 13 wheel also passed
+AVIF, including animation; this device's distro Pillow 12.3 lacked AVIF.
+GIF, animated WebP, APNG and AVIF expose their frames for sampling. These
+checks verify format handling, not the model's classification accuracy.
+
+SVG and JPEG XL remain decoder gaps: Brave 156 displayed both locally,
+but neither current Pillow build nor OpenCV could decode them. HEIC/HEIF
+has no registered Pillow decoder here and was not verified with a valid
+local fixture. Unsupported images also lack same-size, average-colour
+placeholders when their dimensions cannot be read. TIFF decoded locally
+but did not display in this browser. Browser support and filter support
+are separate capabilities; Pillow's [format documentation](https://pillow.readthedocs.io/en/stable/handbook/image-file-formats.html)
+describes the available codecs, and Chrome's [JPEG XL announcement](https://developer.chrome.com/blog/jpeg-xl-in-chrome)
+documents its browser support.
+
+Inline SVG and `data:` or `blob:` images do not themselves create a
+network-image response, so this proxy image path cannot classify them.
+Existing page rules can remove some inline images; they do not provide
+general pixel inspection of browser-generated content.
+
 ### Pictures that move
 
 A GIF, an animated PNG or an animated WebP is a short clip and is treated
-as one: four frames spread through the animation are judged and the
-strongest frame's verdict is the picture's. Anything the detector's image
-reader cannot open, GIF and AVIF included, is handed to it as a JPEG. An
+as one, as is animated AVIF: up to four frames spread through the animation
+are judged and the strongest frame's verdict is the picture's. Formats
+outside the detector's JPEG/PNG input path are converted to JPEG first. An
 animation that must be covered is hidden whole, because a cover on one
 frame means nothing on the others. WebM is video and takes the video path.
 
@@ -321,6 +379,22 @@ throughput under a browser's concurrent connections.
 
 Deliberately no Redis on the device: another daemon holding RAM on a
 machine already short of it, to cache something SQLite handles.
+
+## Image status on a page
+
+The page script labels visible images and single inline CSS backgrounds at
+least 80×48 CSS pixels: waiting, checking, checked, filtered, hidden, or not
+checked. A failed check is labelled "Not checked · hidden". A small image
+exempted by policy is labelled "Not checked", not "Checked". Missing observations
+expire to "Status unavailable"; they are never presented as a successful check.
+
+Labels do not alter image URLs, layout or click targets. The script batches
+status requests while the tab is visible, stops polling settled images and
+tracks source changes. Status is held briefly in bounded memory and scoped to
+the account and referring page origin. No image bytes are sent by this UI.
+Images without a referrer, browser-cache hits without a recent observation,
+and external stylesheet backgrounds may have no label or no available status.
+The proxy still applies its image policy independently of the status script.
 
 ## What is not built
 

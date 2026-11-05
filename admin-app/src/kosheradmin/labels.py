@@ -463,6 +463,8 @@ def change_sentence(event: dict, users_by_uid: dict | None = None) -> tuple[str,
         what = "Sites the ad blocker leaves reachable changed"
     elif method == "SetDeveloperTools":
         what = f"{who}: developer tools {'on' if arg(1) else 'off'}"
+    elif method == "SetSshIn":
+        what = f"{who}: sign in over SSH {'on' if arg(1) else 'off'}"
     elif method == "SetBuildSources":
         what = "Sites Nix builds may download from changed"
     elif method == "SetBootMenuPassword":

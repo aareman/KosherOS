@@ -192,6 +192,21 @@ def cmd_developer_tools(args) -> int:
     return 0
 
 
+def cmd_ssh_in(args) -> int:
+    """kosherctl ssh-in UID on|off
+
+    May the account be signed in to from another machine over SSH? Keys
+    only: the account adds its public key to ~/.ssh/authorized_keys.
+    Needs developer tools on.
+    """
+    on = args.state == "on"
+    _client().set_ssh_in(args.uid, on, _guardian_pw(args))
+    print(f"uid {args.uid}: sign in over SSH {'on' if on else 'off'}")
+    if on:
+        print("Add the key to ~/.ssh/authorized_keys in that account; passwords are refused.")
+    return 0
+
+
 def cmd_build_sources(args) -> int:
     """kosherctl build-sources [list | add HOST... | remove HOST...]
 
@@ -1417,6 +1432,14 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("state", choices=["on", "off"])
     s.add_argument("--guardian-password")
     s.set_defaults(func=cmd_developer_tools)
+
+    s = sub.add_parser("ssh-in",
+                       help="may an account with developer tools be signed in to over SSH, "
+                            "with a key")
+    s.add_argument("uid", type=int)
+    s.add_argument("state", choices=["on", "off"])
+    s.add_argument("--guardian-password")
+    s.set_defaults(func=cmd_ssh_in)
 
     s = sub.add_parser("build-sources",
                        help="where a Nix build may download from while a developer account "

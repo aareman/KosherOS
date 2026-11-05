@@ -217,6 +217,11 @@ INTROSPECTION_XML = """
       <arg direction="in" type="b" name="enabled"/>
       <arg direction="in" type="s" name="guardian_password"/>
     </method>
+    <method name="SetSshIn">
+      <arg direction="in" type="i" name="uid"/>
+      <arg direction="in" type="b" name="enabled"/>
+      <arg direction="in" type="s" name="guardian_password"/>
+    </method>
     <method name="SetBuildSources">
       <arg direction="in" type="as" name="hosts"/>
       <arg direction="in" type="s" name="guardian_password"/>
@@ -1358,8 +1363,9 @@ class Daemon:
                 "a list that needs more than that is not finished, and "
                 "should be fixed for everybody rather than here")
         lists.save_delta(list_name, add=add, remove=list(remove))
-        # The proxy and the search service reload on their own, but the
-        # resolver's category blocks are rendered from the policy.
+        # The proxy and the search service load the lists when they start;
+        # apply restarts them because the lists changed (apply.py,
+        # _restart_if_changed), and renders the resolver's category blocks.
         self._save_and_apply()
         log.info("edited %s: +%s -%s", list_name, len(add), len(remove))
         return None
@@ -1788,6 +1794,10 @@ class Daemon:
 
         user = self._managed(uid)
         user.developer_tools = bool(enabled)
+        # Signing in over SSH is part of developer tools: it goes with them,
+        # and does not come back on its own when they are turned on again.
+        if not enabled:
+            user.ssh_in = False
         if enabled:
             try:
                 home = Path(pwd.getpwuid(uid).pw_dir)
@@ -1797,6 +1807,21 @@ class Daemon:
                         shutil.chown(path, uid, pwd.getpwuid(uid).pw_gid)
             except (KeyError, OSError) as e:
                 log.warning("could not hand uid %d its nix profile: %s", uid, e)
+        self._save_and_apply()
+        return None
+
+    def impl_SetSshIn(self, uid: int, enabled: bool, _guardian_pw: str):
+        """May this account be signed in to from another machine over SSH,
+        with a key in its own ~/.ssh/authorized_keys (sshin.py)?
+
+        Guardian-gated: whatever arrives over the connection is not read
+        by the filter. Only for an account with developer tools on; apply
+        writes sshd's list and starts or stops it.
+        """
+        user = self._managed(uid)
+        if enabled and not user.developer_tools:
+            raise PolicyError("turn developer tools on for this account first")
+        user.ssh_in = bool(enabled)
         self._save_and_apply()
         return None
 

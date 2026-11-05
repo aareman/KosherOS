@@ -618,6 +618,10 @@
           "type": "boolean",
           "description": "May use the Nix daemon and reach the package registries directly (nix, devbox, devenv from a shell). Default false."
         },
+        "ssh_in": {
+          "type": "boolean",
+          "description": "May be signed in to from another machine over SSH, with a key in the account's own ~/.ssh/authorized_keys; passwords are refused. Only takes effect with developer_tools on. Default false."
+        },
         "approved_apps": {
           "type": "array",
           "items": {

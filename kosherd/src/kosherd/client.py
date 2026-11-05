@@ -218,6 +218,11 @@ class DaemonClient:
         itself (nix, devbox, devenv from a shell)?"""
         self._call("Profiles", "SetDeveloperTools", "(ibs)", uid, bool(enabled), guardian_password)
 
+    def set_ssh_in(self, uid: int, enabled: bool, guardian_password: str = "") -> None:
+        """May the account be signed in to over SSH with a key? Needs
+        developer tools on."""
+        self._call("Profiles", "SetSshIn", "(ibs)", uid, bool(enabled), guardian_password)
+
     def set_build_sources(self, hosts: list[str], guardian_password: str = "") -> None:
         """The hosts added to where a Nix build may download from; the
         built-in ones always apply."""

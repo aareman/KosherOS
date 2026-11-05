@@ -17,6 +17,24 @@ check_contains "bad patterns are rejected before they reach the proxy" "action" 
 wait_for_dns  # every policy change restarts the resolver
 sleep 2       # ...and the proxy needs a moment to bind
 
+section "A rule change reaches the proxy without restarting it"
+# Every change used to restart the proxy: seconds before the admin app
+# heard back, and every account's web down meanwhile. It re-reads its
+# rules file as it changes; only a new listener or edited lists restart it.
+pid_before=$(systemctl show -p MainPID --value kosher-mitm)
+t0=$(date +%s%N)
+kctl rules "$uid" block "example.org/*" >/dev/null
+took_ms=$(( ($(date +%s%N) - t0) / 1000000 ))
+sleep 2
+pid_after=$(systemctl show -p MainPID --value kosher-mitm)
+assert_that "the proxy kept running through the change (pid $pid_before -> $pid_after, ${took_ms} ms)" \
+    test "$pid_before" = "$pid_after" -a "$pid_before" != 0
+code=$(http_code_as wlkid https://example.org/)
+assert_that "and the new rule is in force at once (got $code)" test "$code" = "403"
+kctl rules "$uid" clear >/dev/null
+kctl rules "$uid" block "example.com/blocked*" >/dev/null
+sleep 2
+
 section "Plumbing"
 check "the proxy is running" 0 systemctl is-active --quiet kosher-mitm
 check "the inspection CA is in the system trust store" 0 \

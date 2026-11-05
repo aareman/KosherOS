@@ -8,6 +8,7 @@ The HTTP fixture is local and synthetic; no private browsing data is accessed.
 """
 import argparse
 import asyncio
+import base64
 from collections import Counter
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import hashlib
@@ -35,6 +36,17 @@ IMAGE_STATUS_SNAPSHOT = '''() => ({hosts:document.querySelectorAll('[data-kosher
 
 def percentile(values, fraction):
     return round(sorted(values)[int((len(values)-1)*fraction)], 2) if values else None
+
+
+async def capture_screenshot(session, path):
+    """Capture after measurements, without Playwright's screenshot preflight."""
+    try:
+        result = await asyncio.wait_for(session.send('Page.captureScreenshot', {
+            'format': 'png', 'fromSurface': True, 'captureBeyondViewport': False}), 10)
+        path.write_bytes(base64.b64decode(result['data'], validate=True))
+        return None
+    except Exception as error:
+        return {'path': path.name, 'error': type(error).__name__ + ': ' + str(error)}
 
 
 def assets(root):
@@ -328,7 +340,6 @@ async def trial(browser, origin, args, label, root, scenario, repeat):
         raw['image_status_ui'] = await page.evaluate(IMAGE_STATUS_SNAPSHOT)
         raw['dispatches'] = dispatches
         raw['http_responses'] = responses
-        await page.screenshot(path=str(out / 'browser.png'))
         frames = [entry['gap_ms'] for entry in raw['frames']]
         inputs = [entry['next_frame_ms'] for entry in raw['inputs']]
         # Events below the browser's minimum reporting threshold are absent.
@@ -367,9 +378,17 @@ async def trial(browser, origin, args, label, root, scenario, repeat):
             'visible_image_status_labels':dict(Counter(b['label'] for b in raw['image_status_ui']['badges'] if b['visible'])),
             'observed_image_status_states':dict(Counter(b['state'] for b in raw['image_status_ui']['badges'] if b['was_displayed'])),
             'status_api_http_codes':dict(Counter(proxy['status_api_http_codes'])),
-            'video_states':raw['videos'], 'validation':validation}
+            'video_states':raw['videos'], 'validation':validation,
+            'capture_status':'pending', 'capture_errors':[]}
+        # A screenshot failure must not discard measurements or correctness
+        # evidence. Persist everything before asking Chromium for the PNG.
         (out/'browser.json').write_text(json.dumps(raw,indent=2))
         (out/'proxy.json').write_text(json.dumps(proxy,indent=2))
+        (out/'summary.json').write_text(json.dumps(result,indent=2))
+        capture_error = await capture_screenshot(cdp, out/'browser.png')
+        if capture_error:
+            result['capture_errors'].append(capture_error)
+        result['capture_status'] = 'failed' if capture_error else 'saved'
         (out/'summary.json').write_text(json.dumps(result,indent=2))
         print(json.dumps(result), flush=True)
         return result
@@ -444,9 +463,9 @@ async def main(args):
         for server in servers:
             server.shutdown()
             server.server_close()
-    invalid = [r for r in results if not r['validation']['valid']]
+    invalid = [r for r in results if not r['validation']['valid'] or r['capture_errors']]
     if invalid:
-        raise SystemExit(f"{len(invalid)} trials failed correctness checks; inspect summary.json")
+        raise SystemExit(f"{len(invalid)} trials failed correctness or screenshot checks; inspect summary.json")
 
 
 if __name__=='__main__':

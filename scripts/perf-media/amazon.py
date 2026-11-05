@@ -15,6 +15,7 @@ import os
 from pathlib import Path
 import signal
 import subprocess
+import tempfile
 import time
 from urllib.request import urlopen
 
@@ -83,7 +84,10 @@ async def capture(browser, url, output, seconds, require_image_status=False):
     await session.send('Emulation.setDeviceMetricsOverride',{
         'width':1440,'height':900,'deviceScaleFactor':1,'mobile':False})
     await page.goto(url,wait_until='domcontentloaded',timeout=90000)
-    await page.screenshot(path=str(output/'initial.png'))
+    capture_errors=[]
+    initial_error=await bench.capture_screenshot(session,output/'initial.png')
+    if initial_error:
+        capture_errors.append(initial_error)
     actions=[]
     # Focus and type into the ordinary search box without submitting anything.
     search=page.locator('#twotabsearchtextbox,input[name="field-keywords"],input[type="search"],input[name="search_query"]').first
@@ -119,7 +123,6 @@ async def capture(browser, url, output, seconds, require_image_status=False):
     raw['actions']=actions
     raw['carousel_controls']=controls
     (output/'browser.json').write_text(json.dumps(raw,indent=2))
-    await page.screenshot(path=str(output/'final.png'))
     stats=await read_stats()
     (output/'proxy-snapshot.json').write_text(json.dumps(stats,indent=2))
     frames=[entry['gap'] for entry in raw['metrics']['frames']]
@@ -161,10 +164,18 @@ async def capture(browser, url, output, seconds, require_image_status=False):
         if 'waiting' not in summary['observed_image_status_states']:
             failures.append('initial waiting state was not observed')
     summary['validation_errors']=failures
+    summary['capture_status']='pending'
+    summary['capture_errors']=capture_errors
+    # Preserve raw data, proxy data and validation before the final screenshot.
+    (output/'summary.json').write_text(json.dumps(summary,indent=2))
+    final_error=await bench.capture_screenshot(session,output/'final.png')
+    if final_error:
+        capture_errors.append(final_error)
+    summary['capture_status']='failed' if capture_errors else 'saved'
     (output/'summary.json').write_text(json.dumps(summary,indent=2))
     print(json.dumps(summary),flush=True)
     await page.close()
-    return failures
+    return failures+[f"Screenshot capture failed: {error}" for error in capture_errors]
 
 
 async def main(args):
@@ -173,7 +184,9 @@ async def main(args):
     shared.mkdir(exist_ok=True)
     ca=shared/'ca'
     pin=ca_fingerprint(ca)
-    profile=shared/f'browser-profile-{args.output.name}'
+    # Failed captures can leave restorable tabs carrying the previous proxy's
+    # page token. Every run needs a genuinely fresh isolated browser profile.
+    profile=Path(tempfile.mkdtemp(prefix=f'browser-profile-{args.output.name}-',dir=shared))
     browser_args=['flatpak','run','com.brave.Browser',f'--user-data-dir={profile}',
         '--remote-debugging-port=9224','--no-first-run','--no-default-browser-check',
         '--disable-background-networking','--proxy-server=http://127.0.0.1:8088',
@@ -205,6 +218,8 @@ async def main(args):
         (args.output/'environment.json').write_text(json.dumps({
             'source':bench.source_metadata(args.root),'host':bench.host_metadata(),
             'browser':version,'browser_args':browser_args,'temporary_ca_spki':pin,
+            'harness_sha256':{path.name:hashlib.sha256(path.read_bytes()).hexdigest()
+                              for path in (HERE/'browser.py',HERE/'amazon.py',HERE/'amazon_addon.py')},
             'upstream_tls_verification':True,'media_level':args.level,
             'extra_pythonpath':[str(path) for path in args.extra_pythonpath],
             'scope':'public signed-out site; isolated media policy; no real account configuration'},indent=2))

@@ -1,0 +1,154 @@
+# Media filtering: browser evidence on the test device
+
+Product code in the current media/UI captures: `62b72c6d33fd8d158f21d17284082856421b47a8`.
+Baseline: `506ebba40af8`. Commit `84d5760` changes the capture harness only;
+the current captures' production-file hashes match `62b72c6` exactly.
+Captured 2026-11-05 on an i7-10710U with installed, headed Brave/Chromium 156.
+The current public-media and preliminary pipeline captures recorded `quiet` /
+`powersave` / energy preference `power`. The later color capture recorded
+Performance mode. Each artifact retains its own settings; color correctness is
+not used as timing evidence.
+Personal browser profiles and account policy were not changed.
+
+## Current browser correctness and appearance
+
+[Public browser observations and provenance](public-browser.json) preserve
+source hashes, public asset hashes, verdicts, output pixel checks, page DOM
+observations and status API responses. Controlled pages exercise production
+image hooks, models, transforms and the status script/API in a separate proxy
+and browser profile; authentication and policy are supplied by the fixture.
+The candidate uses the AVIF-enabled Pillow 13 wheel selected by its
+Containerfile; the baseline uses installed Pillow 12.3 without AVIF support.
+These captures demonstrate functional behavior, not a causal performance
+comparison or the model's general accuracy.
+
+### Subtle loading, then unobstructed approved images
+
+The current UI shows a small pending indicator and removes the visible badge
+when an image is approved or exempt from checking. Filtered or hidden results
+retain a label. The separate real-browser status regression passed source
+changes, inline backgrounds, unchanged URLs and layout, clicks through badges,
+DOM removal cleanup, bounded batches of long CDN URLs and images first shown
+after their initial offscreen registration. That regression uses the production
+script with fixture image/status responses; the public captures additionally
+exercise the production status API.
+
+![Small pending indicator](checking.png)
+![Approved image with no visible badge](approved.png)
+
+### Pink fallback
+
+The old emergency PNG decodes to RGBA `(255, 0, 0, 127)`, which looks pink over
+white. The replacement is opaque `(214, 214, 214, 255)`. The rightmost tile
+below deliberately sends malformed bytes at a YouTube hover-preview address
+through the production refusal path. Its 1×1 intrinsic fallback is expected
+because the input has no readable dimensions. This proves the fallback fix;
+it does not establish how often real previews fail. The public thumbnails to
+its left were already hidden upstream or returned HTTP 404, so they provide
+no classification evidence.
+
+![Baseline: translucent red emergency fallback](pink-before.png)
+![Current: opaque neutral fallback](pink-after.png)
+
+### AVIF and CSS background: cold timeout, then cached cover
+
+The exact public Law & Order AVIF passed as clean in the baseline. Its OpenCV
+reader could decode it while Pillow-dependent refinement was silently skipped.
+With native Pillow AVIF support, the current run's first cold `<img>` request
+hit the image deadline after 2,025 ms, returned a solid same-size 720×270 tile,
+and reported **Not checked · hidden**. It did not produce a cover on that first
+request.
+
+The continuing worker cached an **immodest** verdict. A later inline CSS
+background request for the identical input SHA-256 returned that cached verdict
+and a cover in 129 ms. The screenshot below is this later request and its
+**Filtered** label. All seven status requests in `public-media-subtle` returned
+HTTP 200, and its three page validations recorded no errors. The three approved
+carousel images had no visible settled badge.
+
+![Later CSS-background request receives the cached cover](prime-covered.png)
+
+### Solid colors and geometry
+
+At policy `all`, four public AVIFs became solid, opaque 720×270 PNGs, retaining
+their natural dimensions. In page order their RGB colors are `(16,16,32)`,
+`(96,112,112)`, `(32,32,96)` and `(32,16,16)`. These are quantised whole-image
+averages with no spatial detail; the saved output files were checked for a
+single opaque color and their hashes verified.
+
+![Current average-color placeholders](average-colors.png)
+
+This color capture restored old test tabs, which sent **28 stale-token HTTP
+403s** to the new proxy. The cumulative log retains them. The captured page
+itself made one HTTP 200 status request, decoded all four images, settled all
+four states to Hidden and passed its recorded validation. Its final PNG and
+DOM are valid color/geometry evidence; this was not a clean performance run.
+The harness now creates a fresh temporary profile per run to prevent restored
+tabs from contributing traffic.
+
+## Preliminary low-power pipeline measurements — older UI
+
+[Validated paired trials](preliminary-low-power-pairs.json) contain only the
+16 completed trials forming two before/after pairs per scenario from
+`build/image-perf-browser-verified`. Their candidate is **`fbe3edc`**, which
+still showed persistent **Checked** badges. These timings do **not** measure
+the final subtle-loading/no-approved-badge UI at `62b72c6`.
+
+Every included trial had recorded `quiet` / `power` / `powersave` mode at its
+start, source-file hashes matching the stated commit, valid recorded media and
+pixel checks, no browser errors, and natural dimensions independently matched
+to the original assets. Raw response counts matched the summaries; all 36
+covers were preserved in each cover trial. The unfinished `before-hidden-2`
+and unstarted third pairs were excluded. Mode was not sampled continuously.
+
+Values below are the median of each side's two per-trial metrics, shown as
+baseline → `fbe3edc`. Percentiles are not pooled across trials. Two pairs provide
+preliminary descriptive evidence, not a statistical-significance claim.
+
+| Scenario | Pairs | Ping p95, ms | Proxy loop maximum, ms | Input-to-next-frame p95, ms | Page load, s |
+|---|---:|---:|---:|---:|---:|
+| 36 hidden images | 2 | 1116.2 → 61.7 | 850.4 → 192.1 | 9.6 → 9.3 | 3.13 → 3.16 |
+| 6 images with intrinsic layout | 2 | 36.4 → 28.1 | 802.1 → 189.1 | 6.2 → 6.3 | 1.15 → 0.92 |
+| 36 covered images | 2 | 1416.5 → 131.0 | 729.7 → 190.0 | 16.6 → 30.8 | 6.10 → 5.33 |
+| Image inference + 2 videos | 2 | 1129.3 → 131.6 | 717.1 → 178.9 | 18.2 → 22.2 | 4.71 → 5.09 |
+
+The proxy stayed more responsive to unrelated requests in these trials, but
+browser responsiveness and page-load time did not improve uniformly. Cover
+input latency increased, and the inference case loaded more slowly. The
+inference case also hid 30/32 images in the baseline versus 26/28 in the
+candidate; timeout-driven outputs were not identical. Both sides retained all
+36 image dimensions and checked both videos. The JSON includes frame gaps,
+load times, output counts and all per-trial results so these tradeoffs remain
+visible.
+
+## Historical live-site observations — `86ed2cc`, double-filtered
+
+The `legacy_live_runs` entry in `public-browser.json` retains an earlier
+signed-out Amazon, Prime Video and YouTube capture at **`86ed2cc`**. Search-field
+typing and Amazon's next-carousel interaction succeeded. Amazon and Prime
+served AVIFs through the media path, but the existing host proxy also filtered
+these connections and sometimes inserted its older page script. Those runs
+are **double-filtered** and cannot establish current candidate UI coverage or
+performance. Some pages had large frame gaps. Signed-out YouTube showed no
+recommendation thumbnails. These legacy observations are not the current UI
+screenshots or the paired measurements above.
+
+## Reproduction and local raw files
+
+The subsequently reported new AWS portal error was a proxy HTTP/2
+`ConnectionTerminated` / GOAWAY failure. The targeted workaround negotiates
+HTTP/1.1 upstream only for `us-east-1.signin.aws`. [TLS transport checks](aws-signin-transport.json)
+verified the actual installed mitmproxy/PyOpenSSL ClientHello in both hook
+orders: HTTP/1.1 was offered, SNI and peer verification were retained, and other
+hosts still offered HTTP/2. Fourteen focused tests passed. An anonymous,
+verified HTTP/1.1 request to the public origin returned 302. No private workflow
+URL, cookies or login was used. This verifies the transport workaround, not
+successful completion of the user's new-portal login.
+
+See [the harness instructions](../../../scripts/perf-media/README.md). Full
+raw captures are under the main checkout's `build/public-media-before`,
+`build/public-media-subtle`, `build/public-media-colors-subtle`,
+`build/image-status-browser-subtle`, `build/image-perf-browser-verified` and
+historical `build/amazon-browser-after`. This directory contains only small
+public evidence artifacts; no personal browsing data or CA private key is
+included.

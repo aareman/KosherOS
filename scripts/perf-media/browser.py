@@ -251,6 +251,11 @@ def host_metadata():
             'load_average': os.getloadavg()}
 
 
+def power_settings(host):
+    return {key: host[key] for key in
+            ('platform_profile', 'energy_preferences', 'governors')}
+
+
 def expected_placeholder_colors(root, asset_dir, extra_paths):
     """Compute expected decoded colors in a separate process BEFORE trials.
 
@@ -284,9 +289,14 @@ async def trial(browser, origin, args, label, root, scenario, repeat):
     out.mkdir(parents=True, exist_ok=False)
     extra_paths = args.candidate_pythonpath if label == 'after' else args.baseline_pythonpath
     runtime_paths = [str(root/'kosherd/src')]+[str(path) for path in extra_paths]
-    (out/'environment.json').write_text(json.dumps({
-        'source': source_metadata(root), 'host': host_metadata(),
-        'runtime_pythonpath': runtime_paths}, indent=2))
+    host_start = host_metadata()
+    power_start = power_settings(host_start)
+    if args.expected_power_settings is None:
+        args.expected_power_settings = power_start
+    environment = {'source': source_metadata(root), 'host': host_start,
+                   'runtime_pythonpath': runtime_paths,
+                   'expected_power_settings': args.expected_power_settings}
+    (out/'environment.json').write_text(json.dumps(environment, indent=2))
     env = dict(os.environ, PYTHONPATH=os.pathsep.join(runtime_paths), MEDIA_PERF_ROOT=str(root),
                MEDIA_PERF_OUT=str(out), MEDIA_PERF_ASSETS=str(origin.assets), MEDIA_PERF_SCENARIO=scenario)
     log = (out / 'proxy.log').open('w')
@@ -340,6 +350,12 @@ async def trial(browser, origin, args, label, root, scenario, repeat):
         raw['image_status_ui'] = await page.evaluate(IMAGE_STATUS_SNAPSHOT)
         raw['dispatches'] = dispatches
         raw['http_responses'] = responses
+        # Timing and proxy snapshots are already frozen. These provenance
+        # reads must not add work inside the measured interaction window.
+        host_end = host_metadata()
+        power_end = power_settings(host_end)
+        environment['host_end'] = host_end
+        (out/'environment.json').write_text(json.dumps(environment, indent=2))
         frames = [entry['gap_ms'] for entry in raw['frames']]
         inputs = [entry['next_frame_ms'] for entry in raw['inputs']]
         # Events below the browser's minimum reporting threshold are absent.
@@ -353,6 +369,13 @@ async def trial(browser, origin, args, label, root, scenario, repeat):
         loading_frames = [entry['gap_ms'] for entry in raw['frames']
                           if not load_end or entry['time'] <= load_end]
         validation = validate(raw, proxy, scenario, args.placeholder_colors[label])
+        power_errors = []
+        if power_start != power_end:
+            power_errors.append('power settings changed during this trial')
+        if power_start != args.expected_power_settings or power_end != args.expected_power_settings:
+            power_errors.append('power settings differ from the first trial; mixed-mode comparisons are invalid')
+        validation['errors'].extend(power_errors)
+        validation['valid'] = not validation['errors']
         result = {'version':label,'scenario':scenario,'repeat':repeat,'browser':browser.version,
             'critical_js_ms':round(raw.get('criticalReady') or 0,2),
             'dom_content_loaded_ms':round(raw['navigation']['domContentLoadedEventEnd'],2),
@@ -379,6 +402,8 @@ async def trial(browser, origin, args, label, root, scenario, repeat):
             'observed_image_status_states':dict(Counter(b['state'] for b in raw['image_status_ui']['badges'] if b['was_displayed'])),
             'status_api_http_codes':dict(Counter(proxy['status_api_http_codes'])),
             'video_states':raw['videos'], 'validation':validation,
+            'power':{'start':power_start, 'end':power_end,
+                     'expected':args.expected_power_settings, 'valid':not power_errors},
             'capture_status':'pending', 'capture_errors':[]}
         # A screenshot failure must not discard measurements or correctness
         # evidence. Persist everything before asking Chromium for the PNG.
@@ -406,6 +431,7 @@ async def trial(browser, origin, args, label, root, scenario, repeat):
 
 async def main(args):
     args.output.mkdir(parents=True, exist_ok=True)
+    args.expected_power_settings = None
     assets(args.output/'assets')
     args.placeholder_colors={}
     for label,root,extra in [('before',args.baseline,args.baseline_pythonpath),
@@ -443,14 +469,15 @@ async def main(args):
                             and not any(arg.startswith('--type=') for arg in argv):
                         command_line = {'arguments': argv}
                         break
-            (args.output/'environment.json').write_text(json.dumps({
+            environment = {
                 'browser': version, 'browser_command_line': command_line,
                 'host': host_metadata(), 'seconds': args.seconds, 'repeats': args.repeats,
                 'scenarios': args.scenarios,
                 'harness_sha256': {path.name: hashlib.sha256(path.read_bytes()).hexdigest()
                                    for path in (HERE/'browser.py', HERE/'addon.py')},
                 'assets_sha256': {path.name: hashlib.sha256(path.read_bytes()).hexdigest()
-                                  for path in (args.output/'assets').iterdir()}}, indent=2))
+                                  for path in (args.output/'assets').iterdir()}}
+            (args.output/'environment.json').write_text(json.dumps(environment, indent=2))
             for repeat in range(args.repeats):
                 variants=[('before',args.baseline),('after',args.candidate)]
                 if repeat%2:
@@ -459,6 +486,10 @@ async def main(args):
                     for label,root in variants:
                         results.append(await trial(browser,origin,args,label,root,scenario,repeat))
                         (args.output/'summary.json').write_text(json.dumps(results,indent=2))
+                        environment['expected_power_settings'] = args.expected_power_settings
+                        (args.output/'environment.json').write_text(json.dumps(environment,indent=2))
+                        if not results[-1]['power']['valid']:
+                            raise SystemExit('Power settings changed; artifacts retained, but this run cannot be compared. Restart in one stable mode.')
     finally:
         for server in servers:
             server.shutdown()

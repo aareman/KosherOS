@@ -163,6 +163,11 @@ RUN dnf -y install dnsmasq nftables python3-gobject python3-jsonschema python3-p
         gnome-shell-extension-dash-to-panel gnome-shell-extension-appindicator \
         gnome-shell-extension-user-theme \
         niri noctalia xdg-desktop-portal-gtk \
+        # Typing into other windows on the desktops without GNOME's Remote
+        # Desktop portal: Hex (the Store's dictation app) pastes there with
+        # wtype over the virtual-keyboard protocol, and wl-clipboard is its
+        # clipboard on every Wayland desktop.
+        wtype wl-clipboard \
         # Hebrew, properly: the Culmus family (David, Frank Ruehl, Hadasim,
         # Miriam, Nachlieli, Taamey Frank with te'amim), Noto Sans/Serif
         # Hebrew, Noto Rashi for sefarim, Ezra SIL for Tanach with

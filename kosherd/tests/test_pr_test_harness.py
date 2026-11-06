@@ -335,3 +335,21 @@ def test_a_switch_to_the_release_repository_is_held_to_the_signature_policy():
         == pr_test.RELEASE_IMAGE
     assert pr_test.parse_registry_image("ghcr.io/aareman/kosher-linux-ci:x-1@sha256:" + "0" * 64)[0] \
         != pr_test.RELEASE_IMAGE
+
+
+def test_the_registry_keeps_only_the_base_tag_and_collects_the_rest(tmp_path):
+    tags = tmp_path / "docker/registry/v2/repositories/kosher-linux/_manifests/tags"
+    for t in ("base", "pr-test-head", "pr-test-pr-224"):
+        (tags / t / "current").mkdir(parents=True)
+    bin_ = tmp_path / "bin"
+    bin_.mkdir()
+    (bin_ / "registry").write_text('#!/bin/sh\necho "$@" > "$GC_LOG"\n')
+    (bin_ / "registry").chmod(0o755)
+    env = {**os.environ, "PATH": f"{bin_}:{os.environ['PATH']}", "GC_LOG": str(tmp_path / "gc")}
+    subprocess.run(["sh", "-c", pr_test.REGISTRY_PRUNE, "sh", str(tmp_path)], env=env, check=True)
+    assert sorted(p.name for p in tags.iterdir()) == ["base"]
+    assert "garbage-collect --delete-untagged" in (tmp_path / "gc").read_text()
+
+
+def test_an_empty_registry_is_left_alone(tmp_path):
+    subprocess.run(["sh", "-c", pr_test.REGISTRY_PRUNE, "sh", str(tmp_path)], check=True)

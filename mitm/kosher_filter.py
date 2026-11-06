@@ -95,6 +95,7 @@ REQUEST_PATH = "/__kosheros__/request"
 SCRIPT_PATH = "/__kosheros__/filter.js"
 WORDS_PATH = "/__kosheros__/words.json"
 JUDGE_PATH = "/__kosheros__/judge"
+IMAGE_STATUS_PATH = "/__kosheros__/image-status"
 # The calm filter (kosher_calm.js, beside this file): the calmer versions
 # of the addictive sites (#179). Served on every host like the page
 # filter, injected into the pages of the sites an account calms, and the
@@ -450,7 +451,7 @@ BLANK_DATA_URI = ("data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAA
                   "fFcSJAAAADUlEQVR42mNk+P+/HgAFhAJ/wlseKgAAAABJRU5ErkJggg==")
 
 BLANK_PNG = base64.b64decode(
-    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGO4du0aAAUIAoOn1MDPAAAAAElFTkSuQmCC"
 )
 
 IMAGE_TYPES = ("image/",)
@@ -529,7 +530,11 @@ def _is_search_thumb(host: str) -> bool:
 OCTET_TYPES = ("application/octet-stream", "binary/octet-stream")
 VIDEO_EXTENSIONS = (".mp4", ".m4v", ".webm", ".mov", ".m4s", ".ts", ".mkv",
                     ".ogv", ".3gp", ".gifv")
-IMAGE_EXTENSIONS = (".gif", ".png", ".jpg", ".jpeg", ".webp", ".avif", ".bmp")
+# Recognition is broader than decoder support: an unsupported picture must
+# reach image policy rather than stream unchecked as a generic download.
+IMAGE_EXTENSIONS = (".gif", ".png", ".apng", ".jpg", ".jpeg", ".jfif",
+                    ".pjp", ".pjpeg", ".webp", ".avif", ".bmp", ".ico",
+                    ".svg", ".tif", ".tiff", ".jxl", ".heic", ".heif")
 
 
 def _path_extension(flow) -> str:
@@ -576,6 +581,14 @@ def _range_info(flow):
         total = int(m.group(3)) if m.group(3) != "*" else None
         return int(m.group(1)), total
     return 0, _content_length(flow)
+
+
+def _video_key(flow) -> str:
+    """A judgement applies only to the response range that was sampled."""
+    _first, total = _range_info(flow)
+    content_range = (flow.response.headers.get("content-range") or "").strip()
+    return videocheck_mod.key(flow.request.pretty_url, total,
+                              content_range=content_range or None)
 
 
 class YouTube:
@@ -1018,6 +1031,26 @@ class KosherFilter:
         match = re.search(r"@[^@]*:(\d+)\b", spec)
         return int(match.group(1)) if match else None
 
+    def tls_start_server(self, data) -> None:
+        """Avoid the reported upstream HTTP/2 GOAWAY failure on AWS sign-in.
+
+        Only the origin transport changes; TLS verification and all request
+        and response filtering still run. Other hosts keep normal ALPN.
+        """
+        server = data.conn
+        if data.is_dtls or server is not data.context.server:
+            return  # do not change DTLS or an HTTPS upstream proxy connection
+        host = server.sni
+        if host is None:
+            host = data.context.client.sni or (server.address or ("",))[0]
+        if not isinstance(host, str) or host.lower().rstrip(".") != "us-east-1.signin.aws":
+            return
+        server.alpn_offers = (b"http/1.1",)
+        # Script hooks may run before TLSConfig creates SSL.Connection or
+        # after it. Update an existing connection too, before its handshake.
+        if data.ssl_conn is not None:
+            data.ssl_conn.set_alpn_protos([b"http/1.1"])
+
     # ---- usage: how much went through and how long the filter took --------
 
     def running(self) -> None:
@@ -1038,6 +1071,10 @@ class KosherFilter:
             self.usage.flush()
 
     def done(self) -> None:
+        task = getattr(self, "_image_status_task", None)
+        if task is not None:
+            task.cancel()
+        self.vision.close(wait=False)
         self.usage.flush()
         self._calm_flush(force=True)
 
@@ -1089,10 +1126,10 @@ class KosherFilter:
         finally:
             self._timed(flow, started)
 
-    def responseheaders(self, flow: http.HTTPFlow) -> None:
+    async def responseheaders(self, flow: http.HTTPFlow) -> None:
         started = time.perf_counter()
         try:
-            self._responseheaders(flow)
+            await self._responseheaders(flow)
         finally:
             self._timed(flow, started)
 
@@ -1115,6 +1152,9 @@ class KosherFilter:
 
         uid = self._uid_of(flow)
         flow.metadata["kosher_uid"] = uid
+        # A new request must not inherit a settled badge while it waits for
+        # upstream headers. Keep the previous result only for a possible 304.
+        self._image_status(flow, None)
 
         # A Nix build is held to the strictest developer account's filter
         # (#199); bare addresses are refused below as for everyone.
@@ -1209,7 +1249,7 @@ class KosherFilter:
 
     # ---- what to hold and what to let through as it arrives ----------------
 
-    def _responseheaders(self, flow: http.HTTPFlow) -> None:
+    async def _responseheaders(self, flow: http.HTTPFlow) -> None:
         """Decide, from the headers alone, whether the body must be held.
 
         mitmproxy buffers every response body before `response` runs unless
@@ -1234,24 +1274,41 @@ class KosherFilter:
             # rule to reach them, and by default a browser names only the
             # site. For the administrator's chosen pages alone.
             flow.response.headers["Referrer-Policy"] = PICTURES_REFERRER_POLICY
+        if flow.response.status_code == 304 and (
+                _is_image(flow) or "kosher_previous_image_status" in flow.metadata):
+            # The browser reuses its cached representation. There are no
+            # pixels here to judge, and an empty body is not an exempt icon.
+            self._restore_image_status(flow)
+            flow.response.stream = True
+            return
+
         content_type = (flow.response.headers.get("content-type") or "").lower()
         if content_type.startswith(PLAYLIST_TYPES):
             return  # small text; response() decides
         if _is_video(flow):
-            decision = self._video_decision(flow, uid)
+            decision = await self._video_decision_async(flow, uid)
             if decision == "stream":
                 flow.response.stream = True
             elif decision == "refuse":
-                self._refuse_video(flow, before_body=True)
+                await self._refuse_video_async(flow, before_body=True)
             return  # "hold": sampled in response()
         if _is_image(flow):
+            level = self.policy.media_level_for(uid)
+            flow.metadata["kosher_image_status_level"] = level
             if YouTube.is_moving_thumbnail(flow.request.pretty_host or "",
                                            getattr(flow.request, "path", "") or ""):
                 return  # response() decides: it may be a video in a picture
-            level = self.policy.media_level_for(uid)
-            if level == "none" or flow.metadata.get("kosher_pictures") \
-                    or self._recently_clean(flow, level):
+            if flow.metadata.get("kosher_pictures"):
+                self._image_status(flow, "not_checked")
                 flow.response.stream = True
+                return
+            if level == "none":
+                flow.response.stream = True
+            elif self._recently_clean(flow, level):
+                self._image_status(flow, "checked")
+                flow.response.stream = True
+            else:
+                self._image_status(flow, "checking")
             return
         if "text/html" in content_type or YouTube.applies(flow.request.pretty_host) \
                 or self.siterules.is_suggestions(flow.request.pretty_url):
@@ -1273,13 +1330,25 @@ class KosherFilter:
         if getattr(flow.response, "stream", False):
             return  # let through as it arrived; there is no body to read
 
-        if _is_image(flow):
-            if self._youtube_preview_refused(flow, uid):
+        image, video = _is_image(flow), _is_video(flow)
+        preview_refused = image and self._youtube_preview_blocked(flow, uid)
+        filter_media = (image or video) and self.policy.media_level_for(uid) != "none"
+        if (filter_media or preview_refused) and not await self._decode_media_response(flow):
+            if image:
+                await self._blank_image_async(flow, body=b"", state="unavailable")
+            else:
+                await self._video_settle_async(
+                    flow, uid, self.policy.media_level_for(uid), None)
+            return
+
+        if image:
+            if preview_refused:
+                await self._blank_image_async(flow)
                 return
             await self._filter_image_async(flow, uid)
             return
 
-        if _is_video(flow):
+        if video:
             await self._filter_video_async(flow, uid)
             return
 
@@ -1293,20 +1362,70 @@ class KosherFilter:
         # through: a page they blocked is theirs, not ours to soften.
         self._calm_filter(flow, uid)
 
+    @staticmethod
+    def _decode_media_bytes(raw: bytes, content_encoding: str) -> bytes:
+        from mitmproxy.net import encoding
+
+        body = encoding.decode(raw, content_encoding)
+        if not isinstance(body, bytes):
+            raise ValueError("HTTP content encoding did not produce bytes")
+        return body
+
+    async def _decode_media_response(self, flow: http.HTTPFlow) -> bool:
+        """Decode HTTP compression once, without making content getters block.
+
+        Workers see only bytes and an encoding string. The loop then
+        normalizes the response so later getters and replacements cannot
+        decompress or recompress media on the loop.
+        """
+        import asyncio
+
+        response = flow.response
+        content_encoding = response.headers.get("content-encoding")
+        raw = getattr(response, "raw_content", None)
+        if not content_encoding or content_encoding.lower() == "identity" or raw is None:
+            return True
+        try:
+            body = await asyncio.wait_for(self.vision.prepare_async(
+                self._decode_media_bytes, raw, content_encoding),
+                self.IMAGE_FINALIZE_TIMEOUT)
+        except Exception:  # noqa: BLE001 - invalid/late decoding is unjudged
+            log.debug("could not decode media response", exc_info=True)
+            return False
+        self._clear_media_representation_headers(response)
+        response.raw_content = body
+        if "transfer-encoding" in response.headers:
+            response.headers.pop("content-length", None)
+        else:
+            response.headers["content-length"] = str(len(body))
+        return True
+
+    @staticmethod
+    def _clear_media_representation_headers(response) -> None:
+        # A decoded or replaced body must not retain encoding/integrity
+        # headers describing the original representation.
+        for name in ("content-encoding", "content-md5", "digest", "content-digest",
+                     "repr-digest", "etag"):
+            response.headers.pop(name, None)
+
     def _youtube_limited(self, uid: int) -> bool:
         """Whether this account has YouTube limits of any kind."""
         settings = self.policy.youtube_for(uid)
         return bool(settings.get("allowed_channels") or settings.get("blocked_categories"))
 
-    def _youtube_preview_refused(self, flow: http.HTTPFlow, uid: int) -> bool:
-        """Hide an animated preview of a video for an account that limits
-        YouTube. True when the response has been answered."""
+    def _youtube_preview_blocked(self, flow: http.HTTPFlow, uid: int) -> bool:
         if not YouTube.is_moving_thumbnail(flow.request.pretty_host or "",
                                            getattr(flow.request, "path", "") or ""):
             return False
         if not self._youtube_limited(uid):
             return False
         log.info("hid a YouTube hover preview for uid=%s", uid)
+        return True
+
+    def _youtube_preview_refused(self, flow: http.HTTPFlow, uid: int) -> bool:
+        """Synchronous helper for tools; the response hook hides off-loop."""
+        if not self._youtube_preview_blocked(flow, uid):
+            return False
         self._blank_image(flow)
         return True
 
@@ -1602,6 +1721,14 @@ class KosherFilter:
             self._cached(flow, body, etag, "application/json; charset=utf-8",
                          vary=PAGE_TOKEN_HEADER)
             return True
+        if path == IMAGE_STATUS_PATH and flow.request.method == "POST":
+            if not self._page_token_ok(flow, uid):
+                self._refuse(flow, 403, "no page token")
+            elif not self._judge_allowed("images:" + flow.request.headers.get(PAGE_TOKEN_HEADER)):
+                self._refuse(flow, 429, "too many image status requests")
+            else:
+                self._serve_image_status(flow, uid)
+            return True
         if path == JUDGE_PATH and flow.request.method == "POST":
             if not self._page_token_ok(flow, uid):
                 self._refuse(flow, 403, "no page token")
@@ -1671,7 +1798,9 @@ class KosherFilter:
         the nonce on the tag, so the policy lets it run; 'self' covers
         it otherwise, since the address is the page's own origin.
         """
-        if language_filter == "off" and not judge:
+        uid = (getattr(flow, "metadata", None) or {}).get("kosher_uid")
+        media = self.policy.media_level_for(uid) != "none"
+        if language_filter == "off" and not judge and not media:
             return
         content_type = (flow.response.headers.get("content-type") or "").lower()
         if "text/html" not in content_type:
@@ -1687,8 +1816,10 @@ class KosherFilter:
             return
         uid = (getattr(flow, "metadata", None) or {}).get("kosher_uid")
         token = self._page_token(uid, flow.request.pretty_host)
-        attrs = (f'src="{SCRIPT_PATH}" data-kosheros-language="{language_filter}" '
+        version = self._page_script()[1].strip('"')
+        attrs = (f'src="{SCRIPT_PATH}?v={version}" data-kosheros-language="{language_filter}" '
                  f'data-kosheros-judge="{"1" if judge else "0"}" '
+                 f'data-kosheros-images="{"1" if media else "0"}" '
                  f'data-kosheros-token="{token}" defer')
         csp = flow.response.headers.get("content-security-policy") or ""
         nonce = re.search(r"'nonce-([A-Za-z0-9+/=_-]+)'", csp)
@@ -1717,14 +1848,100 @@ class KosherFilter:
         referer = flow.request.headers.get("referer") or ""
         return self.page_levels.get(referer, "")
 
+    # Short-lived, page-origin-scoped status; never a browsing-history API.
+    IMAGE_STATUS_TTL = 120
+    MAX_IMAGE_STATUSES = 4096
+
+    @staticmethod
+    def _image_origin(url: str) -> str:
+        try:
+            parts = urlsplit(url)
+            if parts.scheme in ("http", "https") and parts.hostname:
+                port = parts.port
+                default = 443 if parts.scheme == "https" else 80
+                host = parts.hostname.lower()
+                if ":" in host:
+                    host = f"[{host}]"  # keep IPv6 addresses distinct from ports
+                return f"{parts.scheme}://{host}" + (
+                    f":{port}" if port is not None and port != default else "")
+        except ValueError:
+            pass
+        return ""
+
+    def _image_status(self, flow: http.HTTPFlow, state: str | None) -> None:
+        uid = flow.metadata.get("kosher_uid")
+        origin = self._image_origin(flow.request.headers.get("referer") or "")
+        if uid is None or not origin:
+            return  # no page provenance: do not expose the observation
+        url = flow.request.pretty_url.split("#", 1)[0]
+        if len(url) > 2048:
+            return
+        key = (uid, origin, url)
+        if state is None:
+            previous = self.__dict__.get("_image_statuses", {}).pop(key, None)
+            if previous and previous[1] != "checking":
+                flow.metadata["kosher_previous_image_status"] = (key, previous)
+            return
+        statuses = self.__dict__.setdefault("_image_statuses", OrderedDict())
+        level = flow.metadata.get("kosher_image_status_level")
+        if level is None:
+            level = self.policy.media_level_for(uid)
+        statuses[key] = (time.monotonic(), state, level)
+        statuses.move_to_end(key)
+        while len(statuses) > self.MAX_IMAGE_STATUSES:
+            statuses.popitem(last=False)
+
+    def _restore_image_status(self, flow: http.HTTPFlow) -> None:
+        previous = flow.metadata.pop("kosher_previous_image_status", None)
+        if previous is None:
+            return
+        key, entry = previous
+        if (time.monotonic() - entry[0] > self.IMAGE_STATUS_TTL
+                or entry[2] != self.policy.media_level_for(key[0])):
+            return
+        statuses = self.__dict__.setdefault("_image_statuses", OrderedDict())
+        if key in statuses:
+            return  # a concurrent request has already published newer state
+        statuses[key] = entry
+        while len(statuses) > self.MAX_IMAGE_STATUSES:
+            statuses.popitem(last=False)
+
+    def _serve_image_status(self, flow: http.HTTPFlow, uid) -> None:
+        raw = flow.request.get_text(strict=False) or ""
+        if len(raw) > 20_000:
+            self._refuse(flow, 413, "too many image addresses")
+            return
+        try:
+            body = json.loads(raw)
+            urls = body.get("urls") if isinstance(body, dict) else None
+            if not isinstance(urls, list) or len(urls) > 64:
+                raise ValueError()
+        except (ValueError, TypeError):
+            self._refuse(flow, 400, "expected up to 64 image addresses")
+            return
+        origin = self._image_origin(flow.request.pretty_url)
+        now = time.monotonic()
+        level = self.policy.media_level_for(uid)
+        statuses = self.__dict__.get("_image_statuses", {})
+        result = {}
+        for url in urls:
+            if not isinstance(url, str) or len(url) > 2048:
+                continue
+            url = url.split("#", 1)[0]
+            entry = statuses.get((uid, origin, url))
+            if entry and now - entry[0] <= self.IMAGE_STATUS_TTL and entry[2] == level:
+                result[url] = entry[1]
+        flow.response = http.Response.make(200, json.dumps({"images": result}).encode(),
+            {"Content-Type": "application/json", "Cache-Control": "no-store"})
+
     # ---- pictures ----------------------------------------------------------
     #
     # The picture path is three steps so the same logic serves the proxy
     # (async, off the event loop) and the tests (sync): the free decisions
     # before the model, the decision after its verdict, and the cover.
 
-    def _image_prejudge(self, flow: http.HTTPFlow, uid: int, level: str) -> bool:
-        """The decisions that need no model. True when the response is settled."""
+    def _image_initial_action(self, flow: http.HTTPFlow, uid: int, level: str) -> str:
+        """Decide on the loop without decoding or changing the response."""
         body = flow.response.content or b""
 
         # "all" needs no judgement, which is why it is the only level that
@@ -1732,11 +1949,10 @@ class KosherFilter:
         # "block all pictures" must mean all of them, and shopping sites'
         # thumbnails fit comfortably under any byte floor.
         if level == "all":
-            self._blank_image(flow)
-            return True
+            return "hide"
 
         if len(body) < MIN_IMAGE_BYTES:
-            return True  # icons, spacers, tracking pixels
+            return "pass"  # icons, spacers, tracking pixels
 
         # Source-based suppression costs nothing and covers the worst of the
         # web: if the page's own domain is in a category this user blocks,
@@ -1744,8 +1960,7 @@ class KosherFilter:
         # being wrong.
         host = flow.request.pretty_host or ""
         if self._blocked_categories_of(host, uid):
-            self._blank_image(flow)
-            return True
+            return "hide"
 
         # And the catalogue's OWN judgement of the source, independent of
         # what this account blocks for browsing: a site classified adult or
@@ -1764,24 +1979,24 @@ class KosherFilter:
                     log.info("hid a picture from %s (source is %s)",
                              candidate,
                              ",".join(sorted(self.categories.categories_of(candidate) & sources)))
-                    self._blank_image(flow)
-                    return True
-        return False
+                    return "hide"
+        return "judge"
 
-    def _image_settle(self, flow: http.HTTPFlow, uid: int, level: str,
-                      verdict) -> bool:
-        """After the verdict: True when the response is settled, False when
-        the picture is to be covered (verdict.regions say where)."""
-        body = flow.response.content or b""
-        # Cheap: it only writes when the answer has changed.
-        self.vision.write_status()
+    def _image_prejudge(self, flow: http.HTTPFlow, uid: int, level: str) -> bool:
+        action = self._image_initial_action(flow, uid, level)
+        if action == "hide":
+            self._blank_image(flow)
+        return action != "judge"
+
+    def _image_verdict_action(self, flow: http.HTTPFlow, uid: int, level: str,
+                              verdict) -> str:
+        """Apply account and page policy; image bytes stay untouched."""
         if verdict is None:
             # Could not look — no model installed, or it took too long.
             # Hiding is the safe direction, and it is the honest one: an
             # account that asked for pictures to be checked should not
             # quietly get unchecked pictures.
-            self._blank_image(flow)
-            return True
+            return "hide"
         # Image-search thumbnails are aggregated pictures of the whole web,
         # shrunk past what the detector can reliably judge — beach and
         # sheer-fabric shots sailed through at "immodest". At the modesty
@@ -1790,8 +2005,7 @@ class KosherFilter:
         if level in ("immodest", "suggestive", "people") and verdict.has_person \
                 and _is_search_thumb(flow.request.pretty_host or ""):
             log.info("hid a search thumbnail with a person for uid=%s", uid)
-            self._blank_image(flow)
-            return True
+            return "hide"
         if not vision_mod.hides(level, verdict):
             # The immodest level is the weak one: the detector has no
             # label for a bare arm, so a clothed model in a lingerie
@@ -1800,38 +2014,46 @@ class KosherFilter:
             if not vision_mod.in_context(verdict, self._referring_page_level(flow),
                                          CONTENT_TOLERANCE.get(level, "nsfw")):
                 self._remember_clean(flow, level)
-                return True
+                return "pass"
             log.info("hid a picture on a page that reads as %s",
                      self._referring_page_level(flow))
+            return "hide"
+        return "cover"
+
+    @staticmethod
+    def _hide_instead_of_cover(body: bytes, verdict, style: str) -> bool:
+        # Header parsing and region rasterisation can be expensive too.
+        return (imageedit_mod.is_animated(body)
+                or (style == imageedit_mod.FROST
+                    and imageedit_mod.dominant(body, verdict.regions)))
+
+    def _image_settle(self, flow: http.HTTPFlow, uid: int, level: str,
+                      verdict) -> bool:
+        self.vision.write_status()
+        action = self._image_verdict_action(flow, uid, level, verdict)
+        if action == "cover" and self._hide_instead_of_cover(
+                flow.response.content or b"", verdict, self._style_for(uid)):
+            action = "hide"
+        if action == "hide":
             self._blank_image(flow)
-            return True
-        # An animated picture (GIF, animated PNG or WebP) was judged on
-        # frames spread through it; a cover on one frame means nothing on
-        # the others, so it is hidden whole.
-        if imageedit_mod.is_animated(body):
-            log.info("hid an animated picture that reads as %s", verdict.level)
-            self._blank_image(flow)
-            return True
-        # When the cover would take most of the picture, a frosted rectangle
-        # in a frame of background helps nobody and costs a decode, a blur
-        # and a re-encode. Hide it whole, instantly. (Not for the skin
-        # style, whose whole point is to leave the rest of the figure.)
-        if self._style_for(uid) == imageedit_mod.FROST and \
-                imageedit_mod.dominant(body, verdict.regions):
-            self._blank_image(flow)
-            return True
-        return False
+        return action != "cover"
 
     def _style_for(self, uid: int) -> str:
         """How this account wants a kept picture covered (see imageedit)."""
         getter = getattr(self.policy, "cover_style_for", None)
         return getter(uid) if getter else imageedit_mod.FROST
 
-    def _cover(self, body: bytes, verdict, style: str = imageedit_mod.FROST) -> bytes | None:
+    @staticmethod
+    def _cover_key(body: bytes, verdict, style: str) -> str:
+        return vision_mod.digest(body) + "|" + style + "|" + ",".join(
+            "-".join(str(v) for v in box) for box in verdict.regions)
+
+    def _cover(self, body: bytes, verdict, style: str = imageedit_mod.FROST,
+               cache_key: str | None = None) -> bytes | None:
         """The covered picture, from the cache of recent covers when the
         same picture came past a moment ago. CPU work: run on a worker."""
-        cache_key = vision_mod.digest(body) + "|" + style + "|" + ",".join(
-            "-".join(str(v) for v in box) for box in verdict.regions)
+        if cache_key is None:
+            cache_key = self._cover_key(body, verdict, style)
         covered = self.covers.get(cache_key)
         if covered is None:
             covered = imageedit_mod.cover(body, verdict.regions, style=style)
@@ -1845,6 +2067,7 @@ class KosherFilter:
         if covered is None:
             self._blank_image(flow)
             return
+        self._clear_media_representation_headers(flow.response)
         flow.response.content = covered
         flow.response.headers["content-type"] = imageedit_mod.content_type(covered)
         flow.response.headers["x-kosheros"] = f"image-covered={verdict.level}"
@@ -1863,32 +2086,94 @@ class KosherFilter:
             return
         self._apply_cover(flow, verdict, self._cover(body, verdict, self._style_for(uid)))
 
+    # HTTP decoding and image finalisation have separate bounded budgets.
+    IMAGE_FINALIZE_TIMEOUT = 2.0
+    # A burst of already-judged pictures may need several worker turns to
+    # cover. Let those finish without hiding normal images, while keeping
+    # the wait bounded when a worker is stuck. Includes key preparation.
+    IMAGE_COVER_TIMEOUT = 10.0
+    # Whole-image average sampling decodes pixels, and the low-priority
+    # preparation worker competes with active inference on slow CPUs.
+    # Give a burst the same bounded finishing window as covers so valid
+    # pictures keep their dimensions rather than collapsing to 1x1.
+    IMAGE_PLACEHOLDER_TIMEOUT = 10.0
+    IMAGE_ADVISORY_TIMEOUT = 0.25
+
+    def _cover_or_hide(self, body: bytes, verdict, style: str,
+                       cache_key: str) -> bytes | None:
+        if self._hide_instead_of_cover(body, verdict, style):
+            return None
+        return self._cover(body, verdict, style, cache_key)
+
+    def _publish_image_status(self) -> None:
+        """Coalesce status writes; filesystem I/O must not gate responses."""
+        import asyncio
+
+        task = getattr(self, "_image_status_task", None)
+        if task is not None and not task.done():
+            return
+
+        async def publish():
+            try:
+                await asyncio.wait_for(
+                    self.vision.run_async(self.vision.write_status),
+                    self.IMAGE_ADVISORY_TIMEOUT)
+            except Exception:  # noqa: BLE001 - status is advisory
+                log.debug("could not publish image status", exc_info=True)
+
+        self._image_status_task = asyncio.create_task(publish())
+
     async def _filter_image_async(self, flow: http.HTTPFlow, uid: int) -> None:
-        """The picture path as the proxy runs it: the model and the cover
-        both on a worker, the event loop free for everyone else meanwhile."""
+        """Only policy and response mutation run on the proxy's event loop."""
+        import asyncio
+
         level = self.policy.media_level_for(uid)
-        if level == "none" or self._image_prejudge(flow, uid, level):
+        flow.metadata["kosher_image_status_level"] = level
+        if level == "none":
+            return
+        action = self._image_initial_action(flow, uid, level)
+        if action == "hide":
+            await self._blank_image_async(flow)
+            return
+        if action == "pass":
+            self._image_status(flow, "not_checked")
             return
         body = flow.response.content or b""
         verdict = await self.vision.verdict_async(body)
-        if self._image_settle(flow, uid, level, verdict):
+        self._publish_image_status()
+        action = self._image_verdict_action(flow, uid, level, verdict)
+        if action == "pass":
+            self._image_status(flow, "checked")
             return
-        covered = await self.vision.run_async(self._cover, body, verdict,
-                                              self._style_for(uid))
-        self._apply_cover(flow, verdict, covered)
+        if action == "hide":
+            await self._blank_image_async(flow, state="unavailable" if verdict is None else "hidden")
+            return
+        style = self._style_for(uid)
+
+        async def cover():
+            cache_key = await self.vision.prepare_async(
+                self._cover_key, body, verdict, style)
+            return await self.vision.run_async(
+                self._cover_or_hide, body, verdict, style, cache_key,
+                share_key=("cover", cache_key))
+
+        try:
+            covered = await asyncio.wait_for(cover(), self.IMAGE_COVER_TIMEOUT)
+        except Exception:  # noqa: BLE001 - broken or late covers hide safely
+            covered = None
+        if covered is None:
+            await self._blank_image_async(flow)
+        else:
+            self._apply_cover(flow, verdict, covered)
+            self._image_status(flow, "filtered")
 
     # ---- video -------------------------------------------------------------
 
     def _checker(self):
         return getattr(self, "videos", None)
 
-    def _video_decision(self, flow: http.HTTPFlow, uid: int) -> str:
-        """From the headers: "stream" (let through), "refuse", or "hold"
-        (buffer the clip and sample it).
-
-        YouTube is handled separately and precisely (categories and an
-        approved-channel list). This is everything else.
-        """
+    def _video_source_decision(self, flow: http.HTTPFlow, uid: int) -> str | None:
+        """Policy decisions that do not need the cache or decoder."""
         level = self.policy.media_level_for(uid)
         if level == "none":
             return "stream"
@@ -1897,14 +2182,18 @@ class KosherFilter:
             return "refuse"  # a clip from a site this account blocks
         if level not in VIDEO_CHECKED_LEVELS:
             return "refuse"  # "all": no video, as no pictures
-        checker = self._checker()
+        if self._checker() is None:
+            return "refuse" if level in VIDEO_STRICT_LEVELS else "stream"
+        return None
+
+    def _video_prepared_decision(self, flow: http.HTTPFlow, uid: int,
+                                 cached, ready: bool) -> str:
+        level = self.policy.media_level_for(uid)
         uncheckable = "refuse" if level in VIDEO_STRICT_LEVELS else "stream"
-        if checker is None or not checker.available:
-            return uncheckable
-        _first, total = _range_info(flow)
-        cached = checker.cached(videocheck_mod.key(flow.request.pretty_url, total))
         if cached is not None:
             return "refuse" if vision_mod.hides(level, cached) else "stream"
+        if not ready:
+            return uncheckable
         length = _content_length(flow)
         if length is not None and length > videocheck_mod.VIDEO_MAX_BYTES:
             return uncheckable  # too big to hold for sampling
@@ -1918,13 +2207,24 @@ class KosherFilter:
         # treats that as unchecked.
         return "hold"
 
-    def _refuse_video(self, flow: http.HTTPFlow, before_body: bool = False) -> None:
-        log.info("refused video %s", flow.request.pretty_url)
-        try:
-            page = self._page_of(flow)
-        except Exception:  # noqa: BLE001 - the log is a convenience
-            page = ""
-        self._note(activity_mod.VIDEO, flow, url=page)
+    def _video_decision(self, flow: http.HTTPFlow, uid: int) -> str:
+        """Header decision for synchronous tools and tests."""
+        source = self._video_source_decision(flow, uid)
+        if source is not None:
+            return source
+        checker = self._checker()
+        cached = checker.cached(_video_key(flow))
+        return self._video_prepared_decision(flow, uid, cached, checker.available)
+
+    async def _video_decision_async(self, flow: http.HTTPFlow, uid: int) -> str:
+        """Header decision with cache I/O and decoder discovery off-loop."""
+        source = self._video_source_decision(flow, uid)
+        if source is not None:
+            return source
+        cached, ready = await self._checker().precheck_async(_video_key(flow))
+        return self._video_prepared_decision(flow, uid, cached, ready)
+
+    def _apply_video_refusal(self, flow: http.HTTPFlow, before_body: bool) -> None:
         if before_body:
             # Headers not yet sent: turn this response into the refusal and
             # drop the body as it arrives instead of downloading it.
@@ -1937,6 +2237,37 @@ class KosherFilter:
         flow.response = http.Response.make(
             403, b"", {"Content-Type": "text/plain",
                        "x-kosheros": "video-blocked"})
+
+    def _refuse_video(self, flow: http.HTTPFlow, before_body: bool = False) -> None:
+        log.info("refused video %s", flow.request.pretty_url)
+        try:
+            page = self._page_of(flow)
+        except Exception:  # noqa: BLE001 - the log is a convenience
+            page = ""
+        self._note(activity_mod.VIDEO, flow, url=page)
+        self._apply_video_refusal(flow, before_body)
+
+    async def _refuse_video_async(self, flow: http.HTTPFlow,
+                                   before_body: bool = False) -> None:
+        import asyncio
+        from functools import partial
+
+        log.info("refused video %s", flow.request.pretty_url)
+        try:
+            page = self._page_of(flow)
+        except Exception:  # noqa: BLE001 - the log is a convenience
+            page = ""
+        uid = (getattr(flow, "metadata", None) or {}).get("kosher_uid")
+        self._count(flow, videos=1)
+        self._apply_video_refusal(flow, before_body)
+        # Freeze the event on-loop. Only the filesystem write goes to a
+        # worker, and advisory logging cannot hold a response indefinitely.
+        record = partial(activity_mod.record, "proxy", activity_mod.VIDEO, uid, url=page)
+        try:
+            await asyncio.wait_for(self.vision.prepare_async(record),
+                                   self.IMAGE_ADVISORY_TIMEOUT)
+        except Exception:  # noqa: BLE001 - logging must never prevent refusal
+            log.debug("could not record refused video", exc_info=True)
 
     def _video_settle(self, flow: http.HTTPFlow, uid: int, level: str, verdict) -> None:
         if verdict is None:
@@ -1954,6 +2285,15 @@ class KosherFilter:
             self._refuse_video(flow)
             return
         flow.response.headers["x-kosheros"] = f"video-checked={verdict.level}"
+
+    async def _video_settle_async(self, flow: http.HTTPFlow, uid: int,
+                                  level: str, verdict) -> None:
+        refused = level in VIDEO_STRICT_LEVELS if verdict is None else \
+            vision_mod.hides(level, verdict)
+        if refused:
+            await self._refuse_video_async(flow)
+        else:
+            self._video_settle(flow, uid, level, verdict)
 
     def _playlist_refused(self, flow: http.HTTPFlow, uid: int) -> bool:
         """A manifest is text pointing at segments, and the segments are
@@ -1979,27 +2319,25 @@ class KosherFilter:
             self._refuse_video(flow)
             return
         level = self.policy.media_level_for(uid)
-        _first, total = _range_info(flow)
         verdict = self._checker().verdict(
-            flow.response.content or b"", videocheck_mod.key(flow.request.pretty_url, total))
+            flow.response.content or b"", _video_key(flow))
         self._video_settle(flow, uid, level, verdict)
 
     async def _filter_video_async(self, flow: http.HTTPFlow, uid: int) -> None:
         if _is_playlist(flow):
             if self._playlist_refused(flow, uid):
-                self._refuse_video(flow)
+                await self._refuse_video_async(flow)
             return
-        decision = self._video_decision(flow, uid)
+        decision = await self._video_decision_async(flow, uid)
         if decision == "stream":
             return
         if decision == "refuse":
-            self._refuse_video(flow)
+            await self._refuse_video_async(flow)
             return
         level = self.policy.media_level_for(uid)
-        _first, total = _range_info(flow)
         verdict = await self._checker().verdict_async(
-            flow.response.content or b"", videocheck_mod.key(flow.request.pretty_url, total))
-        self._video_settle(flow, uid, level, verdict)
+            flow.response.content or b"", _video_key(flow))
+        await self._video_settle_async(flow, uid, level, verdict)
 
     # ---- the calm filter: calmer versions of the addictive sites (#179) ---------
     #
@@ -2269,24 +2607,49 @@ class KosherFilter:
             return False
         return True
 
-    def _blank_image(self, flow: http.HTTPFlow) -> None:
-        # The same size as the picture it replaces, when that can be read:
-        # a 1x1 collapsed the picture's box, and on a shop's grid every
-        # picture that arrived after it moved the page — the scroll felt
-        # jumpy. The tile is neutral grey; the 1x1 stays for a picture whose
-        # size cannot be read.
-        tile = imageedit_mod.placeholder_for(flow.response.content or b"")
+    def _apply_blank_image(self, flow: http.HTTPFlow, tile: bytes | None) -> None:
+        self._clear_media_representation_headers(flow.response)
         flow.response.content = tile if tile is not None else BLANK_PNG
         flow.response.headers["content-type"] = "image/png"
         flow.response.headers["x-kosheros"] = "image-hidden"
         flow.response.headers.pop("content-length", None)
+
+    def _blank_image(self, flow: http.HTTPFlow) -> None:
+        self._apply_blank_image(
+            flow, imageedit_mod.placeholder_for(flow.response.content or b""))
         self._note_picture(flow)
 
-    def _note_picture(self, flow: http.HTTPFlow) -> None:
-        """Write down that pictures were hidden on the page this one is on.
+    async def _blank_image_async(self, flow: http.HTTPFlow, *, body: bytes | None = None,
+                                 state: str = "hidden") -> None:
+        import asyncio
+        from functools import partial
 
-        Every picture counts on the Usage page; the activity log gets one
-        line per page."""
+        # Preserve layout with a same-size tile when it can be prepared
+        # promptly. A stuck cache/worker falls back to the fixed safe PNG.
+        try:
+            tile = await asyncio.wait_for(self.vision.prepare_async(
+                imageedit_mod.placeholder_for,
+                body if body is not None else (flow.response.content or b"")),
+                self.IMAGE_PLACEHOLDER_TIMEOUT)
+        except Exception:  # noqa: BLE001 - hiding must always be available
+            tile = None
+        self._apply_blank_image(flow, tile)
+        self._image_status(flow, state)
+        page = self._picture_note(flow)
+        if page is None:
+            return
+        # Snapshot the event on the loop; the worker never touches a flow,
+        # usage counters or the per-page de-duplication dictionary.
+        record = partial(activity_mod.record, "proxy", activity_mod.PICTURES,
+                         flow.metadata.get("kosher_uid"), url=page)
+        try:
+            await asyncio.wait_for(self.vision.prepare_async(record),
+                                   self.IMAGE_ADVISORY_TIMEOUT)
+        except Exception:  # noqa: BLE001 - logging is advisory
+            log.debug("could not record hidden pictures", exc_info=True)
+
+    def _picture_note(self, flow: http.HTTPFlow) -> str | None:
+        """Count each hidden image, and reserve at most one log per page."""
         self._count(flow, pictures=1)
         try:
             page = self._page_of(flow)
@@ -2295,13 +2658,18 @@ class KosherFilter:
             notes = self.__dict__.setdefault("_picture_notes", {})
             last = notes.get((uid, page))
             if last is not None and now - last < self.PICTURE_NOTE_SECONDS:
-                return
+                return None
             notes[(uid, page)] = now
             while len(notes) > self.MAX_PICTURE_NOTES:
                 notes.pop(next(iter(notes)))
+            return page
         except Exception:  # noqa: BLE001 - the log is a convenience
-            return
-        self._note(activity_mod.PICTURES, flow, url=page)
+            return None
+
+    def _note_picture(self, flow: http.HTTPFlow) -> None:
+        page = self._picture_note(flow)
+        if page is not None:
+            self._note(activity_mod.PICTURES, flow, url=page)
 
     MAX_LAST_PAGES = 64
 

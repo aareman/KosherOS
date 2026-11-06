@@ -1,0 +1,5615 @@
+{
+  "scope": "Current pipeline and subtle loading/no-approved-badge UI at 5468b17 in Performance mode, measured before the subsequent image-status reload/cache/304 follow-up. These measurements do not establish low-power behavior of the final UI.",
+  "baseline_commit": "506ebba40af8fd5fefb37125eb61c7bc565d45fb",
+  "candidate_commit": "5468b17e64a67dcc2cc07465a9e9a7831fc8ed4d",
+  "source": "build/image-perf-browser-current-performance",
+  "selection": "All 16 planned completed trials: two before/after pairs per scenario, AB then BA ordering, 20 seconds each. No trials excluded.",
+  "aggregation": "Median of each side's two per-trial measurements. Percent changes compare those medians. Ranges and individual values retained; descriptive evidence without statistical-significance claims.",
+  "run_environment": {
+    "browser": {
+      "protocolVersion": "1.3",
+      "product": "Chrome/156.0.8078.80",
+      "revision": "@cc92146ef17860a4511f7de658b078128dbaad5",
+      "userAgent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Safari/537.36",
+      "jsVersion": "15.6.75.27"
+    },
+    "browser_command_line": {
+      "arguments": null
+    },
+    "host": {
+      "architecture": "x86_64",
+      "kernel": "7.2.13-200.fc44.x86_64",
+      "logical_cpus": 12,
+      "python": "3.14.8",
+      "cpu_model": "Intel(R) Core(TM) i7-10710U CPU @ 1.10GHz",
+      "platform_profile": "performance",
+      "energy_preferences": [
+        "performance"
+      ],
+      "governors": [
+        "performance"
+      ],
+      "load_average": [
+        1.47021484375,
+        1.75830078125,
+        1.90966796875
+      ]
+    },
+    "seconds": 20.0,
+    "repeats": 2,
+    "scenarios": [
+      "hidden",
+      "intrinsic",
+      "covers",
+      "inference"
+    ],
+    "harness_sha256": {
+      "browser.py": "ed0879428056876b5a043de0502384a071eb76586d326763c8e31c9b6967492e",
+      "addon.py": "55dc901c5dacfde9eeb668f8c25fd0aa0b6c342aecd3be375b6a87b58bb34e48"
+    },
+    "assets_sha256": {
+      "22.jpg": "4fe5d61dbeb2c4381093e434486adb5fa87bacb1cd593195bc53dae0d9297206",
+      "2.jpg": "682bfc1e826d0d138c2d4e2cfcf063fc9d19f4145536e90b0abdf9eed90fb95a",
+      "13.jpg": "806713a7dbefe4bf8d48788d2d131498e0ac34333cb97b7b3bb7d15625bbf75e",
+      "7.jpg": "6c74f05902a9f31aad58f8178ed0f7a850c6bb3b59935f0c7cbf7b5c2e3f86d4",
+      "10.jpg": "c391239e6ff0b66ef5cc346a99f26554ebef848a540ef10011e25c06b21f7967",
+      "19.jpg": "249b8d3b85599320d1f189d2fb33b0b4d8eece40ea986d80a9a70248d169e3a6",
+      "5.jpg": "ff53c8cf428133a5e13c2e7a4b36791cc8c2599a97ab8d4f5218a65d5b7b79f2",
+      "6.jpg": "0323c0e92626b0ea1717d5881b094a1a35b7b44173c7c64662573a65a1df30e8",
+      "0.jpg": "a263df97f7d81ad15b85a374ae9a492475e1729cb691dace57ee7cb06e054e8c",
+      "1.jpg": "bcfb65ca044b28feb43c1b8e0fcf7372beea0e8a333ca3901c21eb15be83bd56",
+      "9.jpg": "4fea027283a52f094537cf1b8a4800913d9a4d655b6b021c7fcd8e3fa7578d37",
+      "14.jpg": "3bc0e9edff014e60d5cab7f977a2c710e108d907f8ee253685e51e342eeb550b",
+      "11.jpg": "fc0ab69c313b1822a536f85630b5e739176dfd6c328c9dc799cc5729aef78c5a",
+      "23.jpg": "103a91bcf03acba13b7adf9f266807d300493e8928c16a661d5de6d541adf47d",
+      "21.jpg": "2895523ecc79b1122aac10f760c8ebd858ab6582f1d60d8a7e19bf0dfb7542b6",
+      "8.jpg": "1b7d5b5593529d190eb408e0ab4d38f0a16f2e6fa3db254be48a3ccf885cd6fd",
+      "15.jpg": "d8b0bb097d76621ec85f9df5a31a0085a40b7927ff7fe9f45e0a97a70ad3bce4",
+      "clip.mp4": "ce0f7b8f8daa3684209d3e4a639e4a80af29bc8eab4f5247e4aea7b14d0d5978",
+      "18.jpg": "ff0137ae8581c3cc71ef22d9ae5016494b9ed8ea81ae4adc1fcb5b4c21bb90af",
+      "12.jpg": "81ffcf47858187079b66e31adc069c72df041a90a6c67300d3a9a2e5967fe122",
+      "20.jpg": "7d66a3c14eeaa6ee412d7ba08621d995f5620717c7ccb838916d03d52d19c666",
+      "16.jpg": "83ad060cbf673eb739043399c003a5ba9328c99395e1fe227b0ccd3676ed2bd4",
+      "17.jpg": "b0a4b9aafef7838a030a8906488311a935bf6221a94a53a30a8cc0222ff28fcc",
+      "3.jpg": "deba6d9ef4be8618e7e8c7cdb072a75dd000934375134034de0abdad4820ab1c",
+      "4.jpg": "b6a1dd8c5ac52439f89683918f1c0e2f21ef143d6b3816b644dda41572d615be"
+    },
+    "expected_power_settings": {
+      "platform_profile": "performance",
+      "energy_preferences": [
+        "performance"
+      ],
+      "governors": [
+        "performance"
+      ]
+    }
+  },
+  "quality_totals": {
+    "geometry_preserved": 456,
+    "covers_verified": 144,
+    "all_checks_passed": true,
+    "all_screenshots_saved": true,
+    "all_start_end_power_modes_match": true,
+    "all_source_hashes_match_recorded_commits": true,
+    "browser_errors": 0,
+    "event_timing_missing_trials": 16,
+    "all_recorded_browser_urls_loopback": true
+  },
+  "trials": [
+    {
+      "directory": "after-covers-0",
+      "environment": {
+        "source": {
+          "root": "/tmp/kosher-image-perf",
+          "commit": "5468b17e64a67dcc2cc07465a9e9a7831fc8ed4d",
+          "tracked_diff_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "files_sha256": {
+            "mitm/kosher_filter.py": "fd71ebca55ef457675708c392da8b7c2e2517dade0e68405ada6374595e18dff",
+            "mitm/kosher_page.js": "b4a4a00c446a52d6b8b33981c23a31f1572d58e8a9762f5a10a4445540fb1908",
+            "kosherd/src/kosherd/vision.py": "ec8accb4240ced2e2f9a895bc09e83623f4777897659cab009b78969bd1abec3",
+            "kosherd/src/kosherd/videocheck.py": "f25405816695a32992047b62593e9c78810bfc4ced9779604bbdbaea90a34ce9",
+            "kosherd/src/kosherd/imageedit.py": "465877afcf50b70884e3571241464a9bfa99e12c24ecbaf781f5dfd92cff0f0e"
+          }
+        },
+        "host": {
+          "architecture": "x86_64",
+          "kernel": "7.2.13-200.fc44.x86_64",
+          "logical_cpus": 12,
+          "python": "3.14.8",
+          "cpu_model": "Intel(R) Core(TM) i7-10710U CPU @ 1.10GHz",
+          "platform_profile": "performance",
+          "energy_preferences": [
+            "performance"
+          ],
+          "governors": [
+            "performance"
+          ],
+          "load_average": [
+            1.3505859375,
+            1.63037109375,
+            1.84375
+          ]
+        },
+        "runtime_pythonpath": [
+          "/tmp/kosher-image-perf/kosherd/src",
+          "/tmp/kosher-avif-pillow"
+        ],
+        "expected_power_settings": {
+          "platform_profile": "performance",
+          "energy_preferences": [
+            "performance"
+          ],
+          "governors": [
+            "performance"
+          ]
+        },
+        "host_end": {
+          "architecture": "x86_64",
+          "kernel": "7.2.13-200.fc44.x86_64",
+          "logical_cpus": 12,
+          "python": "3.14.8",
+          "cpu_model": "Intel(R) Core(TM) i7-10710U CPU @ 1.10GHz",
+          "platform_profile": "performance",
+          "energy_preferences": [
+            "performance"
+          ],
+          "governors": [
+            "performance"
+          ],
+          "load_average": [
+            1.40283203125,
+            1.61767578125,
+            1.83203125
+          ]
+        }
+      },
+      "summary": {
+        "version": "after",
+        "scenario": "covers",
+        "repeat": 0,
+        "browser": "156.0.8078.80",
+        "critical_js_ms": 81.9,
+        "dom_content_loaded_ms": 85.1,
+        "load_ms": 1198.6,
+        "frame_gap_p95_ms": 16.8,
+        "frame_gap_max_ms": 33.4,
+        "frames_over_50ms": 0,
+        "loading_frame_gap_p95_ms": 33.4,
+        "loading_frame_gap_max_ms": 33.4,
+        "input_next_frame_p95_ms": 13.3,
+        "input_next_frame_max_ms": 29.3,
+        "reported_interactions": 0,
+        "reported_interaction_max_ms": null,
+        "input_dispatches": 111,
+        "cdp_dispatch_roundtrip_max_ms": 20.79,
+        "clicks": 110,
+        "long_tasks": 0,
+        "long_task_total_ms": 0,
+        "layout_shift_sum": 0,
+        "layout_shift_sum_including_input": 0,
+        "ping_p95_ms": 17.7,
+        "ping_max_ms": 26.7,
+        "proxy_lag_p95_ms": 0.96,
+        "proxy_lag_max_ms": 29.17,
+        "inferences": 0,
+        "image_complete": 36,
+        "media_results": {
+          "image-covered=nsfw": 36
+        },
+        "image_status_ui_hosts": 1,
+        "visible_image_status_labels": {
+          "Filtered": 16
+        },
+        "observed_image_status_states": {
+          "filtered": 36
+        },
+        "status_api_http_codes": {
+          "200": 3
+        },
+        "video_states": [],
+        "validation": {
+          "valid": true,
+          "errors": [],
+          "geometry_preserved": 36,
+          "verified_hidden_tiles": 0,
+          "verified_covers": 36
+        },
+        "power": {
+          "start": {
+            "platform_profile": "performance",
+            "energy_preferences": [
+              "performance"
+            ],
+            "governors": [
+              "performance"
+            ]
+          },
+          "end": {
+            "platform_profile": "performance",
+            "energy_preferences": [
+              "performance"
+            ],
+            "governors": [
+              "performance"
+            ]
+          },
+          "expected": {
+            "platform_profile": "performance",
+            "energy_preferences": [
+              "performance"
+            ],
+            "governors": [
+              "performance"
+            ]
+          },
+          "valid": true
+        },
+        "capture_status": "saved",
+        "capture_errors": []
+      },
+      "additional_metrics": {
+        "ping_max_ms": 26.7,
+        "ping_mean_ms": 7.480451128816695,
+        "ping_samples": 133,
+        "ping_resource_timing_entries": 0
+      },
+      "independent_checks": {
+        "source_files_match_commit": "5468b17e64a67dcc2cc07465a9e9a7831fc8ed4d",
+        "browser_errors_empty": true,
+        "all_urls_loopback": true,
+        "screenshot_present": true
+      },
+      "raw_sha256": {
+        "summary.json": "03234b4fc064ebadec7718b76e4e6b15a89faad56c74aa877c2ce988aba03b03",
+        "environment.json": "d3cda2b373832570fa011aed6b54c15dc725c205eedbfddfc331fe71211fd72e",
+        "browser.json": "b5a17a311b2a30c296f646e8df07a838377b960b5f31f57990033d89a3567159",
+        "proxy.json": "b7179c1bec2b64cb25224701c4f5e7433f6a2fda4e128601966bbde759b7fe21",
+        "browser.png": "6de1c27407f2926ba202842cc08c73e05bfa66b46dff4c4bd92270d0999082b9"
+      }
+    },
+    {
+      "directory": "after-covers-1",
+      "environment": {
+        "source": {
+          "root": "/tmp/kosher-image-perf",
+          "commit": "5468b17e64a67dcc2cc07465a9e9a7831fc8ed4d",
+          "tracked_diff_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "files_sha256": {
+            "mitm/kosher_filter.py": "fd71ebca55ef457675708c392da8b7c2e2517dade0e68405ada6374595e18dff",
+            "mitm/kosher_page.js": "b4a4a00c446a52d6b8b33981c23a31f1572d58e8a9762f5a10a4445540fb1908",
+            "kosherd/src/kosherd/vision.py": "ec8accb4240ced2e2f9a895bc09e83623f4777897659cab009b78969bd1abec3",
+            "kosherd/src/kosherd/videocheck.py": "f25405816695a32992047b62593e9c78810bfc4ced9779604bbdbaea90a34ce9",
+            "kosherd/src/kosherd/imageedit.py": "465877afcf50b70884e3571241464a9bfa99e12c24ecbaf781f5dfd92cff0f0e"
+          }
+        },
+        "host": {
+          "architecture": "x86_64",
+          "kernel": "7.2.13-200.fc44.x86_64",
+          "logical_cpus": 12,
+          "python": "3.14.8",
+          "cpu_model": "Intel(R) Core(TM) i7-10710U CPU @ 1.10GHz",
+          "platform_profile": "performance",
+          "energy_preferences": [
+            "performance"
+          ],
+          "governors": [
+            "performance"
+          ],
+          "load_average": [
+            1.4970703125,
+            1.6728515625,
+            1.82666015625
+          ]
+        },
+        "runtime_pythonpath": [
+          "/tmp/kosher-image-perf/kosherd/src",
+          "/tmp/kosher-avif-pillow"
+        ],
+        "expected_power_settings": {
+          "platform_profile": "performance",
+          "energy_preferences": [
+            "performance"
+          ],
+          "governors": [
+            "performance"
+          ]
+        },
+        "host_end": {
+          "architecture": "x86_64",
+          "kernel": "7.2.13-200.fc44.x86_64",
+          "logical_cpus": 12,
+          "python": "3.14.8",
+          "cpu_model": "Intel(R) Core(TM) i7-10710U CPU @ 1.10GHz",
+          "platform_profile": "performance",
+          "energy_preferences": [
+            "performance"
+          ],
+          "governors": [
+            "performance"
+          ],
+          "load_average": [
+            1.44677734375,
+            1.64990234375,
+            1.81396484375
+          ]
+        }
+      },
+      "summary": {
+        "version": "after",
+        "scenario": "covers",
+        "repeat": 1,
+        "browser": "156.0.8078.80",
+        "critical_js_ms": 68.4,
+        "dom_content_loaded_ms": 71.1,
+        "load_ms": 1224,
+        "frame_gap_p95_ms": 16.8,
+        "frame_gap_max_ms": 33.4,
+        "frames_over_50ms": 0,
+        "loading_frame_gap_p95_ms": 33.4,
+        "loading_frame_gap_max_ms": 33.4,
+        "input_next_frame_p95_ms": 13.4,
+        "input_next_frame_max_ms": 30.1,
+        "reported_interactions": 0,
+        "reported_interaction_max_ms": null,
+        "input_dispatches": 111,
+        "cdp_dispatch_roundtrip_max_ms": 17.65,
+        "clicks": 110,
+        "long_tasks": 0,
+        "long_task_total_ms": 0,
+        "layout_shift_sum": 0,
+        "layout_shift_sum_including_input": 0,
+        "ping_p95_ms": 7.6,
+        "ping_max_ms": 23,
+        "proxy_lag_p95_ms": 0.85,
+        "proxy_lag_max_ms": 23.38,
+        "inferences": 0,
+        "image_complete": 36,
+        "media_results": {
+          "image-covered=nsfw": 36
+        },
+        "image_status_ui_hosts": 1,
+        "visible_image_status_labels": {
+          "Filtered": 16
+        },
+        "observed_image_status_states": {
+          "filtered": 36
+        },
+        "status_api_http_codes": {
+          "200": 3
+        },
+        "video_states": [],
+        "validation": {
+          "valid": true,
+          "errors": [],
+          "geometry_preserved": 36,
+          "verified_hidden_tiles": 0,
+          "verified_covers": 36
+        },
+        "power": {
+          "start": {
+            "platform_profile": "performance",
+            "energy_preferences": [
+              "performance"
+            ],
+            "governors": [
+              "performance"
+            ]
+          },
+          "end": {
+            "platform_profile": "performance",
+            "energy_preferences": [
+              "performance"
+            ],
+            "governors": [
+              "performance"
+            ]
+          },
+          "expected": {
+            "platform_profile": "performance",
+            "energy_preferences": [
+              "performance"
+            ],
+            "governors": [
+              "performance"
+            ]
+          },
+          "valid": true
+        },
+        "capture_status": "saved",
+        "capture_errors": []
+      },
+      "additional_metrics": {
+        "ping_max_ms": 23,
+        "ping_mean_ms": 6.202255639926832,
+        "ping_samples": 133,
+        "ping_resource_timing_entries": 0
+      },
+      "independent_checks": {
+        "source_files_match_commit": "5468b17e64a67dcc2cc07465a9e9a7831fc8ed4d",
+        "browser_errors_empty": true,
+        "all_urls_loopback": true,
+        "screenshot_present": true
+      },
+      "raw_sha256": {
+        "summary.json": "31d1af870eb022f0ba7879f3f9652ab81e4890a614ca875288579eae7e79bcb2",
+        "environment.json": "4fb573d6d5706e6141a68b29f8b3c7459b3e73c7212563db2ec9c1b786d63e0f",
+        "browser.json": "e5f453ada98b648ffe1cd6c513729800030c448b6934727ef27afa1464f0e4c4",
+        "proxy.json": "534af0eb5f78896790c22cd08b65424d13bf712065c599905804916e5efd485a",
+        "browser.png": "ec7187ea560dd33bc09ccc977680a6e89392fcf06035c969c3bea8c99bb2bc88"
+      }
+    },
+    {
+      "directory": "after-hidden-0",
+      "environment": {
+        "source": {
+          "root": "/tmp/kosher-image-perf",
+          "commit": "5468b17e64a67dcc2cc07465a9e9a7831fc8ed4d",
+          "tracked_diff_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "files_sha256": {
+            "mitm/kosher_filter.py": "fd71ebca55ef457675708c392da8b7c2e2517dade0e68405ada6374595e18dff",
+            "mitm/kosher_page.js": "b4a4a00c446a52d6b8b33981c23a31f1572d58e8a9762f5a10a4445540fb1908",
+            "kosherd/src/kosherd/vision.py": "ec8accb4240ced2e2f9a895bc09e83623f4777897659cab009b78969bd1abec3",
+            "kosherd/src/kosherd/videocheck.py": "f25405816695a32992047b62593e9c78810bfc4ced9779604bbdbaea90a34ce9",
+            "kosherd/src/kosherd/imageedit.py": "465877afcf50b70884e3571241464a9bfa99e12c24ecbaf781f5dfd92cff0f0e"
+          }
+        },
+        "host": {
+          "architecture": "x86_64",
+          "kernel": "7.2.13-200.fc44.x86_64",
+          "logical_cpus": 12,
+          "python": "3.14.8",
+          "cpu_model": "Intel(R) Core(TM) i7-10710U CPU @ 1.10GHz",
+          "platform_profile": "performance",
+          "energy_preferences": [
+            "performance"
+          ],
+          "governors": [
+            "performance"
+          ],
+          "load_average": [
+            1.36572265625,
+            1.71240234375,
+            1.89013671875
+          ]
+        },
+        "runtime_pythonpath": [
+          "/tmp/kosher-image-perf/kosherd/src",
+          "/tmp/kosher-avif-pillow"
+        ],
+        "expected_power_settings": {
+          "platform_profile": "performance",
+          "energy_preferences": [
+            "performance"
+          ],
+          "governors": [
+            "performance"
+          ]
+        },
+        "host_end": {
+          "architecture": "x86_64",
+          "kernel": "7.2.13-200.fc44.x86_64",
+          "logical_cpus": 12,
+          "python": "3.14.8",
+          "cpu_model": "Intel(R) Core(TM) i7-10710U CPU @ 1.10GHz",
+          "platform_profile": "performance",
+          "energy_preferences": [
+            "performance"
+          ],
+          "governors": [
+            "performance"
+          ],
+          "load_average": [
+            1.41259765625,
+            1.70068359375,
+            1.88232421875
+          ]
+        }
+      },
+      "summary": {
+        "version": "after",
+        "scenario": "hidden",
+        "repeat": 0,
+        "browser": "156.0.8078.80",
+        "critical_js_ms": 58.9,
+        "dom_content_loaded_ms": 62,
+        "load_ms": 647.7,
+        "frame_gap_p95_ms": 16.8,
+        "frame_gap_max_ms": 50.1,
+        "frames_over_50ms": 1,
+        "loading_frame_gap_p95_ms": 33.3,
+        "loading_frame_gap_max_ms": 33.4,
+        "input_next_frame_p95_ms": 13.2,
+        "input_next_frame_max_ms": 13.8,
+        "reported_interactions": 0,
+        "reported_interaction_max_ms": null,
+        "input_dispatches": 111,
+        "cdp_dispatch_roundtrip_max_ms": 19.16,
+        "clicks": 110,
+        "long_tasks": 0,
+        "long_task_total_ms": 0,
+        "layout_shift_sum": 0,
+        "layout_shift_sum_including_input": 0,
+        "ping_p95_ms": 18,
+        "ping_max_ms": 19,
+        "proxy_lag_p95_ms": 0.78,
+        "proxy_lag_max_ms": 22.9,
+        "inferences": 0,
+        "image_complete": 36,
+        "media_results": {
+          "image-hidden": 36
+        },
+        "image_status_ui_hosts": 1,
+        "visible_image_status_labels": {
+          "Hidden": 16
+        },
+        "observed_image_status_states": {
+          "hidden": 36
+        },
+        "status_api_http_codes": {
+          "200": 3
+        },
+        "video_states": [],
+        "validation": {
+          "valid": true,
+          "errors": [],
+          "geometry_preserved": 36,
+          "verified_hidden_tiles": 36,
+          "verified_covers": 0
+        },
+        "power": {
+          "start": {
+            "platform_profile": "performance",
+            "energy_preferences": [
+              "performance"
+            ],
+            "governors": [
+              "performance"
+            ]
+          },
+          "end": {
+            "platform_profile": "performance",
+            "energy_preferences": [
+              "performance"
+            ],
+            "governors": [
+              "performance"
+            ]
+          },
+          "expected": {
+            "platform_profile": "performance",
+            "energy_preferences": [
+              "performance"
+            ],
+            "governors": [
+              "performance"
+            ]
+          },
+          "valid": true
+        },
+        "capture_status": "saved",
+        "capture_errors": []
+      },
+      "additional_metrics": {
+        "ping_max_ms": 19,
+        "ping_mean_ms": 7.397744359042411,
+        "ping_samples": 133,
+        "ping_resource_timing_entries": 0
+      },
+      "independent_checks": {
+        "source_files_match_commit": "5468b17e64a67dcc2cc07465a9e9a7831fc8ed4d",
+        "browser_errors_empty": true,
+        "all_urls_loopback": true,
+        "screenshot_present": true
+      },
+      "raw_sha256": {
+        "summary.json": "9c4e2da5d020c9e08721539729ed64475de1e0a5e37585dba9c2030de50925c1",
+        "environment.json": "bae910479124f8d06df01d00d3cbd507c9ae5f11107115b3d935522a52d9b6bf",
+        "browser.json": "f6b66a8ff03adeb7e9e96504fbea8a74db857942a57022b0f2e93ff6377eb514",
+        "proxy.json": "d2f8627be4e8f4831b1a0fb08c630ca5afbc1075fe4bbf78ecf34424905f9896",
+        "browser.png": "e31bf1012d0fbd617a43cb0a4b25f5ea34689e042764b9959d4c8c7a7e89667b"
+      }
+    },
+    {
+      "directory": "after-hidden-1",
+      "environment": {
+        "source": {
+          "root": "/tmp/kosher-image-perf",
+          "commit": "5468b17e64a67dcc2cc07465a9e9a7831fc8ed4d",
+          "tracked_diff_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "files_sha256": {
+            "mitm/kosher_filter.py": "fd71ebca55ef457675708c392da8b7c2e2517dade0e68405ada6374595e18dff",
+            "mitm/kosher_page.js": "b4a4a00c446a52d6b8b33981c23a31f1572d58e8a9762f5a10a4445540fb1908",
+            "kosherd/src/kosherd/vision.py": "ec8accb4240ced2e2f9a895bc09e83623f4777897659cab009b78969bd1abec3",
+            "kosherd/src/kosherd/videocheck.py": "f25405816695a32992047b62593e9c78810bfc4ced9779604bbdbaea90a34ce9",
+            "kosherd/src/kosherd/imageedit.py": "465877afcf50b70884e3571241464a9bfa99e12c24ecbaf781f5dfd92cff0f0e"
+          }
+        },
+        "host": {
+          "architecture": "x86_64",
+          "kernel": "7.2.13-200.fc44.x86_64",
+          "logical_cpus": 12,
+          "python": "3.14.8",
+          "cpu_model": "Intel(R) Core(TM) i7-10710U CPU @ 1.10GHz",
+          "platform_profile": "performance",
+          "energy_preferences": [
+            "performance"
+          ],
+          "governors": [
+            "performance"
+          ],
+          "load_average": [
+            1.9140625,
+            1.7509765625,
+            1.86669921875
+          ]
+        },
+        "runtime_pythonpath": [
+          "/tmp/kosher-image-perf/kosherd/src",
+          "/tmp/kosher-avif-pillow"
+        ],
+        "expected_power_settings": {
+          "platform_profile": "performance",
+          "energy_preferences": [
+            "performance"
+          ],
+          "governors": [
+            "performance"
+          ]
+        },
+        "host_end": {
+          "architecture": "x86_64",
+          "kernel": "7.2.13-200.fc44.x86_64",
+          "logical_cpus": 12,
+          "python": "3.14.8",
+          "cpu_model": "Intel(R) Core(TM) i7-10710U CPU @ 1.10GHz",
+          "platform_profile": "performance",
+          "energy_preferences": [
+            "performance"
+          ],
+          "governors": [
+            "performance"
+          ],
+          "load_average": [
+            1.86474609375,
+            1.7548828125,
+            1.865234375
+          ]
+        }
+      },
+      "summary": {
+        "version": "after",
+        "scenario": "hidden",
+        "repeat": 1,
+        "browser": "156.0.8078.80",
+        "critical_js_ms": 57.6,
+        "dom_content_loaded_ms": 59.9,
+        "load_ms": 625.5,
+        "frame_gap_p95_ms": 16.7,
+        "frame_gap_max_ms": 66.6,
+        "frames_over_50ms": 1,
+        "loading_frame_gap_p95_ms": 33.4,
+        "loading_frame_gap_max_ms": 33.4,
+        "input_next_frame_p95_ms": 13.5,
+        "input_next_frame_max_ms": 14.3,
+        "reported_interactions": 0,
+        "reported_interaction_max_ms": null,
+        "input_dispatches": 111,
+        "cdp_dispatch_roundtrip_max_ms": 18.44,
+        "clicks": 110,
+        "long_tasks": 0,
+        "long_task_total_ms": 0,
+        "layout_shift_sum": 0,
+        "layout_shift_sum_including_input": 0,
+        "ping_p95_ms": 14.1,
+        "ping_max_ms": 32.5,
+        "proxy_lag_p95_ms": 0.7,
+        "proxy_lag_max_ms": 23.09,
+        "inferences": 0,
+        "image_complete": 36,
+        "media_results": {
+          "image-hidden": 36
+        },
+        "image_status_ui_hosts": 1,
+        "visible_image_status_labels": {
+          "Hidden": 16
+        },
+        "observed_image_status_states": {
+          "hidden": 36
+        },
+        "status_api_http_codes": {
+          "200": 3
+        },
+        "video_states": [],
+        "validation": {
+          "valid": true,
+          "errors": [],
+          "geometry_preserved": 36,
+          "verified_hidden_tiles": 36,
+          "verified_covers": 0
+        },
+        "power": {
+          "start": {
+            "platform_profile": "performance",
+            "energy_preferences": [
+              "performance"
+            ],
+            "governors": [
+              "performance"
+            ]
+          },
+          "end": {
+            "platform_profile": "performance",
+            "energy_preferences": [
+              "performance"
+            ],
+            "governors": [
+              "performance"
+            ]
+          },
+          "expected": {
+            "platform_profile": "performance",
+            "energy_preferences": [
+              "performance"
+            ],
+            "governors": [
+              "performance"
+            ]
+          },
+          "valid": true
+        },
+        "capture_status": "saved",
+        "capture_errors": []
+      },
+      "additional_metrics": {
+        "ping_max_ms": 32.5,
+        "ping_mean_ms": 6.409022556155696,
+        "ping_samples": 133,
+        "ping_resource_timing_entries": 0
+      },
+      "independent_checks": {
+        "source_files_match_commit": "5468b17e64a67dcc2cc07465a9e9a7831fc8ed4d",
+        "browser_errors_empty": true,
+        "all_urls_loopback": true,
+        "screenshot_present": true
+      },
+      "raw_sha256": {
+        "summary.json": "cb8c98ed51f8980f6d6c024748ed3dbf28d14cbe1ea8b3551e4499e0bc18e208",
+        "environment.json": "34913c84a36fe83681e474ca614b08e43b63febe876b0226bf0ab0a319b17187",
+        "browser.json": "e437fce91c5381541f061c11ca4b76e7f44cba8da57043686d0d87d5c89dcf54",
+        "proxy.json": "226ca13a6baf3d4351d34d6020f1828d0f938e601114c5d85c2e0d6e94a400d6",
+        "browser.png": "e31bf1012d0fbd617a43cb0a4b25f5ea34689e042764b9959d4c8c7a7e89667b"
+      }
+    },
+    {
+      "directory": "after-inference-0",
+      "environment": {
+        "source": {
+          "root": "/tmp/kosher-image-perf",
+          "commit": "5468b17e64a67dcc2cc07465a9e9a7831fc8ed4d",
+          "tracked_diff_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "files_sha256": {
+            "mitm/kosher_filter.py": "fd71ebca55ef457675708c392da8b7c2e2517dade0e68405ada6374595e18dff",
+            "mitm/kosher_page.js": "b4a4a00c446a52d6b8b33981c23a31f1572d58e8a9762f5a10a4445540fb1908",
+            "kosherd/src/kosherd/vision.py": "ec8accb4240ced2e2f9a895bc09e83623f4777897659cab009b78969bd1abec3",
+            "kosherd/src/kosherd/videocheck.py": "f25405816695a32992047b62593e9c78810bfc4ced9779604bbdbaea90a34ce9",
+            "kosherd/src/kosherd/imageedit.py": "465877afcf50b70884e3571241464a9bfa99e12c24ecbaf781f5dfd92cff0f0e"
+          }
+        },
+        "host": {
+          "architecture": "x86_64",
+          "kernel": "7.2.13-200.fc44.x86_64",
+          "logical_cpus": 12,
+          "python": "3.14.8",
+          "cpu_model": "Intel(R) Core(TM) i7-10710U CPU @ 1.10GHz",
+          "platform_profile": "performance",
+          "energy_preferences": [
+            "performance"
+          ],
+          "governors": [
+            "performance"
+          ],
+          "load_average": [
+            1.8154296875,
+            1.70947265625,
+            1.85693359375
+          ]
+        },
+        "runtime_pythonpath": [
+          "/tmp/kosher-image-perf/kosherd/src",
+          "/tmp/kosher-avif-pillow"
+        ],
+        "expected_power_settings": {
+          "platform_profile": "performance",
+          "energy_preferences": [
+            "performance"
+          ],
+          "governors": [
+            "performance"
+          ]
+        },
+        "host_end": {
+          "architecture": "x86_64",
+          "kernel": "7.2.13-200.fc44.x86_64",
+          "logical_cpus": 12,
+          "python": "3.14.8",
+          "cpu_model": "Intel(R) Core(TM) i7-10710U CPU @ 1.10GHz",
+          "platform_profile": "performance",
+          "energy_preferences": [
+            "performance"
+          ],
+          "governors": [
+            "performance"
+          ],
+          "load_average": [
+            1.9140625,
+            1.7509765625,
+            1.86669921875
+          ]
+        }
+      },
+      "summary": {
+        "version": "after",
+        "scenario": "inference",
+        "repeat": 0,
+        "browser": "156.0.8078.80",
+        "critical_js_ms": 70.6,
+        "dom_content_loaded_ms": 72.7,
+        "load_ms": 2294.4,
+        "frame_gap_p95_ms": 16.8,
+        "frame_gap_max_ms": 100,
+        "frames_over_50ms": 1,
+        "loading_frame_gap_p95_ms": 33.3,
+        "loading_frame_gap_max_ms": 100,
+        "input_next_frame_p95_ms": 13.4,
+        "input_next_frame_max_ms": 62.2,
+        "reported_interactions": 0,
+        "reported_interaction_max_ms": null,
+        "input_dispatches": 110,
+        "cdp_dispatch_roundtrip_max_ms": 20.02,
+        "clicks": 109,
+        "long_tasks": 0,
+        "long_task_total_ms": 0,
+        "layout_shift_sum": 0,
+        "layout_shift_sum_including_input": 0,
+        "ping_p95_ms": 16.6,
+        "ping_max_ms": 18.5,
+        "proxy_lag_p95_ms": 0.9,
+        "proxy_lag_max_ms": 23.64,
+        "inferences": 26,
+        "image_complete": 36,
+        "media_results": {
+          "passed": 36,
+          "video-checked=clean": 2
+        },
+        "image_status_ui_hosts": 1,
+        "visible_image_status_labels": {},
+        "observed_image_status_states": {
+          "checked": 36
+        },
+        "status_api_http_codes": {
+          "200": 5
+        },
+        "video_states": [
+          {
+            "src": "http://127.0.0.8:43807/clip/0.mp4",
+            "readyState": 4,
+            "networkState": 1,
+            "width": 640,
+            "height": 360,
+            "error": null
+          },
+          {
+            "src": "http://127.0.0.9:43807/clip/1.mp4",
+            "readyState": 4,
+            "networkState": 1,
+            "width": 640,
+            "height": 360,
+            "error": null
+          }
+        ],
+        "validation": {
+          "valid": true,
+          "errors": [],
+          "geometry_preserved": 36,
+          "verified_hidden_tiles": 0,
+          "verified_covers": 0
+        },
+        "power": {
+          "start": {
+            "platform_profile": "performance",
+            "energy_preferences": [
+              "performance"
+            ],
+            "governors": [
+              "performance"
+            ]
+          },
+          "end": {
+            "platform_profile": "performance",
+            "energy_preferences": [
+              "performance"
+            ],
+            "governors": [
+              "performance"
+            ]
+          },
+          "expected": {
+            "platform_profile": "performance",
+            "energy_preferences": [
+              "performance"
+            ],
+            "governors": [
+              "performance"
+            ]
+          },
+          "valid": true
+        },
+        "capture_status": "saved",
+        "capture_errors": []
+      },
+      "additional_metrics": {
+        "ping_max_ms": 18.5,
+        "ping_mean_ms": 7.189552238016431,
+        "ping_samples": 134,
+        "ping_resource_timing_entries": 0
+      },
+      "independent_checks": {
+        "source_files_match_commit": "5468b17e64a67dcc2cc07465a9e9a7831fc8ed4d",
+        "browser_errors_empty": true,
+        "all_urls_loopback": true,
+        "screenshot_present": true
+      },
+      "raw_sha256": {
+        "summary.json": "50d5b350ce14e3d93e28784d93ab48ec59c7f59ad433bbc666694e7424bb490e",
+        "environment.json": "4923605b532a8489ffb1fb9b156a36a73d20e4008abcb98a78dd2f0a56b9b17f",
+        "browser.json": "d68c9d1fe8581f727a456e087cb3e98a26c8e3a87ecf2d2455986033d9314f01",
+        "proxy.json": "2b103144b7e7180325cd9ba70b4628e4455680f61fde0b77c6169682a00f4e40",
+        "browser.png": "aa7d6ccab12100d8303024a41744849df195a37918d2e830ea8e4e36bcfeef4f"
+      }
+    },
+    {
+      "directory": "after-inference-1",
+      "environment": {
+        "source": {
+          "root": "/tmp/kosher-image-perf",
+          "commit": "5468b17e64a67dcc2cc07465a9e9a7831fc8ed4d",
+          "tracked_diff_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "files_sha256": {
+            "mitm/kosher_filter.py": "fd71ebca55ef457675708c392da8b7c2e2517dade0e68405ada6374595e18dff",
+            "mitm/kosher_page.js": "b4a4a00c446a52d6b8b33981c23a31f1572d58e8a9762f5a10a4445540fb1908",
+            "kosherd/src/kosherd/vision.py": "ec8accb4240ced2e2f9a895bc09e83623f4777897659cab009b78969bd1abec3",
+            "kosherd/src/kosherd/videocheck.py": "f25405816695a32992047b62593e9c78810bfc4ced9779604bbdbaea90a34ce9",
+            "kosherd/src/kosherd/imageedit.py": "465877afcf50b70884e3571241464a9bfa99e12c24ecbaf781f5dfd92cff0f0e"
+          }
+        },
+        "host": {
+          "architecture": "x86_64",
+          "kernel": "7.2.13-200.fc44.x86_64",
+          "logical_cpus": 12,
+          "python": "3.14.8",
+          "cpu_model": "Intel(R) Core(TM) i7-10710U CPU @ 1.10GHz",
+          "platform_profile": "performance",
+          "energy_preferences": [
+            "performance"
+          ],
+          "governors": [
+            "performance"
+          ],
+          "load_average": [
+            2.232421875,
+            1.8388671875,
+            1.8740234375
+          ]
+        },
+        "runtime_pythonpath": [
+          "/tmp/kosher-image-perf/kosherd/src",
+          "/tmp/kosher-avif-pillow"
+        ],
+        "expected_power_settings": {
+          "platform_profile": "performance",
+          "energy_preferences": [
+            "performance"
+          ],
+          "governors": [
+            "performance"
+          ]
+        },
+        "host_end": {
+          "architecture": "x86_64",
+          "kernel": "7.2.13-200.fc44.x86_64",
+          "logical_cpus": 12,
+          "python": "3.14.8",
+          "cpu_model": "Intel(R) Core(TM) i7-10710U CPU @ 1.10GHz",
+          "platform_profile": "performance",
+          "energy_preferences": [
+            "performance"
+          ],
+          "governors": [
+            "performance"
+          ],
+          "load_average": [
+            1.94189453125,
+            1.80322265625,
+            1.861328125
+          ]
+        }
+      },
+      "summary": {
+        "version": "after",
+        "scenario": "inference",
+        "repeat": 1,
+        "browser": "156.0.8078.80",
+        "critical_js_ms": 45.6,
+        "dom_content_loaded_ms": 66.7,
+        "load_ms": 2332.3,
+        "frame_gap_p95_ms": 16.8,
+        "frame_gap_max_ms": 99.9,
+        "frames_over_50ms": 1,
+        "loading_frame_gap_p95_ms": 33.4,
+        "loading_frame_gap_max_ms": 99.9,
+        "input_next_frame_p95_ms": 13.5,
+        "input_next_frame_max_ms": 62,
+        "reported_interactions": 0,
+        "reported_interaction_max_ms": null,
+        "input_dispatches": 110,
+        "cdp_dispatch_roundtrip_max_ms": 22.28,
+        "clicks": 109,
+        "long_tasks": 0,
+        "long_task_total_ms": 0,
+        "layout_shift_sum": 0,
+        "layout_shift_sum_including_input": 0,
+        "ping_p95_ms": 20.1,
+        "ping_max_ms": 41.9,
+        "proxy_lag_p95_ms": 0.93,
+        "proxy_lag_max_ms": 36.65,
+        "inferences": 26,
+        "image_complete": 36,
+        "media_results": {
+          "passed": 36,
+          "video-checked=clean": 2
+        },
+        "image_status_ui_hosts": 1,
+        "visible_image_status_labels": {},
+        "observed_image_status_states": {
+          "checked": 36
+        },
+        "status_api_http_codes": {
+          "200": 5
+        },
+        "video_states": [
+          {
+            "src": "http://127.0.0.8:43807/clip/0.mp4",
+            "readyState": 4,
+            "networkState": 1,
+            "width": 640,
+            "height": 360,
+            "error": null
+          },
+          {
+            "src": "http://127.0.0.9:43807/clip/1.mp4",
+            "readyState": 4,
+            "networkState": 1,
+            "width": 640,
+            "height": 360,
+            "error": null
+          }
+        ],
+        "validation": {
+          "valid": true,
+          "errors": [],
+          "geometry_preserved": 36,
+          "verified_hidden_tiles": 0,
+          "verified_covers": 0
+        },
+        "power": {
+          "start": {
+            "platform_profile": "performance",
+            "energy_preferences": [
+              "performance"
+            ],
+            "governors": [
+              "performance"
+            ]
+          },
+          "end": {
+            "platform_profile": "performance",
+            "energy_preferences": [
+              "performance"
+            ],
+            "governors": [
+              "performance"
+            ]
+          },
+          "expected": {
+            "platform_profile": "performance",
+            "energy_preferences": [
+              "performance"
+            ],
+            "governors": [
+              "performance"
+            ]
+          },
+          "valid": true
+        },
+        "capture_status": "saved",
+        "capture_errors": []
+      },
+      "additional_metrics": {
+        "ping_max_ms": 41.9,
+        "ping_mean_ms": 7.942537312632177,
+        "ping_samples": 134,
+        "ping_resource_timing_entries": 0
+      },
+      "independent_checks": {
+        "source_files_match_commit": "5468b17e64a67dcc2cc07465a9e9a7831fc8ed4d",
+        "browser_errors_empty": true,
+        "all_urls_loopback": true,
+        "screenshot_present": true
+      },
+      "raw_sha256": {
+        "summary.json": "aee5899de096ca53564d926d894f8f6a1f26b02f8941253fa6481da0665dce3d",
+        "environment.json": "6acd24196f7dfe92b59f04a56607c8bdc4bddb3a2e7ae47cecc26507ce9460aa",
+        "browser.json": "95e181f6ddb1d33faae655c5efbd7b6b6b3248eb7feb1710b22b9d1fe1bb2105",
+        "proxy.json": "fd387f207471479b1182efbd399db2b7259f25282c4e06e12546eca2d3061664",
+        "browser.png": "c0b57cda1fa0cf46aade0052b93634348bd5b551c31e9742529b6655b57ea54d"
+      }
+    },
+    {
+      "directory": "after-intrinsic-0",
+      "environment": {
+        "source": {
+          "root": "/tmp/kosher-image-perf",
+          "commit": "5468b17e64a67dcc2cc07465a9e9a7831fc8ed4d",
+          "tracked_diff_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "files_sha256": {
+            "mitm/kosher_filter.py": "fd71ebca55ef457675708c392da8b7c2e2517dade0e68405ada6374595e18dff",
+            "mitm/kosher_page.js": "b4a4a00c446a52d6b8b33981c23a31f1572d58e8a9762f5a10a4445540fb1908",
+            "kosherd/src/kosherd/vision.py": "ec8accb4240ced2e2f9a895bc09e83623f4777897659cab009b78969bd1abec3",
+            "kosherd/src/kosherd/videocheck.py": "f25405816695a32992047b62593e9c78810bfc4ced9779604bbdbaea90a34ce9",
+            "kosherd/src/kosherd/imageedit.py": "465877afcf50b70884e3571241464a9bfa99e12c24ecbaf781f5dfd92cff0f0e"
+          }
+        },
+        "host": {
+          "architecture": "x86_64",
+          "kernel": "7.2.13-200.fc44.x86_64",
+          "logical_cpus": 12,
+          "python": "3.14.8",
+          "cpu_model": "Intel(R) Core(TM) i7-10710U CPU @ 1.10GHz",
+          "platform_profile": "performance",
+          "energy_preferences": [
+            "performance"
+          ],
+          "governors": [
+            "performance"
+          ],
+          "load_average": [
+            1.4091796875,
+            1.67626953125,
+            1.86962890625
+          ]
+        },
+        "runtime_pythonpath": [
+          "/tmp/kosher-image-perf/kosherd/src",
+          "/tmp/kosher-avif-pillow"
+        ],
+        "expected_power_settings": {
+          "platform_profile": "performance",
+          "energy_preferences": [
+            "performance"
+          ],
+          "governors": [
+            "performance"
+          ]
+        },
+        "host_end": {
+          "architecture": "x86_64",
+          "kernel": "7.2.13-200.fc44.x86_64",
+          "logical_cpus": 12,
+          "python": "3.14.8",
+          "cpu_model": "Intel(R) Core(TM) i7-10710U CPU @ 1.10GHz",
+          "platform_profile": "performance",
+          "energy_preferences": [
+            "performance"
+          ],
+          "governors": [
+            "performance"
+          ],
+          "load_average": [
+            1.44580078125,
+            1.6689453125,
+            1.8623046875
+          ]
+        }
+      },
+      "summary": {
+        "version": "after",
+        "scenario": "intrinsic",
+        "repeat": 0,
+        "browser": "156.0.8078.80",
+        "critical_js_ms": 49.3,
+        "dom_content_loaded_ms": 51.1,
+        "load_ms": 166,
+        "frame_gap_p95_ms": 16.7,
+        "frame_gap_max_ms": 16.8,
+        "frames_over_50ms": 0,
+        "loading_frame_gap_p95_ms": 16.7,
+        "loading_frame_gap_max_ms": 16.8,
+        "input_next_frame_p95_ms": 12.9,
+        "input_next_frame_max_ms": 13.5,
+        "reported_interactions": 0,
+        "reported_interaction_max_ms": null,
+        "input_dispatches": 120,
+        "cdp_dispatch_roundtrip_max_ms": 10.85,
+        "clicks": 119,
+        "long_tasks": 0,
+        "long_task_total_ms": 0,
+        "layout_shift_sum": 0,
+        "layout_shift_sum_including_input": 1.5e-05,
+        "ping_p95_ms": 6.8,
+        "ping_max_ms": 8.9,
+        "proxy_lag_p95_ms": 0.59,
+        "proxy_lag_max_ms": 23.73,
+        "inferences": 0,
+        "image_complete": 6,
+        "media_results": {
+          "image-hidden": 6
+        },
+        "image_status_ui_hosts": 1,
+        "visible_image_status_labels": {
+          "Hidden": 6
+        },
+        "observed_image_status_states": {
+          "hidden": 6
+        },
+        "status_api_http_codes": {
+          "200": 1
+        },
+        "video_states": [],
+        "validation": {
+          "valid": true,
+          "errors": [],
+          "geometry_preserved": 6,
+          "verified_hidden_tiles": 6,
+          "verified_covers": 0
+        },
+        "power": {
+          "start": {
+            "platform_profile": "performance",
+            "energy_preferences": [
+              "performance"
+            ],
+            "governors": [
+              "performance"
+            ]
+          },
+          "end": {
+            "platform_profile": "performance",
+            "energy_preferences": [
+              "performance"
+            ],
+            "governors": [
+              "performance"
+            ]
+          },
+          "expected": {
+            "platform_profile": "performance",
+            "energy_preferences": [
+              "performance"
+            ],
+            "governors": [
+              "performance"
+            ]
+          },
+          "valid": true
+        },
+        "capture_status": "saved",
+        "capture_errors": []
+      },
+      "additional_metrics": {
+        "ping_max_ms": 8.9,
+        "ping_mean_ms": 5.899999999126098,
+        "ping_samples": 133,
+        "ping_resource_timing_entries": 0
+      },
+      "independent_checks": {
+        "source_files_match_commit": "5468b17e64a67dcc2cc07465a9e9a7831fc8ed4d",
+        "browser_errors_empty": true,
+        "all_urls_loopback": true,
+        "screenshot_present": true
+      },
+      "raw_sha256": {
+        "summary.json": "de64c570713d48a53f2ac0588d0efcd0df4d3744d9fdf588d1246f66aa0d87ad",
+        "environment.json": "30f32b70f82713c13a105c8db014349503737a30003fb8f6e1a27bfac5c9639c",
+        "browser.json": "f376a38e435a4709f9cd4246d733437d9cfd54fad3d710fa0db2ebb038ac35e1",
+        "proxy.json": "7fc46006da604a023a3cbcfd76c28478cccd21f08b572e3ea96ec041cf67e8ec",
+        "browser.png": "0c9c88de8e926092e02f9031df0048bf39e7131866bcf9738cdd5d376e8e3178"
+      }
+    },
+    {
+      "directory": "after-intrinsic-1",
+      "environment": {
+        "source": {
+          "root": "/tmp/kosher-image-perf",
+          "commit": "5468b17e64a67dcc2cc07465a9e9a7831fc8ed4d",
+          "tracked_diff_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "files_sha256": {
+            "mitm/kosher_filter.py": "fd71ebca55ef457675708c392da8b7c2e2517dade0e68405ada6374595e18dff",
+            "mitm/kosher_page.js": "b4a4a00c446a52d6b8b33981c23a31f1572d58e8a9762f5a10a4445540fb1908",
+            "kosherd/src/kosherd/vision.py": "ec8accb4240ced2e2f9a895bc09e83623f4777897659cab009b78969bd1abec3",
+            "kosherd/src/kosherd/videocheck.py": "f25405816695a32992047b62593e9c78810bfc4ced9779604bbdbaea90a34ce9",
+            "kosherd/src/kosherd/imageedit.py": "465877afcf50b70884e3571241464a9bfa99e12c24ecbaf781f5dfd92cff0f0e"
+          }
+        },
+        "host": {
+          "architecture": "x86_64",
+          "kernel": "7.2.13-200.fc44.x86_64",
+          "logical_cpus": 12,
+          "python": "3.14.8",
+          "cpu_model": "Intel(R) Core(TM) i7-10710U CPU @ 1.10GHz",
+          "platform_profile": "performance",
+          "energy_preferences": [
+            "performance"
+          ],
+          "governors": [
+            "performance"
+          ],
+          "load_average": [
+            1.62646484375,
+            1.70947265625,
+            1.8466796875
+          ]
+        },
+        "runtime_pythonpath": [
+          "/tmp/kosher-image-perf/kosherd/src",
+          "/tmp/kosher-avif-pillow"
+        ],
+        "expected_power_settings": {
+          "platform_profile": "performance",
+          "energy_preferences": [
+            "performance"
+          ],
+          "governors": [
+            "performance"
+          ]
+        },
+        "host_end": {
+          "architecture": "x86_64",
+          "kernel": "7.2.13-200.fc44.x86_64",
+          "logical_cpus": 12,
+          "python": "3.14.8",
+          "cpu_model": "Intel(R) Core(TM) i7-10710U CPU @ 1.10GHz",
+          "platform_profile": "performance",
+          "energy_preferences": [
+            "performance"
+          ],
+          "governors": [
+            "performance"
+          ],
+          "load_average": [
+            1.66796875,
+            1.7158203125,
+            1.84521484375
+          ]
+        }
+      },
+      "summary": {
+        "version": "after",
+        "scenario": "intrinsic",
+        "repeat": 1,
+        "browser": "156.0.8078.80",
+        "critical_js_ms": 53.6,
+        "dom_content_loaded_ms": 55.4,
+        "load_ms": 172.7,
+        "frame_gap_p95_ms": 16.7,
+        "frame_gap_max_ms": 16.8,
+        "frames_over_50ms": 0,
+        "loading_frame_gap_p95_ms": 16.7,
+        "loading_frame_gap_max_ms": 16.7,
+        "input_next_frame_p95_ms": 12.6,
+        "input_next_frame_max_ms": 12.8,
+        "reported_interactions": 0,
+        "reported_interaction_max_ms": null,
+        "input_dispatches": 120,
+        "cdp_dispatch_roundtrip_max_ms": 74.92,
+        "clicks": 119,
+        "long_tasks": 0,
+        "long_task_total_ms": 0,
+        "layout_shift_sum": 0,
+        "layout_shift_sum_including_input": 1.5e-05,
+        "ping_p95_ms": 16.8,
+        "ping_max_ms": 33.6,
+        "proxy_lag_p95_ms": 0.66,
+        "proxy_lag_max_ms": 23.54,
+        "inferences": 0,
+        "image_complete": 6,
+        "media_results": {
+          "image-hidden": 6
+        },
+        "image_status_ui_hosts": 1,
+        "visible_image_status_labels": {
+          "Hidden": 6
+        },
+        "observed_image_status_states": {
+          "hidden": 6
+        },
+        "status_api_http_codes": {
+          "200": 1
+        },
+        "video_states": [],
+        "validation": {
+          "valid": true,
+          "errors": [],
+          "geometry_preserved": 6,
+          "verified_hidden_tiles": 6,
+          "verified_covers": 0
+        },
+        "power": {
+          "start": {
+            "platform_profile": "performance",
+            "energy_preferences": [
+              "performance"
+            ],
+            "governors": [
+              "performance"
+            ]
+          },
+          "end": {
+            "platform_profile": "performance",
+            "energy_preferences": [
+              "performance"
+            ],
+            "governors": [
+              "performance"
+            ]
+          },
+          "expected": {
+            "platform_profile": "performance",
+            "energy_preferences": [
+              "performance"
+            ],
+            "governors": [
+              "performance"
+            ]
+          },
+          "valid": true
+        },
+        "capture_status": "saved",
+        "capture_errors": []
+      },
+      "additional_metrics": {
+        "ping_max_ms": 33.6,
+        "ping_mean_ms": 7.110526315531785,
+        "ping_samples": 133,
+        "ping_resource_timing_entries": 0
+      },
+      "independent_checks": {
+        "source_files_match_commit": "5468b17e64a67dcc2cc07465a9e9a7831fc8ed4d",
+        "browser_errors_empty": true,
+        "all_urls_loopback": true,
+        "screenshot_present": true
+      },
+      "raw_sha256": {
+        "summary.json": "176e66e610e807d5f71cdfe86e418104c93981a5bcc400fdd84a13085e1cadb4",
+        "environment.json": "7b6250031b13b93b608a92d759634523a1a6fd7ae790ccc3b1f123ffcb2c864b",
+        "browser.json": "2a725c3754baf5b14e1334cbd7363a8b3aa44cdbf416bf5b35eb6555fa96b41e",
+        "proxy.json": "7b927d52c6863a2e11ac39fe0eecff1a2ee1a2b2660cc5cc60be387a727307c0",
+        "browser.png": "64c3e47f8aaf699a15ad497262bd49d4f3190739e2ae60ed76663e24ce3c850f"
+      }
+    },
+    {
+      "directory": "before-covers-0",
+      "environment": {
+        "source": {
+          "root": "/tmp/kosher-browser-baseline",
+          "commit": null,
+          "tracked_diff_sha256": null,
+          "files_sha256": {
+            "mitm/kosher_filter.py": "4bf6924083cdc2e2976fd875ba52e3de17681280bf75a96f1737cc6ec38a51ee",
+            "mitm/kosher_page.js": "8d2f7db3514da1689a9732ce3d9ff118e17e0cb875073714b7c1770ca8b29948",
+            "kosherd/src/kosherd/vision.py": "90e1602019c70bb5c242c3f8db3c029da4b124aea79111ebb58ea18acbba9f8e",
+            "kosherd/src/kosherd/videocheck.py": "00f1f4023b82525012111932b844622ac43c938fcb6ab8b2cda55fc40fa4a19b",
+            "kosherd/src/kosherd/imageedit.py": "b03afebf4ffc4d8a2ddb9d92d7a743107fc2c22be46e0879411f586fcf617465"
+          }
+        },
+        "host": {
+          "architecture": "x86_64",
+          "kernel": "7.2.13-200.fc44.x86_64",
+          "logical_cpus": 12,
+          "python": "3.14.8",
+          "cpu_model": "Intel(R) Core(TM) i7-10710U CPU @ 1.10GHz",
+          "platform_profile": "performance",
+          "energy_preferences": [
+            "performance"
+          ],
+          "governors": [
+            "performance"
+          ],
+          "load_average": [
+            1.44580078125,
+            1.6689453125,
+            1.8623046875
+          ]
+        },
+        "runtime_pythonpath": [
+          "/tmp/kosher-browser-baseline/kosherd/src"
+        ],
+        "expected_power_settings": {
+          "platform_profile": "performance",
+          "energy_preferences": [
+            "performance"
+          ],
+          "governors": [
+            "performance"
+          ]
+        },
+        "host_end": {
+          "architecture": "x86_64",
+          "kernel": "7.2.13-200.fc44.x86_64",
+          "logical_cpus": 12,
+          "python": "3.14.8",
+          "cpu_model": "Intel(R) Core(TM) i7-10710U CPU @ 1.10GHz",
+          "platform_profile": "performance",
+          "energy_preferences": [
+            "performance"
+          ],
+          "governors": [
+            "performance"
+          ],
+          "load_average": [
+            1.3505859375,
+            1.63037109375,
+            1.84375
+          ]
+        }
+      },
+      "summary": {
+        "version": "before",
+        "scenario": "covers",
+        "repeat": 0,
+        "browser": "156.0.8078.80",
+        "critical_js_ms": 87.2,
+        "dom_content_loaded_ms": 87.3,
+        "load_ms": 1221,
+        "frame_gap_p95_ms": 16.8,
+        "frame_gap_max_ms": 83.4,
+        "frames_over_50ms": 1,
+        "loading_frame_gap_p95_ms": 33.4,
+        "loading_frame_gap_max_ms": 83.4,
+        "input_next_frame_p95_ms": 13,
+        "input_next_frame_max_ms": 28.7,
+        "reported_interactions": 0,
+        "reported_interaction_max_ms": null,
+        "input_dispatches": 111,
+        "cdp_dispatch_roundtrip_max_ms": 18.66,
+        "clicks": 110,
+        "long_tasks": 0,
+        "long_task_total_ms": 0,
+        "layout_shift_sum": 0,
+        "layout_shift_sum_including_input": 0,
+        "ping_p95_ms": 16.5,
+        "ping_max_ms": 249,
+        "proxy_lag_p95_ms": 0.81,
+        "proxy_lag_max_ms": 161.18,
+        "inferences": 0,
+        "image_complete": 36,
+        "media_results": {
+          "image-covered=nsfw": 36
+        },
+        "image_status_ui_hosts": 0,
+        "visible_image_status_labels": {},
+        "observed_image_status_states": {},
+        "status_api_http_codes": {},
+        "video_states": [],
+        "validation": {
+          "valid": true,
+          "errors": [],
+          "geometry_preserved": 36,
+          "verified_hidden_tiles": 0,
+          "verified_covers": 36
+        },
+        "power": {
+          "start": {
+            "platform_profile": "performance",
+            "energy_preferences": [
+              "performance"
+            ],
+            "governors": [
+              "performance"
+            ]
+          },
+          "end": {
+            "platform_profile": "performance",
+            "energy_preferences": [
+              "performance"
+            ],
+            "governors": [
+              "performance"
+            ]
+          },
+          "expected": {
+            "platform_profile": "performance",
+            "energy_preferences": [
+              "performance"
+            ],
+            "governors": [
+              "performance"
+            ]
+          },
+          "valid": true
+        },
+        "capture_status": "saved",
+        "capture_errors": []
+      },
+      "additional_metrics": {
+        "ping_max_ms": 249,
+        "ping_mean_ms": 9.527819547101966,
+        "ping_samples": 133,
+        "ping_resource_timing_entries": 0
+      },
+      "independent_checks": {
+        "source_files_match_commit": "506ebba40af8fd5fefb37125eb61c7bc565d45fb",
+        "browser_errors_empty": true,
+        "all_urls_loopback": true,
+        "screenshot_present": true
+      },
+      "raw_sha256": {
+        "summary.json": "67b1939fd29c9403d3871dfca2f0b26a663db11d69254cb98ecd0b09016582ad",
+        "environment.json": "ff3d8afff70edbafe2f945579283a722ed36604e6fbe92e65ea6c100e11ef22d",
+        "browser.json": "e2f4d43a9ba4de355db77bd58e91b541c436712f549c0c6b350ee6a397929d27",
+        "proxy.json": "289666d47e73de314d6776519aca4d81ecdf344c16508ef28af991649cea8286",
+        "browser.png": "03bd1418a71a78e7b4714471cc62d7a20b67c924fe8c0de55f96dd44399cc888"
+      }
+    },
+    {
+      "directory": "before-covers-1",
+      "environment": {
+        "source": {
+          "root": "/tmp/kosher-browser-baseline",
+          "commit": null,
+          "tracked_diff_sha256": null,
+          "files_sha256": {
+            "mitm/kosher_filter.py": "4bf6924083cdc2e2976fd875ba52e3de17681280bf75a96f1737cc6ec38a51ee",
+            "mitm/kosher_page.js": "8d2f7db3514da1689a9732ce3d9ff118e17e0cb875073714b7c1770ca8b29948",
+            "kosherd/src/kosherd/vision.py": "90e1602019c70bb5c242c3f8db3c029da4b124aea79111ebb58ea18acbba9f8e",
+            "kosherd/src/kosherd/videocheck.py": "00f1f4023b82525012111932b844622ac43c938fcb6ab8b2cda55fc40fa4a19b",
+            "kosherd/src/kosherd/imageedit.py": "b03afebf4ffc4d8a2ddb9d92d7a743107fc2c22be46e0879411f586fcf617465"
+          }
+        },
+        "host": {
+          "architecture": "x86_64",
+          "kernel": "7.2.13-200.fc44.x86_64",
+          "logical_cpus": 12,
+          "python": "3.14.8",
+          "cpu_model": "Intel(R) Core(TM) i7-10710U CPU @ 1.10GHz",
+          "platform_profile": "performance",
+          "energy_preferences": [
+            "performance"
+          ],
+          "governors": [
+            "performance"
+          ],
+          "load_average": [
+            1.44677734375,
+            1.64990234375,
+            1.81396484375
+          ]
+        },
+        "runtime_pythonpath": [
+          "/tmp/kosher-browser-baseline/kosherd/src"
+        ],
+        "expected_power_settings": {
+          "platform_profile": "performance",
+          "energy_preferences": [
+            "performance"
+          ],
+          "governors": [
+            "performance"
+          ]
+        },
+        "host_end": {
+          "architecture": "x86_64",
+          "kernel": "7.2.13-200.fc44.x86_64",
+          "logical_cpus": 12,
+          "python": "3.14.8",
+          "cpu_model": "Intel(R) Core(TM) i7-10710U CPU @ 1.10GHz",
+          "platform_profile": "performance",
+          "energy_preferences": [
+            "performance"
+          ],
+          "governors": [
+            "performance"
+          ],
+          "load_average": [
+            2.232421875,
+            1.8388671875,
+            1.8740234375
+          ]
+        }
+      },
+      "summary": {
+        "version": "before",
+        "scenario": "covers",
+        "repeat": 1,
+        "browser": "156.0.8078.80",
+        "critical_js_ms": 44.5,
+        "dom_content_loaded_ms": 44.6,
+        "load_ms": 1160.6,
+        "frame_gap_p95_ms": 16.8,
+        "frame_gap_max_ms": 33.4,
+        "frames_over_50ms": 0,
+        "loading_frame_gap_p95_ms": 33.4,
+        "loading_frame_gap_max_ms": 33.4,
+        "input_next_frame_p95_ms": 13.5,
+        "input_next_frame_max_ms": 28.8,
+        "reported_interactions": 0,
+        "reported_interaction_max_ms": null,
+        "input_dispatches": 111,
+        "cdp_dispatch_roundtrip_max_ms": 13.96,
+        "clicks": 110,
+        "long_tasks": 0,
+        "long_task_total_ms": 0,
+        "layout_shift_sum": 0,
+        "layout_shift_sum_including_input": 0,
+        "ping_p95_ms": 18.9,
+        "ping_max_ms": 243.3,
+        "proxy_lag_p95_ms": 0.77,
+        "proxy_lag_max_ms": 145.34,
+        "inferences": 0,
+        "image_complete": 36,
+        "media_results": {
+          "image-covered=nsfw": 36
+        },
+        "image_status_ui_hosts": 0,
+        "visible_image_status_labels": {},
+        "observed_image_status_states": {},
+        "status_api_http_codes": {},
+        "video_states": [],
+        "validation": {
+          "valid": true,
+          "errors": [],
+          "geometry_preserved": 36,
+          "verified_hidden_tiles": 0,
+          "verified_covers": 36
+        },
+        "power": {
+          "start": {
+            "platform_profile": "performance",
+            "energy_preferences": [
+              "performance"
+            ],
+            "governors": [
+              "performance"
+            ]
+          },
+          "end": {
+            "platform_profile": "performance",
+            "energy_preferences": [
+              "performance"
+            ],
+            "governors": [
+              "performance"
+            ]
+          },
+          "expected": {
+            "platform_profile": "performance",
+            "energy_preferences": [
+              "performance"
+            ],
+            "governors": [
+              "performance"
+            ]
+          },
+          "valid": true
+        },
+        "capture_status": "saved",
+        "capture_errors": []
+      },
+      "additional_metrics": {
+        "ping_max_ms": 243.3,
+        "ping_mean_ms": 9.2789473679841,
+        "ping_samples": 133,
+        "ping_resource_timing_entries": 0
+      },
+      "independent_checks": {
+        "source_files_match_commit": "506ebba40af8fd5fefb37125eb61c7bc565d45fb",
+        "browser_errors_empty": true,
+        "all_urls_loopback": true,
+        "screenshot_present": true
+      },
+      "raw_sha256": {
+        "summary.json": "caf1a102cf011a89548f923a3b95a5215baaf3fc0dfbb47950d29a13e5bc21f2",
+        "environment.json": "50144134e15fef503852922cba4a478142e3db112f172918ae79368040bd9c9a",
+        "browser.json": "caaa2f3e7abfe3248423e34e8269a7cbc358c0252aa9cf71ea765301ad8dbf65",
+        "proxy.json": "ded9c7365ad7353af4b2a5125fa1be9fe98e7646ee4390f957fc1e4126ab1301",
+        "browser.png": "28b6279802709acfcd2d50398af04f06bcb70f953c4660b7def82b49bfef80e3"
+      }
+    },
+    {
+      "directory": "before-hidden-0",
+      "environment": {
+        "source": {
+          "root": "/tmp/kosher-browser-baseline",
+          "commit": null,
+          "tracked_diff_sha256": null,
+          "files_sha256": {
+            "mitm/kosher_filter.py": "4bf6924083cdc2e2976fd875ba52e3de17681280bf75a96f1737cc6ec38a51ee",
+            "mitm/kosher_page.js": "8d2f7db3514da1689a9732ce3d9ff118e17e0cb875073714b7c1770ca8b29948",
+            "kosherd/src/kosherd/vision.py": "90e1602019c70bb5c242c3f8db3c029da4b124aea79111ebb58ea18acbba9f8e",
+            "kosherd/src/kosherd/videocheck.py": "00f1f4023b82525012111932b844622ac43c938fcb6ab8b2cda55fc40fa4a19b",
+            "kosherd/src/kosherd/imageedit.py": "b03afebf4ffc4d8a2ddb9d92d7a743107fc2c22be46e0879411f586fcf617465"
+          }
+        },
+        "host": {
+          "architecture": "x86_64",
+          "kernel": "7.2.13-200.fc44.x86_64",
+          "logical_cpus": 12,
+          "python": "3.14.8",
+          "cpu_model": "Intel(R) Core(TM) i7-10710U CPU @ 1.10GHz",
+          "platform_profile": "performance",
+          "energy_preferences": [
+            "performance"
+          ],
+          "governors": [
+            "performance"
+          ],
+          "load_average": [
+            1.47021484375,
+            1.75830078125,
+            1.90966796875
+          ]
+        },
+        "runtime_pythonpath": [
+          "/tmp/kosher-browser-baseline/kosherd/src"
+        ],
+        "expected_power_settings": {
+          "platform_profile": "performance",
+          "energy_preferences": [
+            "performance"
+          ],
+          "governors": [
+            "performance"
+          ]
+        },
+        "host_end": {
+          "architecture": "x86_64",
+          "kernel": "7.2.13-200.fc44.x86_64",
+          "logical_cpus": 12,
+          "python": "3.14.8",
+          "cpu_model": "Intel(R) Core(TM) i7-10710U CPU @ 1.10GHz",
+          "platform_profile": "performance",
+          "energy_preferences": [
+            "performance"
+          ],
+          "governors": [
+            "performance"
+          ],
+          "load_average": [
+            1.36572265625,
+            1.71240234375,
+            1.89013671875
+          ]
+        }
+      },
+      "summary": {
+        "version": "before",
+        "scenario": "hidden",
+        "repeat": 0,
+        "browser": "156.0.8078.80",
+        "critical_js_ms": 78.3,
+        "dom_content_loaded_ms": 78.3,
+        "load_ms": 747.1,
+        "frame_gap_p95_ms": 16.7,
+        "frame_gap_max_ms": 100,
+        "frames_over_50ms": 3,
+        "loading_frame_gap_p95_ms": 66.6,
+        "loading_frame_gap_max_ms": 100,
+        "input_next_frame_p95_ms": 13.5,
+        "input_next_frame_max_ms": 58.5,
+        "reported_interactions": 0,
+        "reported_interaction_max_ms": null,
+        "input_dispatches": 110,
+        "cdp_dispatch_roundtrip_max_ms": 25.82,
+        "clicks": 109,
+        "long_tasks": 0,
+        "long_task_total_ms": 0,
+        "layout_shift_sum": 0,
+        "layout_shift_sum_including_input": 0,
+        "ping_p95_ms": 7.3,
+        "ping_max_ms": 502.8,
+        "proxy_lag_p95_ms": 0.68,
+        "proxy_lag_max_ms": 188.99,
+        "inferences": 0,
+        "image_complete": 36,
+        "media_results": {
+          "image-hidden": 36
+        },
+        "image_status_ui_hosts": 0,
+        "visible_image_status_labels": {},
+        "observed_image_status_states": {},
+        "status_api_http_codes": {},
+        "video_states": [],
+        "validation": {
+          "valid": true,
+          "errors": [],
+          "geometry_preserved": 36,
+          "verified_hidden_tiles": 36,
+          "verified_covers": 0
+        },
+        "power": {
+          "start": {
+            "platform_profile": "performance",
+            "energy_preferences": [
+              "performance"
+            ],
+            "governors": [
+              "performance"
+            ]
+          },
+          "end": {
+            "platform_profile": "performance",
+            "energy_preferences": [
+              "performance"
+            ],
+            "governors": [
+              "performance"
+            ]
+          },
+          "expected": {
+            "platform_profile": "performance",
+            "energy_preferences": [
+              "performance"
+            ],
+            "governors": [
+              "performance"
+            ]
+          },
+          "valid": true
+        },
+        "capture_status": "saved",
+        "capture_errors": []
+      },
+      "additional_metrics": {
+        "ping_max_ms": 502.8,
+        "ping_mean_ms": 14.23684210699976,
+        "ping_samples": 133,
+        "ping_resource_timing_entries": 0
+      },
+      "independent_checks": {
+        "source_files_match_commit": "506ebba40af8fd5fefb37125eb61c7bc565d45fb",
+        "browser_errors_empty": true,
+        "all_urls_loopback": true,
+        "screenshot_present": true
+      },
+      "raw_sha256": {
+        "summary.json": "3efba23157aa7d1027f2a41d95ff073b816d6e8ad4c05e0afd21653e260877e4",
+        "environment.json": "48db3cb2c9e6910012ab9dcc1df5348a3fb66f8e8720d0561a298c835e291e1e",
+        "browser.json": "864773464c6056fa98b1aafe425c062103a711524fd4a84dd3678091bfc4d3e3",
+        "proxy.json": "f3fe1fa142d3d22a711943e50ae77a9f8e1296aa0225406feaf548bbe26dcbb6",
+        "browser.png": "521acaab4b414b6d1ada693fa81fb14627ffa69afef53d3fa61636f13f37489e"
+      }
+    },
+    {
+      "directory": "before-hidden-1",
+      "environment": {
+        "source": {
+          "root": "/tmp/kosher-browser-baseline",
+          "commit": null,
+          "tracked_diff_sha256": null,
+          "files_sha256": {
+            "mitm/kosher_filter.py": "4bf6924083cdc2e2976fd875ba52e3de17681280bf75a96f1737cc6ec38a51ee",
+            "mitm/kosher_page.js": "8d2f7db3514da1689a9732ce3d9ff118e17e0cb875073714b7c1770ca8b29948",
+            "kosherd/src/kosherd/vision.py": "90e1602019c70bb5c242c3f8db3c029da4b124aea79111ebb58ea18acbba9f8e",
+            "kosherd/src/kosherd/videocheck.py": "00f1f4023b82525012111932b844622ac43c938fcb6ab8b2cda55fc40fa4a19b",
+            "kosherd/src/kosherd/imageedit.py": "b03afebf4ffc4d8a2ddb9d92d7a743107fc2c22be46e0879411f586fcf617465"
+          }
+        },
+        "host": {
+          "architecture": "x86_64",
+          "kernel": "7.2.13-200.fc44.x86_64",
+          "logical_cpus": 12,
+          "python": "3.14.8",
+          "cpu_model": "Intel(R) Core(TM) i7-10710U CPU @ 1.10GHz",
+          "platform_profile": "performance",
+          "energy_preferences": [
+            "performance"
+          ],
+          "governors": [
+            "performance"
+          ],
+          "load_average": [
+            1.86474609375,
+            1.7548828125,
+            1.865234375
+          ]
+        },
+        "runtime_pythonpath": [
+          "/tmp/kosher-browser-baseline/kosherd/src"
+        ],
+        "expected_power_settings": {
+          "platform_profile": "performance",
+          "energy_preferences": [
+            "performance"
+          ],
+          "governors": [
+            "performance"
+          ]
+        },
+        "host_end": {
+          "architecture": "x86_64",
+          "kernel": "7.2.13-200.fc44.x86_64",
+          "logical_cpus": 12,
+          "python": "3.14.8",
+          "cpu_model": "Intel(R) Core(TM) i7-10710U CPU @ 1.10GHz",
+          "platform_profile": "performance",
+          "energy_preferences": [
+            "performance"
+          ],
+          "governors": [
+            "performance"
+          ],
+          "load_average": [
+            1.62646484375,
+            1.70947265625,
+            1.8466796875
+          ]
+        }
+      },
+      "summary": {
+        "version": "before",
+        "scenario": "hidden",
+        "repeat": 1,
+        "browser": "156.0.8078.80",
+        "critical_js_ms": 43.5,
+        "dom_content_loaded_ms": 43.5,
+        "load_ms": 688,
+        "frame_gap_p95_ms": 16.7,
+        "frame_gap_max_ms": 150,
+        "frames_over_50ms": 2,
+        "loading_frame_gap_p95_ms": 33.3,
+        "loading_frame_gap_max_ms": 83.3,
+        "input_next_frame_p95_ms": 13.2,
+        "input_next_frame_max_ms": 25,
+        "reported_interactions": 0,
+        "reported_interaction_max_ms": null,
+        "input_dispatches": 111,
+        "cdp_dispatch_roundtrip_max_ms": 15.93,
+        "clicks": 110,
+        "long_tasks": 0,
+        "long_task_total_ms": 0,
+        "layout_shift_sum": 0,
+        "layout_shift_sum_including_input": 0,
+        "ping_p95_ms": 20.3,
+        "ping_max_ms": 423.7,
+        "proxy_lag_p95_ms": 0.64,
+        "proxy_lag_max_ms": 269.07,
+        "inferences": 0,
+        "image_complete": 36,
+        "media_results": {
+          "image-hidden": 36
+        },
+        "image_status_ui_hosts": 0,
+        "visible_image_status_labels": {},
+        "observed_image_status_states": {},
+        "status_api_http_codes": {},
+        "video_states": [],
+        "validation": {
+          "valid": true,
+          "errors": [],
+          "geometry_preserved": 36,
+          "verified_hidden_tiles": 36,
+          "verified_covers": 0
+        },
+        "power": {
+          "start": {
+            "platform_profile": "performance",
+            "energy_preferences": [
+              "performance"
+            ],
+            "governors": [
+              "performance"
+            ]
+          },
+          "end": {
+            "platform_profile": "performance",
+            "energy_preferences": [
+              "performance"
+            ],
+            "governors": [
+              "performance"
+            ]
+          },
+          "expected": {
+            "platform_profile": "performance",
+            "energy_preferences": [
+              "performance"
+            ],
+            "governors": [
+              "performance"
+            ]
+          },
+          "valid": true
+        },
+        "capture_status": "saved",
+        "capture_errors": []
+      },
+      "additional_metrics": {
+        "ping_max_ms": 423.7,
+        "ping_mean_ms": 14.313533832648195,
+        "ping_samples": 133,
+        "ping_resource_timing_entries": 0
+      },
+      "independent_checks": {
+        "source_files_match_commit": "506ebba40af8fd5fefb37125eb61c7bc565d45fb",
+        "browser_errors_empty": true,
+        "all_urls_loopback": true,
+        "screenshot_present": true
+      },
+      "raw_sha256": {
+        "summary.json": "c1a340130c63681d050334ae7a0f46cdf149230d9ae178a93c98b941cf28155b",
+        "environment.json": "57754e2c1356244aadee6363a11b3abd4649db7dcc40ecf5915c6362f18a8b7f",
+        "browser.json": "96d88d5fdbf2cd670e214d15da7475060098722e1448a53650fab847402b3019",
+        "proxy.json": "c9e186fe035be7a0447a9e90ca03cfa34da4eaeca9c180ba19b01d8040920f79",
+        "browser.png": "762c327c89ac74f97353b047a440a7f1b9f9a86bb09b3dd0a89e415fd1d62efc"
+      }
+    },
+    {
+      "directory": "before-inference-0",
+      "environment": {
+        "source": {
+          "root": "/tmp/kosher-browser-baseline",
+          "commit": null,
+          "tracked_diff_sha256": null,
+          "files_sha256": {
+            "mitm/kosher_filter.py": "4bf6924083cdc2e2976fd875ba52e3de17681280bf75a96f1737cc6ec38a51ee",
+            "mitm/kosher_page.js": "8d2f7db3514da1689a9732ce3d9ff118e17e0cb875073714b7c1770ca8b29948",
+            "kosherd/src/kosherd/vision.py": "90e1602019c70bb5c242c3f8db3c029da4b124aea79111ebb58ea18acbba9f8e",
+            "kosherd/src/kosherd/videocheck.py": "00f1f4023b82525012111932b844622ac43c938fcb6ab8b2cda55fc40fa4a19b",
+            "kosherd/src/kosherd/imageedit.py": "b03afebf4ffc4d8a2ddb9d92d7a743107fc2c22be46e0879411f586fcf617465"
+          }
+        },
+        "host": {
+          "architecture": "x86_64",
+          "kernel": "7.2.13-200.fc44.x86_64",
+          "logical_cpus": 12,
+          "python": "3.14.8",
+          "cpu_model": "Intel(R) Core(TM) i7-10710U CPU @ 1.10GHz",
+          "platform_profile": "performance",
+          "energy_preferences": [
+            "performance"
+          ],
+          "governors": [
+            "performance"
+          ],
+          "load_average": [
+            1.40283203125,
+            1.61767578125,
+            1.83203125
+          ]
+        },
+        "runtime_pythonpath": [
+          "/tmp/kosher-browser-baseline/kosherd/src"
+        ],
+        "expected_power_settings": {
+          "platform_profile": "performance",
+          "energy_preferences": [
+            "performance"
+          ],
+          "governors": [
+            "performance"
+          ]
+        },
+        "host_end": {
+          "architecture": "x86_64",
+          "kernel": "7.2.13-200.fc44.x86_64",
+          "logical_cpus": 12,
+          "python": "3.14.8",
+          "cpu_model": "Intel(R) Core(TM) i7-10710U CPU @ 1.10GHz",
+          "platform_profile": "performance",
+          "energy_preferences": [
+            "performance"
+          ],
+          "governors": [
+            "performance"
+          ],
+          "load_average": [
+            1.8154296875,
+            1.70947265625,
+            1.85693359375
+          ]
+        }
+      },
+      "summary": {
+        "version": "before",
+        "scenario": "inference",
+        "repeat": 0,
+        "browser": "156.0.8078.80",
+        "critical_js_ms": 68.1,
+        "dom_content_loaded_ms": 68.1,
+        "load_ms": 3005,
+        "frame_gap_p95_ms": 16.8,
+        "frame_gap_max_ms": 50.1,
+        "frames_over_50ms": 1,
+        "loading_frame_gap_p95_ms": 33.3,
+        "loading_frame_gap_max_ms": 50.1,
+        "input_next_frame_p95_ms": 13.2,
+        "input_next_frame_max_ms": 37.6,
+        "reported_interactions": 0,
+        "reported_interaction_max_ms": null,
+        "input_dispatches": 110,
+        "cdp_dispatch_roundtrip_max_ms": 31.87,
+        "clicks": 110,
+        "long_tasks": 0,
+        "long_task_total_ms": 0,
+        "layout_shift_sum": 0,
+        "layout_shift_sum_including_input": 1.6e-05,
+        "ping_p95_ms": 19.5,
+        "ping_max_ms": 166.4,
+        "proxy_lag_p95_ms": 0.99,
+        "proxy_lag_max_ms": 115.25,
+        "inferences": 38,
+        "image_complete": 36,
+        "media_results": {
+          "video-checked=clean": 2,
+          "passed": 26,
+          "image-hidden": 10
+        },
+        "image_status_ui_hosts": 0,
+        "visible_image_status_labels": {},
+        "observed_image_status_states": {},
+        "status_api_http_codes": {},
+        "video_states": [
+          {
+            "src": "http://127.0.0.8:43807/clip/0.mp4",
+            "readyState": 4,
+            "networkState": 1,
+            "width": 640,
+            "height": 360,
+            "error": null
+          },
+          {
+            "src": "http://127.0.0.9:43807/clip/1.mp4",
+            "readyState": 4,
+            "networkState": 1,
+            "width": 640,
+            "height": 360,
+            "error": null
+          }
+        ],
+        "validation": {
+          "valid": true,
+          "errors": [],
+          "geometry_preserved": 36,
+          "verified_hidden_tiles": 10,
+          "verified_covers": 0
+        },
+        "power": {
+          "start": {
+            "platform_profile": "performance",
+            "energy_preferences": [
+              "performance"
+            ],
+            "governors": [
+              "performance"
+            ]
+          },
+          "end": {
+            "platform_profile": "performance",
+            "energy_preferences": [
+              "performance"
+            ],
+            "governors": [
+              "performance"
+            ]
+          },
+          "expected": {
+            "platform_profile": "performance",
+            "energy_preferences": [
+              "performance"
+            ],
+            "governors": [
+              "performance"
+            ]
+          },
+          "valid": true
+        },
+        "capture_status": "saved",
+        "capture_errors": []
+      },
+      "additional_metrics": {
+        "ping_max_ms": 166.4,
+        "ping_mean_ms": 8.489552237482657,
+        "ping_samples": 134,
+        "ping_resource_timing_entries": 0
+      },
+      "independent_checks": {
+        "source_files_match_commit": "506ebba40af8fd5fefb37125eb61c7bc565d45fb",
+        "browser_errors_empty": true,
+        "all_urls_loopback": true,
+        "screenshot_present": true
+      },
+      "raw_sha256": {
+        "summary.json": "3de808a84439730e08a81822c71a824d74c9920b9cdc91aa6773227c1e2752b4",
+        "environment.json": "a3375ef41f7d83e0c446ffa2c8d5c74e4f36ad43f75d6d9279d8f62c6f8cd1c0",
+        "browser.json": "d77112ab1302ef7031a14384db5e87e9d16b25cd22fc4c17d17e2dfc584e113a",
+        "proxy.json": "7aecbe87b3337c14fe512bbe94974d1cbab5585ef4eeb752e2c41516646e14b5",
+        "browser.png": "c5700d76935f7745eb569f5b2a6807ff1bec0b1b5c53d412c207b350ca13aa35"
+      }
+    },
+    {
+      "directory": "before-inference-1",
+      "environment": {
+        "source": {
+          "root": "/tmp/kosher-browser-baseline",
+          "commit": null,
+          "tracked_diff_sha256": null,
+          "files_sha256": {
+            "mitm/kosher_filter.py": "4bf6924083cdc2e2976fd875ba52e3de17681280bf75a96f1737cc6ec38a51ee",
+            "mitm/kosher_page.js": "8d2f7db3514da1689a9732ce3d9ff118e17e0cb875073714b7c1770ca8b29948",
+            "kosherd/src/kosherd/vision.py": "90e1602019c70bb5c242c3f8db3c029da4b124aea79111ebb58ea18acbba9f8e",
+            "kosherd/src/kosherd/videocheck.py": "00f1f4023b82525012111932b844622ac43c938fcb6ab8b2cda55fc40fa4a19b",
+            "kosherd/src/kosherd/imageedit.py": "b03afebf4ffc4d8a2ddb9d92d7a743107fc2c22be46e0879411f586fcf617465"
+          }
+        },
+        "host": {
+          "architecture": "x86_64",
+          "kernel": "7.2.13-200.fc44.x86_64",
+          "logical_cpus": 12,
+          "python": "3.14.8",
+          "cpu_model": "Intel(R) Core(TM) i7-10710U CPU @ 1.10GHz",
+          "platform_profile": "performance",
+          "energy_preferences": [
+            "performance"
+          ],
+          "governors": [
+            "performance"
+          ],
+          "load_average": [
+            1.94189453125,
+            1.80322265625,
+            1.861328125
+          ]
+        },
+        "runtime_pythonpath": [
+          "/tmp/kosher-browser-baseline/kosherd/src"
+        ],
+        "expected_power_settings": {
+          "platform_profile": "performance",
+          "energy_preferences": [
+            "performance"
+          ],
+          "governors": [
+            "performance"
+          ]
+        },
+        "host_end": {
+          "architecture": "x86_64",
+          "kernel": "7.2.13-200.fc44.x86_64",
+          "logical_cpus": 12,
+          "python": "3.14.8",
+          "cpu_model": "Intel(R) Core(TM) i7-10710U CPU @ 1.10GHz",
+          "platform_profile": "performance",
+          "energy_preferences": [
+            "performance"
+          ],
+          "governors": [
+            "performance"
+          ],
+          "load_average": [
+            2.47509765625,
+            1.9609375,
+            1.91259765625
+          ]
+        }
+      },
+      "summary": {
+        "version": "before",
+        "scenario": "inference",
+        "repeat": 1,
+        "browser": "156.0.8078.80",
+        "critical_js_ms": 52.1,
+        "dom_content_loaded_ms": 52.1,
+        "load_ms": 2722.8,
+        "frame_gap_p95_ms": 16.8,
+        "frame_gap_max_ms": 50,
+        "frames_over_50ms": 0,
+        "loading_frame_gap_p95_ms": 33.4,
+        "loading_frame_gap_max_ms": 50,
+        "input_next_frame_p95_ms": 13.8,
+        "input_next_frame_max_ms": 47.7,
+        "reported_interactions": 0,
+        "reported_interaction_max_ms": null,
+        "input_dispatches": 110,
+        "cdp_dispatch_roundtrip_max_ms": 15.46,
+        "clicks": 109,
+        "long_tasks": 0,
+        "long_task_total_ms": 0,
+        "layout_shift_sum": 0,
+        "layout_shift_sum_including_input": 0,
+        "ping_p95_ms": 16.9,
+        "ping_max_ms": 118,
+        "proxy_lag_p95_ms": 0.95,
+        "proxy_lag_max_ms": 40.88,
+        "inferences": 36,
+        "image_complete": 36,
+        "media_results": {
+          "passed": 28,
+          "video-checked=clean": 2,
+          "image-hidden": 8
+        },
+        "image_status_ui_hosts": 0,
+        "visible_image_status_labels": {},
+        "observed_image_status_states": {},
+        "status_api_http_codes": {},
+        "video_states": [
+          {
+            "src": "http://127.0.0.8:43807/clip/0.mp4",
+            "readyState": 4,
+            "networkState": 1,
+            "width": 640,
+            "height": 360,
+            "error": null
+          },
+          {
+            "src": "http://127.0.0.9:43807/clip/1.mp4",
+            "readyState": 4,
+            "networkState": 1,
+            "width": 640,
+            "height": 360,
+            "error": null
+          }
+        ],
+        "validation": {
+          "valid": true,
+          "errors": [],
+          "geometry_preserved": 36,
+          "verified_hidden_tiles": 8,
+          "verified_covers": 0
+        },
+        "power": {
+          "start": {
+            "platform_profile": "performance",
+            "energy_preferences": [
+              "performance"
+            ],
+            "governors": [
+              "performance"
+            ]
+          },
+          "end": {
+            "platform_profile": "performance",
+            "energy_preferences": [
+              "performance"
+            ],
+            "governors": [
+              "performance"
+            ]
+          },
+          "expected": {
+            "platform_profile": "performance",
+            "energy_preferences": [
+              "performance"
+            ],
+            "governors": [
+              "performance"
+            ]
+          },
+          "valid": true
+        },
+        "capture_status": "saved",
+        "capture_errors": []
+      },
+      "additional_metrics": {
+        "ping_max_ms": 118,
+        "ping_mean_ms": 8.017164179026636,
+        "ping_samples": 134,
+        "ping_resource_timing_entries": 0
+      },
+      "independent_checks": {
+        "source_files_match_commit": "506ebba40af8fd5fefb37125eb61c7bc565d45fb",
+        "browser_errors_empty": true,
+        "all_urls_loopback": true,
+        "screenshot_present": true
+      },
+      "raw_sha256": {
+        "summary.json": "5323b81dddb505f81a96e0eae0dca6384c98d5145431bf566bc042a5bc403a50",
+        "environment.json": "c56c463f55ff44b41078a709527adffd2a3114fa0574552a297d2f9c94e68721",
+        "browser.json": "b9ee9d7c3c011ac2de80bf024b170c9a9e5d459a88e22614e492f02fa481d60c",
+        "proxy.json": "1efcab5e3102a5c03e08037b7b8a4a2c29aa23b0186a9a091ea370172ae9dea3",
+        "browser.png": "c56510fcea08d488a0fc7c4887500bb8aacf04792a3e1a00e4d822ae74e4e703"
+      }
+    },
+    {
+      "directory": "before-intrinsic-0",
+      "environment": {
+        "source": {
+          "root": "/tmp/kosher-browser-baseline",
+          "commit": null,
+          "tracked_diff_sha256": null,
+          "files_sha256": {
+            "mitm/kosher_filter.py": "4bf6924083cdc2e2976fd875ba52e3de17681280bf75a96f1737cc6ec38a51ee",
+            "mitm/kosher_page.js": "8d2f7db3514da1689a9732ce3d9ff118e17e0cb875073714b7c1770ca8b29948",
+            "kosherd/src/kosherd/vision.py": "90e1602019c70bb5c242c3f8db3c029da4b124aea79111ebb58ea18acbba9f8e",
+            "kosherd/src/kosherd/videocheck.py": "00f1f4023b82525012111932b844622ac43c938fcb6ab8b2cda55fc40fa4a19b",
+            "kosherd/src/kosherd/imageedit.py": "b03afebf4ffc4d8a2ddb9d92d7a743107fc2c22be46e0879411f586fcf617465"
+          }
+        },
+        "host": {
+          "architecture": "x86_64",
+          "kernel": "7.2.13-200.fc44.x86_64",
+          "logical_cpus": 12,
+          "python": "3.14.8",
+          "cpu_model": "Intel(R) Core(TM) i7-10710U CPU @ 1.10GHz",
+          "platform_profile": "performance",
+          "energy_preferences": [
+            "performance"
+          ],
+          "governors": [
+            "performance"
+          ],
+          "load_average": [
+            1.41259765625,
+            1.70068359375,
+            1.88232421875
+          ]
+        },
+        "runtime_pythonpath": [
+          "/tmp/kosher-browser-baseline/kosherd/src"
+        ],
+        "expected_power_settings": {
+          "platform_profile": "performance",
+          "energy_preferences": [
+            "performance"
+          ],
+          "governors": [
+            "performance"
+          ]
+        },
+        "host_end": {
+          "architecture": "x86_64",
+          "kernel": "7.2.13-200.fc44.x86_64",
+          "logical_cpus": 12,
+          "python": "3.14.8",
+          "cpu_model": "Intel(R) Core(TM) i7-10710U CPU @ 1.10GHz",
+          "platform_profile": "performance",
+          "energy_preferences": [
+            "performance"
+          ],
+          "governors": [
+            "performance"
+          ],
+          "load_average": [
+            1.4091796875,
+            1.67626953125,
+            1.86962890625
+          ]
+        }
+      },
+      "summary": {
+        "version": "before",
+        "scenario": "intrinsic",
+        "repeat": 0,
+        "browser": "156.0.8078.80",
+        "critical_js_ms": 41.8,
+        "dom_content_loaded_ms": 41.9,
+        "load_ms": 216.6,
+        "frame_gap_p95_ms": 16.7,
+        "frame_gap_max_ms": 16.8,
+        "frames_over_50ms": 0,
+        "loading_frame_gap_p95_ms": 16.7,
+        "loading_frame_gap_max_ms": 16.7,
+        "input_next_frame_p95_ms": 12.5,
+        "input_next_frame_max_ms": 13.3,
+        "reported_interactions": 0,
+        "reported_interaction_max_ms": null,
+        "input_dispatches": 121,
+        "cdp_dispatch_roundtrip_max_ms": 9.77,
+        "clicks": 120,
+        "long_tasks": 0,
+        "long_task_total_ms": 0,
+        "layout_shift_sum": 0,
+        "layout_shift_sum_including_input": 1.5e-05,
+        "ping_p95_ms": 6.7,
+        "ping_max_ms": 54.9,
+        "proxy_lag_p95_ms": 0.52,
+        "proxy_lag_max_ms": 156.09,
+        "inferences": 0,
+        "image_complete": 6,
+        "media_results": {
+          "image-hidden": 6
+        },
+        "image_status_ui_hosts": 0,
+        "visible_image_status_labels": {},
+        "observed_image_status_states": {},
+        "status_api_http_codes": {},
+        "video_states": [],
+        "validation": {
+          "valid": true,
+          "errors": [],
+          "geometry_preserved": 6,
+          "verified_hidden_tiles": 6,
+          "verified_covers": 0
+        },
+        "power": {
+          "start": {
+            "platform_profile": "performance",
+            "energy_preferences": [
+              "performance"
+            ],
+            "governors": [
+              "performance"
+            ]
+          },
+          "end": {
+            "platform_profile": "performance",
+            "energy_preferences": [
+              "performance"
+            ],
+            "governors": [
+              "performance"
+            ]
+          },
+          "expected": {
+            "platform_profile": "performance",
+            "energy_preferences": [
+              "performance"
+            ],
+            "governors": [
+              "performance"
+            ]
+          },
+          "valid": true
+        },
+        "capture_status": "saved",
+        "capture_errors": []
+      },
+      "additional_metrics": {
+        "ping_max_ms": 54.9,
+        "ping_mean_ms": 6.105223881831365,
+        "ping_samples": 134,
+        "ping_resource_timing_entries": 0
+      },
+      "independent_checks": {
+        "source_files_match_commit": "506ebba40af8fd5fefb37125eb61c7bc565d45fb",
+        "browser_errors_empty": true,
+        "all_urls_loopback": true,
+        "screenshot_present": true
+      },
+      "raw_sha256": {
+        "summary.json": "b84f32cdcbd3028781caae06eb6e78da286dcbc40c3941b74f98f33134fe6e8d",
+        "environment.json": "e0bf6385b551212811f75117cf1021863730ee7a2ed8cbeb9ba5693ab3cbfb5f",
+        "browser.json": "1dddef740de5e597ec28480c168c79aff7c6c0610555eebd98d2e6421c56a241",
+        "proxy.json": "6735d3d0b8c9d668b3ba2807a3b9037a349e3ef4ccb1816d31bba33a1600a443",
+        "browser.png": "8fd7e976bbc8ba7248568e7ed4344f453da9d5139a6bb2acada86dc1433991cf"
+      }
+    },
+    {
+      "directory": "before-intrinsic-1",
+      "environment": {
+        "source": {
+          "root": "/tmp/kosher-browser-baseline",
+          "commit": null,
+          "tracked_diff_sha256": null,
+          "files_sha256": {
+            "mitm/kosher_filter.py": "4bf6924083cdc2e2976fd875ba52e3de17681280bf75a96f1737cc6ec38a51ee",
+            "mitm/kosher_page.js": "8d2f7db3514da1689a9732ce3d9ff118e17e0cb875073714b7c1770ca8b29948",
+            "kosherd/src/kosherd/vision.py": "90e1602019c70bb5c242c3f8db3c029da4b124aea79111ebb58ea18acbba9f8e",
+            "kosherd/src/kosherd/videocheck.py": "00f1f4023b82525012111932b844622ac43c938fcb6ab8b2cda55fc40fa4a19b",
+            "kosherd/src/kosherd/imageedit.py": "b03afebf4ffc4d8a2ddb9d92d7a743107fc2c22be46e0879411f586fcf617465"
+          }
+        },
+        "host": {
+          "architecture": "x86_64",
+          "kernel": "7.2.13-200.fc44.x86_64",
+          "logical_cpus": 12,
+          "python": "3.14.8",
+          "cpu_model": "Intel(R) Core(TM) i7-10710U CPU @ 1.10GHz",
+          "platform_profile": "performance",
+          "energy_preferences": [
+            "performance"
+          ],
+          "governors": [
+            "performance"
+          ],
+          "load_average": [
+            1.66796875,
+            1.7158203125,
+            1.84521484375
+          ]
+        },
+        "runtime_pythonpath": [
+          "/tmp/kosher-browser-baseline/kosherd/src"
+        ],
+        "expected_power_settings": {
+          "platform_profile": "performance",
+          "energy_preferences": [
+            "performance"
+          ],
+          "governors": [
+            "performance"
+          ]
+        },
+        "host_end": {
+          "architecture": "x86_64",
+          "kernel": "7.2.13-200.fc44.x86_64",
+          "logical_cpus": 12,
+          "python": "3.14.8",
+          "cpu_model": "Intel(R) Core(TM) i7-10710U CPU @ 1.10GHz",
+          "platform_profile": "performance",
+          "energy_preferences": [
+            "performance"
+          ],
+          "governors": [
+            "performance"
+          ],
+          "load_average": [
+            1.4970703125,
+            1.6728515625,
+            1.82666015625
+          ]
+        }
+      },
+      "summary": {
+        "version": "before",
+        "scenario": "intrinsic",
+        "repeat": 1,
+        "browser": "156.0.8078.80",
+        "critical_js_ms": 44.9,
+        "dom_content_loaded_ms": 45,
+        "load_ms": 216.3,
+        "frame_gap_p95_ms": 16.7,
+        "frame_gap_max_ms": 16.8,
+        "frames_over_50ms": 0,
+        "loading_frame_gap_p95_ms": 16.7,
+        "loading_frame_gap_max_ms": 16.8,
+        "input_next_frame_p95_ms": 12.6,
+        "input_next_frame_max_ms": 12.8,
+        "reported_interactions": 0,
+        "reported_interaction_max_ms": null,
+        "input_dispatches": 120,
+        "cdp_dispatch_roundtrip_max_ms": 10.69,
+        "clicks": 119,
+        "long_tasks": 0,
+        "long_task_total_ms": 0,
+        "layout_shift_sum": 0,
+        "layout_shift_sum_including_input": 1.5e-05,
+        "ping_p95_ms": 6.6,
+        "ping_max_ms": 52.6,
+        "proxy_lag_p95_ms": 0.55,
+        "proxy_lag_max_ms": 157.05,
+        "inferences": 0,
+        "image_complete": 6,
+        "media_results": {
+          "image-hidden": 6
+        },
+        "image_status_ui_hosts": 0,
+        "visible_image_status_labels": {},
+        "observed_image_status_states": {},
+        "status_api_http_codes": {},
+        "video_states": [],
+        "validation": {
+          "valid": true,
+          "errors": [],
+          "geometry_preserved": 6,
+          "verified_hidden_tiles": 6,
+          "verified_covers": 0
+        },
+        "power": {
+          "start": {
+            "platform_profile": "performance",
+            "energy_preferences": [
+              "performance"
+            ],
+            "governors": [
+              "performance"
+            ]
+          },
+          "end": {
+            "platform_profile": "performance",
+            "energy_preferences": [
+              "performance"
+            ],
+            "governors": [
+              "performance"
+            ]
+          },
+          "expected": {
+            "platform_profile": "performance",
+            "energy_preferences": [
+              "performance"
+            ],
+            "governors": [
+              "performance"
+            ]
+          },
+          "valid": true
+        },
+        "capture_status": "saved",
+        "capture_errors": []
+      },
+      "additional_metrics": {
+        "ping_max_ms": 52.6,
+        "ping_mean_ms": 6.062406013446643,
+        "ping_samples": 133,
+        "ping_resource_timing_entries": 0
+      },
+      "independent_checks": {
+        "source_files_match_commit": "506ebba40af8fd5fefb37125eb61c7bc565d45fb",
+        "browser_errors_empty": true,
+        "all_urls_loopback": true,
+        "screenshot_present": true
+      },
+      "raw_sha256": {
+        "summary.json": "c7bb54f92d70d205095216034acd1554ca648b9b8784fa44617f9d9d2ae9ea8f",
+        "environment.json": "776507c9c73eb6835a7c9ab6493fef14eb5693caebba157fa1aecdaea3afed24",
+        "browser.json": "7534e28b21d8ce029177d35e2a81faa8e72b6e61572c3df69e6e2c7c8a400b30",
+        "proxy.json": "cff9e3cd6834d092b33ff53f41ca3aa7220acafb2be138b649df3498a09f7394",
+        "browser.png": "111f20dff37b2c8ee25b9a4e01913f63dafe70d5eca671a1ac02ed71f616cb6f"
+      }
+    }
+  ],
+  "aggregates": {
+    "trials": 16,
+    "paired_trials_per_scenario": 2,
+    "all_correctness_valid": true,
+    "all_captures_saved": true,
+    "all_power_checks_valid": true,
+    "expected_power": {
+      "platform_profile": "performance",
+      "energy_preferences": [
+        "performance"
+      ],
+      "governors": [
+        "performance"
+      ]
+    },
+    "candidate_commits": [
+      "5468b17e64a67dcc2cc07465a9e9a7831fc8ed4d"
+    ],
+    "notes": [
+      "Two paired repeats per scenario, with AB then BA order. Medians and observed ranges are descriptive, not confidence intervals.",
+      "Percent changes compare the displayed medians; individual paired changes are also included.",
+      "EventTiming null means missing reported slow-event evidence, not zero latency.",
+      "Next-frame timing uses requestAnimationFrame; it is not presentation latency or INP.",
+      "Current Performance-mode values cannot isolate UI effects from historical low-power results.",
+      "Whole-window ping statistics include the entire 20-second interaction window. Subsecond loads can occupy fewer than 5% of samples, so whole-window p95 may miss initial blocking.",
+      "Loading-phase ping metrics are unavailable: raw ping durations lack timestamps and ResourceTiming contains no /ping entries. Nulls do not mean zero latency or no requests. Full-window ping mean/max/p95 remain valid.",
+      "Ping measures fetch-to-response-headers latency; the response body is not consumed."
+    ],
+    "rows": [
+      {
+        "scenario": "hidden",
+        "pairs": 2,
+        "metrics": {
+          "proxy_lag_max_ms": {
+            "before": {
+              "median": 229.03,
+              "range": [
+                188.99,
+                269.07
+              ],
+              "values": [
+                188.99,
+                269.07
+              ],
+              "available": 2
+            },
+            "after": {
+              "median": 22.995,
+              "range": [
+                22.9,
+                23.09
+              ],
+              "values": [
+                22.9,
+                23.09
+              ],
+              "available": 2
+            },
+            "percent_change_of_medians": -89.9598,
+            "paired_percent_changes": [
+              -87.883,
+              -91.4186
+            ]
+          },
+          "proxy_lag_p95_ms": {
+            "before": {
+              "median": 0.66,
+              "range": [
+                0.64,
+                0.68
+              ],
+              "values": [
+                0.68,
+                0.64
+              ],
+              "available": 2
+            },
+            "after": {
+              "median": 0.74,
+              "range": [
+                0.7,
+                0.78
+              ],
+              "values": [
+                0.78,
+                0.7
+              ],
+              "available": 2
+            },
+            "percent_change_of_medians": 12.1212,
+            "paired_percent_changes": [
+              14.7059,
+              9.375
+            ]
+          },
+          "ping_p95_ms": {
+            "before": {
+              "median": 13.8,
+              "range": [
+                7.3,
+                20.3
+              ],
+              "values": [
+                7.3,
+                20.3
+              ],
+              "available": 2
+            },
+            "after": {
+              "median": 16.05,
+              "range": [
+                14.1,
+                18
+              ],
+              "values": [
+                18,
+                14.1
+              ],
+              "available": 2
+            },
+            "percent_change_of_medians": 16.3043,
+            "paired_percent_changes": [
+              146.5753,
+              -30.5419
+            ]
+          },
+          "loading_frame_gap_max_ms": {
+            "before": {
+              "median": 91.65,
+              "range": [
+                83.3,
+                100
+              ],
+              "values": [
+                100,
+                83.3
+              ],
+              "available": 2
+            },
+            "after": {
+              "median": 33.4,
+              "range": [
+                33.4,
+                33.4
+              ],
+              "values": [
+                33.4,
+                33.4
+              ],
+              "available": 2
+            },
+            "percent_change_of_medians": -63.557,
+            "paired_percent_changes": [
+              -66.6,
+              -59.904
+            ]
+          },
+          "loading_frame_gap_p95_ms": {
+            "before": {
+              "median": 49.95,
+              "range": [
+                33.3,
+                66.6
+              ],
+              "values": [
+                66.6,
+                33.3
+              ],
+              "available": 2
+            },
+            "after": {
+              "median": 33.35,
+              "range": [
+                33.3,
+                33.4
+              ],
+              "values": [
+                33.3,
+                33.4
+              ],
+              "available": 2
+            },
+            "percent_change_of_medians": -33.2332,
+            "paired_percent_changes": [
+              -50.0,
+              0.3003
+            ]
+          },
+          "frame_gap_max_ms": {
+            "before": {
+              "median": 125.0,
+              "range": [
+                100,
+                150
+              ],
+              "values": [
+                100,
+                150
+              ],
+              "available": 2
+            },
+            "after": {
+              "median": 58.35,
+              "range": [
+                50.1,
+                66.6
+              ],
+              "values": [
+                50.1,
+                66.6
+              ],
+              "available": 2
+            },
+            "percent_change_of_medians": -53.32,
+            "paired_percent_changes": [
+              -49.9,
+              -55.6
+            ]
+          },
+          "frames_over_50ms": {
+            "before": {
+              "median": 2.5,
+              "range": [
+                2,
+                3
+              ],
+              "values": [
+                3,
+                2
+              ],
+              "available": 2
+            },
+            "after": {
+              "median": 1.0,
+              "range": [
+                1,
+                1
+              ],
+              "values": [
+                1,
+                1
+              ],
+              "available": 2
+            },
+            "percent_change_of_medians": -60.0,
+            "paired_percent_changes": [
+              -66.6667,
+              -50.0
+            ]
+          },
+          "load_ms": {
+            "before": {
+              "median": 717.55,
+              "range": [
+                688,
+                747.1
+              ],
+              "values": [
+                747.1,
+                688
+              ],
+              "available": 2
+            },
+            "after": {
+              "median": 636.6,
+              "range": [
+                625.5,
+                647.7
+              ],
+              "values": [
+                647.7,
+                625.5
+              ],
+              "available": 2
+            },
+            "percent_change_of_medians": -11.2814,
+            "paired_percent_changes": [
+              -13.3048,
+              -9.0843
+            ]
+          },
+          "dom_content_loaded_ms": {
+            "before": {
+              "median": 60.9,
+              "range": [
+                43.5,
+                78.3
+              ],
+              "values": [
+                78.3,
+                43.5
+              ],
+              "available": 2
+            },
+            "after": {
+              "median": 60.95,
+              "range": [
+                59.9,
+                62
+              ],
+              "values": [
+                62,
+                59.9
+              ],
+              "available": 2
+            },
+            "percent_change_of_medians": 0.0821,
+            "paired_percent_changes": [
+              -20.8174,
+              37.7011
+            ]
+          },
+          "input_next_frame_p95_ms": {
+            "before": {
+              "median": 13.35,
+              "range": [
+                13.2,
+                13.5
+              ],
+              "values": [
+                13.5,
+                13.2
+              ],
+              "available": 2
+            },
+            "after": {
+              "median": 13.35,
+              "range": [
+                13.2,
+                13.5
+              ],
+              "values": [
+                13.2,
+                13.5
+              ],
+              "available": 2
+            },
+            "percent_change_of_medians": 0.0,
+            "paired_percent_changes": [
+              -2.2222,
+              2.2727
+            ]
+          },
+          "input_next_frame_max_ms": {
+            "before": {
+              "median": 41.75,
+              "range": [
+                25,
+                58.5
+              ],
+              "values": [
+                58.5,
+                25
+              ],
+              "available": 2
+            },
+            "after": {
+              "median": 14.05,
+              "range": [
+                13.8,
+                14.3
+              ],
+              "values": [
+                13.8,
+                14.3
+              ],
+              "available": 2
+            },
+            "percent_change_of_medians": -66.3473,
+            "paired_percent_changes": [
+              -76.4103,
+              -42.8
+            ]
+          },
+          "reported_interaction_max_ms": {
+            "before": {
+              "median": null,
+              "range": null,
+              "values": [
+                null,
+                null
+              ],
+              "available": 0
+            },
+            "after": {
+              "median": null,
+              "range": null,
+              "values": [
+                null,
+                null
+              ],
+              "available": 0
+            },
+            "percent_change_of_medians": null,
+            "paired_percent_changes": []
+          },
+          "inferences": {
+            "before": {
+              "median": 0.0,
+              "range": [
+                0,
+                0
+              ],
+              "values": [
+                0,
+                0
+              ],
+              "available": 2
+            },
+            "after": {
+              "median": 0.0,
+              "range": [
+                0,
+                0
+              ],
+              "values": [
+                0,
+                0
+              ],
+              "available": 2
+            },
+            "percent_change_of_medians": null,
+            "paired_percent_changes": []
+          },
+          "ping_max_ms": {
+            "before": {
+              "median": 463.25,
+              "range": [
+                423.7,
+                502.8
+              ],
+              "values": [
+                502.8,
+                423.7
+              ],
+              "available": 2
+            },
+            "after": {
+              "median": 25.75,
+              "range": [
+                19,
+                32.5
+              ],
+              "values": [
+                19,
+                32.5
+              ],
+              "available": 2
+            },
+            "percent_change_of_medians": -94.4414,
+            "paired_percent_changes": [
+              -96.2212,
+              -92.3295
+            ]
+          },
+          "ping_mean_ms": {
+            "before": {
+              "median": 14.2752,
+              "range": [
+                14.23684210699976,
+                14.313533832648195
+              ],
+              "values": [
+                14.23684210699976,
+                14.313533832648195
+              ],
+              "available": 2
+            },
+            "after": {
+              "median": 6.9034,
+              "range": [
+                6.409022556155696,
+                7.397744359042411
+              ],
+              "values": [
+                7.397744359042411,
+                6.409022556155696
+              ],
+              "available": 2
+            },
+            "percent_change_of_medians": -51.6406,
+            "paired_percent_changes": [
+              -48.038,
+              -55.224
+            ]
+          }
+        },
+        "quality": {
+          "before": [
+            {
+              "repeat": 0,
+              "geometry": 36,
+              "hidden_pixels": 36,
+              "covers": 0,
+              "media_results": {
+                "image-hidden": 36
+              },
+              "video_states": [],
+              "clicks": 109,
+              "input_dispatches": 110,
+              "status_api_codes": {},
+              "ui_final_states": {},
+              "ui_visible_labels": {},
+              "valid": true,
+              "capture": "saved",
+              "power": {
+                "start": {
+                  "platform_profile": "performance",
+                  "energy_preferences": [
+                    "performance"
+                  ],
+                  "governors": [
+                    "performance"
+                  ]
+                },
+                "end": {
+                  "platform_profile": "performance",
+                  "energy_preferences": [
+                    "performance"
+                  ],
+                  "governors": [
+                    "performance"
+                  ]
+                },
+                "expected": {
+                  "platform_profile": "performance",
+                  "energy_preferences": [
+                    "performance"
+                  ],
+                  "governors": [
+                    "performance"
+                  ]
+                },
+                "valid": true
+              }
+            },
+            {
+              "repeat": 1,
+              "geometry": 36,
+              "hidden_pixels": 36,
+              "covers": 0,
+              "media_results": {
+                "image-hidden": 36
+              },
+              "video_states": [],
+              "clicks": 110,
+              "input_dispatches": 111,
+              "status_api_codes": {},
+              "ui_final_states": {},
+              "ui_visible_labels": {},
+              "valid": true,
+              "capture": "saved",
+              "power": {
+                "start": {
+                  "platform_profile": "performance",
+                  "energy_preferences": [
+                    "performance"
+                  ],
+                  "governors": [
+                    "performance"
+                  ]
+                },
+                "end": {
+                  "platform_profile": "performance",
+                  "energy_preferences": [
+                    "performance"
+                  ],
+                  "governors": [
+                    "performance"
+                  ]
+                },
+                "expected": {
+                  "platform_profile": "performance",
+                  "energy_preferences": [
+                    "performance"
+                  ],
+                  "governors": [
+                    "performance"
+                  ]
+                },
+                "valid": true
+              }
+            }
+          ],
+          "after": [
+            {
+              "repeat": 0,
+              "geometry": 36,
+              "hidden_pixels": 36,
+              "covers": 0,
+              "media_results": {
+                "image-hidden": 36
+              },
+              "video_states": [],
+              "clicks": 110,
+              "input_dispatches": 111,
+              "status_api_codes": {
+                "200": 3
+              },
+              "ui_final_states": {
+                "hidden": 36
+              },
+              "ui_visible_labels": {
+                "Hidden": 16
+              },
+              "valid": true,
+              "capture": "saved",
+              "power": {
+                "start": {
+                  "platform_profile": "performance",
+                  "energy_preferences": [
+                    "performance"
+                  ],
+                  "governors": [
+                    "performance"
+                  ]
+                },
+                "end": {
+                  "platform_profile": "performance",
+                  "energy_preferences": [
+                    "performance"
+                  ],
+                  "governors": [
+                    "performance"
+                  ]
+                },
+                "expected": {
+                  "platform_profile": "performance",
+                  "energy_preferences": [
+                    "performance"
+                  ],
+                  "governors": [
+                    "performance"
+                  ]
+                },
+                "valid": true
+              }
+            },
+            {
+              "repeat": 1,
+              "geometry": 36,
+              "hidden_pixels": 36,
+              "covers": 0,
+              "media_results": {
+                "image-hidden": 36
+              },
+              "video_states": [],
+              "clicks": 110,
+              "input_dispatches": 111,
+              "status_api_codes": {
+                "200": 3
+              },
+              "ui_final_states": {
+                "hidden": 36
+              },
+              "ui_visible_labels": {
+                "Hidden": 16
+              },
+              "valid": true,
+              "capture": "saved",
+              "power": {
+                "start": {
+                  "platform_profile": "performance",
+                  "energy_preferences": [
+                    "performance"
+                  ],
+                  "governors": [
+                    "performance"
+                  ]
+                },
+                "end": {
+                  "platform_profile": "performance",
+                  "energy_preferences": [
+                    "performance"
+                  ],
+                  "governors": [
+                    "performance"
+                  ]
+                },
+                "expected": {
+                  "platform_profile": "performance",
+                  "energy_preferences": [
+                    "performance"
+                  ],
+                  "governors": [
+                    "performance"
+                  ]
+                },
+                "valid": true
+              }
+            }
+          ]
+        }
+      },
+      {
+        "scenario": "intrinsic",
+        "pairs": 2,
+        "metrics": {
+          "proxy_lag_max_ms": {
+            "before": {
+              "median": 156.57,
+              "range": [
+                156.09,
+                157.05
+              ],
+              "values": [
+                156.09,
+                157.05
+              ],
+              "available": 2
+            },
+            "after": {
+              "median": 23.635,
+              "range": [
+                23.54,
+                23.73
+              ],
+              "values": [
+                23.73,
+                23.54
+              ],
+              "available": 2
+            },
+            "percent_change_of_medians": -84.9045,
+            "paired_percent_changes": [
+              -84.7972,
+              -85.0111
+            ]
+          },
+          "proxy_lag_p95_ms": {
+            "before": {
+              "median": 0.535,
+              "range": [
+                0.52,
+                0.55
+              ],
+              "values": [
+                0.52,
+                0.55
+              ],
+              "available": 2
+            },
+            "after": {
+              "median": 0.625,
+              "range": [
+                0.59,
+                0.66
+              ],
+              "values": [
+                0.59,
+                0.66
+              ],
+              "available": 2
+            },
+            "percent_change_of_medians": 16.8224,
+            "paired_percent_changes": [
+              13.4615,
+              20.0
+            ]
+          },
+          "ping_p95_ms": {
+            "before": {
+              "median": 6.65,
+              "range": [
+                6.6,
+                6.7
+              ],
+              "values": [
+                6.7,
+                6.6
+              ],
+              "available": 2
+            },
+            "after": {
+              "median": 11.8,
+              "range": [
+                6.8,
+                16.8
+              ],
+              "values": [
+                6.8,
+                16.8
+              ],
+              "available": 2
+            },
+            "percent_change_of_medians": 77.4436,
+            "paired_percent_changes": [
+              1.4925,
+              154.5455
+            ]
+          },
+          "loading_frame_gap_max_ms": {
+            "before": {
+              "median": 16.75,
+              "range": [
+                16.7,
+                16.8
+              ],
+              "values": [
+                16.7,
+                16.8
+              ],
+              "available": 2
+            },
+            "after": {
+              "median": 16.75,
+              "range": [
+                16.7,
+                16.8
+              ],
+              "values": [
+                16.8,
+                16.7
+              ],
+              "available": 2
+            },
+            "percent_change_of_medians": 0.0,
+            "paired_percent_changes": [
+              0.5988,
+              -0.5952
+            ]
+          },
+          "loading_frame_gap_p95_ms": {
+            "before": {
+              "median": 16.7,
+              "range": [
+                16.7,
+                16.7
+              ],
+              "values": [
+                16.7,
+                16.7
+              ],
+              "available": 2
+            },
+            "after": {
+              "median": 16.7,
+              "range": [
+                16.7,
+                16.7
+              ],
+              "values": [
+                16.7,
+                16.7
+              ],
+              "available": 2
+            },
+            "percent_change_of_medians": 0.0,
+            "paired_percent_changes": [
+              0.0,
+              0.0
+            ]
+          },
+          "frame_gap_max_ms": {
+            "before": {
+              "median": 16.8,
+              "range": [
+                16.8,
+                16.8
+              ],
+              "values": [
+                16.8,
+                16.8
+              ],
+              "available": 2
+            },
+            "after": {
+              "median": 16.8,
+              "range": [
+                16.8,
+                16.8
+              ],
+              "values": [
+                16.8,
+                16.8
+              ],
+              "available": 2
+            },
+            "percent_change_of_medians": 0.0,
+            "paired_percent_changes": [
+              0.0,
+              0.0
+            ]
+          },
+          "frames_over_50ms": {
+            "before": {
+              "median": 0.0,
+              "range": [
+                0,
+                0
+              ],
+              "values": [
+                0,
+                0
+              ],
+              "available": 2
+            },
+            "after": {
+              "median": 0.0,
+              "range": [
+                0,
+                0
+              ],
+              "values": [
+                0,
+                0
+              ],
+              "available": 2
+            },
+            "percent_change_of_medians": null,
+            "paired_percent_changes": []
+          },
+          "load_ms": {
+            "before": {
+              "median": 216.45,
+              "range": [
+                216.3,
+                216.6
+              ],
+              "values": [
+                216.6,
+                216.3
+              ],
+              "available": 2
+            },
+            "after": {
+              "median": 169.35,
+              "range": [
+                166,
+                172.7
+              ],
+              "values": [
+                166,
+                172.7
+              ],
+              "available": 2
+            },
+            "percent_change_of_medians": -21.7602,
+            "paired_percent_changes": [
+              -23.361,
+              -20.1572
+            ]
+          },
+          "dom_content_loaded_ms": {
+            "before": {
+              "median": 43.45,
+              "range": [
+                41.9,
+                45
+              ],
+              "values": [
+                41.9,
+                45
+              ],
+              "available": 2
+            },
+            "after": {
+              "median": 53.25,
+              "range": [
+                51.1,
+                55.4
+              ],
+              "values": [
+                51.1,
+                55.4
+              ],
+              "available": 2
+            },
+            "percent_change_of_medians": 22.5547,
+            "paired_percent_changes": [
+              21.957,
+              23.1111
+            ]
+          },
+          "input_next_frame_p95_ms": {
+            "before": {
+              "median": 12.55,
+              "range": [
+                12.5,
+                12.6
+              ],
+              "values": [
+                12.5,
+                12.6
+              ],
+              "available": 2
+            },
+            "after": {
+              "median": 12.75,
+              "range": [
+                12.6,
+                12.9
+              ],
+              "values": [
+                12.9,
+                12.6
+              ],
+              "available": 2
+            },
+            "percent_change_of_medians": 1.5936,
+            "paired_percent_changes": [
+              3.2,
+              0.0
+            ]
+          },
+          "input_next_frame_max_ms": {
+            "before": {
+              "median": 13.05,
+              "range": [
+                12.8,
+                13.3
+              ],
+              "values": [
+                13.3,
+                12.8
+              ],
+              "available": 2
+            },
+            "after": {
+              "median": 13.15,
+              "range": [
+                12.8,
+                13.5
+              ],
+              "values": [
+                13.5,
+                12.8
+              ],
+              "available": 2
+            },
+            "percent_change_of_medians": 0.7663,
+            "paired_percent_changes": [
+              1.5038,
+              0.0
+            ]
+          },
+          "reported_interaction_max_ms": {
+            "before": {
+              "median": null,
+              "range": null,
+              "values": [
+                null,
+                null
+              ],
+              "available": 0
+            },
+            "after": {
+              "median": null,
+              "range": null,
+              "values": [
+                null,
+                null
+              ],
+              "available": 0
+            },
+            "percent_change_of_medians": null,
+            "paired_percent_changes": []
+          },
+          "inferences": {
+            "before": {
+              "median": 0.0,
+              "range": [
+                0,
+                0
+              ],
+              "values": [
+                0,
+                0
+              ],
+              "available": 2
+            },
+            "after": {
+              "median": 0.0,
+              "range": [
+                0,
+                0
+              ],
+              "values": [
+                0,
+                0
+              ],
+              "available": 2
+            },
+            "percent_change_of_medians": null,
+            "paired_percent_changes": []
+          },
+          "ping_max_ms": {
+            "before": {
+              "median": 53.75,
+              "range": [
+                52.6,
+                54.9
+              ],
+              "values": [
+                54.9,
+                52.6
+              ],
+              "available": 2
+            },
+            "after": {
+              "median": 21.25,
+              "range": [
+                8.9,
+                33.6
+              ],
+              "values": [
+                8.9,
+                33.6
+              ],
+              "available": 2
+            },
+            "percent_change_of_medians": -60.4651,
+            "paired_percent_changes": [
+              -83.7887,
+              -36.1217
+            ]
+          },
+          "ping_mean_ms": {
+            "before": {
+              "median": 6.0838,
+              "range": [
+                6.062406013446643,
+                6.105223881831365
+              ],
+              "values": [
+                6.105223881831365,
+                6.062406013446643
+              ],
+              "available": 2
+            },
+            "after": {
+              "median": 6.5053,
+              "range": [
+                5.899999999126098,
+                7.110526315531785
+              ],
+              "values": [
+                5.899999999126098,
+                7.110526315531785
+              ],
+              "available": 2
+            },
+            "percent_change_of_medians": 6.9282,
+            "paired_percent_changes": [
+              -3.3614,
+              17.2889
+            ]
+          }
+        },
+        "quality": {
+          "before": [
+            {
+              "repeat": 0,
+              "geometry": 6,
+              "hidden_pixels": 6,
+              "covers": 0,
+              "media_results": {
+                "image-hidden": 6
+              },
+              "video_states": [],
+              "clicks": 120,
+              "input_dispatches": 121,
+              "status_api_codes": {},
+              "ui_final_states": {},
+              "ui_visible_labels": {},
+              "valid": true,
+              "capture": "saved",
+              "power": {
+                "start": {
+                  "platform_profile": "performance",
+                  "energy_preferences": [
+                    "performance"
+                  ],
+                  "governors": [
+                    "performance"
+                  ]
+                },
+                "end": {
+                  "platform_profile": "performance",
+                  "energy_preferences": [
+                    "performance"
+                  ],
+                  "governors": [
+                    "performance"
+                  ]
+                },
+                "expected": {
+                  "platform_profile": "performance",
+                  "energy_preferences": [
+                    "performance"
+                  ],
+                  "governors": [
+                    "performance"
+                  ]
+                },
+                "valid": true
+              }
+            },
+            {
+              "repeat": 1,
+              "geometry": 6,
+              "hidden_pixels": 6,
+              "covers": 0,
+              "media_results": {
+                "image-hidden": 6
+              },
+              "video_states": [],
+              "clicks": 119,
+              "input_dispatches": 120,
+              "status_api_codes": {},
+              "ui_final_states": {},
+              "ui_visible_labels": {},
+              "valid": true,
+              "capture": "saved",
+              "power": {
+                "start": {
+                  "platform_profile": "performance",
+                  "energy_preferences": [
+                    "performance"
+                  ],
+                  "governors": [
+                    "performance"
+                  ]
+                },
+                "end": {
+                  "platform_profile": "performance",
+                  "energy_preferences": [
+                    "performance"
+                  ],
+                  "governors": [
+                    "performance"
+                  ]
+                },
+                "expected": {
+                  "platform_profile": "performance",
+                  "energy_preferences": [
+                    "performance"
+                  ],
+                  "governors": [
+                    "performance"
+                  ]
+                },
+                "valid": true
+              }
+            }
+          ],
+          "after": [
+            {
+              "repeat": 0,
+              "geometry": 6,
+              "hidden_pixels": 6,
+              "covers": 0,
+              "media_results": {
+                "image-hidden": 6
+              },
+              "video_states": [],
+              "clicks": 119,
+              "input_dispatches": 120,
+              "status_api_codes": {
+                "200": 1
+              },
+              "ui_final_states": {
+                "hidden": 6
+              },
+              "ui_visible_labels": {
+                "Hidden": 6
+              },
+              "valid": true,
+              "capture": "saved",
+              "power": {
+                "start": {
+                  "platform_profile": "performance",
+                  "energy_preferences": [
+                    "performance"
+                  ],
+                  "governors": [
+                    "performance"
+                  ]
+                },
+                "end": {
+                  "platform_profile": "performance",
+                  "energy_preferences": [
+                    "performance"
+                  ],
+                  "governors": [
+                    "performance"
+                  ]
+                },
+                "expected": {
+                  "platform_profile": "performance",
+                  "energy_preferences": [
+                    "performance"
+                  ],
+                  "governors": [
+                    "performance"
+                  ]
+                },
+                "valid": true
+              }
+            },
+            {
+              "repeat": 1,
+              "geometry": 6,
+              "hidden_pixels": 6,
+              "covers": 0,
+              "media_results": {
+                "image-hidden": 6
+              },
+              "video_states": [],
+              "clicks": 119,
+              "input_dispatches": 120,
+              "status_api_codes": {
+                "200": 1
+              },
+              "ui_final_states": {
+                "hidden": 6
+              },
+              "ui_visible_labels": {
+                "Hidden": 6
+              },
+              "valid": true,
+              "capture": "saved",
+              "power": {
+                "start": {
+                  "platform_profile": "performance",
+                  "energy_preferences": [
+                    "performance"
+                  ],
+                  "governors": [
+                    "performance"
+                  ]
+                },
+                "end": {
+                  "platform_profile": "performance",
+                  "energy_preferences": [
+                    "performance"
+                  ],
+                  "governors": [
+                    "performance"
+                  ]
+                },
+                "expected": {
+                  "platform_profile": "performance",
+                  "energy_preferences": [
+                    "performance"
+                  ],
+                  "governors": [
+                    "performance"
+                  ]
+                },
+                "valid": true
+              }
+            }
+          ]
+        }
+      },
+      {
+        "scenario": "covers",
+        "pairs": 2,
+        "metrics": {
+          "proxy_lag_max_ms": {
+            "before": {
+              "median": 153.26,
+              "range": [
+                145.34,
+                161.18
+              ],
+              "values": [
+                161.18,
+                145.34
+              ],
+              "available": 2
+            },
+            "after": {
+              "median": 26.275,
+              "range": [
+                23.38,
+                29.17
+              ],
+              "values": [
+                29.17,
+                23.38
+              ],
+              "available": 2
+            },
+            "percent_change_of_medians": -82.8559,
+            "paired_percent_changes": [
+              -81.9022,
+              -83.9136
+            ]
+          },
+          "proxy_lag_p95_ms": {
+            "before": {
+              "median": 0.79,
+              "range": [
+                0.77,
+                0.81
+              ],
+              "values": [
+                0.81,
+                0.77
+              ],
+              "available": 2
+            },
+            "after": {
+              "median": 0.905,
+              "range": [
+                0.85,
+                0.96
+              ],
+              "values": [
+                0.96,
+                0.85
+              ],
+              "available": 2
+            },
+            "percent_change_of_medians": 14.557,
+            "paired_percent_changes": [
+              18.5185,
+              10.3896
+            ]
+          },
+          "ping_p95_ms": {
+            "before": {
+              "median": 17.7,
+              "range": [
+                16.5,
+                18.9
+              ],
+              "values": [
+                16.5,
+                18.9
+              ],
+              "available": 2
+            },
+            "after": {
+              "median": 12.65,
+              "range": [
+                7.6,
+                17.7
+              ],
+              "values": [
+                17.7,
+                7.6
+              ],
+              "available": 2
+            },
+            "percent_change_of_medians": -28.5311,
+            "paired_percent_changes": [
+              7.2727,
+              -59.7884
+            ]
+          },
+          "loading_frame_gap_max_ms": {
+            "before": {
+              "median": 58.4,
+              "range": [
+                33.4,
+                83.4
+              ],
+              "values": [
+                83.4,
+                33.4
+              ],
+              "available": 2
+            },
+            "after": {
+              "median": 33.4,
+              "range": [
+                33.4,
+                33.4
+              ],
+              "values": [
+                33.4,
+                33.4
+              ],
+              "available": 2
+            },
+            "percent_change_of_medians": -42.8082,
+            "paired_percent_changes": [
+              -59.952,
+              0.0
+            ]
+          },
+          "loading_frame_gap_p95_ms": {
+            "before": {
+              "median": 33.4,
+              "range": [
+                33.4,
+                33.4
+              ],
+              "values": [
+                33.4,
+                33.4
+              ],
+              "available": 2
+            },
+            "after": {
+              "median": 33.4,
+              "range": [
+                33.4,
+                33.4
+              ],
+              "values": [
+                33.4,
+                33.4
+              ],
+              "available": 2
+            },
+            "percent_change_of_medians": 0.0,
+            "paired_percent_changes": [
+              0.0,
+              0.0
+            ]
+          },
+          "frame_gap_max_ms": {
+            "before": {
+              "median": 58.4,
+              "range": [
+                33.4,
+                83.4
+              ],
+              "values": [
+                83.4,
+                33.4
+              ],
+              "available": 2
+            },
+            "after": {
+              "median": 33.4,
+              "range": [
+                33.4,
+                33.4
+              ],
+              "values": [
+                33.4,
+                33.4
+              ],
+              "available": 2
+            },
+            "percent_change_of_medians": -42.8082,
+            "paired_percent_changes": [
+              -59.952,
+              0.0
+            ]
+          },
+          "frames_over_50ms": {
+            "before": {
+              "median": 0.5,
+              "range": [
+                0,
+                1
+              ],
+              "values": [
+                1,
+                0
+              ],
+              "available": 2
+            },
+            "after": {
+              "median": 0.0,
+              "range": [
+                0,
+                0
+              ],
+              "values": [
+                0,
+                0
+              ],
+              "available": 2
+            },
+            "percent_change_of_medians": -100.0,
+            "paired_percent_changes": [
+              -100.0
+            ]
+          },
+          "load_ms": {
+            "before": {
+              "median": 1190.8,
+              "range": [
+                1160.6,
+                1221
+              ],
+              "values": [
+                1221,
+                1160.6
+              ],
+              "available": 2
+            },
+            "after": {
+              "median": 1211.3,
+              "range": [
+                1198.6,
+                1224
+              ],
+              "values": [
+                1198.6,
+                1224
+              ],
+              "available": 2
+            },
+            "percent_change_of_medians": 1.7215,
+            "paired_percent_changes": [
+              -1.8346,
+              5.4627
+            ]
+          },
+          "dom_content_loaded_ms": {
+            "before": {
+              "median": 65.95,
+              "range": [
+                44.6,
+                87.3
+              ],
+              "values": [
+                87.3,
+                44.6
+              ],
+              "available": 2
+            },
+            "after": {
+              "median": 78.1,
+              "range": [
+                71.1,
+                85.1
+              ],
+              "values": [
+                85.1,
+                71.1
+              ],
+              "available": 2
+            },
+            "percent_change_of_medians": 18.423,
+            "paired_percent_changes": [
+              -2.52,
+              59.417
+            ]
+          },
+          "input_next_frame_p95_ms": {
+            "before": {
+              "median": 13.25,
+              "range": [
+                13,
+                13.5
+              ],
+              "values": [
+                13,
+                13.5
+              ],
+              "available": 2
+            },
+            "after": {
+              "median": 13.35,
+              "range": [
+                13.3,
+                13.4
+              ],
+              "values": [
+                13.3,
+                13.4
+              ],
+              "available": 2
+            },
+            "percent_change_of_medians": 0.7547,
+            "paired_percent_changes": [
+              2.3077,
+              -0.7407
+            ]
+          },
+          "input_next_frame_max_ms": {
+            "before": {
+              "median": 28.75,
+              "range": [
+                28.7,
+                28.8
+              ],
+              "values": [
+                28.7,
+                28.8
+              ],
+              "available": 2
+            },
+            "after": {
+              "median": 29.7,
+              "range": [
+                29.3,
+                30.1
+              ],
+              "values": [
+                29.3,
+                30.1
+              ],
+              "available": 2
+            },
+            "percent_change_of_medians": 3.3043,
+            "paired_percent_changes": [
+              2.0906,
+              4.5139
+            ]
+          },
+          "reported_interaction_max_ms": {
+            "before": {
+              "median": null,
+              "range": null,
+              "values": [
+                null,
+                null
+              ],
+              "available": 0
+            },
+            "after": {
+              "median": null,
+              "range": null,
+              "values": [
+                null,
+                null
+              ],
+              "available": 0
+            },
+            "percent_change_of_medians": null,
+            "paired_percent_changes": []
+          },
+          "inferences": {
+            "before": {
+              "median": 0.0,
+              "range": [
+                0,
+                0
+              ],
+              "values": [
+                0,
+                0
+              ],
+              "available": 2
+            },
+            "after": {
+              "median": 0.0,
+              "range": [
+                0,
+                0
+              ],
+              "values": [
+                0,
+                0
+              ],
+              "available": 2
+            },
+            "percent_change_of_medians": null,
+            "paired_percent_changes": []
+          },
+          "ping_max_ms": {
+            "before": {
+              "median": 246.15,
+              "range": [
+                243.3,
+                249
+              ],
+              "values": [
+                249,
+                243.3
+              ],
+              "available": 2
+            },
+            "after": {
+              "median": 24.85,
+              "range": [
+                23,
+                26.7
+              ],
+              "values": [
+                26.7,
+                23
+              ],
+              "available": 2
+            },
+            "percent_change_of_medians": -89.9045,
+            "paired_percent_changes": [
+              -89.2771,
+              -90.5467
+            ]
+          },
+          "ping_mean_ms": {
+            "before": {
+              "median": 9.4034,
+              "range": [
+                9.2789473679841,
+                9.527819547101966
+              ],
+              "values": [
+                9.527819547101966,
+                9.2789473679841
+              ],
+              "available": 2
+            },
+            "after": {
+              "median": 6.8414,
+              "range": [
+                6.202255639926832,
+                7.480451128816695
+              ],
+              "values": [
+                7.480451128816695,
+                6.202255639926832
+              ],
+              "available": 2
+            },
+            "percent_change_of_medians": -27.2455,
+            "paired_percent_changes": [
+              -21.4883,
+              -33.1578
+            ]
+          }
+        },
+        "quality": {
+          "before": [
+            {
+              "repeat": 0,
+              "geometry": 36,
+              "hidden_pixels": 0,
+              "covers": 36,
+              "media_results": {
+                "image-covered=nsfw": 36
+              },
+              "video_states": [],
+              "clicks": 110,
+              "input_dispatches": 111,
+              "status_api_codes": {},
+              "ui_final_states": {},
+              "ui_visible_labels": {},
+              "valid": true,
+              "capture": "saved",
+              "power": {
+                "start": {
+                  "platform_profile": "performance",
+                  "energy_preferences": [
+                    "performance"
+                  ],
+                  "governors": [
+                    "performance"
+                  ]
+                },
+                "end": {
+                  "platform_profile": "performance",
+                  "energy_preferences": [
+                    "performance"
+                  ],
+                  "governors": [
+                    "performance"
+                  ]
+                },
+                "expected": {
+                  "platform_profile": "performance",
+                  "energy_preferences": [
+                    "performance"
+                  ],
+                  "governors": [
+                    "performance"
+                  ]
+                },
+                "valid": true
+              }
+            },
+            {
+              "repeat": 1,
+              "geometry": 36,
+              "hidden_pixels": 0,
+              "covers": 36,
+              "media_results": {
+                "image-covered=nsfw": 36
+              },
+              "video_states": [],
+              "clicks": 110,
+              "input_dispatches": 111,
+              "status_api_codes": {},
+              "ui_final_states": {},
+              "ui_visible_labels": {},
+              "valid": true,
+              "capture": "saved",
+              "power": {
+                "start": {
+                  "platform_profile": "performance",
+                  "energy_preferences": [
+                    "performance"
+                  ],
+                  "governors": [
+                    "performance"
+                  ]
+                },
+                "end": {
+                  "platform_profile": "performance",
+                  "energy_preferences": [
+                    "performance"
+                  ],
+                  "governors": [
+                    "performance"
+                  ]
+                },
+                "expected": {
+                  "platform_profile": "performance",
+                  "energy_preferences": [
+                    "performance"
+                  ],
+                  "governors": [
+                    "performance"
+                  ]
+                },
+                "valid": true
+              }
+            }
+          ],
+          "after": [
+            {
+              "repeat": 0,
+              "geometry": 36,
+              "hidden_pixels": 0,
+              "covers": 36,
+              "media_results": {
+                "image-covered=nsfw": 36
+              },
+              "video_states": [],
+              "clicks": 110,
+              "input_dispatches": 111,
+              "status_api_codes": {
+                "200": 3
+              },
+              "ui_final_states": {
+                "filtered": 36
+              },
+              "ui_visible_labels": {
+                "Filtered": 16
+              },
+              "valid": true,
+              "capture": "saved",
+              "power": {
+                "start": {
+                  "platform_profile": "performance",
+                  "energy_preferences": [
+                    "performance"
+                  ],
+                  "governors": [
+                    "performance"
+                  ]
+                },
+                "end": {
+                  "platform_profile": "performance",
+                  "energy_preferences": [
+                    "performance"
+                  ],
+                  "governors": [
+                    "performance"
+                  ]
+                },
+                "expected": {
+                  "platform_profile": "performance",
+                  "energy_preferences": [
+                    "performance"
+                  ],
+                  "governors": [
+                    "performance"
+                  ]
+                },
+                "valid": true
+              }
+            },
+            {
+              "repeat": 1,
+              "geometry": 36,
+              "hidden_pixels": 0,
+              "covers": 36,
+              "media_results": {
+                "image-covered=nsfw": 36
+              },
+              "video_states": [],
+              "clicks": 110,
+              "input_dispatches": 111,
+              "status_api_codes": {
+                "200": 3
+              },
+              "ui_final_states": {
+                "filtered": 36
+              },
+              "ui_visible_labels": {
+                "Filtered": 16
+              },
+              "valid": true,
+              "capture": "saved",
+              "power": {
+                "start": {
+                  "platform_profile": "performance",
+                  "energy_preferences": [
+                    "performance"
+                  ],
+                  "governors": [
+                    "performance"
+                  ]
+                },
+                "end": {
+                  "platform_profile": "performance",
+                  "energy_preferences": [
+                    "performance"
+                  ],
+                  "governors": [
+                    "performance"
+                  ]
+                },
+                "expected": {
+                  "platform_profile": "performance",
+                  "energy_preferences": [
+                    "performance"
+                  ],
+                  "governors": [
+                    "performance"
+                  ]
+                },
+                "valid": true
+              }
+            }
+          ]
+        }
+      },
+      {
+        "scenario": "inference",
+        "pairs": 2,
+        "metrics": {
+          "proxy_lag_max_ms": {
+            "before": {
+              "median": 78.065,
+              "range": [
+                40.88,
+                115.25
+              ],
+              "values": [
+                115.25,
+                40.88
+              ],
+              "available": 2
+            },
+            "after": {
+              "median": 30.145,
+              "range": [
+                23.64,
+                36.65
+              ],
+              "values": [
+                23.64,
+                36.65
+              ],
+              "available": 2
+            },
+            "percent_change_of_medians": -61.3847,
+            "paired_percent_changes": [
+              -79.4881,
+              -10.3474
+            ]
+          },
+          "proxy_lag_p95_ms": {
+            "before": {
+              "median": 0.97,
+              "range": [
+                0.95,
+                0.99
+              ],
+              "values": [
+                0.99,
+                0.95
+              ],
+              "available": 2
+            },
+            "after": {
+              "median": 0.915,
+              "range": [
+                0.9,
+                0.93
+              ],
+              "values": [
+                0.9,
+                0.93
+              ],
+              "available": 2
+            },
+            "percent_change_of_medians": -5.6701,
+            "paired_percent_changes": [
+              -9.0909,
+              -2.1053
+            ]
+          },
+          "ping_p95_ms": {
+            "before": {
+              "median": 18.2,
+              "range": [
+                16.9,
+                19.5
+              ],
+              "values": [
+                19.5,
+                16.9
+              ],
+              "available": 2
+            },
+            "after": {
+              "median": 18.35,
+              "range": [
+                16.6,
+                20.1
+              ],
+              "values": [
+                16.6,
+                20.1
+              ],
+              "available": 2
+            },
+            "percent_change_of_medians": 0.8242,
+            "paired_percent_changes": [
+              -14.8718,
+              18.9349
+            ]
+          },
+          "loading_frame_gap_max_ms": {
+            "before": {
+              "median": 50.05,
+              "range": [
+                50,
+                50.1
+              ],
+              "values": [
+                50.1,
+                50
+              ],
+              "available": 2
+            },
+            "after": {
+              "median": 99.95,
+              "range": [
+                99.9,
+                100
+              ],
+              "values": [
+                100,
+                99.9
+              ],
+              "available": 2
+            },
+            "percent_change_of_medians": 99.7003,
+            "paired_percent_changes": [
+              99.6008,
+              99.8
+            ]
+          },
+          "loading_frame_gap_p95_ms": {
+            "before": {
+              "median": 33.35,
+              "range": [
+                33.3,
+                33.4
+              ],
+              "values": [
+                33.3,
+                33.4
+              ],
+              "available": 2
+            },
+            "after": {
+              "median": 33.35,
+              "range": [
+                33.3,
+                33.4
+              ],
+              "values": [
+                33.3,
+                33.4
+              ],
+              "available": 2
+            },
+            "percent_change_of_medians": 0.0,
+            "paired_percent_changes": [
+              0.0,
+              0.0
+            ]
+          },
+          "frame_gap_max_ms": {
+            "before": {
+              "median": 50.05,
+              "range": [
+                50,
+                50.1
+              ],
+              "values": [
+                50.1,
+                50
+              ],
+              "available": 2
+            },
+            "after": {
+              "median": 99.95,
+              "range": [
+                99.9,
+                100
+              ],
+              "values": [
+                100,
+                99.9
+              ],
+              "available": 2
+            },
+            "percent_change_of_medians": 99.7003,
+            "paired_percent_changes": [
+              99.6008,
+              99.8
+            ]
+          },
+          "frames_over_50ms": {
+            "before": {
+              "median": 0.5,
+              "range": [
+                0,
+                1
+              ],
+              "values": [
+                1,
+                0
+              ],
+              "available": 2
+            },
+            "after": {
+              "median": 1.0,
+              "range": [
+                1,
+                1
+              ],
+              "values": [
+                1,
+                1
+              ],
+              "available": 2
+            },
+            "percent_change_of_medians": 100.0,
+            "paired_percent_changes": [
+              0.0
+            ]
+          },
+          "load_ms": {
+            "before": {
+              "median": 2863.9,
+              "range": [
+                2722.8,
+                3005
+              ],
+              "values": [
+                3005,
+                2722.8
+              ],
+              "available": 2
+            },
+            "after": {
+              "median": 2313.35,
+              "range": [
+                2294.4,
+                2332.3
+              ],
+              "values": [
+                2294.4,
+                2332.3
+              ],
+              "available": 2
+            },
+            "percent_change_of_medians": -19.2238,
+            "paired_percent_changes": [
+              -23.6473,
+              -14.3419
+            ]
+          },
+          "dom_content_loaded_ms": {
+            "before": {
+              "median": 60.1,
+              "range": [
+                52.1,
+                68.1
+              ],
+              "values": [
+                68.1,
+                52.1
+              ],
+              "available": 2
+            },
+            "after": {
+              "median": 69.7,
+              "range": [
+                66.7,
+                72.7
+              ],
+              "values": [
+                72.7,
+                66.7
+              ],
+              "available": 2
+            },
+            "percent_change_of_medians": 15.9734,
+            "paired_percent_changes": [
+              6.7548,
+              28.023
+            ]
+          },
+          "input_next_frame_p95_ms": {
+            "before": {
+              "median": 13.5,
+              "range": [
+                13.2,
+                13.8
+              ],
+              "values": [
+                13.2,
+                13.8
+              ],
+              "available": 2
+            },
+            "after": {
+              "median": 13.45,
+              "range": [
+                13.4,
+                13.5
+              ],
+              "values": [
+                13.4,
+                13.5
+              ],
+              "available": 2
+            },
+            "percent_change_of_medians": -0.3704,
+            "paired_percent_changes": [
+              1.5152,
+              -2.1739
+            ]
+          },
+          "input_next_frame_max_ms": {
+            "before": {
+              "median": 42.65,
+              "range": [
+                37.6,
+                47.7
+              ],
+              "values": [
+                37.6,
+                47.7
+              ],
+              "available": 2
+            },
+            "after": {
+              "median": 62.1,
+              "range": [
+                62,
+                62.2
+              ],
+              "values": [
+                62.2,
+                62
+              ],
+              "available": 2
+            },
+            "percent_change_of_medians": 45.6038,
+            "paired_percent_changes": [
+              65.4255,
+              29.979
+            ]
+          },
+          "reported_interaction_max_ms": {
+            "before": {
+              "median": null,
+              "range": null,
+              "values": [
+                null,
+                null
+              ],
+              "available": 0
+            },
+            "after": {
+              "median": null,
+              "range": null,
+              "values": [
+                null,
+                null
+              ],
+              "available": 0
+            },
+            "percent_change_of_medians": null,
+            "paired_percent_changes": []
+          },
+          "inferences": {
+            "before": {
+              "median": 37.0,
+              "range": [
+                36,
+                38
+              ],
+              "values": [
+                38,
+                36
+              ],
+              "available": 2
+            },
+            "after": {
+              "median": 26.0,
+              "range": [
+                26,
+                26
+              ],
+              "values": [
+                26,
+                26
+              ],
+              "available": 2
+            },
+            "percent_change_of_medians": -29.7297,
+            "paired_percent_changes": [
+              -31.5789,
+              -27.7778
+            ]
+          },
+          "ping_max_ms": {
+            "before": {
+              "median": 142.2,
+              "range": [
+                118,
+                166.4
+              ],
+              "values": [
+                166.4,
+                118
+              ],
+              "available": 2
+            },
+            "after": {
+              "median": 30.2,
+              "range": [
+                18.5,
+                41.9
+              ],
+              "values": [
+                18.5,
+                41.9
+              ],
+              "available": 2
+            },
+            "percent_change_of_medians": -78.7623,
+            "paired_percent_changes": [
+              -88.8822,
+              -64.4915
+            ]
+          },
+          "ping_mean_ms": {
+            "before": {
+              "median": 8.2534,
+              "range": [
+                8.017164179026636,
+                8.489552237482657
+              ],
+              "values": [
+                8.489552237482657,
+                8.017164179026636
+              ],
+              "available": 2
+            },
+            "after": {
+              "median": 7.566,
+              "range": [
+                7.189552238016431,
+                7.942537312632177
+              ],
+              "values": [
+                7.189552238016431,
+                7.942537312632177
+              ],
+              "available": 2
+            },
+            "percent_change_of_medians": -8.3287,
+            "paired_percent_changes": [
+              -15.3129,
+              -0.9308
+            ]
+          }
+        },
+        "quality": {
+          "before": [
+            {
+              "repeat": 0,
+              "geometry": 36,
+              "hidden_pixels": 10,
+              "covers": 0,
+              "media_results": {
+                "video-checked=clean": 2,
+                "passed": 26,
+                "image-hidden": 10
+              },
+              "video_states": [
+                {
+                  "src": "http://127.0.0.8:43807/clip/0.mp4",
+                  "readyState": 4,
+                  "networkState": 1,
+                  "width": 640,
+                  "height": 360,
+                  "error": null
+                },
+                {
+                  "src": "http://127.0.0.9:43807/clip/1.mp4",
+                  "readyState": 4,
+                  "networkState": 1,
+                  "width": 640,
+                  "height": 360,
+                  "error": null
+                }
+              ],
+              "clicks": 110,
+              "input_dispatches": 110,
+              "status_api_codes": {},
+              "ui_final_states": {},
+              "ui_visible_labels": {},
+              "valid": true,
+              "capture": "saved",
+              "power": {
+                "start": {
+                  "platform_profile": "performance",
+                  "energy_preferences": [
+                    "performance"
+                  ],
+                  "governors": [
+                    "performance"
+                  ]
+                },
+                "end": {
+                  "platform_profile": "performance",
+                  "energy_preferences": [
+                    "performance"
+                  ],
+                  "governors": [
+                    "performance"
+                  ]
+                },
+                "expected": {
+                  "platform_profile": "performance",
+                  "energy_preferences": [
+                    "performance"
+                  ],
+                  "governors": [
+                    "performance"
+                  ]
+                },
+                "valid": true
+              }
+            },
+            {
+              "repeat": 1,
+              "geometry": 36,
+              "hidden_pixels": 8,
+              "covers": 0,
+              "media_results": {
+                "passed": 28,
+                "video-checked=clean": 2,
+                "image-hidden": 8
+              },
+              "video_states": [
+                {
+                  "src": "http://127.0.0.8:43807/clip/0.mp4",
+                  "readyState": 4,
+                  "networkState": 1,
+                  "width": 640,
+                  "height": 360,
+                  "error": null
+                },
+                {
+                  "src": "http://127.0.0.9:43807/clip/1.mp4",
+                  "readyState": 4,
+                  "networkState": 1,
+                  "width": 640,
+                  "height": 360,
+                  "error": null
+                }
+              ],
+              "clicks": 109,
+              "input_dispatches": 110,
+              "status_api_codes": {},
+              "ui_final_states": {},
+              "ui_visible_labels": {},
+              "valid": true,
+              "capture": "saved",
+              "power": {
+                "start": {
+                  "platform_profile": "performance",
+                  "energy_preferences": [
+                    "performance"
+                  ],
+                  "governors": [
+                    "performance"
+                  ]
+                },
+                "end": {
+                  "platform_profile": "performance",
+                  "energy_preferences": [
+                    "performance"
+                  ],
+                  "governors": [
+                    "performance"
+                  ]
+                },
+                "expected": {
+                  "platform_profile": "performance",
+                  "energy_preferences": [
+                    "performance"
+                  ],
+                  "governors": [
+                    "performance"
+                  ]
+                },
+                "valid": true
+              }
+            }
+          ],
+          "after": [
+            {
+              "repeat": 0,
+              "geometry": 36,
+              "hidden_pixels": 0,
+              "covers": 0,
+              "media_results": {
+                "passed": 36,
+                "video-checked=clean": 2
+              },
+              "video_states": [
+                {
+                  "src": "http://127.0.0.8:43807/clip/0.mp4",
+                  "readyState": 4,
+                  "networkState": 1,
+                  "width": 640,
+                  "height": 360,
+                  "error": null
+                },
+                {
+                  "src": "http://127.0.0.9:43807/clip/1.mp4",
+                  "readyState": 4,
+                  "networkState": 1,
+                  "width": 640,
+                  "height": 360,
+                  "error": null
+                }
+              ],
+              "clicks": 109,
+              "input_dispatches": 110,
+              "status_api_codes": {
+                "200": 5
+              },
+              "ui_final_states": {
+                "checked": 36
+              },
+              "ui_visible_labels": {},
+              "valid": true,
+              "capture": "saved",
+              "power": {
+                "start": {
+                  "platform_profile": "performance",
+                  "energy_preferences": [
+                    "performance"
+                  ],
+                  "governors": [
+                    "performance"
+                  ]
+                },
+                "end": {
+                  "platform_profile": "performance",
+                  "energy_preferences": [
+                    "performance"
+                  ],
+                  "governors": [
+                    "performance"
+                  ]
+                },
+                "expected": {
+                  "platform_profile": "performance",
+                  "energy_preferences": [
+                    "performance"
+                  ],
+                  "governors": [
+                    "performance"
+                  ]
+                },
+                "valid": true
+              }
+            },
+            {
+              "repeat": 1,
+              "geometry": 36,
+              "hidden_pixels": 0,
+              "covers": 0,
+              "media_results": {
+                "passed": 36,
+                "video-checked=clean": 2
+              },
+              "video_states": [
+                {
+                  "src": "http://127.0.0.8:43807/clip/0.mp4",
+                  "readyState": 4,
+                  "networkState": 1,
+                  "width": 640,
+                  "height": 360,
+                  "error": null
+                },
+                {
+                  "src": "http://127.0.0.9:43807/clip/1.mp4",
+                  "readyState": 4,
+                  "networkState": 1,
+                  "width": 640,
+                  "height": 360,
+                  "error": null
+                }
+              ],
+              "clicks": 109,
+              "input_dispatches": 110,
+              "status_api_codes": {
+                "200": 5
+              },
+              "ui_final_states": {
+                "checked": 36
+              },
+              "ui_visible_labels": {},
+              "valid": true,
+              "capture": "saved",
+              "power": {
+                "start": {
+                  "platform_profile": "performance",
+                  "energy_preferences": [
+                    "performance"
+                  ],
+                  "governors": [
+                    "performance"
+                  ]
+                },
+                "end": {
+                  "platform_profile": "performance",
+                  "energy_preferences": [
+                    "performance"
+                  ],
+                  "governors": [
+                    "performance"
+                  ]
+                },
+                "expected": {
+                  "platform_profile": "performance",
+                  "energy_preferences": [
+                    "performance"
+                  ],
+                  "governors": [
+                    "performance"
+                  ]
+                },
+                "valid": true
+              }
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "metric_definitions": {
+    "ping": "Elapsed time around await fetch(/ping): fetch-to-response-headers latency, without consuming the response body. p95, maximum and mean cover the entire 20-second interaction window.",
+    "proxy_lag": "Overshoot of a 10ms asyncio heartbeat after warmup; maximum and p95 are per-trial values.",
+    "input_next_frame": "CDP click event timestamp to the next requestAnimationFrame callback; not presentation latency or INP.",
+    "loading_phase_ping": "Unavailable: raw ping durations have no request timestamps and ResourceTiming contains no ping entries. No loading-phase metric is inferred."
+  }
+}

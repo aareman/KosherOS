@@ -1,0 +1,33 @@
+[
+  {
+    "host": "us-east-1.signin.aws",
+    "hook_before_tlsconfig": true,
+    "wire_alpn": [
+      "http/1.1"
+    ],
+    "wire_sni": "us-east-1.signin.aws",
+    "verify_peer": true,
+    "global_http2_unchanged": true
+  },
+  {
+    "host": "us-east-1.signin.aws",
+    "hook_before_tlsconfig": false,
+    "wire_alpn": [
+      "http/1.1"
+    ],
+    "wire_sni": "us-east-1.signin.aws",
+    "verify_peer": true,
+    "global_http2_unchanged": true
+  },
+  {
+    "host": "example.com",
+    "hook_before_tlsconfig": true,
+    "wire_alpn": [
+      "h2",
+      "http/1.1"
+    ],
+    "wire_sni": "example.com",
+    "verify_peer": true,
+    "global_http2_unchanged": true
+  }
+]

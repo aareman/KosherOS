@@ -1,0 +1,2030 @@
+{
+  "candidate_code_commit": "62b72c6d33fd8d158f21d17284082856421b47a8",
+  "harness_head_at_refresh": "84d57601c42bb4a33db113ec08e97e00625c152a",
+  "harness_head_note": "84d5760 changes capture handling only; candidate product hashes match 62b72c6.",
+  "baseline_code_commit": "506ebba40af8fd5fefb37125eb61c7bc565d45fb",
+  "captured": "2026-11-05",
+  "scope": "Functional browser evidence on controlled pages using public assets; these captures are not a causal performance comparison.",
+  "runs": {
+    "public-media-before": {
+      "environment": {
+        "source": {
+          "root": "/tmp/kosher-browser-baseline",
+          "commit": null,
+          "tracked_diff_sha256": null,
+          "files_sha256": {
+            "mitm/kosher_filter.py": "4bf6924083cdc2e2976fd875ba52e3de17681280bf75a96f1737cc6ec38a51ee",
+            "kosherd/src/kosherd/vision.py": "90e1602019c70bb5c242c3f8db3c029da4b124aea79111ebb58ea18acbba9f8e",
+            "kosherd/src/kosherd/videocheck.py": "00f1f4023b82525012111932b844622ac43c938fcb6ab8b2cda55fc40fa4a19b",
+            "kosherd/src/kosherd/imageedit.py": "b03afebf4ffc4d8a2ddb9d92d7a743107fc2c22be46e0879411f586fcf617465"
+          }
+        },
+        "host": {
+          "architecture": "x86_64",
+          "kernel": "7.2.13-200.fc44.x86_64",
+          "logical_cpus": 12,
+          "python": "3.14.8",
+          "cpu_model": "Intel(R) Core(TM) i7-10710U CPU @ 1.10GHz",
+          "platform_profile": "quiet",
+          "energy_preferences": [
+            "power"
+          ],
+          "governors": [
+            "powersave"
+          ],
+          "load_average": [
+            3.05908203125,
+            3.65185546875,
+            4.2646484375
+          ]
+        },
+        "browser": {
+          "Browser": "Chrome/156.0.8078.80",
+          "File-Path-Style": "posix",
+          "Protocol-Version": "1.3",
+          "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Safari/537.36",
+          "V8-Version": "15.6.75.27",
+          "WebKit-Version": "537.36 (@cc92146ef17860a4511f7de658b078128dbaad5)",
+          "webSocketDebuggerUrl": "ws://127.0.0.1:9224/devtools/browser/7c68e34c-3b42-4727-8b87-b9414ac6e9d3"
+        },
+        "browser_args": [
+          "flatpak",
+          "run",
+          "com.brave.Browser",
+          "--user-data-dir=/tmp/kosher-amazon-evidence/browser-profile-public-media-before",
+          "--remote-debugging-port=9224",
+          "--no-first-run",
+          "--no-default-browser-check",
+          "--disable-background-networking",
+          "--proxy-server=http://127.0.0.1:8088",
+          "--proxy-bypass-list=<-loopback>",
+          "--ignore-certificate-errors-spki-list=uplHRXi2CASb9Rk0vxAGnqy92mlDTy8cVvZFQsU49lI=",
+          "about:blank"
+        ],
+        "temporary_ca_spki": "uplHRXi2CASb9Rk0vxAGnqy92mlDTy8cVvZFQsU49lI=",
+        "upstream_tls_verification": true,
+        "media_level": "immodest",
+        "extra_pythonpath": [],
+        "scope": "public signed-out site; isolated media policy; no real account configuration"
+      },
+      "source_files_match_commit": "506ebba40af8fd5fefb37125eb61c7bc565d45fb",
+      "pillow_version": "12.3.0",
+      "avif_decoder": false,
+      "media": [
+        {
+          "url": "https://m.media-amazon.com/images/S/sonata-images-prod/US_TVOD_Verity_PVOD_SH/d3c31963-71f6-4224-af66-facbc299243b._UR3840,1440_SX720_FMavif_PQ65_.jpeg",
+          "synthetic_invalid_preview": false,
+          "input_mime": "image/avif",
+          "input_encoding": "",
+          "input_bytes": 2684,
+          "upstream_filter_result": null,
+          "verdict": {
+            "level": "clean",
+            "has_person": true,
+            "regions": []
+          },
+          "elapsed_ms": 1147.6050460005354,
+          "result": "passed",
+          "output_mime": "image/avif",
+          "output_bytes": 2684,
+          "status": 200,
+          "input_sha256": "6a904cd925a09238d1ecc99d4bd5394a8966c2887b20a7bd27d7b76c383fca41",
+          "input_sample": "media/6a904cd925a09238d1ecc99d4bd5394a8966c2887b20a7bd27d7b76c383fca41.input.bin",
+          "output_sha256": "6a904cd925a09238d1ecc99d4bd5394a8966c2887b20a7bd27d7b76c383fca41",
+          "output_sample": "media/6a904cd925a09238d1ecc99d4bd5394a8966c2887b20a7bd27d7b76c383fca41.output.bin"
+        },
+        {
+          "url": "https://m.media-amazon.com/images/S/sonata-images-prod/US_3P_StDenisMedical_Peacock_SH/fc116421-633c-4f2e-9c8c-022bd0bde25f._UR3840,1440_SX720_FMavif_PQ65_.jpeg",
+          "synthetic_invalid_preview": false,
+          "input_mime": "image/avif",
+          "input_encoding": "",
+          "input_bytes": 16543,
+          "upstream_filter_result": null,
+          "verdict": {
+            "level": "clean",
+            "has_person": false,
+            "regions": []
+          },
+          "elapsed_ms": 335.7841719989665,
+          "result": "passed",
+          "output_mime": "image/avif",
+          "output_bytes": 16543,
+          "status": 200,
+          "input_sha256": "95f5f89f62e505aa29a0bcbfca9376bf5e59508120088cf80f0daa63b96725f5",
+          "input_sample": "media/95f5f89f62e505aa29a0bcbfca9376bf5e59508120088cf80f0daa63b96725f5.input.bin",
+          "output_sha256": "95f5f89f62e505aa29a0bcbfca9376bf5e59508120088cf80f0daa63b96725f5",
+          "output_sample": "media/95f5f89f62e505aa29a0bcbfca9376bf5e59508120088cf80f0daa63b96725f5.output.bin"
+        },
+        {
+          "url": "https://m.media-amazon.com/images/S/sonata-images-prod/US_SVOD_TNF26_1105_LiveTonight/1e2f3533-b73c-4c00-87c3-a0eb6450b31b._UR3840,1440_SX720_FMavif_PQ65_.jpeg",
+          "synthetic_invalid_preview": false,
+          "input_mime": "image/avif",
+          "input_encoding": "",
+          "input_bytes": 27238,
+          "upstream_filter_result": null,
+          "verdict": {
+            "level": "clean",
+            "has_person": false,
+            "regions": []
+          },
+          "elapsed_ms": 335.93498099799035,
+          "result": "passed",
+          "output_mime": "image/avif",
+          "output_bytes": 27238,
+          "status": 200,
+          "input_sha256": "85d561b68fb5325e01cc5afbe00adc13c2433817f1a19648f0fff2217aa6304f",
+          "input_sample": "media/85d561b68fb5325e01cc5afbe00adc13c2433817f1a19648f0fff2217aa6304f.input.bin",
+          "output_sha256": "85d561b68fb5325e01cc5afbe00adc13c2433817f1a19648f0fff2217aa6304f",
+          "output_sample": "media/85d561b68fb5325e01cc5afbe00adc13c2433817f1a19648f0fff2217aa6304f.output.bin"
+        },
+        {
+          "url": "https://m.media-amazon.com/images/S/sonata-images-prod/US_FAST_LawOrder_FR/67db5120-8b4b-4034-944d-df37cbc22885._SX720_FMavif_PQ65_.jpeg",
+          "synthetic_invalid_preview": false,
+          "input_mime": "image/avif",
+          "input_encoding": "",
+          "input_bytes": 6444,
+          "upstream_filter_result": null,
+          "verdict": {
+            "level": "clean",
+            "has_person": true,
+            "regions": []
+          },
+          "elapsed_ms": 596.3277339978958,
+          "result": "passed",
+          "output_mime": "image/avif",
+          "output_bytes": 6444,
+          "status": 200,
+          "input_sha256": "90a92655b271d72325d8bf5415e560c80d87974c7cefc40362eadf8524c6852c",
+          "input_sample": "media/90a92655b271d72325d8bf5415e560c80d87974c7cefc40362eadf8524c6852c.input.bin",
+          "output_sha256": "90a92655b271d72325d8bf5415e560c80d87974c7cefc40362eadf8524c6852c",
+          "output_sample": "media/90a92655b271d72325d8bf5415e560c80d87974c7cefc40362eadf8524c6852c.output.bin"
+        },
+        {
+          "url": "https://i.ytimg.com/an_webp/kosher-invalid-preview/mqdefault_6s.webp",
+          "synthetic_invalid_preview": true,
+          "input_mime": "image/webp",
+          "input_encoding": "",
+          "input_bytes": 23,
+          "upstream_filter_result": null,
+          "verdict": "not-requested",
+          "elapsed_ms": 1.2542580006993376,
+          "result": "image-hidden",
+          "output_mime": "image/png",
+          "output_bytes": 70,
+          "status": 200,
+          "input_sha256": "2a91c183e4143cfd865c3dfc51bb34c4c5687cab0a5e4dc13e398cf562c25e20",
+          "input_sample": "media/2a91c183e4143cfd865c3dfc51bb34c4c5687cab0a5e4dc13e398cf562c25e20.input.bin",
+          "output_sha256": "c414cd0e204de974f73753c7e28d7638e7b3691bb8b1a2bab6b25bb7fed7ce77",
+          "output_sample": "media/c414cd0e204de974f73753c7e28d7638e7b3691bb8b1a2bab6b25bb7fed7ce77.output.bin",
+          "output_pixel_check": {
+            "size": [
+              1,
+              1
+            ],
+            "solid": true,
+            "rgba": [
+              255,
+              0,
+              0,
+              127
+            ]
+          }
+        },
+        {
+          "url": "https://i.ytimg.com/vi/aqz-KE-bpKQ/hqdefault.jpg",
+          "synthetic_invalid_preview": false,
+          "input_mime": "image/png",
+          "input_encoding": "",
+          "input_bytes": 1347,
+          "upstream_filter_result": "image-hidden",
+          "verdict": "not-requested",
+          "elapsed_ms": 0.19372599854250439,
+          "result": "image-hidden",
+          "output_mime": "image/png",
+          "output_bytes": 1347,
+          "status": 200,
+          "input_sha256": "9ee2cca885b8c8913f975d9651610e7a99dc3bbc21ca36c08d45b1e65501e1a9",
+          "input_sample": "media/9ee2cca885b8c8913f975d9651610e7a99dc3bbc21ca36c08d45b1e65501e1a9.input.bin",
+          "output_sha256": "9ee2cca885b8c8913f975d9651610e7a99dc3bbc21ca36c08d45b1e65501e1a9",
+          "output_sample": "media/9ee2cca885b8c8913f975d9651610e7a99dc3bbc21ca36c08d45b1e65501e1a9.output.bin",
+          "output_pixel_check": {
+            "size": [
+              480,
+              360
+            ],
+            "solid": true,
+            "rgba": [
+              214,
+              214,
+              214,
+              255
+            ]
+          }
+        },
+        {
+          "url": "https://i.ytimg.com/vi/dQw4w9WgXc/hqdefault.jpg",
+          "synthetic_invalid_preview": false,
+          "input_mime": "image/jpeg",
+          "input_encoding": "",
+          "input_bytes": 1097,
+          "upstream_filter_result": null,
+          "verdict": "not-requested",
+          "elapsed_ms": 0.14117699902271852,
+          "result": "passed",
+          "output_mime": "image/jpeg",
+          "output_bytes": 1097,
+          "status": 404,
+          "input_sha256": "20e9aab22032d85684d7d916a1013f7c577a132a5b10ea3fd3578e8d0b28a711",
+          "input_sample": "media/20e9aab22032d85684d7d916a1013f7c577a132a5b10ea3fd3578e8d0b28a711.input.bin",
+          "output_sha256": "20e9aab22032d85684d7d916a1013f7c577a132a5b10ea3fd3578e8d0b28a711",
+          "output_sample": "media/20e9aab22032d85684d7d916a1013f7c577a132a5b10ea3fd3578e8d0b28a711.output.bin"
+        }
+      ],
+      "pages": [
+        {
+          "directory": "page-0",
+          "summary": {
+            "url": "http://127.0.0.1/__prime_asset_check",
+            "title": "Public Prime Video carousel image check",
+            "images": 4,
+            "visible_images": 3,
+            "visible_decoded_images": 3,
+            "frame_gap_p95_ms": 16.8,
+            "frame_gap_max_ms": 66.5,
+            "reported_interaction_max_ms": null,
+            "media_results": {
+              "passed": 4
+            },
+            "media_results_scope": "cumulative across pages in this isolated proxy run",
+            "input_mimes": {
+              "image/avif": 4
+            },
+            "upstream_already_filtered": 0,
+            "proxy_errors": 0,
+            "actions": [],
+            "has_captcha_text": false
+          },
+          "browser": {
+            "url": "http://127.0.0.1/__prime_asset_check",
+            "title": "Public Prime Video carousel image check",
+            "images": [
+              {
+                "src": "https://m.media-amazon.com/images/S/sonata-images-prod/US_TVOD_Verity_PVOD_SH/d3c31963-71f6-4224-af66-facbc299243b._UR3840,1440_SX720_FMavif_PQ65_.jpeg",
+                "currentSrc": "https://m.media-amazon.com/images/S/sonata-images-prod/US_TVOD_Verity_PVOD_SH/d3c31963-71f6-4224-af66-facbc299243b._UR3840,1440_SX720_FMavif_PQ65_.jpeg",
+                "alt": "",
+                "srcset": "",
+                "complete": true,
+                "naturalWidth": 720,
+                "naturalHeight": 270,
+                "width": 720,
+                "height": 270,
+                "visible": true
+              },
+              {
+                "src": "https://m.media-amazon.com/images/S/sonata-images-prod/US_3P_StDenisMedical_Peacock_SH/fc116421-633c-4f2e-9c8c-022bd0bde25f._UR3840,1440_SX720_FMavif_PQ65_.jpeg",
+                "currentSrc": "https://m.media-amazon.com/images/S/sonata-images-prod/US_3P_StDenisMedical_Peacock_SH/fc116421-633c-4f2e-9c8c-022bd0bde25f._UR3840,1440_SX720_FMavif_PQ65_.jpeg",
+                "alt": "",
+                "srcset": "",
+                "complete": true,
+                "naturalWidth": 720,
+                "naturalHeight": 270,
+                "width": 720,
+                "height": 270,
+                "visible": true
+              },
+              {
+                "src": "https://m.media-amazon.com/images/S/sonata-images-prod/US_SVOD_TNF26_1105_LiveTonight/1e2f3533-b73c-4c00-87c3-a0eb6450b31b._UR3840,1440_SX720_FMavif_PQ65_.jpeg",
+                "currentSrc": "https://m.media-amazon.com/images/S/sonata-images-prod/US_SVOD_TNF26_1105_LiveTonight/1e2f3533-b73c-4c00-87c3-a0eb6450b31b._UR3840,1440_SX720_FMavif_PQ65_.jpeg",
+                "alt": "",
+                "srcset": "",
+                "complete": true,
+                "naturalWidth": 720,
+                "naturalHeight": 270,
+                "width": 720,
+                "height": 270,
+                "visible": true
+              },
+              {
+                "src": "https://m.media-amazon.com/images/S/sonata-images-prod/US_FAST_LawOrder_FR/67db5120-8b4b-4034-944d-df37cbc22885._SX720_FMavif_PQ65_.jpeg",
+                "currentSrc": "https://m.media-amazon.com/images/S/sonata-images-prod/US_FAST_LawOrder_FR/67db5120-8b4b-4034-944d-df37cbc22885._SX720_FMavif_PQ65_.jpeg",
+                "alt": "",
+                "srcset": "",
+                "complete": true,
+                "naturalWidth": 720,
+                "naturalHeight": 270,
+                "width": 720,
+                "height": 270,
+                "visible": false
+              }
+            ],
+            "backgrounds": [],
+            "http_responses": [
+              {
+                "url": "http://127.0.0.1/__prime_asset_check",
+                "status": 200,
+                "mime": "text/html",
+                "filter_result": null
+              },
+              {
+                "url": "https://m.media-amazon.com/images/S/sonata-images-prod/US_TVOD_Verity_PVOD_SH/d3c31963-71f6-4224-af66-facbc299243b._UR3840,1440_SX720_FMavif_PQ65_.jpeg",
+                "status": 200,
+                "mime": "image/avif",
+                "filter_result": null
+              },
+              {
+                "url": "https://m.media-amazon.com/images/S/sonata-images-prod/US_3P_StDenisMedical_Peacock_SH/fc116421-633c-4f2e-9c8c-022bd0bde25f._UR3840,1440_SX720_FMavif_PQ65_.jpeg",
+                "status": 200,
+                "mime": "image/avif",
+                "filter_result": null
+              },
+              {
+                "url": "https://m.media-amazon.com/images/S/sonata-images-prod/US_SVOD_TNF26_1105_LiveTonight/1e2f3533-b73c-4c00-87c3-a0eb6450b31b._UR3840,1440_SX720_FMavif_PQ65_.jpeg",
+                "status": 200,
+                "mime": "image/avif",
+                "filter_result": null
+              },
+              {
+                "url": "https://m.media-amazon.com/images/S/sonata-images-prod/US_FAST_LawOrder_FR/67db5120-8b4b-4034-944d-df37cbc22885._SX720_FMavif_PQ65_.jpeg",
+                "status": 200,
+                "mime": "image/avif",
+                "filter_result": null
+              }
+            ]
+          },
+          "final_png_sha256": "65e878701af8b9fdc75c9dbbb66717e03de464154ad220cf1a46d94d6445827a"
+        },
+        {
+          "directory": "page-1",
+          "summary": {
+            "url": "http://127.0.0.1/__youtube_asset_check",
+            "title": "Public YouTube thumbnail and hover fallback check",
+            "images": 3,
+            "visible_images": 3,
+            "visible_decoded_images": 3,
+            "frame_gap_p95_ms": 16.7,
+            "frame_gap_max_ms": 33.4,
+            "reported_interaction_max_ms": null,
+            "media_results": {
+              "passed": 5,
+              "image-hidden": 2
+            },
+            "media_results_scope": "cumulative across pages in this isolated proxy run",
+            "input_mimes": {
+              "image/avif": 4,
+              "image/webp": 1,
+              "image/png": 1,
+              "image/jpeg": 1
+            },
+            "upstream_already_filtered": 1,
+            "proxy_errors": 0,
+            "actions": [],
+            "has_captcha_text": false
+          },
+          "browser": {
+            "url": "http://127.0.0.1/__youtube_asset_check",
+            "title": "Public YouTube thumbnail and hover fallback check",
+            "images": [
+              {
+                "src": "https://i.ytimg.com/vi/aqz-KE-bpKQ/hqdefault.jpg",
+                "currentSrc": "https://i.ytimg.com/vi/aqz-KE-bpKQ/hqdefault.jpg",
+                "alt": "",
+                "srcset": "",
+                "complete": true,
+                "naturalWidth": 480,
+                "naturalHeight": 360,
+                "width": 320,
+                "height": 180,
+                "visible": true
+              },
+              {
+                "src": "https://i.ytimg.com/vi/dQw4w9WgXc/hqdefault.jpg",
+                "currentSrc": "https://i.ytimg.com/vi/dQw4w9WgXc/hqdefault.jpg",
+                "alt": "",
+                "srcset": "",
+                "complete": true,
+                "naturalWidth": 120,
+                "naturalHeight": 90,
+                "width": 320,
+                "height": 180,
+                "visible": true
+              },
+              {
+                "src": "https://i.ytimg.com/an_webp/kosher-invalid-preview/mqdefault_6s.webp",
+                "currentSrc": "https://i.ytimg.com/an_webp/kosher-invalid-preview/mqdefault_6s.webp",
+                "alt": "",
+                "srcset": "",
+                "complete": true,
+                "naturalWidth": 1,
+                "naturalHeight": 1,
+                "width": 320,
+                "height": 180,
+                "visible": true
+              }
+            ],
+            "backgrounds": [],
+            "http_responses": [
+              {
+                "url": "http://127.0.0.1/__youtube_asset_check",
+                "status": 200,
+                "mime": "text/html",
+                "filter_result": null
+              },
+              {
+                "url": "https://i.ytimg.com/an_webp/kosher-invalid-preview/mqdefault_6s.webp",
+                "status": 200,
+                "mime": "image/png",
+                "filter_result": "image-hidden"
+              },
+              {
+                "url": "https://i.ytimg.com/vi/aqz-KE-bpKQ/hqdefault.jpg",
+                "status": 200,
+                "mime": "image/png",
+                "filter_result": "image-hidden"
+              },
+              {
+                "url": "https://i.ytimg.com/vi/dQw4w9WgXc/hqdefault.jpg",
+                "status": 404,
+                "mime": "image/jpeg",
+                "filter_result": null
+              }
+            ]
+          },
+          "final_png_sha256": "3c6747530b22edce7ce1e8e02cde465b5f875d7571b48695aa8c4c1f30b67cff"
+        }
+      ],
+      "status_api_responses": [],
+      "proxy_errors": []
+    },
+    "public-media-subtle": {
+      "environment": {
+        "source": {
+          "root": "/tmp/kosher-image-perf",
+          "commit": "62b72c6d33fd8d158f21d17284082856421b47a8",
+          "tracked_diff_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "files_sha256": {
+            "mitm/kosher_filter.py": "1fd80efb12b7a33d96967a9f1b460a2779a041744c5f7c8bf7d564a20efffc73",
+            "mitm/kosher_page.js": "b4a4a00c446a52d6b8b33981c23a31f1572d58e8a9762f5a10a4445540fb1908",
+            "kosherd/src/kosherd/vision.py": "ec8accb4240ced2e2f9a895bc09e83623f4777897659cab009b78969bd1abec3",
+            "kosherd/src/kosherd/videocheck.py": "f25405816695a32992047b62593e9c78810bfc4ced9779604bbdbaea90a34ce9",
+            "kosherd/src/kosherd/imageedit.py": "465877afcf50b70884e3571241464a9bfa99e12c24ecbaf781f5dfd92cff0f0e"
+          }
+        },
+        "host": {
+          "architecture": "x86_64",
+          "kernel": "7.2.13-200.fc44.x86_64",
+          "logical_cpus": 12,
+          "python": "3.14.8",
+          "cpu_model": "Intel(R) Core(TM) i7-10710U CPU @ 1.10GHz",
+          "platform_profile": "quiet",
+          "energy_preferences": [
+            "power"
+          ],
+          "governors": [
+            "powersave"
+          ],
+          "load_average": [
+            3.451171875,
+            3.11474609375,
+            3.30029296875
+          ]
+        },
+        "browser": {
+          "Browser": "Chrome/156.0.8078.80",
+          "File-Path-Style": "posix",
+          "Protocol-Version": "1.3",
+          "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Safari/537.36",
+          "V8-Version": "15.6.75.27",
+          "WebKit-Version": "537.36 (@cc92146ef17860a4511f7de658b078128dbaad5)",
+          "webSocketDebuggerUrl": "ws://127.0.0.1:9224/devtools/browser/359abbd0-6dab-4ba5-b51c-6671ea1a7324"
+        },
+        "browser_args": [
+          "flatpak",
+          "run",
+          "com.brave.Browser",
+          "--user-data-dir=/tmp/kosher-amazon-evidence/browser-profile-public-media-subtle",
+          "--remote-debugging-port=9224",
+          "--no-first-run",
+          "--no-default-browser-check",
+          "--disable-background-networking",
+          "--proxy-server=http://127.0.0.1:8088",
+          "--proxy-bypass-list=<-loopback>",
+          "--ignore-certificate-errors-spki-list=uplHRXi2CASb9Rk0vxAGnqy92mlDTy8cVvZFQsU49lI=",
+          "about:blank"
+        ],
+        "temporary_ca_spki": "uplHRXi2CASb9Rk0vxAGnqy92mlDTy8cVvZFQsU49lI=",
+        "upstream_tls_verification": true,
+        "media_level": "immodest",
+        "extra_pythonpath": [
+          "/tmp/kosher-avif-pillow"
+        ],
+        "scope": "public signed-out site; isolated media policy; no real account configuration"
+      },
+      "source_files_match_commit": "62b72c6d33fd8d158f21d17284082856421b47a8",
+      "pillow_version": "13.0.0",
+      "avif_decoder": true,
+      "media": [
+        {
+          "url": "https://m.media-amazon.com/images/S/sonata-images-prod/US_SVOD_TNF26_1105_LiveTonight/1e2f3533-b73c-4c00-87c3-a0eb6450b31b._UR3840,1440_SX720_FMavif_PQ65_.jpeg",
+          "synthetic_invalid_preview": false,
+          "input_mime": "image/avif",
+          "input_encoding": "",
+          "input_bytes": 27238,
+          "upstream_filter_result": null,
+          "verdict": {
+            "level": "clean",
+            "has_person": false,
+            "regions": []
+          },
+          "elapsed_ms": 914.3896979985584,
+          "result": "passed",
+          "output_mime": "image/avif",
+          "output_bytes": 27238,
+          "status": 200,
+          "input_sha256": "85d561b68fb5325e01cc5afbe00adc13c2433817f1a19648f0fff2217aa6304f",
+          "input_sample": "media/85d561b68fb5325e01cc5afbe00adc13c2433817f1a19648f0fff2217aa6304f.input.bin",
+          "output_sha256": "85d561b68fb5325e01cc5afbe00adc13c2433817f1a19648f0fff2217aa6304f",
+          "output_sample": "media/85d561b68fb5325e01cc5afbe00adc13c2433817f1a19648f0fff2217aa6304f.output.bin"
+        },
+        {
+          "url": "https://m.media-amazon.com/images/S/sonata-images-prod/US_3P_StDenisMedical_Peacock_SH/fc116421-633c-4f2e-9c8c-022bd0bde25f._UR3840,1440_SX720_FMavif_PQ65_.jpeg",
+          "synthetic_invalid_preview": false,
+          "input_mime": "image/avif",
+          "input_encoding": "",
+          "input_bytes": 16543,
+          "upstream_filter_result": null,
+          "verdict": {
+            "level": "clean",
+            "has_person": true,
+            "regions": []
+          },
+          "elapsed_ms": 1319.488203000219,
+          "result": "passed",
+          "output_mime": "image/avif",
+          "output_bytes": 16543,
+          "status": 200,
+          "input_sha256": "95f5f89f62e505aa29a0bcbfca9376bf5e59508120088cf80f0daa63b96725f5",
+          "input_sample": "media/95f5f89f62e505aa29a0bcbfca9376bf5e59508120088cf80f0daa63b96725f5.input.bin",
+          "output_sha256": "95f5f89f62e505aa29a0bcbfca9376bf5e59508120088cf80f0daa63b96725f5",
+          "output_sample": "media/95f5f89f62e505aa29a0bcbfca9376bf5e59508120088cf80f0daa63b96725f5.output.bin"
+        },
+        {
+          "url": "https://m.media-amazon.com/images/S/sonata-images-prod/US_TVOD_Verity_PVOD_SH/d3c31963-71f6-4224-af66-facbc299243b._UR3840,1440_SX720_FMavif_PQ65_.jpeg",
+          "synthetic_invalid_preview": false,
+          "input_mime": "image/avif",
+          "input_encoding": "",
+          "input_bytes": 2684,
+          "upstream_filter_result": null,
+          "verdict": {
+            "level": "clean",
+            "has_person": true,
+            "regions": []
+          },
+          "elapsed_ms": 1341.561722001643,
+          "result": "passed",
+          "output_mime": "image/avif",
+          "output_bytes": 2684,
+          "status": 200,
+          "input_sha256": "6a904cd925a09238d1ecc99d4bd5394a8966c2887b20a7bd27d7b76c383fca41",
+          "input_sample": "media/6a904cd925a09238d1ecc99d4bd5394a8966c2887b20a7bd27d7b76c383fca41.input.bin",
+          "output_sha256": "6a904cd925a09238d1ecc99d4bd5394a8966c2887b20a7bd27d7b76c383fca41",
+          "output_sample": "media/6a904cd925a09238d1ecc99d4bd5394a8966c2887b20a7bd27d7b76c383fca41.output.bin"
+        },
+        {
+          "url": "https://m.media-amazon.com/images/S/sonata-images-prod/US_FAST_LawOrder_FR/67db5120-8b4b-4034-944d-df37cbc22885._SX720_FMavif_PQ65_.jpeg",
+          "synthetic_invalid_preview": false,
+          "input_mime": "image/avif",
+          "input_encoding": "",
+          "input_bytes": 6444,
+          "upstream_filter_result": null,
+          "verdict": null,
+          "elapsed_ms": 2025.4530679994787,
+          "result": "image-hidden",
+          "output_mime": "image/png",
+          "output_bytes": 122,
+          "status": 200,
+          "input_sha256": "90a92655b271d72325d8bf5415e560c80d87974c7cefc40362eadf8524c6852c",
+          "input_sample": "media/90a92655b271d72325d8bf5415e560c80d87974c7cefc40362eadf8524c6852c.input.bin",
+          "output_sha256": "80762658b723b6e2f847e40878c0955b29a70f1b095cd3cc1be2ed59ecdc8276",
+          "output_sample": "media/80762658b723b6e2f847e40878c0955b29a70f1b095cd3cc1be2ed59ecdc8276.output.bin",
+          "output_pixel_check": {
+            "size": [
+              720,
+              270
+            ],
+            "solid": true,
+            "rgba": [
+              32,
+              16,
+              16,
+              255
+            ]
+          }
+        },
+        {
+          "url": "https://i.ytimg.com/an_webp/kosher-invalid-preview/mqdefault_6s.webp",
+          "synthetic_invalid_preview": true,
+          "input_mime": "image/webp",
+          "input_encoding": "",
+          "input_bytes": 23,
+          "upstream_filter_result": null,
+          "verdict": "not-requested",
+          "elapsed_ms": 3.1753149996802676,
+          "result": "image-hidden",
+          "output_mime": "image/png",
+          "output_bytes": 69,
+          "status": 200,
+          "input_sha256": "2a91c183e4143cfd865c3dfc51bb34c4c5687cab0a5e4dc13e398cf562c25e20",
+          "input_sample": "media/2a91c183e4143cfd865c3dfc51bb34c4c5687cab0a5e4dc13e398cf562c25e20.input.bin",
+          "output_sha256": "da37cba1317b983b694f7538c68944ce4c35d12eae406c961c5adb6fa97a6288",
+          "output_sample": "media/da37cba1317b983b694f7538c68944ce4c35d12eae406c961c5adb6fa97a6288.output.bin",
+          "output_pixel_check": {
+            "size": [
+              1,
+              1
+            ],
+            "solid": true,
+            "rgba": [
+              214,
+              214,
+              214,
+              255
+            ]
+          }
+        },
+        {
+          "url": "https://i.ytimg.com/vi/aqz-KE-bpKQ/hqdefault.jpg",
+          "synthetic_invalid_preview": false,
+          "input_mime": "image/png",
+          "input_encoding": "",
+          "input_bytes": 1347,
+          "upstream_filter_result": "image-hidden",
+          "verdict": "not-requested",
+          "elapsed_ms": 0.35350499820197,
+          "result": "image-hidden",
+          "output_mime": "image/png",
+          "output_bytes": 1347,
+          "status": 200,
+          "input_sha256": "9ee2cca885b8c8913f975d9651610e7a99dc3bbc21ca36c08d45b1e65501e1a9",
+          "input_sample": "media/9ee2cca885b8c8913f975d9651610e7a99dc3bbc21ca36c08d45b1e65501e1a9.input.bin",
+          "output_sha256": "9ee2cca885b8c8913f975d9651610e7a99dc3bbc21ca36c08d45b1e65501e1a9",
+          "output_sample": "media/9ee2cca885b8c8913f975d9651610e7a99dc3bbc21ca36c08d45b1e65501e1a9.output.bin",
+          "output_pixel_check": {
+            "size": [
+              480,
+              360
+            ],
+            "solid": true,
+            "rgba": [
+              214,
+              214,
+              214,
+              255
+            ]
+          }
+        },
+        {
+          "url": "https://i.ytimg.com/vi/dQw4w9WgXc/hqdefault.jpg",
+          "synthetic_invalid_preview": false,
+          "input_mime": "image/jpeg",
+          "input_encoding": "",
+          "input_bytes": 1097,
+          "upstream_filter_result": null,
+          "verdict": "not-requested",
+          "elapsed_ms": 0.36453600114327855,
+          "result": "passed",
+          "output_mime": "image/jpeg",
+          "output_bytes": 1097,
+          "status": 404,
+          "input_sha256": "20e9aab22032d85684d7d916a1013f7c577a132a5b10ea3fd3578e8d0b28a711",
+          "input_sample": "media/20e9aab22032d85684d7d916a1013f7c577a132a5b10ea3fd3578e8d0b28a711.input.bin",
+          "output_sha256": "20e9aab22032d85684d7d916a1013f7c577a132a5b10ea3fd3578e8d0b28a711",
+          "output_sample": "media/20e9aab22032d85684d7d916a1013f7c577a132a5b10ea3fd3578e8d0b28a711.output.bin"
+        },
+        {
+          "url": "https://m.media-amazon.com/images/S/sonata-images-prod/US_FAST_LawOrder_FR/67db5120-8b4b-4034-944d-df37cbc22885._SX720_FMavif_PQ65_.jpeg",
+          "synthetic_invalid_preview": false,
+          "input_mime": "image/avif",
+          "input_encoding": "",
+          "input_bytes": 6444,
+          "upstream_filter_result": null,
+          "verdict": {
+            "level": "immodest",
+            "has_person": true,
+            "regions": [
+              [
+                362,
+                5,
+                182,
+                265
+              ]
+            ]
+          },
+          "elapsed_ms": 128.99492300130078,
+          "result": "image-covered=immodest",
+          "output_mime": "image/png",
+          "output_bytes": 45615,
+          "status": 200,
+          "input_sha256": "90a92655b271d72325d8bf5415e560c80d87974c7cefc40362eadf8524c6852c",
+          "input_sample": "media/90a92655b271d72325d8bf5415e560c80d87974c7cefc40362eadf8524c6852c.input.bin",
+          "output_sha256": "c77521ae4a7dcc67efa7dfa969a67e6fea21f93e82022299d4030809ad2606e1",
+          "output_sample": "media/c77521ae4a7dcc67efa7dfa969a67e6fea21f93e82022299d4030809ad2606e1.output.bin",
+          "output_pixel_check": {
+            "size": [
+              720,
+              270
+            ],
+            "solid": false
+          }
+        }
+      ],
+      "pages": [
+        {
+          "directory": "page-0",
+          "summary": {
+            "url": "http://127.0.0.1/__prime_asset_check",
+            "title": "Public Prime Video carousel image check",
+            "images": 4,
+            "visible_images": 3,
+            "visible_decoded_images": 3,
+            "visible_css_backgrounds": 0,
+            "frame_gap_p95_ms": 16.8,
+            "frame_gap_max_ms": 50,
+            "reported_interaction_max_ms": 16,
+            "media_results": {
+              "passed": 3,
+              "image-hidden": 1
+            },
+            "media_results_scope": "cumulative across pages in this isolated proxy run",
+            "input_mimes": {
+              "image/avif": 4
+            },
+            "upstream_already_filtered": 0,
+            "proxy_errors": 0,
+            "actions": [],
+            "image_status_ui_hosts": 1,
+            "visible_image_status_labels": {},
+            "final_tracked_image_status_states": {
+              "checked": 3,
+              "unavailable": 1
+            },
+            "observed_image_status_states": [
+              "checked",
+              "checking",
+              "unavailable",
+              "waiting"
+            ],
+            "status_api_http_codes": {
+              "200": 5
+            },
+            "has_captcha_text": false,
+            "validation_errors": []
+          },
+          "browser": {
+            "url": "http://127.0.0.1/__prime_asset_check",
+            "title": "Public Prime Video carousel image check",
+            "images": [
+              {
+                "src": "https://m.media-amazon.com/images/S/sonata-images-prod/US_TVOD_Verity_PVOD_SH/d3c31963-71f6-4224-af66-facbc299243b._UR3840,1440_SX720_FMavif_PQ65_.jpeg",
+                "currentSrc": "https://m.media-amazon.com/images/S/sonata-images-prod/US_TVOD_Verity_PVOD_SH/d3c31963-71f6-4224-af66-facbc299243b._UR3840,1440_SX720_FMavif_PQ65_.jpeg",
+                "alt": "",
+                "srcset": "",
+                "complete": true,
+                "naturalWidth": 720,
+                "naturalHeight": 270,
+                "width": 720,
+                "height": 270,
+                "visible": true
+              },
+              {
+                "src": "https://m.media-amazon.com/images/S/sonata-images-prod/US_3P_StDenisMedical_Peacock_SH/fc116421-633c-4f2e-9c8c-022bd0bde25f._UR3840,1440_SX720_FMavif_PQ65_.jpeg",
+                "currentSrc": "https://m.media-amazon.com/images/S/sonata-images-prod/US_3P_StDenisMedical_Peacock_SH/fc116421-633c-4f2e-9c8c-022bd0bde25f._UR3840,1440_SX720_FMavif_PQ65_.jpeg",
+                "alt": "",
+                "srcset": "",
+                "complete": true,
+                "naturalWidth": 720,
+                "naturalHeight": 270,
+                "width": 720,
+                "height": 270,
+                "visible": true
+              },
+              {
+                "src": "https://m.media-amazon.com/images/S/sonata-images-prod/US_SVOD_TNF26_1105_LiveTonight/1e2f3533-b73c-4c00-87c3-a0eb6450b31b._UR3840,1440_SX720_FMavif_PQ65_.jpeg",
+                "currentSrc": "https://m.media-amazon.com/images/S/sonata-images-prod/US_SVOD_TNF26_1105_LiveTonight/1e2f3533-b73c-4c00-87c3-a0eb6450b31b._UR3840,1440_SX720_FMavif_PQ65_.jpeg",
+                "alt": "",
+                "srcset": "",
+                "complete": true,
+                "naturalWidth": 720,
+                "naturalHeight": 270,
+                "width": 720,
+                "height": 270,
+                "visible": true
+              },
+              {
+                "src": "https://m.media-amazon.com/images/S/sonata-images-prod/US_FAST_LawOrder_FR/67db5120-8b4b-4034-944d-df37cbc22885._SX720_FMavif_PQ65_.jpeg",
+                "currentSrc": "https://m.media-amazon.com/images/S/sonata-images-prod/US_FAST_LawOrder_FR/67db5120-8b4b-4034-944d-df37cbc22885._SX720_FMavif_PQ65_.jpeg",
+                "alt": "",
+                "srcset": "",
+                "complete": true,
+                "naturalWidth": 720,
+                "naturalHeight": 270,
+                "width": 720,
+                "height": 270,
+                "visible": false
+              }
+            ],
+            "backgrounds": [],
+            "image_status_ui": {
+              "hosts": 1,
+              "badges": [
+                {
+                  "state": "checked",
+                  "label": "Checked",
+                  "visible": false,
+                  "was_displayed": true,
+                  "title": "",
+                  "accessible_label": "Checked"
+                },
+                {
+                  "state": "checked",
+                  "label": "Checked",
+                  "visible": false,
+                  "was_displayed": true,
+                  "title": "",
+                  "accessible_label": "Checked"
+                },
+                {
+                  "state": "checked",
+                  "label": "Checked",
+                  "visible": false,
+                  "was_displayed": true,
+                  "title": "",
+                  "accessible_label": "Checked"
+                },
+                {
+                  "state": "unavailable",
+                  "label": "Not checked \u00b7 hidden",
+                  "visible": false,
+                  "was_displayed": true,
+                  "title": "",
+                  "accessible_label": "Not checked \u00b7 hidden"
+                }
+              ]
+            },
+            "http_responses": [
+              {
+                "url": "http://127.0.0.1/__prime_asset_check",
+                "status": 200,
+                "mime": "text/html",
+                "filter_result": null
+              },
+              {
+                "url": "http://127.0.0.1/__kosheros__/filter.js?v=b4a4a00c446a52d6b8b33981c23a31f1",
+                "status": 200,
+                "mime": "application/javascript; charset=utf-8",
+                "filter_result": null
+              },
+              {
+                "url": "http://127.0.0.1/__kosheros__/image-status",
+                "status": 200,
+                "mime": "application/json",
+                "filter_result": null
+              },
+              {
+                "url": "https://m.media-amazon.com/images/S/sonata-images-prod/US_SVOD_TNF26_1105_LiveTonight/1e2f3533-b73c-4c00-87c3-a0eb6450b31b._UR3840,1440_SX720_FMavif_PQ65_.jpeg",
+                "status": 200,
+                "mime": "image/avif",
+                "filter_result": null
+              },
+              {
+                "url": "http://127.0.0.1/__kosheros__/image-status",
+                "status": 200,
+                "mime": "application/json",
+                "filter_result": null
+              },
+              {
+                "url": "https://m.media-amazon.com/images/S/sonata-images-prod/US_3P_StDenisMedical_Peacock_SH/fc116421-633c-4f2e-9c8c-022bd0bde25f._UR3840,1440_SX720_FMavif_PQ65_.jpeg",
+                "status": 200,
+                "mime": "image/avif",
+                "filter_result": null
+              },
+              {
+                "url": "https://m.media-amazon.com/images/S/sonata-images-prod/US_TVOD_Verity_PVOD_SH/d3c31963-71f6-4224-af66-facbc299243b._UR3840,1440_SX720_FMavif_PQ65_.jpeg",
+                "status": 200,
+                "mime": "image/avif",
+                "filter_result": null
+              },
+              {
+                "url": "http://127.0.0.1/__kosheros__/image-status",
+                "status": 200,
+                "mime": "application/json",
+                "filter_result": null
+              },
+              {
+                "url": "https://m.media-amazon.com/images/S/sonata-images-prod/US_FAST_LawOrder_FR/67db5120-8b4b-4034-944d-df37cbc22885._SX720_FMavif_PQ65_.jpeg",
+                "status": 200,
+                "mime": "image/png",
+                "filter_result": "image-hidden"
+              },
+              {
+                "url": "http://127.0.0.1/__kosheros__/image-status",
+                "status": 200,
+                "mime": "application/json",
+                "filter_result": null
+              },
+              {
+                "url": "http://127.0.0.1/__kosheros__/image-status",
+                "status": 200,
+                "mime": "application/json",
+                "filter_result": null
+              }
+            ]
+          },
+          "final_png_sha256": "65e878701af8b9fdc75c9dbbb66717e03de464154ad220cf1a46d94d6445827a"
+        },
+        {
+          "directory": "page-1",
+          "summary": {
+            "url": "http://127.0.0.1/__youtube_asset_check",
+            "title": "Public YouTube thumbnail and hover fallback check",
+            "images": 3,
+            "visible_images": 3,
+            "visible_decoded_images": 3,
+            "visible_css_backgrounds": 0,
+            "frame_gap_p95_ms": 16.7,
+            "frame_gap_max_ms": 49.9,
+            "reported_interaction_max_ms": null,
+            "media_results": {
+              "passed": 4,
+              "image-hidden": 3
+            },
+            "media_results_scope": "cumulative across pages in this isolated proxy run",
+            "input_mimes": {
+              "image/avif": 4,
+              "image/webp": 1,
+              "image/png": 1,
+              "image/jpeg": 1
+            },
+            "upstream_already_filtered": 1,
+            "proxy_errors": 0,
+            "actions": [],
+            "image_status_ui_hosts": 1,
+            "visible_image_status_labels": {
+              "Hidden": 1
+            },
+            "final_tracked_image_status_states": {
+              "not_checked": 2,
+              "hidden": 1
+            },
+            "observed_image_status_states": [
+              "hidden",
+              "not_checked",
+              "waiting"
+            ],
+            "status_api_http_codes": {
+              "200": 6
+            },
+            "has_captcha_text": false,
+            "validation_errors": []
+          },
+          "browser": {
+            "url": "http://127.0.0.1/__youtube_asset_check",
+            "title": "Public YouTube thumbnail and hover fallback check",
+            "images": [
+              {
+                "src": "https://i.ytimg.com/vi/aqz-KE-bpKQ/hqdefault.jpg",
+                "currentSrc": "https://i.ytimg.com/vi/aqz-KE-bpKQ/hqdefault.jpg",
+                "alt": "",
+                "srcset": "",
+                "complete": true,
+                "naturalWidth": 480,
+                "naturalHeight": 360,
+                "width": 320,
+                "height": 180,
+                "visible": true
+              },
+              {
+                "src": "https://i.ytimg.com/vi/dQw4w9WgXc/hqdefault.jpg",
+                "currentSrc": "https://i.ytimg.com/vi/dQw4w9WgXc/hqdefault.jpg",
+                "alt": "",
+                "srcset": "",
+                "complete": true,
+                "naturalWidth": 120,
+                "naturalHeight": 90,
+                "width": 320,
+                "height": 180,
+                "visible": true
+              },
+              {
+                "src": "https://i.ytimg.com/an_webp/kosher-invalid-preview/mqdefault_6s.webp",
+                "currentSrc": "https://i.ytimg.com/an_webp/kosher-invalid-preview/mqdefault_6s.webp",
+                "alt": "",
+                "srcset": "",
+                "complete": true,
+                "naturalWidth": 1,
+                "naturalHeight": 1,
+                "width": 320,
+                "height": 180,
+                "visible": true
+              }
+            ],
+            "backgrounds": [],
+            "image_status_ui": {
+              "hosts": 1,
+              "badges": [
+                {
+                  "state": "not_checked",
+                  "label": "Not checked",
+                  "visible": false,
+                  "was_displayed": true,
+                  "title": "",
+                  "accessible_label": "Not checked"
+                },
+                {
+                  "state": "not_checked",
+                  "label": "Not checked",
+                  "visible": false,
+                  "was_displayed": true,
+                  "title": "",
+                  "accessible_label": "Not checked"
+                },
+                {
+                  "state": "hidden",
+                  "label": "Hidden",
+                  "visible": true,
+                  "was_displayed": true,
+                  "title": "",
+                  "accessible_label": "Hidden"
+                }
+              ]
+            },
+            "http_responses": [
+              {
+                "url": "http://127.0.0.1/__youtube_asset_check",
+                "status": 200,
+                "mime": "text/html",
+                "filter_result": null
+              },
+              {
+                "url": "http://127.0.0.1/__kosheros__/filter.js?v=b4a4a00c446a52d6b8b33981c23a31f1",
+                "status": 200,
+                "mime": "application/javascript; charset=utf-8",
+                "filter_result": null
+              },
+              {
+                "url": "https://i.ytimg.com/an_webp/kosher-invalid-preview/mqdefault_6s.webp",
+                "status": 200,
+                "mime": "image/png",
+                "filter_result": "image-hidden"
+              },
+              {
+                "url": "https://i.ytimg.com/vi/aqz-KE-bpKQ/hqdefault.jpg",
+                "status": 200,
+                "mime": "image/png",
+                "filter_result": "image-hidden"
+              },
+              {
+                "url": "https://i.ytimg.com/vi/dQw4w9WgXc/hqdefault.jpg",
+                "status": 404,
+                "mime": "image/jpeg",
+                "filter_result": null
+              },
+              {
+                "url": "http://127.0.0.1/__kosheros__/image-status",
+                "status": 200,
+                "mime": "application/json",
+                "filter_result": null
+              }
+            ]
+          },
+          "final_png_sha256": "120c8f1b0f7820b667810acf258639b6249b7b0de4765e29d9c41f90a38bde1e"
+        },
+        {
+          "directory": "page-2",
+          "summary": {
+            "url": "http://127.0.0.1/__prime_background_check",
+            "title": "Public Prime Video inline background check",
+            "images": 0,
+            "visible_images": 0,
+            "visible_decoded_images": 0,
+            "visible_css_backgrounds": 1,
+            "frame_gap_p95_ms": 16.8,
+            "frame_gap_max_ms": 38,
+            "reported_interaction_max_ms": null,
+            "media_results": {
+              "passed": 4,
+              "image-hidden": 3,
+              "image-covered=immodest": 1
+            },
+            "media_results_scope": "cumulative across pages in this isolated proxy run",
+            "input_mimes": {
+              "image/avif": 5,
+              "image/webp": 1,
+              "image/png": 1,
+              "image/jpeg": 1
+            },
+            "upstream_already_filtered": 1,
+            "proxy_errors": 0,
+            "actions": [],
+            "image_status_ui_hosts": 1,
+            "visible_image_status_labels": {
+              "Filtered": 1
+            },
+            "final_tracked_image_status_states": {
+              "filtered": 1
+            },
+            "observed_image_status_states": [
+              "filtered",
+              "waiting"
+            ],
+            "status_api_http_codes": {
+              "200": 7
+            },
+            "has_captcha_text": false,
+            "validation_errors": []
+          },
+          "browser": {
+            "url": "http://127.0.0.1/__prime_background_check",
+            "title": "Public Prime Video inline background check",
+            "images": [],
+            "backgrounds": [
+              {
+                "image": "url(\"https://m.media-amazon.com/images/S/sonata-images-prod/US_FAST_LawOrder_FR/67db5120-8b4b-4034-944d-df37cbc22885._SX720_FMavif_PQ65_.jpeg\")",
+                "width": 720,
+                "height": 270,
+                "visible": true
+              }
+            ],
+            "image_status_ui": {
+              "hosts": 1,
+              "badges": [
+                {
+                  "state": "filtered",
+                  "label": "Filtered",
+                  "visible": true,
+                  "was_displayed": true,
+                  "title": "",
+                  "accessible_label": "Filtered"
+                }
+              ]
+            },
+            "http_responses": [
+              {
+                "url": "http://127.0.0.1/__prime_background_check",
+                "status": 200,
+                "mime": "text/html",
+                "filter_result": null
+              },
+              {
+                "url": "http://127.0.0.1/__kosheros__/filter.js?v=b4a4a00c446a52d6b8b33981c23a31f1",
+                "status": 200,
+                "mime": "application/javascript; charset=utf-8",
+                "filter_result": null
+              },
+              {
+                "url": "https://m.media-amazon.com/images/S/sonata-images-prod/US_FAST_LawOrder_FR/67db5120-8b4b-4034-944d-df37cbc22885._SX720_FMavif_PQ65_.jpeg",
+                "status": 200,
+                "mime": "image/png",
+                "filter_result": "image-covered=immodest"
+              },
+              {
+                "url": "http://127.0.0.1/__kosheros__/image-status",
+                "status": 200,
+                "mime": "application/json",
+                "filter_result": null
+              }
+            ]
+          },
+          "final_png_sha256": "f2ffe743f463d599ce6f8331676eb4632cc80c600e435b0a7768c7949eb1e4c6"
+        }
+      ],
+      "status_api_responses": [
+        {
+          "url": "http://127.0.0.1/__kosheros__/image-status",
+          "status": 200,
+          "states": {}
+        },
+        {
+          "url": "http://127.0.0.1/__kosheros__/image-status",
+          "status": 200,
+          "states": {
+            "https://m.media-amazon.com/images/S/sonata-images-prod/US_3P_StDenisMedical_Peacock_SH/fc116421-633c-4f2e-9c8c-022bd0bde25f._UR3840,1440_SX720_FMavif_PQ65_.jpeg": "checking",
+            "https://m.media-amazon.com/images/S/sonata-images-prod/US_SVOD_TNF26_1105_LiveTonight/1e2f3533-b73c-4c00-87c3-a0eb6450b31b._UR3840,1440_SX720_FMavif_PQ65_.jpeg": "checking",
+            "https://m.media-amazon.com/images/S/sonata-images-prod/US_FAST_LawOrder_FR/67db5120-8b4b-4034-944d-df37cbc22885._SX720_FMavif_PQ65_.jpeg": "checking"
+          }
+        },
+        {
+          "url": "http://127.0.0.1/__kosheros__/image-status",
+          "status": 200,
+          "states": {
+            "https://m.media-amazon.com/images/S/sonata-images-prod/US_3P_StDenisMedical_Peacock_SH/fc116421-633c-4f2e-9c8c-022bd0bde25f._UR3840,1440_SX720_FMavif_PQ65_.jpeg": "checked",
+            "https://m.media-amazon.com/images/S/sonata-images-prod/US_SVOD_TNF26_1105_LiveTonight/1e2f3533-b73c-4c00-87c3-a0eb6450b31b._UR3840,1440_SX720_FMavif_PQ65_.jpeg": "checked",
+            "https://m.media-amazon.com/images/S/sonata-images-prod/US_FAST_LawOrder_FR/67db5120-8b4b-4034-944d-df37cbc22885._SX720_FMavif_PQ65_.jpeg": "checking"
+          }
+        },
+        {
+          "url": "http://127.0.0.1/__kosheros__/image-status",
+          "status": 200,
+          "states": {
+            "https://m.media-amazon.com/images/S/sonata-images-prod/US_FAST_LawOrder_FR/67db5120-8b4b-4034-944d-df37cbc22885._SX720_FMavif_PQ65_.jpeg": "unavailable"
+          }
+        },
+        {
+          "url": "http://127.0.0.1/__kosheros__/image-status",
+          "status": 200,
+          "states": {
+            "https://m.media-amazon.com/images/S/sonata-images-prod/US_TVOD_Verity_PVOD_SH/d3c31963-71f6-4224-af66-facbc299243b._UR3840,1440_SX720_FMavif_PQ65_.jpeg": "checked"
+          }
+        },
+        {
+          "url": "http://127.0.0.1/__kosheros__/image-status",
+          "status": 200,
+          "states": {
+            "https://i.ytimg.com/vi/aqz-KE-bpKQ/hqdefault.jpg": "not_checked",
+            "https://i.ytimg.com/vi/dQw4w9WgXc/hqdefault.jpg": "not_checked",
+            "https://i.ytimg.com/an_webp/kosher-invalid-preview/mqdefault_6s.webp": "hidden"
+          }
+        },
+        {
+          "url": "http://127.0.0.1/__kosheros__/image-status",
+          "status": 200,
+          "states": {
+            "https://m.media-amazon.com/images/S/sonata-images-prod/US_FAST_LawOrder_FR/67db5120-8b4b-4034-944d-df37cbc22885._SX720_FMavif_PQ65_.jpeg": "filtered"
+          }
+        }
+      ],
+      "proxy_errors": [],
+      "limitations": [
+        "The first cold Law & Order IMG request hit the image deadline (verdict null, elapsed 2025ms), hid safely with its dimensions preserved, and reported unavailable.",
+        "A later CSS-background request for the identical input hash returned the cached immodest verdict and a cover (129ms); this is not evidence that the first cold request covered successfully.",
+        "The public YouTube samples beside the synthetic invalid preview were already hidden upstream or returned HTTP404; they are not model-classification evidence."
+      ]
+    },
+    "public-media-colors-subtle": {
+      "environment": {
+        "source": {
+          "root": "/tmp/kosher-image-perf",
+          "commit": "62b72c6d33fd8d158f21d17284082856421b47a8",
+          "tracked_diff_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "files_sha256": {
+            "mitm/kosher_filter.py": "1fd80efb12b7a33d96967a9f1b460a2779a041744c5f7c8bf7d564a20efffc73",
+            "mitm/kosher_page.js": "b4a4a00c446a52d6b8b33981c23a31f1572d58e8a9762f5a10a4445540fb1908",
+            "kosherd/src/kosherd/vision.py": "ec8accb4240ced2e2f9a895bc09e83623f4777897659cab009b78969bd1abec3",
+            "kosherd/src/kosherd/videocheck.py": "f25405816695a32992047b62593e9c78810bfc4ced9779604bbdbaea90a34ce9",
+            "kosherd/src/kosherd/imageedit.py": "465877afcf50b70884e3571241464a9bfa99e12c24ecbaf781f5dfd92cff0f0e"
+          }
+        },
+        "host": {
+          "architecture": "x86_64",
+          "kernel": "7.2.13-200.fc44.x86_64",
+          "logical_cpus": 12,
+          "python": "3.14.8",
+          "cpu_model": "Intel(R) Core(TM) i7-10710U CPU @ 1.10GHz",
+          "platform_profile": "performance",
+          "energy_preferences": [
+            "performance"
+          ],
+          "governors": [
+            "performance"
+          ],
+          "load_average": [
+            1.55126953125,
+            2.263671875,
+            2.89697265625
+          ]
+        },
+        "browser": {
+          "Browser": "Chrome/156.0.8078.80",
+          "File-Path-Style": "posix",
+          "Protocol-Version": "1.3",
+          "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Safari/537.36",
+          "V8-Version": "15.6.75.27",
+          "WebKit-Version": "537.36 (@cc92146ef17860a4511f7de658b078128dbaad5)",
+          "webSocketDebuggerUrl": "ws://127.0.0.1:9224/devtools/browser/394cc988-9603-47dc-b940-4dadba6a2393"
+        },
+        "browser_args": [
+          "flatpak",
+          "run",
+          "com.brave.Browser",
+          "--user-data-dir=/tmp/kosher-amazon-evidence/browser-profile-public-media-colors-subtle",
+          "--remote-debugging-port=9224",
+          "--no-first-run",
+          "--no-default-browser-check",
+          "--disable-background-networking",
+          "--proxy-server=http://127.0.0.1:8088",
+          "--proxy-bypass-list=<-loopback>",
+          "--ignore-certificate-errors-spki-list=uplHRXi2CASb9Rk0vxAGnqy92mlDTy8cVvZFQsU49lI=",
+          "about:blank"
+        ],
+        "temporary_ca_spki": "uplHRXi2CASb9Rk0vxAGnqy92mlDTy8cVvZFQsU49lI=",
+        "harness_sha256": {
+          "browser.py": "635f6d7bef22b4c31a50241ad334fe894dbcab1f9469aa3f3d5a7eb16d6c652e",
+          "amazon.py": "a6d6cc98183028cc0e22b5c36075e82ec7562e4936b2637b1330fd2f51ded277",
+          "amazon_addon.py": "aa8b2a2caca8eecac43cc84d3c337981c35a141f8901c68d7462a786f96f28cd"
+        },
+        "upstream_tls_verification": true,
+        "media_level": "all",
+        "extra_pythonpath": [
+          "/tmp/kosher-avif-pillow"
+        ],
+        "scope": "public signed-out site; isolated media policy; no real account configuration"
+      },
+      "source_files_match_commit": "62b72c6d33fd8d158f21d17284082856421b47a8",
+      "pillow_version": "13.0.0",
+      "avif_decoder": true,
+      "media": [
+        {
+          "url": "https://m.media-amazon.com/images/S/sonata-images-prod/US_TVOD_Verity_PVOD_SH/d3c31963-71f6-4224-af66-facbc299243b._UR3840,1440_SX720_FMavif_PQ65_.jpeg",
+          "synthetic_invalid_preview": false,
+          "input_mime": "image/avif",
+          "input_encoding": "",
+          "input_bytes": 2684,
+          "upstream_filter_result": null,
+          "verdict": "not-requested",
+          "elapsed_ms": 59.69534800533438,
+          "result": "image-hidden",
+          "output_mime": "image/png",
+          "output_bytes": 122,
+          "status": 200,
+          "input_sha256": "6a904cd925a09238d1ecc99d4bd5394a8966c2887b20a7bd27d7b76c383fca41",
+          "input_sample": "media/6a904cd925a09238d1ecc99d4bd5394a8966c2887b20a7bd27d7b76c383fca41.input.bin",
+          "output_sha256": "3cb27f37a6f46b164a55d5bd63536153400e2350270e4c4a0b8a88528ed69f57",
+          "output_sample": "media/3cb27f37a6f46b164a55d5bd63536153400e2350270e4c4a0b8a88528ed69f57.output.bin",
+          "output_pixel_check": {
+            "size": [
+              720,
+              270
+            ],
+            "solid": true,
+            "rgba": [
+              16,
+              16,
+              32,
+              255
+            ]
+          }
+        },
+        {
+          "url": "https://m.media-amazon.com/images/S/sonata-images-prod/US_3P_StDenisMedical_Peacock_SH/fc116421-633c-4f2e-9c8c-022bd0bde25f._UR3840,1440_SX720_FMavif_PQ65_.jpeg",
+          "synthetic_invalid_preview": false,
+          "input_mime": "image/avif",
+          "input_encoding": "",
+          "input_bytes": 16543,
+          "upstream_filter_result": null,
+          "verdict": "not-requested",
+          "elapsed_ms": 61.50509400322335,
+          "result": "image-hidden",
+          "output_mime": "image/png",
+          "output_bytes": 122,
+          "status": 200,
+          "input_sha256": "95f5f89f62e505aa29a0bcbfca9376bf5e59508120088cf80f0daa63b96725f5",
+          "input_sample": "media/95f5f89f62e505aa29a0bcbfca9376bf5e59508120088cf80f0daa63b96725f5.input.bin",
+          "output_sha256": "a7040d9386b8240ef35505186aee5b80d7a347e8c0a22847f13c6040abf7ba3a",
+          "output_sample": "media/a7040d9386b8240ef35505186aee5b80d7a347e8c0a22847f13c6040abf7ba3a.output.bin",
+          "output_pixel_check": {
+            "size": [
+              720,
+              270
+            ],
+            "solid": true,
+            "rgba": [
+              96,
+              112,
+              112,
+              255
+            ]
+          }
+        },
+        {
+          "url": "https://m.media-amazon.com/images/S/sonata-images-prod/US_FAST_LawOrder_FR/67db5120-8b4b-4034-944d-df37cbc22885._SX720_FMavif_PQ65_.jpeg",
+          "synthetic_invalid_preview": false,
+          "input_mime": "image/avif",
+          "input_encoding": "",
+          "input_bytes": 6444,
+          "upstream_filter_result": null,
+          "verdict": "not-requested",
+          "elapsed_ms": 63.576893000572454,
+          "result": "image-hidden",
+          "output_mime": "image/png",
+          "output_bytes": 122,
+          "status": 200,
+          "input_sha256": "90a92655b271d72325d8bf5415e560c80d87974c7cefc40362eadf8524c6852c",
+          "input_sample": "media/90a92655b271d72325d8bf5415e560c80d87974c7cefc40362eadf8524c6852c.input.bin",
+          "output_sha256": "80762658b723b6e2f847e40878c0955b29a70f1b095cd3cc1be2ed59ecdc8276",
+          "output_sample": "media/80762658b723b6e2f847e40878c0955b29a70f1b095cd3cc1be2ed59ecdc8276.output.bin",
+          "output_pixel_check": {
+            "size": [
+              720,
+              270
+            ],
+            "solid": true,
+            "rgba": [
+              32,
+              16,
+              16,
+              255
+            ]
+          }
+        },
+        {
+          "url": "https://m.media-amazon.com/images/S/sonata-images-prod/US_SVOD_TNF26_1105_LiveTonight/1e2f3533-b73c-4c00-87c3-a0eb6450b31b._UR3840,1440_SX720_FMavif_PQ65_.jpeg",
+          "synthetic_invalid_preview": false,
+          "input_mime": "image/avif",
+          "input_encoding": "",
+          "input_bytes": 27238,
+          "upstream_filter_result": null,
+          "verdict": "not-requested",
+          "elapsed_ms": 51.678986004844774,
+          "result": "image-hidden",
+          "output_mime": "image/png",
+          "output_bytes": 122,
+          "status": 200,
+          "input_sha256": "85d561b68fb5325e01cc5afbe00adc13c2433817f1a19648f0fff2217aa6304f",
+          "input_sample": "media/85d561b68fb5325e01cc5afbe00adc13c2433817f1a19648f0fff2217aa6304f.input.bin",
+          "output_sha256": "c645a48dc0700cf1d6ffbd4f2c4c99a938e9a47948765550ffcab5bcb7554cd0",
+          "output_sample": "media/c645a48dc0700cf1d6ffbd4f2c4c99a938e9a47948765550ffcab5bcb7554cd0.output.bin",
+          "output_pixel_check": {
+            "size": [
+              720,
+              270
+            ],
+            "solid": true,
+            "rgba": [
+              32,
+              32,
+              96,
+              255
+            ]
+          }
+        }
+      ],
+      "pages": [
+        {
+          "directory": "page-0",
+          "summary": {
+            "url": "http://127.0.0.1/__prime_asset_check",
+            "title": "Public Prime Video carousel image check",
+            "images": 4,
+            "visible_images": 4,
+            "visible_decoded_images": 4,
+            "visible_css_backgrounds": 0,
+            "frame_gap_p95_ms": 16.7,
+            "frame_gap_max_ms": 33.4,
+            "reported_interaction_max_ms": null,
+            "media_results": {
+              "image-hidden": 4
+            },
+            "media_results_scope": "cumulative across pages in this isolated proxy run",
+            "input_mimes": {
+              "image/avif": 4
+            },
+            "upstream_already_filtered": 0,
+            "proxy_errors": 0,
+            "actions": [],
+            "image_status_ui_hosts": 1,
+            "visible_image_status_labels": {
+              "Hidden": 4
+            },
+            "final_tracked_image_status_states": {
+              "hidden": 4
+            },
+            "observed_image_status_states": [
+              "hidden",
+              "waiting"
+            ],
+            "status_api_http_codes": {
+              "403": 28,
+              "200": 1
+            },
+            "has_captcha_text": false,
+            "validation_errors": [],
+            "capture_status": "saved",
+            "capture_errors": []
+          },
+          "browser": {
+            "url": "http://127.0.0.1/__prime_asset_check",
+            "title": "Public Prime Video carousel image check",
+            "images": [
+              {
+                "src": "https://m.media-amazon.com/images/S/sonata-images-prod/US_TVOD_Verity_PVOD_SH/d3c31963-71f6-4224-af66-facbc299243b._UR3840,1440_SX720_FMavif_PQ65_.jpeg",
+                "currentSrc": "https://m.media-amazon.com/images/S/sonata-images-prod/US_TVOD_Verity_PVOD_SH/d3c31963-71f6-4224-af66-facbc299243b._UR3840,1440_SX720_FMavif_PQ65_.jpeg",
+                "alt": "",
+                "srcset": "",
+                "complete": true,
+                "naturalWidth": 720,
+                "naturalHeight": 270,
+                "width": 720,
+                "height": 270,
+                "visible": true
+              },
+              {
+                "src": "https://m.media-amazon.com/images/S/sonata-images-prod/US_3P_StDenisMedical_Peacock_SH/fc116421-633c-4f2e-9c8c-022bd0bde25f._UR3840,1440_SX720_FMavif_PQ65_.jpeg",
+                "currentSrc": "https://m.media-amazon.com/images/S/sonata-images-prod/US_3P_StDenisMedical_Peacock_SH/fc116421-633c-4f2e-9c8c-022bd0bde25f._UR3840,1440_SX720_FMavif_PQ65_.jpeg",
+                "alt": "",
+                "srcset": "",
+                "complete": true,
+                "naturalWidth": 720,
+                "naturalHeight": 270,
+                "width": 720,
+                "height": 270,
+                "visible": true
+              },
+              {
+                "src": "https://m.media-amazon.com/images/S/sonata-images-prod/US_SVOD_TNF26_1105_LiveTonight/1e2f3533-b73c-4c00-87c3-a0eb6450b31b._UR3840,1440_SX720_FMavif_PQ65_.jpeg",
+                "currentSrc": "https://m.media-amazon.com/images/S/sonata-images-prod/US_SVOD_TNF26_1105_LiveTonight/1e2f3533-b73c-4c00-87c3-a0eb6450b31b._UR3840,1440_SX720_FMavif_PQ65_.jpeg",
+                "alt": "",
+                "srcset": "",
+                "complete": true,
+                "naturalWidth": 720,
+                "naturalHeight": 270,
+                "width": 720,
+                "height": 270,
+                "visible": true
+              },
+              {
+                "src": "https://m.media-amazon.com/images/S/sonata-images-prod/US_FAST_LawOrder_FR/67db5120-8b4b-4034-944d-df37cbc22885._SX720_FMavif_PQ65_.jpeg",
+                "currentSrc": "https://m.media-amazon.com/images/S/sonata-images-prod/US_FAST_LawOrder_FR/67db5120-8b4b-4034-944d-df37cbc22885._SX720_FMavif_PQ65_.jpeg",
+                "alt": "",
+                "srcset": "",
+                "complete": true,
+                "naturalWidth": 720,
+                "naturalHeight": 270,
+                "width": 720,
+                "height": 270,
+                "visible": true
+              }
+            ],
+            "backgrounds": [],
+            "image_status_ui": {
+              "hosts": 1,
+              "badges": [
+                {
+                  "state": "hidden",
+                  "label": "Hidden",
+                  "visible": true,
+                  "was_displayed": true,
+                  "title": "",
+                  "accessible_label": "Hidden"
+                },
+                {
+                  "state": "hidden",
+                  "label": "Hidden",
+                  "visible": true,
+                  "was_displayed": true,
+                  "title": "",
+                  "accessible_label": "Hidden"
+                },
+                {
+                  "state": "hidden",
+                  "label": "Hidden",
+                  "visible": true,
+                  "was_displayed": true,
+                  "title": "",
+                  "accessible_label": "Hidden"
+                },
+                {
+                  "state": "hidden",
+                  "label": "Hidden",
+                  "visible": true,
+                  "was_displayed": true,
+                  "title": "",
+                  "accessible_label": "Hidden"
+                }
+              ]
+            },
+            "http_responses": [
+              {
+                "url": "http://127.0.0.1/__prime_asset_check",
+                "status": 200,
+                "mime": "text/html",
+                "filter_result": null
+              },
+              {
+                "url": "http://127.0.0.1/__kosheros__/filter.js?v=b4a4a00c446a52d6b8b33981c23a31f1",
+                "status": 200,
+                "mime": "application/javascript; charset=utf-8",
+                "filter_result": null
+              },
+              {
+                "url": "https://m.media-amazon.com/images/S/sonata-images-prod/US_TVOD_Verity_PVOD_SH/d3c31963-71f6-4224-af66-facbc299243b._UR3840,1440_SX720_FMavif_PQ65_.jpeg",
+                "status": 200,
+                "mime": "image/png",
+                "filter_result": "image-hidden"
+              },
+              {
+                "url": "https://m.media-amazon.com/images/S/sonata-images-prod/US_3P_StDenisMedical_Peacock_SH/fc116421-633c-4f2e-9c8c-022bd0bde25f._UR3840,1440_SX720_FMavif_PQ65_.jpeg",
+                "status": 200,
+                "mime": "image/png",
+                "filter_result": "image-hidden"
+              },
+              {
+                "url": "https://m.media-amazon.com/images/S/sonata-images-prod/US_FAST_LawOrder_FR/67db5120-8b4b-4034-944d-df37cbc22885._SX720_FMavif_PQ65_.jpeg",
+                "status": 200,
+                "mime": "image/png",
+                "filter_result": "image-hidden"
+              },
+              {
+                "url": "https://m.media-amazon.com/images/S/sonata-images-prod/US_SVOD_TNF26_1105_LiveTonight/1e2f3533-b73c-4c00-87c3-a0eb6450b31b._UR3840,1440_SX720_FMavif_PQ65_.jpeg",
+                "status": 200,
+                "mime": "image/png",
+                "filter_result": "image-hidden"
+              },
+              {
+                "url": "http://127.0.0.1/__kosheros__/image-status",
+                "status": 200,
+                "mime": "application/json",
+                "filter_result": null
+              }
+            ]
+          },
+          "final_png_sha256": "e8fb2e6082ab025017eedd1af7ab9a2f767ba99313cb01eab8297f6fb96da490"
+        }
+      ],
+      "status_api_responses": [
+        {
+          "url": "http://127.0.0.1/__kosheros__/image-status",
+          "status": 403,
+          "states": {}
+        },
+        {
+          "url": "http://127.0.0.1/__kosheros__/image-status",
+          "status": 403,
+          "states": {}
+        },
+        {
+          "url": "http://127.0.0.1/__kosheros__/image-status",
+          "status": 200,
+          "states": {
+            "https://m.media-amazon.com/images/S/sonata-images-prod/US_TVOD_Verity_PVOD_SH/d3c31963-71f6-4224-af66-facbc299243b._UR3840,1440_SX720_FMavif_PQ65_.jpeg": "hidden",
+            "https://m.media-amazon.com/images/S/sonata-images-prod/US_3P_StDenisMedical_Peacock_SH/fc116421-633c-4f2e-9c8c-022bd0bde25f._UR3840,1440_SX720_FMavif_PQ65_.jpeg": "hidden",
+            "https://m.media-amazon.com/images/S/sonata-images-prod/US_SVOD_TNF26_1105_LiveTonight/1e2f3533-b73c-4c00-87c3-a0eb6450b31b._UR3840,1440_SX720_FMavif_PQ65_.jpeg": "hidden",
+            "https://m.media-amazon.com/images/S/sonata-images-prod/US_FAST_LawOrder_FR/67db5120-8b4b-4034-944d-df37cbc22885._SX720_FMavif_PQ65_.jpeg": "hidden"
+          }
+        },
+        {
+          "url": "http://127.0.0.1/__kosheros__/image-status",
+          "status": 403,
+          "states": {}
+        },
+        {
+          "url": "http://127.0.0.1/__kosheros__/image-status",
+          "status": 403,
+          "states": {}
+        },
+        {
+          "url": "http://127.0.0.1/__kosheros__/image-status",
+          "status": 403,
+          "states": {}
+        },
+        {
+          "url": "http://127.0.0.1/__kosheros__/image-status",
+          "status": 403,
+          "states": {}
+        },
+        {
+          "url": "http://127.0.0.1/__kosheros__/image-status",
+          "status": 403,
+          "states": {}
+        },
+        {
+          "url": "http://127.0.0.1/__kosheros__/image-status",
+          "status": 403,
+          "states": {}
+        },
+        {
+          "url": "http://127.0.0.1/__kosheros__/image-status",
+          "status": 403,
+          "states": {}
+        },
+        {
+          "url": "http://127.0.0.1/__kosheros__/image-status",
+          "status": 403,
+          "states": {}
+        },
+        {
+          "url": "http://127.0.0.1/__kosheros__/image-status",
+          "status": 403,
+          "states": {}
+        },
+        {
+          "url": "http://127.0.0.1/__kosheros__/image-status",
+          "status": 403,
+          "states": {}
+        },
+        {
+          "url": "http://127.0.0.1/__kosheros__/image-status",
+          "status": 403,
+          "states": {}
+        },
+        {
+          "url": "http://127.0.0.1/__kosheros__/image-status",
+          "status": 403,
+          "states": {}
+        },
+        {
+          "url": "http://127.0.0.1/__kosheros__/image-status",
+          "status": 403,
+          "states": {}
+        },
+        {
+          "url": "http://127.0.0.1/__kosheros__/image-status",
+          "status": 403,
+          "states": {}
+        },
+        {
+          "url": "http://127.0.0.1/__kosheros__/image-status",
+          "status": 403,
+          "states": {}
+        },
+        {
+          "url": "http://127.0.0.1/__kosheros__/image-status",
+          "status": 403,
+          "states": {}
+        },
+        {
+          "url": "http://127.0.0.1/__kosheros__/image-status",
+          "status": 403,
+          "states": {}
+        },
+        {
+          "url": "http://127.0.0.1/__kosheros__/image-status",
+          "status": 403,
+          "states": {}
+        },
+        {
+          "url": "http://127.0.0.1/__kosheros__/image-status",
+          "status": 403,
+          "states": {}
+        },
+        {
+          "url": "http://127.0.0.1/__kosheros__/image-status",
+          "status": 403,
+          "states": {}
+        },
+        {
+          "url": "http://127.0.0.1/__kosheros__/image-status",
+          "status": 403,
+          "states": {}
+        },
+        {
+          "url": "http://127.0.0.1/__kosheros__/image-status",
+          "status": 403,
+          "states": {}
+        },
+        {
+          "url": "http://127.0.0.1/__kosheros__/image-status",
+          "status": 403,
+          "states": {}
+        },
+        {
+          "url": "http://127.0.0.1/__kosheros__/image-status",
+          "status": 403,
+          "states": {}
+        },
+        {
+          "url": "http://127.0.0.1/__kosheros__/image-status",
+          "status": 403,
+          "states": {}
+        },
+        {
+          "url": "http://127.0.0.1/__kosheros__/image-status",
+          "status": 403,
+          "states": {}
+        }
+      ],
+      "proxy_errors": [],
+      "limitations": [
+        "Restored old tabs sent 28 stale-token HTTP403 requests to the new proxy. These are retained in the cumulative status log.",
+        "The captured page itself made one successful HTTP200 status request, decoded all four 720x270 flat opaque PNGs, and settled all four states to hidden; DOM, final PNG and recorded validation are valid.",
+        "The harness now creates a fresh temporary profile per run to prevent restored-tab traffic. This capture is color/geometry evidence, not clean performance evidence."
+      ]
+    }
+  },
+  "legacy_live_runs": {
+    "amazon-browser-after-86ed2cc": {
+      "environment": {
+        "source": {
+          "root": "/tmp/kosher-image-perf",
+          "commit": "b4e085ad5f6ce2e75cf2573085cf8e6c07e80152",
+          "tracked_diff_sha256": "37fbdea2ede83cc16f9b2e82c1c4a6ccb960cf42d92485f5e9035718b40aee86",
+          "files_sha256": {
+            "mitm/kosher_filter.py": "21b4fa0e1bac878dfb9e7e17380e585bd72eb766d1cfd96d79fc31e3b9e3949d",
+            "mitm/kosher_page.js": "b362b74b6462fa9aa8774bca4659b751c23a643fb2d1c6ae00453a9348f3226a",
+            "kosherd/src/kosherd/vision.py": "ec8accb4240ced2e2f9a895bc09e83623f4777897659cab009b78969bd1abec3",
+            "kosherd/src/kosherd/videocheck.py": "f25405816695a32992047b62593e9c78810bfc4ced9779604bbdbaea90a34ce9",
+            "kosherd/src/kosherd/imageedit.py": "465877afcf50b70884e3571241464a9bfa99e12c24ecbaf781f5dfd92cff0f0e"
+          }
+        },
+        "host": {
+          "architecture": "x86_64",
+          "kernel": "7.2.13-200.fc44.x86_64",
+          "logical_cpus": 12,
+          "python": "3.14.8",
+          "cpu_model": "Intel(R) Core(TM) i7-10710U CPU @ 1.10GHz",
+          "platform_profile": "quiet",
+          "energy_preferences": [
+            "power"
+          ],
+          "governors": [
+            "powersave"
+          ],
+          "load_average": [
+            3.50439453125,
+            3.4052734375,
+            3.34033203125
+          ]
+        },
+        "browser": {
+          "Browser": "Chrome/156.0.8078.80",
+          "File-Path-Style": "posix",
+          "Protocol-Version": "1.3",
+          "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Safari/537.36",
+          "V8-Version": "15.6.75.27",
+          "WebKit-Version": "537.36 (@cc92146ef17860a4511f7de658b078128dbaad5)",
+          "webSocketDebuggerUrl": "ws://127.0.0.1:9224/devtools/browser/16ebe8e1-5aa5-4bc9-83b1-31c08aa79d0c"
+        },
+        "browser_args": [
+          "flatpak",
+          "run",
+          "com.brave.Browser",
+          "--user-data-dir=/tmp/kosher-amazon-evidence/browser-profile-amazon-browser-after",
+          "--remote-debugging-port=9224",
+          "--no-first-run",
+          "--no-default-browser-check",
+          "--disable-background-networking",
+          "--proxy-server=http://127.0.0.1:8088",
+          "--proxy-bypass-list=<-loopback>",
+          "--ignore-certificate-errors-spki-list=uplHRXi2CASb9Rk0vxAGnqy92mlDTy8cVvZFQsU49lI=",
+          "about:blank"
+        ],
+        "temporary_ca_spki": "uplHRXi2CASb9Rk0vxAGnqy92mlDTy8cVvZFQsU49lI=",
+        "upstream_tls_verification": true,
+        "media_level": "immodest",
+        "extra_pythonpath": [
+          "/tmp/kosher-avif-pillow"
+        ],
+        "scope": "public signed-out site; isolated media policy; no real account configuration"
+      },
+      "summaries": [
+        {
+          "url": "https://www.amazon.com/",
+          "title": "Amazon.com. Spend less. Smile more.",
+          "images": 84,
+          "visible_images": 47,
+          "visible_decoded_images": 33,
+          "visible_css_backgrounds": 17,
+          "frame_gap_p95_ms": 116.6,
+          "frame_gap_max_ms": 2348.7,
+          "reported_interaction_max_ms": 320,
+          "media_results": {
+            "passed": 17,
+            "image-hidden": 74,
+            "image-covered=nsfw": 2,
+            "image-covered=immodest": 1,
+            "video-checked=clean": 4
+          },
+          "media_results_scope": "cumulative across pages in this isolated proxy run",
+          "input_mimes": {
+            "image/x-icon": 2,
+            "image/png": 29,
+            "image/avif": 16,
+            "image/jpeg": 44,
+            "image/gif": 3,
+            "video/mp4": 4
+          },
+          "upstream_already_filtered": 37,
+          "proxy_errors": 12,
+          "actions": [
+            "focused search, typed books, cleared, escaped; no submission",
+            "clicked next carousel button"
+          ],
+          "image_status_ui_hosts": 0,
+          "visible_image_status_labels": {},
+          "observed_image_status_states": [],
+          "status_api_http_codes": {},
+          "has_captcha_text": false,
+          "validation_errors": []
+        },
+        {
+          "url": "https://www.primevideo.com/",
+          "title": "Prime Video: Watch movies, TV shows, sports, and live TV",
+          "images": 381,
+          "visible_images": 37,
+          "visible_decoded_images": 36,
+          "visible_css_backgrounds": 37,
+          "frame_gap_p95_ms": 499.7,
+          "frame_gap_max_ms": 4014.5,
+          "reported_interaction_max_ms": null,
+          "media_results": {
+            "passed": 22,
+            "image-hidden": 297,
+            "image-covered=nsfw": 2,
+            "image-covered=immodest": 1,
+            "video-checked=clean": 5,
+            "video-blocked": 1
+          },
+          "media_results_scope": "cumulative across pages in this isolated proxy run",
+          "input_mimes": {
+            "image/x-icon": 2,
+            "image/png": 108,
+            "image/avif": 133,
+            "image/jpeg": 44,
+            "image/gif": 3,
+            "video/mp4": 6,
+            "image/webp": 32
+          },
+          "upstream_already_filtered": 126,
+          "proxy_errors": 44,
+          "actions": [],
+          "image_status_ui_hosts": 0,
+          "visible_image_status_labels": {},
+          "observed_image_status_states": [],
+          "status_api_http_codes": {},
+          "has_captcha_text": false,
+          "validation_errors": []
+        },
+        {
+          "url": "https://www.youtube.com/",
+          "title": "YouTube",
+          "images": 18,
+          "visible_images": 0,
+          "visible_decoded_images": 0,
+          "visible_css_backgrounds": 0,
+          "frame_gap_p95_ms": 16.8,
+          "frame_gap_max_ms": 3581.4,
+          "reported_interaction_max_ms": 160,
+          "media_results": {
+            "passed": 112,
+            "image-hidden": 303,
+            "image-covered=nsfw": 2,
+            "image-covered=immodest": 1,
+            "video-checked=clean": 5,
+            "video-blocked": 1
+          },
+          "media_results_scope": "cumulative across pages in this isolated proxy run",
+          "input_mimes": {
+            "image/x-icon": 3,
+            "image/png": 115,
+            "image/avif": 133,
+            "image/jpeg": 44,
+            "image/gif": 4,
+            "video/mp4": 6,
+            "image/webp": 32,
+            "image/svg+xml": 87
+          },
+          "upstream_already_filtered": 132,
+          "proxy_errors": 57,
+          "actions": [
+            "focused search, typed books, cleared, escaped; no submission"
+          ],
+          "image_status_ui_hosts": 1,
+          "visible_image_status_labels": {},
+          "observed_image_status_states": [
+            "waiting"
+          ],
+          "status_api_http_codes": {},
+          "has_captcha_text": false,
+          "validation_errors": []
+        }
+      ],
+      "pillow_version": "13.0.0",
+      "avif_decoder": true,
+      "captured_code_commit": "86ed2cc862539e54e2b7516b2bfdfc7f264a2893",
+      "limitations": [
+        "Historical live-site capture with older persistent status badges.",
+        "The existing host proxy also filtered these requests and sometimes inserted its older script. This is double-filtered evidence, not current candidate UI or performance proof."
+      ]
+    }
+  },
+  "status_ui_regression": {
+    "source": "build/image-status-browser-subtle",
+    "candidate_product_commit": "62b72c6d33fd8d158f21d17284082856421b47a8",
+    "result": "PASS: subtle pending indicator; approved images have no visible badge; filtered/unavailable/background labels; unchanged image URL/layout; click-through; removal cleanup; bounded long-URL batches; late-visible images checked.",
+    "scope": "Real browser with the production page script; status endpoint and image responses supplied by a controlled fixture."
+  },
+  "screenshots": {
+    "pink-before.png": {
+      "source": "build/public-media-before/page-1/final.png",
+      "sha256": "3c6747530b22edce7ce1e8e02cde465b5f875d7571b48695aa8c4c1f30b67cff"
+    },
+    "pink-after.png": {
+      "source": "build/public-media-subtle/page-1/final.png",
+      "sha256": "120c8f1b0f7820b667810acf258639b6249b7b0de4765e29d9c41f90a38bde1e"
+    },
+    "prime-covered.png": {
+      "source": "build/public-media-subtle/page-2/final.png",
+      "sha256": "f2ffe743f463d599ce6f8331676eb4632cc80c600e435b0a7768c7949eb1e4c6"
+    },
+    "average-colors.png": {
+      "source": "build/public-media-colors-subtle/page-0/final.png",
+      "sha256": "e8fb2e6082ab025017eedd1af7ab9a2f767ba99313cb01eab8297f6fb96da490"
+    },
+    "checking.png": {
+      "source": "build/image-status-browser-subtle/checking.png",
+      "sha256": "c0b87095338044335ff13c28d512c1ea212c2dbfa7caf1bc1cd2fbdf68ef18f2"
+    },
+    "approved.png": {
+      "source": "build/image-status-browser-subtle/approved.png",
+      "sha256": "47eca1858ae86fe7fd7dad1cf81f47f7174cfb70f88671119b5e2d1478b028f4"
+    }
+  }
+}

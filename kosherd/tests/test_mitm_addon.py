@@ -2450,3 +2450,75 @@ def test_an_allowed_pages_pictures_are_still_held_to_be_judged(addon):
     picture.request.headers["referer"] = "https://trusted.example/"
     _headers_hook(filt, picture)
     assert not getattr(picture.response, "stream", False), "held, so it can be judged"
+
+
+
+# -- pictures allowed: a level between allow and bypass ------------------------------
+
+def _rules_filter(addon, raw):
+    filt = addon.KosherFilter.__new__(addon.KosherFilter)
+    filt.uids = type("U", (), {"uid_for_connection": staticmethod(lambda *a, **k: 1001)})()
+    filt.categories = _stub_categories()
+    filt.siterules = type("S", (), {"reason": staticmethod(lambda url: None),
+                                    "is_suggestions": staticmethod(lambda url: False)})()
+    filt.blocklist = _stub_blocklist()
+    filt.policy = _rules_policy(addon, raw)
+    return filt
+
+
+def test_a_pictures_rule_marks_its_page_and_what_the_page_shows(addon):
+    filt = _rules_filter(addon, [{"action": "pictures", "pattern": "shop.example/gallery/*"}])
+    page = _request_flow("https://shop.example/gallery/rings")
+    filt.request(page)
+    assert page.response is None
+    assert page.metadata.get("kosher_pictures") is True
+    assert page.metadata.get("kosher_pictures_page") is True
+    assert not page.metadata.get("kosher_bypass"), "its video and words are still read"
+
+    # A CDN picture names the page in full (the page's Referrer-Policy).
+    picture = _request_flow("https://cdn.example.net/ring.jpg")
+    picture.request.headers["referer"] = "https://shop.example/gallery/rings"
+    filt.request(picture)
+    assert picture.metadata.get("kosher_pictures") is True
+    assert not picture.metadata.get("kosher_pictures_page")
+
+    elsewhere = _request_flow("https://cdn.example.net/ring.jpg")
+    elsewhere.request.headers["referer"] = "https://shop.example/swimwear/"
+    filt.request(elsewhere)
+    assert not elsewhere.metadata.get("kosher_pictures")
+
+
+def test_a_pictures_page_shows_its_pictures_and_asks_for_full_referers(addon):
+    filt = _filt(addon, media="immodest")
+    picture = _hflow("image/jpeg", url="https://cdn.example.net/ring.jpg")
+    picture.metadata["kosher_pictures"] = True
+    _headers_hook(filt, picture)
+    assert picture.response.stream is True, "shown as it is, not judged"
+
+    page = _hflow("text/html", url="https://shop.example/gallery/rings")
+    page.metadata["kosher_pictures"] = True
+    page.metadata["kosher_pictures_page"] = True
+    _headers_hook(filt, page)
+    assert page.response.headers["Referrer-Policy"] == addon.PICTURES_REFERRER_POLICY
+    assert not getattr(page.response, "stream", False), "the page's words are still read"
+
+    # Without the rule a picture is held to be judged, as before.
+    plain = _hflow("image/jpeg", url="https://cdn.example.net/ring.jpg")
+    _headers_hook(filt, plain)
+    assert not getattr(plain.response, "stream", False)
+
+
+def test_hidden_pictures_from_another_site_name_the_page_not_the_site(addon):
+    # A CDN picture's Referer is the page's origin alone; the log named the
+    # site, and "allow this page" allowed the home page.
+    filt = _filt(addon)
+    filt._remember_last_page(1001, "https://shop.example/gallery/rings#top")
+    picture = _hflow("image/jpeg", url="https://cdn.example.net/ring.jpg")
+    picture.request.headers["referer"] = "https://shop.example/"
+    assert filt._page_of(picture) == "https://shop.example/gallery/rings"
+    # A full Referer is the page itself; another account's pages are its own.
+    picture.request.headers["referer"] = "https://shop.example/sale?x=1"
+    assert filt._page_of(picture) == "https://shop.example/sale?x=1"
+    other = _hflow("image/jpeg", uid=1002, url="https://cdn.example.net/ring.jpg")
+    other.request.headers["referer"] = "https://shop.example/"
+    assert filt._page_of(other) == "https://shop.example/"

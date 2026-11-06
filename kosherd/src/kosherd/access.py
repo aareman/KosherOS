@@ -148,6 +148,9 @@ ACTIONS = {
     # approving a request for it.
     "AllowUrl": ACTION_MANAGE_FILTER,
     "BypassUrl": ACTION_MANAGE_FILTER,
+    # The activity log's grants: a page, its folder or its site, allowed,
+    # with pictures shown, or bypassed. Each opens more of the web.
+    "GrantUrl": ACTION_MANAGE_FILTER,
     "ListActivity": ACTION_READ_CONFIG,
     "ActivitySummary": ACTION_READ_CONFIG,
     "Usage": ACTION_READ_CONFIG,
@@ -285,7 +288,7 @@ ACTIONS = {
 
 # Methods that can weaken the filter: guardian password required when enabled.
 GUARDIAN_GATED = frozenset({
-    "SetFilterMode", "SetWhitelist", "SetWhitelistBundles", "SetUrlRules", "SetBlockedCategories", "ApplyProfile", "SaveProfile", "DeleteProfile", "ApproveRequest", "AllowUrl", "BypassUrl", "EditList",
+    "SetFilterMode", "SetWhitelist", "SetWhitelistBundles", "SetUrlRules", "SetBlockedCategories", "ApplyProfile", "SaveProfile", "DeleteProfile", "ApproveRequest", "AllowUrl", "BypassUrl", "GrantUrl", "EditList",
     "SetUserAdmin",
     "SetMediaLevel",
     "SetLanguageFilter", "SetYouTube", "SetCalm",
@@ -326,7 +329,7 @@ CHANGES = frozenset({
     "SetFilterMode", "SetWhitelist", "SetWhitelistBundles", "SetUrlRules",
     "SetBlockedCategories",
     "ApplyProfile", "SaveProfile", "DeleteProfile", "ApproveRequest",
-    "DismissRequest", "AllowUrl", "BypassUrl", "EditList", "SetMediaLevel",
+    "DismissRequest", "AllowUrl", "BypassUrl", "GrantUrl", "EditList", "SetMediaLevel",
     "SetLanguageFilter", "SetYouTube", "SetCalm", "SetUserAdmin", "SetLayout",
     "SetCoverStyle", "SetAdBlock", "SetAdBlockAllowed", "SetTimeLimits", "SetNetworkAccess",
     "SetDeveloperTools", "SetSshIn",
@@ -360,7 +363,7 @@ CHANGES = frozenset({
 PER_USER = frozenset({
     "SetFilterMode", "SetWhitelist", "SetWhitelistBundles", "SetUrlRules",
     "SetBlockedCategories",
-    "ApplyProfile", "SaveProfile", "AllowUrl", "BypassUrl", "SetMediaLevel",
+    "ApplyProfile", "SaveProfile", "AllowUrl", "BypassUrl", "GrantUrl", "SetMediaLevel",
     "SetLanguageFilter", "SetYouTube", "SetCalm", "SetUserAdmin", "SetLayout",
     "SetCoverStyle", "SetTimeLimits", "SetNetworkAccess", "SetDeveloperTools", "SetSshIn", "InstallAppFor",
     "RemoveUser", "ResetPassword", "SetUserApps",

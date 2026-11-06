@@ -51,7 +51,7 @@ try:
     from kosherd import videocheck as videocheck_mod
     from kosherd import vision as vision_mod
     from kosherd.uidmap import UidLookup
-    from kosherd.urlrules import BLOCK, BYPASS, decide, parse_rules
+    from kosherd.urlrules import BLOCK, BYPASS, PICTURES, decide, parse_rules
 except ImportError:  # pragma: no cover - only when interpreters differ
     # mitmproxy may run under a different interpreter than the one kosherd
     # is installed for. Discover site-packages instead of hardcoding a
@@ -76,7 +76,7 @@ except ImportError:  # pragma: no cover - only when interpreters differ
     from kosherd import videocheck as videocheck_mod
     from kosherd import vision as vision_mod
     from kosherd.uidmap import UidLookup
-    from kosherd.urlrules import BLOCK, BYPASS, decide, parse_rules
+    from kosherd.urlrules import BLOCK, BYPASS, PICTURES, decide, parse_rules
 
 RULES_PATH = Path("/var/lib/kosher-mitm/rules.json")
 log = logging.getLogger("kosher-filter")
@@ -492,6 +492,10 @@ STREAM_LARGE_BYTES = 8 * 1024 * 1024
 # Below this, an image is an icon, a spacer or a tracking pixel: not worth
 # hiding and not worth a classifier's time.
 MIN_IMAGE_BYTES = 2500  # keep in step with kosherd.vision
+# What a page whose pictures an administrator allowed is told to send as
+# Referer: its full address to other sites too (over https), so a picture
+# from a CDN names the page and a page or folder rule reaches it.
+PICTURES_REFERRER_POLICY = "no-referrer-when-downgrade"
 # Media level -> catalogue categories whose sites get their imagery hidden
 # outright at that level. The weakest level only distrusts adult sites; the
 # modesty levels also distrust celebrity/immodest ones.
@@ -953,16 +957,23 @@ class KosherFilter:
             host, self.policy.blocked_categories_for(uid))
 
     @staticmethod
-    def _referer_bypassed(rules, flow) -> bool:
-        """Whether the page this request comes from is bypassed (#273): a
-        bypassed page's own pictures, scripts and calls are left alone with
-        it. Browsers send a same-site Referer in full and another site's
-        as its origin alone, so a whole-site rule reaches a page's pictures
-        wherever they come from, and a one-page rule its same-site ones."""
+    def _referer_action(rules, flow) -> str | None:
+        """The rule level of the page this request comes from (#273), or
+        None without a Referer or rules: a bypassed page's own pictures,
+        scripts and calls are left alone with it, and a page whose pictures
+        are allowed has its pictures shown. Browsers send a same-site
+        Referer in full and another site's as its origin alone, so a
+        whole-site rule reaches a page's pictures wherever they come from;
+        for a page or folder rule on pictures the page is told to send its
+        address in full (PICTURES_REFERRER_POLICY)."""
         referer = flow.request.headers.get("referer") or ""
         if not referer or not rules:
-            return False
-        return decide(rules, referer)[0] == BYPASS
+            return None
+        return decide(rules, referer)[0]
+
+    @classmethod
+    def _referer_bypassed(cls, rules, flow) -> bool:
+        return cls._referer_action(rules, flow) == BYPASS
 
     def _uid_of(self, flow) -> int | None:
         """Who made this connection: the LISTENER PORT it arrived on.
@@ -1152,9 +1163,17 @@ class KosherFilter:
         # see the mark and pass the answer through as it came. A page's
         # own pictures and scripts come on later requests, so a request
         # made by a bypassed page (its Referer) is bypassed with it.
-        if action == BYPASS or self._referer_bypassed(rules, flow):
+        referer_action = self._referer_action(rules, flow)
+        if action == BYPASS or referer_action == BYPASS:
             flow.metadata["kosher_bypass"] = True
             return
+        # Pictures allowed: a picture this page shows, or one at an address
+        # the rule names, is shown as it is. The page itself is allowed
+        # like any other (pattern set), and its video and words are judged.
+        if action == PICTURES or referer_action == PICTURES:
+            flow.metadata["kosher_pictures"] = True
+        if action == PICTURES:
+            flow.metadata["kosher_pictures_page"] = True
 
         # An explicit allow rule beats the category lists, so an admin can
         # permit one site from a category they otherwise block.
@@ -1209,6 +1228,12 @@ class KosherFilter:
             # A bypass rule (#273): through as it came, body unread.
             flow.response.stream = True
             return
+        if flow.metadata.get("kosher_pictures_page"):
+            # A page whose pictures are allowed: its pictures from another
+            # host (a CDN) must name the page in full for a page or folder
+            # rule to reach them, and by default a browser names only the
+            # site. For the administrator's chosen pages alone.
+            flow.response.headers["Referrer-Policy"] = PICTURES_REFERRER_POLICY
         content_type = (flow.response.headers.get("content-type") or "").lower()
         if content_type.startswith(PLAYLIST_TYPES):
             return  # small text; response() decides
@@ -1224,7 +1249,8 @@ class KosherFilter:
                                            getattr(flow.request, "path", "") or ""):
                 return  # response() decides: it may be a video in a picture
             level = self.policy.media_level_for(uid)
-            if level == "none" or self._recently_clean(flow, level):
+            if level == "none" or flow.metadata.get("kosher_pictures") \
+                    or self._recently_clean(flow, level):
                 flow.response.stream = True
             return
         if "text/html" in content_type or YouTube.applies(flow.request.pretty_host) \
@@ -1401,11 +1427,13 @@ class KosherFilter:
         content_type = (flow.response.headers.get("content-type") or "").lower()
         if "text/html" not in content_type:
             return
+        self._remember_last_page(uid, flow.request.pretty_url)
         body = flow.response.get_text(strict=False) or ""
         if not body:
             return
         stripped = False
-        if level == "all" and "data:image/" in body:
+        if level == "all" and "data:image/" in body \
+                and not flow.metadata.get("kosher_pictures"):
             # Shopping sites inline thumbnails as data: URIs straight into
             # the HTML, so they never appear as image responses at all —
             # and "block all pictures" showed pictures. Replace every
@@ -2275,11 +2303,34 @@ class KosherFilter:
             return
         self._note(activity_mod.PICTURES, flow, url=page)
 
-    @staticmethod
-    def _page_of(flow: http.HTTPFlow) -> str:
-        """The page a picture or video was on, as far as the browser says."""
-        referer = flow.request.headers.get("referer") or ""
-        return (referer or flow.request.pretty_url).split("#", 1)[0]
+    MAX_LAST_PAGES = 64
+
+    def _remember_last_page(self, uid, url: str) -> None:
+        """The page this account last opened on each site, for _page_of."""
+        parts = urlsplit(url)
+        key = (uid, f"{parts.scheme}://{parts.netloc}")
+        pages = self.__dict__.setdefault("_last_pages", {})
+        pages.pop(key, None)
+        pages[key] = url.split("#", 1)[0]
+        while len(pages) > self.MAX_LAST_PAGES:
+            pages.pop(next(iter(pages)))
+
+    def _page_of(self, flow: http.HTTPFlow) -> str:
+        """The page a picture or video was on, as far as the browser says.
+
+        A picture from another site names only the page's site
+        (`https://site.com/`), so the activity log said "pictures hidden on
+        site.com" and allowing that page allowed the home page. The page
+        this account last opened on that site is the better guess."""
+        referer = (flow.request.headers.get("referer") or "").split("#", 1)[0]
+        if referer:
+            parts = urlsplit(referer)
+            if parts.path in ("", "/") and not parts.query:
+                last = self.__dict__.get("_last_pages", {}).get(
+                    (flow.metadata.get("kosher_uid"), f"{parts.scheme}://{parts.netloc}"))
+                if last:
+                    return last
+        return referer or flow.request.pretty_url.split("#", 1)[0]
 
     def _filter_youtube(self, flow: http.HTTPFlow, uid: int) -> None:
         settings = self.policy.youtube_for(uid)

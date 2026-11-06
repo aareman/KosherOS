@@ -86,6 +86,11 @@ RELEASES = {
     ),
 }
 
+# Apps whose developer ships something other than a signed tarball, each
+# with an installer module of its own that keeps the developer's layout.
+# hexapp: Anomaly's single executable with an ed25519 signature.
+OWN_LAYOUT = ("hex",)
+
 
 def is_upstream(ref: str) -> bool:
     return isinstance(ref, str) and ref.startswith(PREFIX)
@@ -95,7 +100,7 @@ def package(ref: str) -> str:
     """'upstream#kitty' -> 'kitty'. Only names in RELEASES pass: the name
     picks URLs and a key, so nothing else may reach that far."""
     name = ref[len(PREFIX):] if is_upstream(ref) else ""
-    if name not in RELEASES:
+    if name not in RELEASES and name not in OWN_LAYOUT:
         raise UpstreamAppError(f"{ref!r} is not an app KosherOS knows how to fetch")
     return name
 
@@ -105,6 +110,9 @@ def _home(uid: int) -> Path:
 
 
 def installed_version(home: Path, name: str) -> str | None:
+    if name == "hex":
+        from . import hexapp
+        return hexapp.installed_version(home)
     try:
         return (home / RELEASES[name].directory / VERSION_FILE).read_text().strip() or None
     except OSError:
@@ -117,19 +125,24 @@ def installed(uid: int) -> set[str]:
         home = _home(uid)
     except KeyError:
         return set()
-    return {PREFIX + n for n in RELEASES if installed_version(home, n)}
+    return {PREFIX + n for n in (*RELEASES, *OWN_LAYOUT) if installed_version(home, n)}
 
 
 # ---- kosherd's side: run the helper as the account ---------------------------
 
 def _argv(uid: int, *args: str) -> list[str]:
     pw = pwd.getpwuid(uid)
+    # The account's own systemd, when it is signed in, so an app that
+    # brings a user service (Hex) can have it reloaded or stopped.
+    runtime = f"/run/user/{uid}"
+    session = [f"XDG_RUNTIME_DIR={runtime}"] if os.path.isdir(runtime) else []
     return [
         "runuser", "-u", pw.pw_name, "--",
         "env", "-i",
         f"HOME={pw.pw_dir}", f"USER={pw.pw_name}", f"LOGNAME={pw.pw_name}",
         "PATH=/usr/bin:/bin",
         f"SSL_CERT_FILE={CA_BUNDLE}",
+        *session,
         "kosher-upstream-app", *args,
     ]
 
@@ -161,7 +174,7 @@ def _drop_replaced(name: str, uid: int, on_progress) -> None:
     two kittys in the app grid, one of which never opens, helps nobody."""
     from . import nixapps
 
-    old = RELEASES[name].replaces
+    old = RELEASES[name].replaces if name in RELEASES else ""
     if old and nixapps.is_nix(old) and old in nixapps.installed(uid):
         try:
             nixapps.remove(old, uid, on_progress)
@@ -192,7 +205,11 @@ def exists(ref: str) -> bool | None:
     """Whether the developer still answers a current version: for
     `kosherctl check-catalog`. None when nothing can be said (offline)."""
     try:
-        return bool(latest_version(RELEASES[package(ref)]))
+        name = package(ref)
+        if name == "hex":
+            from . import hexapp
+            return bool(hexapp.latest(_read))
+        return bool(latest_version(RELEASES[name]))
     except UpstreamAppError:
         return False
     except OSError:
@@ -216,6 +233,11 @@ def latest_version(release: Release) -> str:
     if not version or not all(c.isdigit() or c == "." for c in version):
         raise UpstreamAppError(f"the developer's site answered {version[:20]!r} for a version")
     return version
+
+
+def _read(url: str, limit: int = 1 << 20) -> bytes:
+    with urllib.request.urlopen(url, timeout=60, context=_context()) as r:
+        return r.read(limit)
 
 
 def _download(url: str, dest: Path, share: tuple[int, int] | None = None) -> None:
@@ -358,13 +380,16 @@ def install_into(home: Path, name: str, version: str, fetch=None, keys: Path = K
 
 def main(argv: list[str] | None = None) -> int:
     args = sys.argv[1:] if argv is None else argv
-    if len(args) != 2 or args[0] not in ("install", "upgrade", "remove") or args[1] not in RELEASES:
-        print("usage: kosher-upstream-app install|upgrade|remove " + "|".join(RELEASES),
+    names = (*RELEASES, *OWN_LAYOUT)
+    if len(args) != 2 or args[0] not in ("install", "upgrade", "remove") or args[1] not in names:
+        print("usage: kosher-upstream-app install|upgrade|remove " + "|".join(names),
               file=sys.stderr)
         return 2
     action, name = args
     home = Path(os.environ.get("HOME") or os.path.expanduser("~"))
     try:
+        if name == "hex":
+            return _hex(action, home)
         if action == "remove":
             unlink(home, name)
             shutil.rmtree(home / RELEASES[name].directory, ignore_errors=True)
@@ -383,6 +408,20 @@ def main(argv: list[str] | None = None) -> int:
                 if isinstance(e, urllib.error.URLError) else str(e)
         _say(error=reason)
         return 1
+
+
+def _hex(action: str, home: Path) -> int:
+    from . import hexapp
+
+    if action == "remove":
+        hexapp.remove(home)
+        return 0
+    release = hexapp.latest(_read)
+    if action == "upgrade" and hexapp.installed_version(home) == release["version"]:
+        _say(percent=100, status="Up to date")
+        return 0
+    hexapp.install_into(home, release, _download, _say)
+    return 0
 
 
 if __name__ == "__main__":  # pragma: no cover

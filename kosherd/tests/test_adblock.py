@@ -95,6 +95,7 @@ def test_the_same_drop_in_goes_to_both_resolvers(tmp_path, monkeypatch):
     monkeypatch.setattr(apply_mod, "SAFESEARCH_PATH", tmp_path / "a" / "safesearch.conf")
     monkeypatch.setattr(apply_mod, "NFT_RULESET_PATH", tmp_path / "kosher.nft")
     monkeypatch.setattr(apply_mod, "MITM_DIR", tmp_path / "mitm")
+    monkeypatch.setattr(apply_mod, "STARTED_DIR", tmp_path / "started")
     monkeypatch.setattr(apply_mod, "MITM_RULES_PATH", tmp_path / "mitm" / "rules.json")
     monkeypatch.setattr(apply_mod, "SEARCH_DIR", tmp_path / "search")
     monkeypatch.setattr(apply_mod, "SEARCH_POLICY_PATH", tmp_path / "search" / "policy.json")

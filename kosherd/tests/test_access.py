@@ -162,7 +162,7 @@ def test_the_guardian_gate_covers_every_filter_weakening_method():
     # filter method is added, it belongs in this list AND in GUARDIAN_GATED.
     expected = {"SetFilterMode", "SetWhitelist", "SetWhitelistBundles", "SetUrlRules",
                 "SetBlockedCategories", "ApplyProfile", "SaveProfile",
-                "DeleteProfile", "ApproveRequest", "AllowUrl", "BypassUrl",
+                "DeleteProfile", "ApproveRequest", "AllowUrl", "BypassUrl", "GrantUrl",
                 "EditList", "SetUserAdmin",
                 "SetMediaLevel",
                 "SetLanguageFilter", "SetYouTube", "SetCalm", "SetGuestConfig",
@@ -198,6 +198,9 @@ def test_the_guardian_gate_covers_every_filter_weakening_method():
                 # are not filtered, and its ports go out directly; letting
                 # the home network reach it opens the input side.
                 "SetUserAppApproval", "SetSyncthingLan",
+                # Signing in to an account over SSH: what arrives over the
+                # connection is not read by the filter.
+                "SetSshIn",
                 # Joining a tailnet puts the computer on a network with
                 # other people's machines, reachable by every account.
                 "TailscaleSignIn",

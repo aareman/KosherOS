@@ -233,3 +233,21 @@ def test_emergency_image_is_opaque_neutral_not_translucent_red(addon):
     with Image.open(io.BytesIO(addon.BLANK_PNG)) as image:
         assert image.size == (1, 1)
         assert image.convert('RGBA').getpixel((0, 0)) == (214, 214, 214, 255)
+
+
+def test_explicit_pictures_allowance_streams_without_claiming_a_check(addon):
+    import asyncio
+
+    filt = _filter(addon, media='all')
+    flow = _flow('https://cdn.example/photo.jpg',
+                 headers={'referer': 'https://shop.example/item'})
+    flow.metadata['kosher_pictures'] = True
+    from types import SimpleNamespace
+    flow.response = SimpleNamespace(status_code=200,
+                                    headers={'content-type': 'image/jpeg'},
+                                    content=b'image', stream=False)
+    asyncio.run(filt._responseheaders(flow))
+    assert flow.response.stream is True
+    response = request_status(addon, filt, [flow.request.pretty_url])
+    assert json.loads(response.content)['images'] == {
+        flow.request.pretty_url: 'not_checked'}

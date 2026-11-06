@@ -192,6 +192,21 @@ def cmd_developer_tools(args) -> int:
     return 0
 
 
+def cmd_ssh_in(args) -> int:
+    """kosherctl ssh-in UID on|off
+
+    May the account be signed in to from another machine over SSH? Keys
+    only: the account adds its public key to ~/.ssh/authorized_keys.
+    Needs developer tools on.
+    """
+    on = args.state == "on"
+    _client().set_ssh_in(args.uid, on, _guardian_pw(args))
+    print(f"uid {args.uid}: sign in over SSH {'on' if on else 'off'}")
+    if on:
+        print("Add the key to ~/.ssh/authorized_keys in that account; passwords are refused.")
+    return 0
+
+
 def cmd_build_sources(args) -> int:
     """kosherctl build-sources [list | add HOST... | remove HOST...]
 
@@ -317,14 +332,14 @@ def cmd_rules(args) -> int:
         rules = user.get("rules", [])
         print(f"{len(rules)} rule(s) for {user['username']} (mode: {user['mode']})")
         for i, r in enumerate(rules, 1):
-            print(f"  {i}. {r['action']:6} {r['pattern']}")
+            print(f"  {i}. {r['action']:8} {r['pattern']}")
         if rules and user["mode"] != "filtered":
             print("  note: rules only apply in filtered mode", file=sys.stderr)
         return 0
 
     user = next((u for u in c.get_policy()["users"] if u["uid"] == args.uid), None)
     rules = list(user.get("rules", [])) if user else []
-    if args.action in ("allow", "block", "bypass"):
+    if args.action in ("allow", "block", "bypass", "pictures"):
         rules.append({"action": args.action, "pattern": args.pattern})
     elif args.action == "remove":
         index = int(args.pattern) - 1
@@ -1050,6 +1065,33 @@ class _Console:
             raise EOFError("the console closed mid-setup")
         return line.strip("\r\n")
 
+def _ask_timezone(console: "_Console") -> None:
+    """The installer does not ask where the computer is, so this does: the
+    internet's guess or the zone it has now, kept with Enter."""
+    from kosherd import timezones
+
+    listed = timezones.zones()
+    default = timezones.guess() or timezones.current()
+    here = timezones.zone_for(default, listed)
+    console.say(f"Time zone: {here.label} ({here.id})")
+    console.say("Press Enter to keep it, or type a city or a time zone name "
+                "(like Jerusalem or Europe/London).\n")
+    while True:
+        answer = console.ask(f"Time zone [{default}]: ").strip()
+        chosen = timezones.resolve(answer) if answer else default
+        if chosen:
+            break
+        console.say("  That is not a time zone this computer knows. Try a city, "
+                    "like Jerusalem, or a name like America/New_York.")
+    try:
+        timezones.set_zone(chosen)
+    except Exception as e:  # noqa: BLE001 - setup goes on; Settings can change it
+        console.say(f"  The time zone could not be set: {e}")
+        console.say("  It can be changed later in Settings.\n")
+        return
+    console.say(f"Time zone set to {timezones.zone_for(chosen, listed).label}.\n")
+
+
 def cmd_setup(args) -> int:
     """Text-mode first-boot setup, for when the graphical wizard cannot run.
 
@@ -1071,6 +1113,10 @@ def cmd_setup(args) -> int:
             print("--username requires --password-stdin", file=sys.stderr)
             return 1
         password = sys.stdin.readline().rstrip("\n")
+        if args.timezone:
+            from kosherd import timezones
+
+            timezones.set_zone(args.timezone)
         uid = c.create_first_admin(args.username, args.full_name or args.username,
                                    password)
         # The boot menu takes the administrator's password (#129), as the
@@ -1092,6 +1138,7 @@ def cmd_setup(args) -> int:
         console.say(f"The administrator account '{who}' already exists; "
                     "continuing with the remaining steps.\n")
     else:
+        _ask_timezone(console)
         console.say("Create the administrator account for this computer.")
         console.say("It manages profiles, filtering and apps. It has no root access.\n")
         try:
@@ -1418,6 +1465,14 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("--guardian-password")
     s.set_defaults(func=cmd_developer_tools)
 
+    s = sub.add_parser("ssh-in",
+                       help="may an account with developer tools be signed in to over SSH, "
+                            "with a key")
+    s.add_argument("uid", type=int)
+    s.add_argument("state", choices=["on", "off"])
+    s.add_argument("--guardian-password")
+    s.set_defaults(func=cmd_ssh_in)
+
     s = sub.add_parser("build-sources",
                        help="where a Nix build may download from while a developer account "
                             "is on approved sites only")
@@ -1472,11 +1527,12 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("mode", choices=policy_mod.MODES)
     s.set_defaults(func=cmd_adopt)
 
-    s = sub.add_parser("rules", help="URL rules: block, allow or bypass (filtered mode)")
+    s = sub.add_parser("rules", help="URL rules: block, allow, pictures or bypass (filtered mode)")
     s.add_argument("uid", type=int)
-    s.add_argument("action", choices=["list", "allow", "block", "bypass", "remove", "clear"],
+    s.add_argument("action", choices=["list", "allow", "block", "pictures", "bypass", "remove", "clear"],
                    help="allow opens the page but still filters its pictures, video "
-                        "and words; bypass filters nothing on it")
+                        "and words; pictures also shows its pictures; bypass filters "
+                        "nothing on it")
     s.add_argument("pattern", nargs="?", default="",
                    help="URL pattern, or the rule number for 'remove'")
     s.add_argument("--guardian-password")
@@ -1639,6 +1695,8 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("--password-stdin", action="store_true",
                    help="read the password from stdin (with --username)")
     s.add_argument("--guardian-password", default="")
+    s.add_argument("--timezone", default="",
+                   help="set this time zone (with --username), e.g. Asia/Jerusalem")
     s.set_defaults(func=cmd_setup)
 
     sub.add_parser(

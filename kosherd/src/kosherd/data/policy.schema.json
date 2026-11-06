@@ -372,9 +372,10 @@
           "enum": [
             "allow",
             "block",
-            "bypass"
+            "bypass",
+            "pictures"
           ],
-          "description": "block refuses the page. allow opens it whatever the category lists and the content scorer say; its pictures, video and words are still filtered. bypass passes it through untouched: nothing on it is filtered."
+          "description": "block refuses the page. allow opens it whatever the category lists and the content scorer say; its pictures, video and words are still filtered. pictures is allow with its pictures shown as they are; its video and words are still filtered. bypass passes it through untouched: nothing on it is filtered."
         },
         "pattern": {
           "type": "string",
@@ -421,7 +422,7 @@
             "$ref": "#/$defs/rule"
           },
           "default": [],
-          "description": "URL rules (block, allow or bypass), first match wins. Only enforced in filtered mode (paths are encrypted otherwise)."
+          "description": "URL rules (block, allow, pictures or bypass), first match wins. Only enforced in filtered mode (paths are encrypted otherwise)."
         },
         "admin": {
           "type": "boolean",
@@ -616,6 +617,10 @@
         "developer_tools": {
           "type": "boolean",
           "description": "May use the Nix daemon and reach the package registries directly (nix, devbox, devenv from a shell). Default false."
+        },
+        "ssh_in": {
+          "type": "boolean",
+          "description": "May be signed in to from another machine over SSH, with a key in the account's own ~/.ssh/authorized_keys; passwords are refused. Only takes effect with developer_tools on. Default false."
         },
         "approved_apps": {
           "type": "array",

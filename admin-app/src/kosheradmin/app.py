@@ -37,8 +37,8 @@ EDITABLE_LISTS = labels.EDITABLE_LISTS
 
 class Window(Adw.ApplicationWindow):
     def __init__(self, **kwargs):
-        super().__init__(**kwargs, title="KosherOS Admin", default_width=1120,
-                         default_height=740)
+        super().__init__(**kwargs, title="KosherOS Admin", default_width=1280,
+                         default_height=840)
         load_css()
         self.client = DaemonClient()
         self.policy: dict = {"users": [], "guardian": {"enabled": False}}

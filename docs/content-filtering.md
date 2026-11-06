@@ -103,6 +103,26 @@ refused, because an SSH connection can carry a tunnel around the filter. For a
 git server of the family's own, an administrator can add port 22 under *Extra
 ports*, which opens SSH to every server for that account.
 
+With developer tools on, a second switch appears: **Sign in over SSH**. On,
+the account can be used from another computer with `ssh`. Only keys are
+accepted, never a password, so the person adds the other computer's public
+key to `~/.ssh/authorized_keys` in this account, at this computer:
+
+```
+mkdir -p ~/.ssh
+curl -s https://github.com/NAME.keys >> ~/.ssh/authorized_keys
+```
+
+or by pasting the line from the other computer's `~/.ssh/id_ed25519.pub`.
+The SSH server runs only while at least one account has the switch on, and
+lets in only those accounts. It keeps the account's time limits. Anything the
+account does here over SSH goes through its own filter, and `ssh -L` works.
+`ssh -R` and tunnels are refused, because a listener here would reach out
+from the other computer unfiltered. Files copied in over the connection are
+not checked, which is why the switch is guardian-gated. Turning developer
+tools off turns this off too. From a terminal it's
+`kosherctl ssh-in UID on`.
+
 What the switch cannot stop is a copy of Nix the account downloads itself.
 nix-portable, for one, is a single file on GitHub that brings its own Nix
 and needs no user namespaces, and the binary cache it fetches from
@@ -209,19 +229,28 @@ site, `*.host` includes subdomains, and `host/dir/*` covers a directory. An
 unmatched request is allowed, so a trailing `block *` makes an account
 deny-by-default.
 
-A rule does one of three things. *Block* refuses the page. *Allow* opens it
+A rule does one of four things. *Block* refuses the page. *Allow* opens it
 whatever the category lists and the content scorer say, but the page is
 still a page: its pictures and video are judged, and its words are cleaned,
-like any other. *Bypass* is the level above that, for a site the
-administrator trusts outright: nothing on it is filtered, and the proxy
-passes it through as it came. A bypassed page's own pictures and scripts
-are left alone with it wherever they are served from, because the browser
-names the page they came from. Safe search is still forced on a bypassed
-search engine.
+like any other. *Pictures* is allow with the page's pictures shown as they
+are, wherever they're served from; its video and words are still filtered.
+*Bypass* is the level above that, for a site the administrator trusts
+outright: nothing on it is filtered, and the proxy passes it through as it
+came. A bypassed page's own pictures and scripts are left alone with it
+wherever they are served from, because the browser names the page they came
+from. Safe search is still forced on a bypassed search engine.
+
+A browser tells another site only which site a page is on, not which page,
+so a page with a *Pictures* rule is told to send its full address with the
+pictures it asks for. That's what lets a rule for one page or one folder
+reach pictures served from a CDN. It happens only on the pages a rule names.
 
 Rules are edited on the person's page in the admin app, where a rule's
-level can be changed in place, or with `kosherctl rules`. The Allow button
-on a blocked page in the activity view offers the same levels.
+level can be changed in place, or with `kosherctl rules`. In the activity
+view, a blocked page has an *Allow* button: this page, everything in its
+folder, the whole site, or bypass the filter on the site. A page where
+pictures were hidden has an *Allow pictures* button with the same three
+choices: this page, its folder, or the whole site.
 
 ## Judging a page by its words
 

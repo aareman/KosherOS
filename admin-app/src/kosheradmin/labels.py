@@ -440,6 +440,13 @@ def change_sentence(event: dict, users_by_uid: dict | None = None) -> tuple[str,
     elif method == "BypassUrl":
         what = f"{who} now reaches {host_of(str(arg(1) or ''))} with nothing filtered" + \
             (" (whole site)" if arg(2) else "")
+    elif method == "GrantUrl":
+        where = {"page": "", "folder": " (that folder)", "site": " (whole site)"}.get(
+            str(arg(3) or ""), "")
+        host = host_of(str(arg(1) or ""))
+        what = {"pictures": f"{who} now sees the pictures on {host}{where}",
+                "bypass": f"{who} now reaches {host}{where} with nothing filtered"}.get(
+            str(arg(2) or ""), f"{who} may now reach {host}{where}")
     elif method == "ApproveRequest":
         what = "A request was allowed"
     elif method == "DismissRequest":
@@ -456,6 +463,8 @@ def change_sentence(event: dict, users_by_uid: dict | None = None) -> tuple[str,
         what = "Sites the ad blocker leaves reachable changed"
     elif method == "SetDeveloperTools":
         what = f"{who}: developer tools {'on' if arg(1) else 'off'}"
+    elif method == "SetSshIn":
+        what = f"{who}: sign in over SSH {'on' if arg(1) else 'off'}"
     elif method == "SetBuildSources":
         what = "Sites Nix builds may download from changed"
     elif method == "SetBootMenuPassword":

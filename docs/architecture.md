@@ -210,6 +210,21 @@ commands in `~/.local/bin`. A download whose signature does not check out
 is thrown away, and the copy already there stays. Installing it also
 removes the account's old kitty from nixpkgs.
 
+Hex, Anomaly's voice dictation, comes the same way (`upstream#hex`), but
+Anomaly ships one executable rather than a tarball. The Store reads Hex's
+release manifest from anoma.ly, checks the download's size and SHA-256 and
+Anomaly's ed25519 signature over that SHA-256, and only then lays it out
+in the account's home exactly as Anomaly's own installer does: the program
+under `~/.local/share/hex/versions/`, `~/.local/bin/hex`, a launcher, an
+autostart entry and a user service. Hex reads that layout to update itself
+from the same signed releases, so the Store reports whichever version Hex
+last moved to. Removing it takes the program and launchers and keeps the
+person's settings and downloaded speech models, as Anomaly's uninstaller
+does. On GNOME, Hex takes its hold-to-talk key through the Global Shortcuts
+portal and types through the Remote Desktop portal, so the person grants
+both once in GNOME's own dialogs. On the other desktops it types with
+`wtype`, which the image carries.
+
 ## The policy
 
 One JSON document holds every account's settings and is the contract
@@ -308,11 +323,20 @@ all.
 
 The installer creates no users and asks no passwords. On first boot a
 kiosk session runs the setup wizard instead of the login screen, so the
-machine cannot be used before it is configured. The wizard creates the
-administrator, optionally sets the guardian password and a boot-menu
-password, and shows the firmware checklist KosherOS cannot enforce itself:
+machine cannot be used before it is configured. The wizard sets the time
+zone, creates the administrator, optionally sets the guardian password and
+a boot-menu password, and shows the firmware checklist KosherOS cannot enforce itself:
 a firmware password, USB and network boot off, Secure Boot kept on.
 Finishing writes a stamp, disables the unit and starts the login screen.
+
+The installer does not ask for a time zone, so the wizard does. It shows
+the zone Fedora's location service (the one Anaconda uses) gives for the
+machine's internet address, or the installer's default when there is no
+answer, and Continue keeps it; a search finds any other city. Screen-time
+schedules and the daily usage count follow local time. The wizard runs as root, which may set
+the zone through timedated without asking polkit, and it turns network
+time on at the same time. The text setup asks the same question, with
+Enter keeping the guess.
 
 The setup interface is the one path that runs without an authorised
 administrator, because none exists yet, and it is bounded: creating the

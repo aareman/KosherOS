@@ -34,7 +34,7 @@ def test_refs_are_flatpak_ids_nixpkgs_packages_or_known_builds_and_unique():
     for ref in refs:
         assert (re.fullmatch(r"[A-Za-z][\w-]*(\.[A-Za-z0-9][\w-]*){2,}", ref)
                 or re.fullmatch(r"nixpkgs#(_?)[A-Za-z0-9][A-Za-z0-9_.-]*", ref)
-                or ref[len(upstreamapps.PREFIX):] in upstreamapps.RELEASES), ref
+                or ref[len(upstreamapps.PREFIX):] in (*upstreamapps.RELEASES, *upstreamapps.OWN_LAYOUT)), ref
 
 
 def test_the_ai_tools_and_editors_come_from_nixpkgs():

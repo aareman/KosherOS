@@ -124,8 +124,14 @@ class FakeClient:
     def set_ssh(self, uid, anywhere, hosts, guardian_password=""):
         self.calls.append(("set_ssh", uid, anywhere, list(hosts)))
 
+    def grant_url(self, uid, url, level, scope, guardian_password=""):
+        self.calls.append(("grant_url", uid, url, level, scope))
+
     def set_developer_tools(self, uid, enabled, guardian_password=""):
         self.calls.append(("set_developer_tools", uid, enabled))
+
+    def set_ssh_in(self, uid, enabled, guardian_password=""):
+        self.calls.append(("set_ssh_in", uid, enabled))
 
     def boot_menu_protected(self):
         return self._overrides.get("boot_menu", True)
@@ -363,6 +369,23 @@ def test_the_rules_dialog_builds_with_rules():
     dialog = dialogs.RulesDialog(win, "Page rules", rules, lambda new: None)
     drain()
     assert len(dialog.rules) == 2
+
+
+def test_a_rules_level_drop_down_says_one_word_and_the_row_says_the_rest():
+    # A sentence on the drop-down took the row's width and wrapped the
+    # pattern one letter a line.
+    win = FakeWindow()
+    rules = [{"action": "allow", "pattern": "youtube.com/watch*"},
+             {"action": "bypass", "pattern": "docs.python.org"}]
+    dialog = dialogs.RulesDialog(win, "Page rules", rules, lambda new: None)
+    drain()
+    drop = next(w for w in _walk(dialog.get_child()) if isinstance(w, Gtk.DropDown))
+    model = drop.get_model()
+    words = [model.get_string(i) for i in range(model.get_n_items())]
+    assert words == ["Blocked", "Allowed", "Pictures", "Bypassed"]
+    row = _row_named(dialog.get_child(), "youtube.com/watch*")
+    assert row.get_subtitle() == "Allowed · pictures, video and words still filtered"
+    assert dialog.get_content_width() >= 800
 
 
 def test_the_save_preset_dialog_needs_a_name():
@@ -847,6 +870,35 @@ def _detail(mode="filtered", users=None, **kw):
     return page, win, user
 
 
+# -- a change reloads the page where the person was -----------------------------------
+
+def test_a_rebuild_keeps_the_tab_and_asks_each_tab_back_to_its_place(monkeypatch):
+    page, _win, user = _detail()
+    page.stack.set_visible_child_name("filtering")
+    placed = []
+    monkeypatch.setattr(detail, "_scroll_when_laid_out",
+                        lambda adj, value: placed.append((adj, value)))
+    adj = page._tab_scrolls()["filtering"]
+    adj.configure(400, 0, 2000, 10, 100, 500)
+    page.rebuild(dict(user, media_level="all"))
+    assert page.stack.get_visible_child_name() == "filtering"
+    assert [v for _a, v in placed] == [400]
+    assert placed[0][0] == page._tab_scrolls()["filtering"], "the new tab's, not the old"
+
+
+def test_a_fresh_tab_is_scrolled_once_it_is_tall_enough():
+    adj = Gtk.Adjustment(value=0, lower=0, upper=0, step_increment=10,
+                         page_increment=100, page_size=500)
+    detail._scroll_when_laid_out(adj, 400)
+    assert adj.get_value() == 0, "nothing laid out yet"
+    adj.configure(0, 0, 600, 10, 100, 500)   # partly laid out: as far as it goes
+    assert adj.get_value() == 100
+    adj.configure(adj.get_value(), 0, 2000, 10, 100, 500)
+    assert adj.get_value() == 400
+    adj.configure(0, 0, 3000, 10, 100, 500)  # later growth is left alone
+    assert adj.get_value() == 0
+
+
 def test_the_detail_page_has_eight_tabs_and_starts_on_the_overview():
     page, _w, _u = _detail()
     names = []
@@ -1104,8 +1156,8 @@ def test_the_overview_shows_what_was_blocked_today_with_allow():
     allowed = {}
 
     class Recording(FakeClient):
-        def allow_url(self, uid, url, whole, pw):
-            allowed.update(uid=uid, url=url, whole=whole)
+        def grant_url(self, uid, url, level, scope, pw):
+            allowed.update(uid=uid, url=url, level=level, scope=scope)
 
     now = int(time.time())
     events = [an_event(t=now - 5), an_event(t=now - 8, kind="pictures",
@@ -1119,12 +1171,47 @@ def test_the_overview_shows_what_was_blocked_today_with_allow():
     titles = [r.get_title() for r in _rows(page.blocked_group)]
     assert titles == ["roblox.com/games", "Pictures hidden on shop.example/d"]
     menus = _menu_buttons(page.blocked_group)
-    assert len(menus) == 1
+    assert [m.get_label() for m in menus] == ["Allow", "Allow pictures"]
     page_btn = next(b for b in _buttons(menus[0].get_popover())
                     if b.get_label() == "Allow this page")
     page_btn.emit("clicked")
     drain()
-    assert allowed == {"uid": 1001, "url": "https://roblox.com/games", "whole": False}
+    assert allowed == {"uid": 1001, "url": "https://roblox.com/games",
+                       "level": "allow", "scope": "page"}
+
+
+def test_allow_pictures_offers_the_page_its_folder_and_the_site():
+    granted = []
+
+    class Recording(FakeClient):
+        def grant_url(self, uid, url, level, scope, pw):
+            granted.append((uid, url, level, scope))
+
+    now = int(time.time())
+    url = "https://shop.example/library/article/123"
+    win = FakeWindow(Recording(activity=[an_event(t=now - 8, kind="pictures", url=url, why="")]))
+    user = a_user()
+    win.policy = {"revision": 1, "users": [user], "guardian": {"enabled": False},
+                  "guest": {"enabled": False}, "adblock": {"enabled": True}}
+    page = detail.UserDetailPage(win, user)
+    drain()
+    menu = next(m for m in _menu_buttons(page.blocked_group) if m.get_label() == "Allow pictures")
+    labels_ = [b.get_label() for b in _buttons(menu.get_popover())]
+    assert labels_ == ["Show pictures on this page",
+                       "Show pictures everywhere in /library/article/",
+                       "Show pictures on all of shop.example"]
+    for b in _buttons(menu.get_popover()):
+        b.emit("clicked")
+        drain()
+    assert [g[2:] for g in granted] == [("pictures", "page"), ("pictures", "folder"),
+                                        ("pictures", "site")]
+
+
+def test_a_page_at_the_top_of_its_site_has_no_folder_to_offer():
+    from kosheradmin import dialogs as dialogs_
+    assert dialogs_._folder_label("https://shop.example/d") is None
+    assert dialogs_._folder_label("https://shop.example/") is None
+    assert dialogs_._folder_label("https://shop.example/a/b") == "/a/"
 
 
 def test_the_overview_says_when_nothing_was_blocked():
@@ -2817,6 +2904,23 @@ def test_switching_developer_tools_on_calls_the_daemon():
     assert ("set_developer_tools", 1001, True) in win.client.calls
 
 
+def test_sign_in_over_ssh_is_offered_only_with_developer_tools_on():
+    _win, page = _detail_for(a_user(mode="filtered"))
+    with pytest.raises(AssertionError):
+        _row_named(page, "Sign in over SSH")
+    _win, page = _detail_for(a_user(mode="filtered", developer_tools=True))
+    row = _row_named(page, "Sign in over SSH")
+    assert not row.get_active()
+    assert "~/.ssh/authorized_keys" in row.get_subtitle()
+
+
+def test_switching_sign_in_over_ssh_on_calls_the_daemon():
+    win, page = _detail_for(a_user(mode="filtered", developer_tools=True))
+    _row_named(page, "Sign in over SSH").set_active(True)
+    drain()
+    assert ("set_ssh_in", 1001, True) in win.client.calls
+
+
 # -- the boot menu password row (#129) ------------------------------------------
 
 def test_the_protection_page_says_whether_the_boot_menu_has_a_password():
@@ -3390,3 +3494,71 @@ def test_an_unfiltered_account_is_told_ssh_is_already_open():
     _win, page = _detail_for(a_user(mode="unfiltered"))
     with pytest.raises(AssertionError):
         _row_named(page, "These machines")
+
+
+# -- the example pictures under the Pictures settings -------------------------------
+
+def _media_preview(**kw):
+    from kosheradmin.mediapreview import MediaPreview
+
+    page, win, user = _detail(**kw)
+    previews = [w for w in _walk(page) if isinstance(w, MediaPreview)]
+    return page, win, (previews[0] if previews else None)
+
+
+def test_the_pictures_tab_shows_the_example_pictures_for_the_saved_choice():
+    _page, _w, preview = _media_preview(media_level="immodest", cover_style="skin")
+    assert preview is not None
+    assert len(preview.tiles) == 4
+    assert preview.states == ("shown", "shown", "covered", "hidden")
+    assert preview.cover_style == "skin"
+    assert all(t.picture.get_paintable() is not None for t in preview.tiles)
+
+
+def test_the_example_pictures_follow_the_level_as_it_is_chosen():
+    page, win, preview = _media_preview(media_level="none")
+    win.client.set_media_level = lambda *a: None
+    row = _row_named(page, "Pictures and video")
+    from kosherd.policy import MEDIA_LEVELS
+
+    seen = {}
+    for level in MEDIA_LEVELS:
+        row.set_selected(MEDIA_LEVELS.index(level))
+        seen[level] = preview.states
+    assert seen["none"] == ("shown",) * 4
+    assert seen["nsfw"] == ("shown", "shown", "shown", "hidden")
+    assert seen["immodest"] == ("shown", "shown", "covered", "hidden")
+    # A person with nothing to cover is hidden whole; scenery stays.
+    assert seen["people"] == ("shown", "hidden", "covered", "hidden")
+    assert seen["all"] == ("hidden",) * 4
+    assert preview.caption.get_label() == "Every picture from the web is replaced with a grey box."
+
+
+def test_the_covering_style_changes_how_the_covered_picture_is_drawn():
+    page, win, preview = _media_preview(media_level="immodest", cover_style="frost")
+    win.client.set_cover_style = lambda *a: None
+    assert "frosted over" in preview.caption.get_label()
+    _row_named(page, "Picture covering style").set_selected(labels.COVER_ORDER.index("skin"))
+    assert preview.cover_style == "skin"
+    assert "skin painted grey" in preview.caption.get_label()
+    assert preview.states[2] == "covered"
+
+
+def test_skin_paints_only_the_skin_and_frost_covers_the_whole_figure():
+    from kosheradmin import mediapreview as mp
+
+    plain = mp.svg_for("short-sleeves", mp.SHOWN)
+    skin = mp.svg_for("short-sleeves", mp.COVERED, "skin")
+    frost = mp.svg_for("short-sleeves", mp.COVERED, "frost")
+    assert mp.SKIN in plain and mp.SKIN_FILL not in plain
+    # Every skin shape is painted grey; the t-shirt keeps its colour.
+    assert mp.SKIN not in skin and skin.count(mp.SKIN_FILL) >= 5
+    assert "#f59e0b" in skin
+    assert "frost-area" in frost and mp.SKIN_FILL not in frost
+    assert mp.svg_for("explicit", mp.HIDDEN) == mp.svg_for("scenery", mp.HIDDEN)
+    assert mp.HIDDEN_GREY in mp.svg_for("scenery", mp.HIDDEN)
+
+
+def test_no_example_pictures_where_pictures_are_not_filtered():
+    _page, _w, preview = _media_preview(mode="unfiltered")
+    assert preview is None

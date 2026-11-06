@@ -16,14 +16,16 @@ above general ones. If nothing matches, the request is allowed — inspect
 mode sits on top of the family-DNS baseline, so it filters rather than
 whitelists unless the admin ends the list with a `block *`.
 
-A rule's action is one of three levels (#273):
+A rule's action is one of four levels (#273), in the order a page steps up:
 
-    block    the page is refused
-    allow    the page opens whatever the category lists and the content
-             scorer say, but its pictures, video and words are still
-             filtered like any other page's
-    bypass   nothing on it is filtered: the proxy passes it through as it
-             came, for a site the administrator trusts outright
+    block     the page is refused
+    allow     the page opens whatever the category lists and the content
+              scorer say, but its pictures, video and words are still
+              filtered like any other page's
+    pictures  as allow, and its pictures are shown as they are; its video
+              and words are still filtered
+    bypass    nothing on it is filtered: the proxy passes it through as it
+              came, for a site the administrator trusts outright
 """
 
 from __future__ import annotations
@@ -35,7 +37,8 @@ from urllib.parse import urlsplit
 ALLOW = "allow"
 BLOCK = "block"
 BYPASS = "bypass"
-ACTIONS = (ALLOW, BLOCK, BYPASS)
+PICTURES = "pictures"
+ACTIONS = (ALLOW, BLOCK, BYPASS, PICTURES)
 
 
 class RuleError(ValueError):
@@ -120,3 +123,13 @@ def decide(rules: list[Rule], url: str) -> tuple[str, str | None]:
         if rule.matches(host, path):
             return rule.action, rule.pattern
     return ALLOW, None
+
+
+def folder_of(url: str) -> str | None:
+    """The folder a page is in, as a rule: example.com/a/b/page ->
+    example.com/a/b/*. None for a page at the top of its site, whose
+    folder is the whole site."""
+    parts = urlsplit(url)
+    host = (parts.hostname or "").lower().strip(".").removeprefix("www.")
+    folder = (parts.path or "/").rsplit("/", 1)[0]
+    return f"{host}{folder}/*" if host and folder else None

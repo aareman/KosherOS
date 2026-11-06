@@ -7,6 +7,7 @@ the network comes up (fail-closed by unit ordering).
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import os
@@ -16,8 +17,8 @@ import tempfile
 from pathlib import Path
 
 from . import categories as categories_mod
-from . import (buildsources, containers, dns, mitmca, nft, nixdaemon, paymentsecurity,
-               syncthing, tailnet)
+from . import (buildsources, containers, dns, lists, mitmca, nft, nixdaemon,
+               paymentsecurity, sshin, syncthing, tailnet)
 from . import search as search_mod
 from .policy import INSPECTED_MODES, SAFESEARCH_MODES, UNFILTERED_MODES, Policy
 
@@ -43,6 +44,10 @@ MITM_RULES_PATH = MITM_DIR / "rules.json"
 # The search front end and the metasearch engine behind it, likewise
 # unprivileged and likewise given only what they filter with.
 SEARCH_SERVICES = ("kosher-searxng.service", "kosher-search.service")
+SEARCH_FRONT_END = "kosher-search.service"
+# What each restarted-on-demand service was last started with (see
+# _restart_if_changed). In kosherd's own state directory.
+STARTED_DIR = Path("/var/lib/kosher/started")
 SEARCH_DIR = Path("/var/lib/kosher-search")
 SEARCH_POLICY_PATH = Path(search_mod.SEARCH_POLICY_PATH)
 NIX_DAEMON_SERVICE = "nix-daemon.service"
@@ -180,6 +185,36 @@ def write_nix_users(policy: Policy) -> bool:
     return True
 
 
+def write_ssh_in(policy: Policy, run=subprocess.run) -> bool:
+    """Tell sshd who may sign in (sshin.py). Returns whether anything
+    changed, in which case sshd was restarted: started for the first
+    account, stopped with the last unless root has a key (a dev disk).
+    Sessions already open are their own scopes and survive a restart.
+    A machine without sshd's drop-in directory is left alone.
+    """
+    path = sshin.CONF_PATH
+    if not path.parent.is_dir():
+        return False
+    content = sshin.render(policy)
+    try:
+        current = path.read_text()
+    except OSError:
+        current = None
+    if current == content:
+        return False
+    if content is None:
+        path.unlink(missing_ok=True)
+    else:
+        # sshd refuses a group- or world-writable file; 0600 like the rest.
+        _write_atomic(path, content, mode=0o600)
+    # restart, not try-restart: the unit's condition is what starts or
+    # stops it, and a stopped sshd must start for the first account.
+    res = run(["systemctl", "restart", sshin.SERVICE], capture_output=True, text=True)
+    if res.returncode != 0:
+        log.warning("could not restart sshd: %s", (res.stderr or "").strip())
+    return True
+
+
 def _write_atomic(path: Path, content: str, mode: int = 0o644) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp = tempfile.mkstemp(dir=path.parent)
@@ -206,6 +241,60 @@ def _restart(service: str):
                    capture_output=True, text=True)
     return subprocess.run(["systemctl", "restart", service],
                           capture_output=True, text=True)
+
+
+def _lists_fingerprint() -> str:
+    """What the proxy and the search service load once, when they start:
+    the family's list edits and any category bundle delivered since the
+    image (both under lists.OVERRIDE_DIR). The shipped lists change only
+    with the image, which restarts everything."""
+    digest = hashlib.sha256()
+    root = lists.OVERRIDE_DIR
+    if root.is_dir():
+        for path in sorted(root.rglob("*")):
+            try:
+                if path.is_file():
+                    st = path.stat()
+                    digest.update(f"{path}:{st.st_mtime_ns}:{st.st_size}\n".encode())
+            except OSError:
+                continue
+    return digest.hexdigest()
+
+
+def _file_stamp(path: Path) -> str:
+    try:
+        return path.read_text()
+    except OSError:
+        return ""
+
+
+def _restart_if_changed(service: str, fingerprint: str):
+    """Restart `service` only when what it reads at start has changed since
+    kosherd last started it, or when it is not running; otherwise leave it.
+
+    Every policy change used to restart the proxy and both search services.
+    The proxy loads an image model, so each restart cost seconds before
+    kosherd could answer, and for those seconds every account's web was
+    down. Both re-read their policy file when it changes (rules.json,
+    policy.json); what they read only at start is the listener list and the
+    lists. The fingerprint of those is kept in STARTED_DIR.
+    """
+    stamp = STARTED_DIR / service
+    running = subprocess.run(["systemctl", "is-active", "--quiet", service],
+                             capture_output=True, text=True).returncode == 0
+    # A missing stamp is "never started by kosherd", even for an empty
+    # fingerprint.
+    if running and stamp.exists() and _file_stamp(stamp) == fingerprint:
+        return None
+    res = _restart(service)
+    if res.returncode == 0:
+        # Best effort: a stamp that cannot be written costs one more
+        # restart next time, never the apply.
+        try:
+            _write_atomic(stamp, fingerprint, mode=0o600)
+        except OSError as e:
+            log.warning("could not note what %s started with: %s", service, e)
+    return res
 
 
 def apply_policy(policy: Policy) -> None:
@@ -256,18 +345,29 @@ def apply_policy(policy: Policy) -> None:
             mitmca.ensure_ca()
         except Exception:  # noqa: BLE001 - never leave the firewall unapplied
             log.exception("could not prepare the inspection CA")
-    _restart(MITM_SERVICE) if inspected else subprocess.run(
-        ["systemctl", "stop", MITM_SERVICE], capture_output=True, text=True)
+    lists_now = _lists_fingerprint()
+    if inspected:
+        _restart_if_changed(MITM_SERVICE, "\n".join((
+            _file_stamp(MITM_RULES_PATH.with_name("listen.env")), lists_now,
+            _file_stamp(mitmca.CA_PEM))))
+    else:
+        subprocess.run(["systemctl", "stop", MITM_SERVICE], capture_output=True, text=True)
 
     write_nix_users(policy)
+    try:
+        write_ssh_in(policy)
+    except Exception:  # noqa: BLE001 - never leave the rest unapplied
+        log.exception("could not tell sshd who may sign in")
 
     write_search_policy(policy)
     # Search is only useful to somebody whose results need filtering; an
     # unfiltered account has a real search engine already.
     if any(u.mode not in UNFILTERED_MODES and u.mode != "none"
            for u in policy.effective_users()):
+        # The engine reads nothing kosherd writes; the front end reads its
+        # policy file as it changes, and the lists at start.
         for service in SEARCH_SERVICES:
-            _restart(service)
+            _restart_if_changed(service, lists_now if service == SEARCH_FRONT_END else "")
     else:
         for service in reversed(SEARCH_SERVICES):
             subprocess.run(["systemctl", "stop", service],

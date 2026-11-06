@@ -1229,6 +1229,12 @@ def prune_registry(env: dict, log: Path) -> None:
     registry_up(env, log)
     run_logged(["podman", "exec", REGISTRY, "sh", "-c", REGISTRY_PRUNE,
                 "sh", "/var/lib/registry"], log, env, timeout=1800)
+    # The registry remembers which blobs it has (an in-memory cache). After
+    # a collection it would still answer "have it" for a deleted layer, the
+    # push would skip it, and the machine's pull would end in "unexpected
+    # EOF". A restart empties the cache.
+    run_logged(["podman", "restart", REGISTRY], log, env)
+    registry_up(env, log)
 
 
 def push(image: str, tag: str, env: dict, log: Path) -> str:

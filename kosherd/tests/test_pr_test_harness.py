@@ -353,3 +353,14 @@ def test_the_registry_keeps_only_the_base_tag_and_collects_the_rest(tmp_path):
 
 def test_an_empty_registry_is_left_alone(tmp_path):
     subprocess.run(["sh", "-c", pr_test.REGISTRY_PRUNE, "sh", str(tmp_path)], check=True)
+
+
+def test_the_registry_is_restarted_after_a_collection(tmp_path, monkeypatch):
+    # Its in-memory blob cache would otherwise vouch for deleted layers.
+    calls = []
+    monkeypatch.setattr(pr_test.subprocess, "run", lambda *a, **k: subprocess.CompletedProcess(a, 0))
+    monkeypatch.setattr(pr_test, "registry_up", lambda env, log: calls.append(["up"]))
+    monkeypatch.setattr(pr_test, "run_logged", lambda cmd, log, env, **k: calls.append(cmd) or 0)
+    pr_test.prune_registry({}, tmp_path / "log")
+    kinds = [c[1] if c[0] == "podman" else c[0] for c in calls]
+    assert kinds.index("exec") < kinds.index("restart") < len(kinds) - 1 and kinds[-1] == "up"

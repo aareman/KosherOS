@@ -34,6 +34,7 @@ import base64
 import hashlib
 import json
 import os
+import pwd
 import platform
 import re
 import shutil
@@ -194,9 +195,16 @@ def _replace(path: Path, text: str, mode: int = 0o644) -> None:
     os.replace(tmp, path)
 
 
-def _systemctl(*args: str) -> None:
-    """Best effort: from the Store there may be no session bus at all."""
-    if shutil.which("systemctl") and os.environ.get("XDG_RUNTIME_DIR"):
+def _systemctl(home: Path, *args: str) -> None:
+    """Best effort: from the Store there may be no session bus at all.
+    Only for the account's own home: the user manager is the account's,
+    and a home elsewhere (a test, a scratch install) is not what it runs,
+    so `disable --now` there would stop the account's real Hex."""
+    try:
+        own = Path(pwd.getpwuid(os.getuid()).pw_dir).resolve() == home.resolve()
+    except (KeyError, OSError):
+        own = False
+    if own and shutil.which("systemctl") and os.environ.get("XDG_RUNTIME_DIR"):
         subprocess.run(["systemctl", "--user", *args], capture_output=True, timeout=30)
 
 
@@ -269,7 +277,7 @@ def _launchers(home: Path, binary: Path, root: Path) -> None:
             continue
         if _ours_or_absent(path):
             _replace(path, text)
-    _systemctl("daemon-reload")
+    _systemctl(home, "daemon-reload")
 
 
 def _check_runs(exe: Path, version: str) -> None:
@@ -312,9 +320,9 @@ def remove(home: Path) -> None:
             pass
     unit = home / ".config/systemd/user/hex.service"
     if unit.is_file() and not unit.is_symlink() and _hex_entry(unit):
-        _systemctl("disable", "--now", "hex.service")
+        _systemctl(home, "disable", "--now", "hex.service")
         unit.unlink()
-        _systemctl("daemon-reload")
+        _systemctl(home, "daemon-reload")
     binary = home / ".local/bin/hex"
     if binary.is_symlink() and os.readlink(binary) == str(root / "current/hex"):
         binary.unlink()

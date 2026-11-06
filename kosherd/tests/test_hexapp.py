@@ -215,3 +215,17 @@ def test_the_helper_dispatches_hex(monkeypatch, tmp_path, dev):
     assert u.main(["upgrade", "hex"]) == 0
     assert u.main(["remove", "hex"]) == 0
     assert hexapp.installed_version(tmp_path) is None
+
+
+def test_a_home_that_is_not_the_accounts_never_reaches_its_systemd(monkeypatch, tmp_path, dev):
+    # The user manager runs the account's real Hex; removing a copy in some
+    # other home once stopped and disabled it.
+    calls = []
+    real_run = hexapp.subprocess.run
+    monkeypatch.setattr(hexapp.subprocess, "run",
+                        lambda argv, **kw: calls.append(argv) if argv[0] == "systemctl"
+                        else real_run(argv, **kw))
+    monkeypatch.setenv("XDG_RUNTIME_DIR", "/run/user/0")
+    _install(tmp_path, dev, dev.publish("1.0"))
+    hexapp.remove(tmp_path)
+    assert calls == []

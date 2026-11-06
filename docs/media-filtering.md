@@ -97,6 +97,22 @@ asked whether there is anyone there, and its box is what the skin
 measurement runs on. On a shop's grid for that search it recovered ten of
 the eleven pictures that had been passing.
 
+**The figure's own pixels.** The detector's box is a rectangle, and what is
+behind the figure is in it too. A shiur's rabbi at his desk, bookshelves
+behind him, measured past the line over his box: warm wood and beige book
+spines pass the skin gate, and in a desaturated video frame, which the
+filter measures by lightness alone, so does a white shirt. When a found
+figure measures past the line but the box is not plainly bare, a small
+person segmenter is asked which pixels are the person, and the skin is
+measured over those alone. In a monochrome picture the segmenter's own
+skin classes are what count as skin, since a band of lightness cannot
+tell a shirt from a hand. Over a figure that is bare, taking the
+background out can only raise the fraction, so nothing is let off by it.
+If the segmenter sees no figure where the detector found one (marble,
+paint, a figure too small) its answer is not believed and the box's own
+measurement stands. It is asked only in that narrow band, so an ordinary
+picture pays nothing for it; when it is asked it costs about 150 ms.
+
 A family that wants tzniut enforced strictly should still choose `people`
 or `all`, which need no judgement of what someone is wearing.
 
@@ -234,12 +250,9 @@ asserts the sock department survives. A site can override which tags and
 terms are stripped in its rules, so a layout the defaults do not reach is
 a rules-file edit rather than a release.
 
-## Image search
-
-In filtered mode a search thumbnail loads from its origin through the
-proxy and is judged like any other picture, so image search works. In the
-modes that never read the connection, thumbnails would arrive unexamined,
-so an account that filters pictures does not get them there.
+Image search thumbnails come through the proxy in filtered mode and are
+judged like any other picture; [search](search.md#images) says what the
+other modes do.
 
 ## Running on the family's own computer
 
@@ -271,11 +284,11 @@ hides pictures instead: instant, never wrong, and honest about what the
 computer can do. Cached verdicts are still served. The window rolls, so a
 machine that was briefly busy recovers on its own.
 
-And it says so. The proxy publishes whether it is checking, too slow, or
-has no model, and the admin app shows it as an amber count beside
-Protection and spells it out on the Protection page. A version of this
-that said nothing would teach people that blank pictures mean the computer
-is broken, which is how a filter ends up switched off.
+And it says so: the proxy publishes whether it is checking, too slow, or
+has no model, and that reaches the Protection page with
+[everything else the filter reports about itself](content-filtering.md#saying-when-the-filter-is-not-filtering).
+A version of this that said nothing would teach people that blank pictures
+mean the computer is broken, which is how a filter ends up switched off.
 
 The text path is not where the time goes. Judging a page costs about 20 ms
 of Python across scoring, bad language and element stripping, under 5% of

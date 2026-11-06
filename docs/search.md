@@ -30,7 +30,7 @@ is per account, so that identity is the whole point.
 A results page is sent in two pieces. The head and the search bar go out
 the moment the query arrives, so the browser draws them at once, and the
 results follow in the same response when the engine has answered and the
-filter has read what it needed to.
+filter has checked them. A “Searching…” status appears during that wait.
 
 SearXNG sits behind it and does the one job that needs a large dependency:
 scraping a dozen search engines that keep changing. It is reached only
@@ -41,6 +41,37 @@ The firewall refuses any human account's connection to SearXNG's own port.
 Loopback is otherwise open, which is what lets a person reach the search
 page, and the engine's raw results carry exactly the snippets the filter
 exists to withhold.
+
+## Response time
+
+The front end prepares its shared filtering data at service startup. Compiling
+the language matchers and opening the category database no longer delays the
+first person's search.
+
+Successful, nonempty engine responses stay in memory for 60 seconds, with at
+most 32 entries and a 2 MiB limit per response. The key includes the exact
+query, tab, and page. Simultaneous identical searches share one upstream
+request. Empty responses and errors are retried; nothing is written to disk.
+This caches raw strict-safe-search results, never rendered pages or account
+permissions. Every request still checks query permission and filters results
+against the current account policy and page-scan verdicts. Browser responses
+remain `Cache-Control: no-store`.
+
+SearXNG gives upstream engines 2 seconds by default and caps its overall
+search wait at 2.5 seconds. It returns the engines that answered within the
+budget, so an unusually slow engine may contribute no results. The front end
+allows 4 seconds for the local request. A fresh search still depends on outside
+engines and their rate limits; this is not a local web index.
+
+The search journal records backend, filtering, and rendering durations without
+query text. Use `journalctl -u kosher-search` to distinguish a slow engine from
+slow local processing.
+
+An isolated Fedora image test with the real backend and account filtering on
+2026-10-15 returned repeated Web, Images, and News searches in 22–35 ms.
+Fresh searches in the same small sample took 0.65–2.54 seconds. Preparing the
+filter took 1.6 seconds at startup. These are development measurements, not a
+latency guarantee for other connections or engines.
 
 ## What gets filtered
 
@@ -62,11 +93,9 @@ filtered mode also applies the account's page rules and shop department
 rules.
 
 **Each result, by content.** The title and snippet are scored by the same
-weighted terms that judge a page. Terms sit at the strongest verdict they
-can support, and points earned at one level count toward every milder
-level, so explicit words also make a result immodest but no pile of
-swimwear vocabulary can add up to explicit. Pages that talk about the
-problem need twice the evidence.
+weighted terms and the same rules that
+[judge a page by its words](content-filtering.md#judging-a-page-by-its-words),
+including the extra evidence a page that talks about the problem needs.
 
 **Results nothing has ever classified.** This is the gap domain lists
 leave open, and it is where new material lives. For results on hosts the
@@ -124,17 +153,13 @@ account unexamined.
 
 ## Lists
 
-Both lists ship complete and are meant to stay that way. An administrator
-may add or remove a handful of terms; nobody should have to build one.
-
-- the search blocklist, explicit terms that will not run at all;
-- the content terms, the weighted words a page or a result is judged by.
-
-Both ship in sixteen languages, and a family's edits or a portal's update
-override the shipped copy. Both are checked against ordinary text in the
-test suite: chicken breast recipes, breast cancer information, biology
-lessons, Sussex, Middlesex and a page arguing for modest dress all come
-back clean.
+Two lists do the work: the search blocklist, explicit terms that will not
+run at all, and the content terms a page or a result is judged by. Both
+ship complete in sixteen languages and are updated and edited like
+[every other list](content-filtering.md#the-lists-shipped-updated-edited).
+Both are checked against ordinary text in the test suite: chicken breast
+recipes, breast cancer information, biology lessons, Sussex, Middlesex and
+a page arguing for modest dress all come back clean.
 
 ## Checked against a running stack
 

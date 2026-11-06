@@ -54,6 +54,21 @@
       "description": "Domains reachable in whitelist mode for every user (OS update host, flatpak remote, connectivity check, portal). Merged with built-in defaults.",
       "default": []
     },
+    "developer": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Machine-wide settings for developer tools (#123).",
+      "properties": {
+        "build_sources_extra": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/domain"
+          },
+          "default": [],
+          "description": "Hosts a Nix build may download from, added by an administrator to the built-in list (kosherd.buildsources). The builders' proxy refuses a build's download from any other host (#199)."
+        }
+      }
+    },
     "guest": {
       "type": "object",
       "additionalProperties": false,
@@ -199,6 +214,13 @@
           "maxItems": 20,
           "uniqueItems": true,
           "description": "TCP ports this account may open directly, beyond the web and mail: an advanced setting, empty by default."
+        },
+        "developer_tools": {
+          "type": "boolean",
+          "description": "May use the Nix daemon and reach the package registries directly (nix, devbox, devenv from a shell). Default false."
+        },
+        "calm": {
+          "$ref": "#/$defs/calm"
         }
       }
     },
@@ -244,6 +266,9 @@
           "youtube": {
             "type": "object"
           },
+          "calm": {
+            "$ref": "#/$defs/calm"
+          },
           "can_install_apps": {
             "type": "boolean"
           },
@@ -281,6 +306,55 @@
           "type": "boolean",
           "default": true,
           "description": "Block advertising and tracker domains at the machine's resolvers for every account, like a Pi-hole. Reaches every browser and app because all DNS is forced through the local resolvers. Absent means on."
+        },
+        "allowed": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "description": "Hosts the ad blocker leaves reachable although the tracker lists carry them, beyond the built-in payment-security set: a host, or *.host for the host and everything under it. The proxy's category step steps aside for them too. Guardian-gated to add."
+        }
+      }
+    },
+    "updates": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "auto": {
+          "enum": [
+            "off",
+            "daily",
+            "weekly",
+            "biweekly",
+            "monthly"
+          ],
+          "default": "weekly",
+          "description": "How often this computer looks for a new KosherOS version on its own and downloads it, ready for the next restart. It never restarts by itself. off = only when an administrator checks. Absent means weekly."
+        },
+        "notify": {
+          "type": "boolean",
+          "default": true,
+          "description": "Tell the people signed in, once per version, when a downloaded update is ready for a restart. Absent means on."
+        }
+      }
+    },
+    "advanced": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Features a family turns on for the whole computer (#220). Off on a new install.",
+      "properties": {
+        "tailscale": {
+          "type": "boolean",
+          "description": "Tailscale's service runs and the computer can be signed in to a tailnet. Absent means kosherd decides once at its next start: on if the computer was already signed in, off otherwise."
+        },
+        "syncthing": {
+          "type": "boolean",
+          "description": "Syncthing can be installed from the Store and allowed for an account. Off, every account's Syncthing is stopped and the Store does not offer it. Absent means kosherd decides once at its next start: on if any account already has it, off otherwise."
+        },
+        "keyd": {
+          "type": "boolean",
+          "description": "Key remapping: keyd runs, and each person's ~/.config/keyd files are applied while they are at the screen. Off, keyd is stopped and nobody's files are applied. Absent means kosherd decides once at its next start: on if any account already has keyd files, off otherwise."
         }
       }
     }
@@ -297,8 +371,11 @@
         "action": {
           "enum": [
             "allow",
-            "block"
-          ]
+            "block",
+            "bypass",
+            "pictures"
+          ],
+          "description": "block refuses the page. allow opens it whatever the category lists and the content scorer say; its pictures, video and words are still filtered. pictures is allow with its pictures shown as they are; its video and words are still filtered. bypass passes it through untouched: nothing on it is filtered."
         },
         "pattern": {
           "type": "string",
@@ -345,7 +422,7 @@
             "$ref": "#/$defs/rule"
           },
           "default": [],
-          "description": "URL allow/block rules, first match wins. Only enforced in inspect mode (paths are encrypted otherwise)."
+          "description": "URL rules (block, allow, pictures or bypass), first match wins. Only enforced in filtered mode (paths are encrypted otherwise)."
         },
         "admin": {
           "type": "boolean",
@@ -478,7 +555,16 @@
             "advanced"
           ],
           "default": "classic",
-          "description": "How this account's desktop is laid out: classic = a bottom taskbar and start button (GNOME + Dash to Panel), what a Windows, Mac or ChromeOS user knows; tiling = GNOME with PaperWM scrolling tiling; advanced = a separate niri + Noctalia session, picked at the login screen. A preference applied at sign-in by kosher-layout, not a protection: the filter is per-uid at the network layer whatever draws the windows. Deliberately not part of presets (a protection level does not imply a window manager) and not offered to the guest account, which always gets the classic desktop."
+          "description": "How this account's desktop is laid out: classic = a bottom taskbar and start button (GNOME + Dash to Panel), what a Windows, Mac or ChromeOS user knows; tiling = GNOME with PaperWM scrolling tiling; advanced = the Noctalia shell in a separate session on the compositor chosen in compositor, picked at the login screen. A preference applied at sign-in by kosher-layout, not a protection: the filter is per-uid at the network layer whatever draws the windows. Deliberately not part of presets (a protection level does not imply a window manager) and not offered to the guest account, which always gets the classic desktop."
+        },
+        "compositor": {
+          "enum": [
+            "niri",
+            "hyprland",
+            "umbriel"
+          ],
+          "default": "niri",
+          "description": "Which compositor the advanced layout runs the Noctalia shell on: niri = windows in columns on a strip that scrolls sideways; hyprland = dynamic tiling, each new window splitting the space; umbriel = Noctalia's own compositor. Each is its own login-screen session. Read only when layout is advanced, and kept otherwise. A preference the person chooses in the Look app, like the layout."
         },
         "cover_style": {
           "enum": [
@@ -512,6 +598,97 @@
           "maxItems": 20,
           "uniqueItems": true,
           "description": "TCP ports this account may open directly, beyond the web and mail: an advanced setting, empty by default."
+        },
+        "ssh_hosts": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 261
+          },
+          "maxItems": 50,
+          "uniqueItems": true,
+          "description": "Machines this account may connect to over SSH, and no others: a name, an address, a range (CIDR), or 'tailnet' for every machine on this computer's tailnet, each on port 22 or the port it names (git.example.org:222, [fd00::5]:222). Empty by default: port 22 is closed, since an SSH tunnel reaches anything."
+        },
+        "ssh_anywhere": {
+          "type": "boolean",
+          "description": "SSH to every machine, for an account an administrator trusts with a way around the filter. Default false."
+        },
+        "developer_tools": {
+          "type": "boolean",
+          "description": "May use the Nix daemon and reach the package registries directly (nix, devbox, devenv from a shell). Default false."
+        },
+        "ssh_in": {
+          "type": "boolean",
+          "description": "May be signed in to from another machine over SSH, with a key in the account's own ~/.ssh/authorized_keys; passwords are refused. Only takes effect with developer_tools on. Default false."
+        },
+        "approved_apps": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "uniqueItems": true,
+          "description": "Apps an administrator approved for this account alone, for the apps that need it (appaccess.INDIVIDUAL_APPROVAL: Syncthing, whose files arrive without passing the filter)."
+        },
+        "syncthing_lan": {
+          "type": "boolean",
+          "description": "Devices on the home network may connect to this account's Syncthing directly (TCP 22000, UDP 22000 and 21027, from the LAN ranges only). Default false."
+        },
+        "calm": {
+          "$ref": "#/$defs/calm"
+        }
+      }
+    },
+    "calm": {
+      "type": "object",
+      "additionalProperties": false,
+      "default": {},
+      "description": "Calmer versions of the addictive sites (#179), enforced by the proxy and a script it injects into these pages: a feed page ends after a set number of items with ads, sidebars and recommendations stripped, and a direct link to a post renders as the post alone — no comments, no navigation, no links back into the site. Login flows are never touched. Empty means off.",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "default": false,
+          "description": "The master switch for the calmer sites."
+        },
+        "feed_items": {
+          "type": "integer",
+          "minimum": 5,
+          "maximum": 500,
+          "default": 30,
+          "description": "Where a feed page ends: this many items and no more."
+        },
+        "sites": {
+          "type": "object",
+          "additionalProperties": false,
+          "default": {},
+          "description": "Which sites the calmer version applies to; a site not listed is left exactly as it is.",
+          "properties": {
+            "x": {
+              "$ref": "#/$defs/calm_site"
+            },
+            "reddit": {
+              "$ref": "#/$defs/calm_site"
+            },
+            "youtube": {
+              "$ref": "#/$defs/calm_site"
+            },
+            "facebook": {
+              "$ref": "#/$defs/calm_site"
+            }
+          }
+        }
+      }
+    },
+    "calm_site": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "daily_minutes": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1440,
+          "default": 0,
+          "description": "The site's daily budget in minutes, counted while a page of it is on screen; when it is spent the site is done for the day. 0 means no limit."
         }
       }
     },

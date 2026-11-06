@@ -243,7 +243,7 @@ def test_safe_search_is_forced_on_every_backend_call(monkeypatch):
         def __exit__(self, *a):
             return False
 
-        def read(self):
+        def read(self, size=-1):
             return b"{}"
 
     def fake_urlopen(request, timeout=None):
@@ -389,3 +389,37 @@ def test_the_news_tab_shows_the_date():
     finally:
         httpd.shutdown()
     assert "2026-09-07" in page
+
+
+def test_cached_searches_reapply_account_and_policy_filters(monkeypatch):
+    backend = server_mod.Backend()
+    calls = []
+    monkeypatch.setattr(backend, "_fetch", lambda *key: calls.append(key) or {
+        "results": [{"url": "https://example.org", "title": "Visible result"}]})
+    httpd = start({"mode": "unfiltered"}, backend=backend)
+    handler = server_mod.Handler
+    current_uid = [UID]
+    handler.uids = type("Stub", (), {"uid_for_connection": staticmethod(
+        lambda *a, **k: current_uid[0])})()
+    handler.result_filter.policy._users[UID + 1] = {"mode": "whitelist", "whitelist": []}
+    url = f"http://127.0.0.1:{httpd.server_address[1]}/search?q=hello"
+
+    def read():
+        with urllib.request.urlopen(url, timeout=3) as response:
+            assert response.headers["Cache-Control"] == "no-store"
+            return response.read().decode()
+
+    try:
+        assert "Visible result" in read()
+        current_uid[0] = UID + 1
+        assert "Visible result" not in read()
+        current_uid[0] = UID
+        handler.result_filter.policy._users[UID] = {"mode": "whitelist", "whitelist": []}
+        assert "Visible result" not in read()
+        assert len(calls) == 1
+        handler.result_filter.policy._users[UID] = {"mode": "none"}
+        assert "This search is blocked" in read()
+        assert len(calls) == 1
+    finally:
+        httpd.shutdown()
+        httpd.server_close()

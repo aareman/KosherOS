@@ -1,0 +1,269 @@
+name: VM test
+
+# A real VM: `just pr-test`, the same recipe a developer runs, on a GitHub
+# runner with KVM. It builds the image, makes a disk without root, boots it
+# through the first-boot wizard, signs a test account in at the login
+# screen, and runs the in-VM suites. The report and the logs, consoles and
+# screenshots are uploaded whatever the result.
+#
+# Mostly it runs for the merge train (merge-train.yml), once for a batch of
+# queued pull requests rather than once per push per pull request: an hour
+# of runner for every push was why everything waited. A single pull request
+# gets it on request, with the `vm-test` label, and by hand (Actions -> VM
+# test -> Run workflow) for a branch.
+#
+# Same-repository pull requests only, as in try-image.yml: a fork's run has
+# no secrets and its hour on a runner is better spent after a look at the
+# change.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled]
+  workflow_dispatch:
+  workflow_call:
+    inputs:
+      ref:
+        description: the commit to test
+        required: true
+        type: string
+      id:
+        description: names the run (artifact, concurrency)
+        required: true
+        type: string
+
+jobs:
+  changes:
+    name: Does it reach the machine
+    # A pull request that changes only docs, unit tests or other workflows
+    # cannot change what boots, and an hour of runner for it is waste.
+    # Skipped here rather than with a paths filter, so that a skipped run
+    # still reports and could be made a required check.
+    if: >-
+      inputs.ref != ''
+      || github.event_name == 'workflow_dispatch'
+      || (github.event.pull_request.head.repo.full_name == github.repository
+          && contains(github.event.pull_request.labels.*.name, 'vm-test')
+          && (github.event.action != 'labeled' || github.event.label.name == 'vm-test'))
+    runs-on: ubuntu-latest
+    outputs:
+      vm: ${{ steps.filter.outputs.vm }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - id: filter
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+          TRAIN_REF: ${{ inputs.ref }}
+        run: |
+          if [ -n "$TRAIN_REF" ] || [ "$GITHUB_EVENT_NAME" != "pull_request" ]; then
+            echo "vm=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          changed="$(git diff --name-only "$BASE" "$HEAD")"
+          echo "$changed"
+          if echo "$changed" | grep -E -q \
+               '^(os-image/|kosherd/src/|kosherd/pyproject|admin-app/src/|store-app/src/|setup-app/src/|myfilter-app/src/|welcome-app/src/|look-app/src/|search-app/kosher_search/|mitm/|branding/|policy/|scripts/vm-tests/|scripts/(pr-test|boot-test|check-no-sudo)\.py|scripts/rootless-disk\.sh|scripts/fetch-categories\.py|scripts/curated-sites\.json|scripts/check-searxng-settings\.py|scripts/version\.py|Justfile|devenv\.(nix|lock|yaml)|\.github/workflows/vm-test\.yml)'; then
+            echo "vm=true" >> "$GITHUB_OUTPUT"
+            echo "this reaches the machine: testing it in a VM"
+          else
+            echo "vm=false" >> "$GITHUB_OUTPUT"
+            echo "nothing that boots changed: no VM test"
+          fi
+
+  build:
+    name: The change's image
+    needs: [changes]
+    if: needs.changes.outputs.vm == 'true'
+    # Once, for every runner after it: the image goes to ghcr, and each
+    # runner switches master's base to it from there. A change to nothing
+    # the image is built from (a suite, the harness, a workflow) builds
+    # nothing and tests master's own :edge.
+    concurrency:
+      group: vm-build-${{ inputs.id || github.event.pull_request.number || github.ref }}
+      cancel-in-progress: true
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    permissions:
+      contents: read
+      packages: write # the build cache, and the image the runners switch to
+    outputs:
+      image: ${{ steps.image.outputs.image }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.ref || github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0 # the version is counted from the last tag; master is diffed against
+
+      - name: Build and push, or take master's
+        id: image
+        # The runner's own podman, as ci.yml builds: the dev shell is three
+        # minutes this job has no use for. The layers come from the
+        # registry's build cache (Justfile: build).
+        env:
+          CACHE: ghcr.io/${{ github.repository_owner }}/kosher-linux-cache
+          CI_IMAGE: ghcr.io/${{ github.repository_owner }}/kosher-linux-ci
+          MASTER_IMAGE: ghcr.io/${{ github.repository_owner }}/kosher-linux
+          TAG: ${{ inputs.id || format('pr-{0}', github.event.pull_request.number) }}-${{ github.run_id }}
+        run: |
+          podman login ghcr.io -u "$GITHUB_ACTOR" -p "${{ secrets.GITHUB_TOKEN }}"
+          since="$(git merge-base origin/master HEAD)"
+          # What reaches the image: ci.yml's list (What changed), which an
+          # app's tests, copied in but never installed, are not on.
+          if ! git diff --name-only "$since" HEAD | grep -E -q \
+               '^(os-image/|(kosherd|admin-app|store-app|setup-app|myfilter-app|welcome-app|look-app)/(src/|pyproject)|search-app/(kosher_search/|pyproject)|mitm/|branding/|policy/|scripts/fetch-categories\.py|scripts/curated-sites\.json|scripts/check-searxng-settings\.py|scripts/version\.py)'; then
+            # :edge is master's image only once Checks has built it, some
+            # ten minutes after a merge that changes the image; a train in
+            # that window once tested new suites against the old image.
+            # The version label names the merge :edge was built at, and
+            # master's last change to the image must be in that merge's
+            # past. Otherwise this builds, as for a change to the image.
+            have="$(skopeo inspect --format '{{index .Labels "org.opencontainers.image.version"}}' "docker://$MASTER_IMAGE:edge")"
+            built_at="$(git rev-list -n1 "v$have" 2>/dev/null || true)"
+            last="$(git log -1 --format=%H origin/master -- os-image kosherd/src kosherd/pyproject.toml \
+                      admin-app/src admin-app/pyproject.toml store-app/src store-app/pyproject.toml \
+                      setup-app/src setup-app/pyproject.toml myfilter-app/src myfilter-app/pyproject.toml \
+                      welcome-app/src welcome-app/pyproject.toml look-app/src look-app/pyproject.toml \
+                      search-app/kosher_search search-app/pyproject.toml mitm branding policy \
+                      scripts/fetch-categories.py scripts/curated-sites.json \
+                      scripts/check-searxng-settings.py scripts/version.py)"
+            if [ -n "$built_at" ] && git merge-base --is-ancestor "$last" "$built_at"; then
+              digest="$(skopeo inspect --format '{{.Digest}}' "docker://$MASTER_IMAGE:edge")"
+              echo "nothing the image is built from changed, and :edge ($have) has master's image: testing it ($digest)"
+              echo "image=$MASTER_IMAGE:edge@$digest" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            echo "nothing the image is built from changed, but :edge ($have) is behind master's image (${last::12}): building"
+          fi
+          version="$(python3 scripts/version.py show)"
+          podman build --build-arg "KOSHER_VERSION=$version" \
+            --layers --cache-from "$CACHE" --cache-to "$CACHE" \
+            -t "$CI_IMAGE:$TAG" -f os-image/Containerfile .
+          podman push --digestfile digest "$CI_IMAGE:$TAG"
+          echo "image=$CI_IMAGE:$TAG@$(cat digest)" >> "$GITHUB_OUTPUT"
+          echo "pushed $CI_IMAGE:$TAG@$(cat digest)"
+
+  vm:
+    name: Boot and test (${{ matrix.name }})
+    needs: [changes, build]
+    if: needs.changes.outputs.vm == 'true'
+    # On the job, not the workflow: a run started by some other label (and
+    # skipping everything) must not cancel the VM test in progress. A new
+    # push supersedes the run for the same pull request; a train's is its own.
+    concurrency:
+      group: vm-test-${{ inputs.id || github.event.pull_request.number || github.ref }}-${{ matrix.name }}
+      cancel-in-progress: true
+    strategy:
+      fail-fast: false # every part reports, so one red run shows all its failures
+      matrix:
+        # The desktop and each suite group on a runner of its own. They
+        # used to share one 4-core runner and slow each other down.
+        include:
+          - { name: desktop, shard: desktop }
+          - { name: suites-1, shard: "suites:1/4" }
+          - { name: suites-2, shard: "suites:2/4" }
+          - { name: suites-3, shard: "suites:3/4" }
+          - { name: suites-4, shard: "suites:4/4" }
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          # The branch's own commit rather than GitHub's merge commit, so
+          # the report names a commit that exists on the branch.
+          ref: ${{ inputs.ref || github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0 # the version is counted from the last tag
+
+      - name: KVM
+        # The runners have /dev/kvm, owned by root and closed to the
+        # runner's user until a udev rule opens it. Without KVM the VM would
+        # crawl under emulation for hours and then time out, so this stops
+        # here and says why instead.
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+            | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+          # The trigger is applied asynchronously; one run checked before
+          # it had and found /dev/kvm still closed.
+          sudo udevadm settle --timeout=30 || true
+          ls -l /dev/kvm || echo "no /dev/kvm on this runner"
+          if [ ! -e /dev/kvm ] || [ ! -w /dev/kvm ]; then
+            echo "::error::This runner has no usable /dev/kvm. The VM test needs hardware virtualisation."
+            exit 1
+          fi
+          ls -l /dev/kvm
+
+      - uses: cachix/install-nix-action@v31
+
+      - name: The static virtiofsd bcvk needs
+        uses: actions/cache@v4
+        with:
+          path: /var/tmp/kosher-harness-1001
+          key: virtiofsd-${{ hashFiles('devenv.lock') }}
+
+      - name: Master's base disk
+        # Made and saved by ci.yml after each merge that changes the image
+        # (just pr-test --base-only). The newest one there is; the harness
+        # switches it to the change's image, as a family's machine takes an
+        # update, instead of installing from scratch — twenty minutes on a
+        # runner, which every part of every run used to spend. With none
+        # restored (or one too old), the harness installs as before.
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/.cache/kosher-pr-test
+          key: pr-test-base-${{ github.sha }}
+          restore-keys: pr-test-base-
+
+      - name: Set up the runner
+        # Side by side, since neither waits on the other: the host's QEMU
+        # (bcvk runs it from /usr, not from the dev shell) with user
+        # namespaces opened for the dev shell's rootless podman, which
+        # Ubuntu 24.04 keeps to programs with an AppArmor profile; and the
+        # dev shell itself.
+        run: |
+          (sudo apt-get update && sudo apt-get install -y qemu-system-x86 qemu-utils uidmap \
+             && sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0) > apt.log 2>&1 &
+          apt=$!
+          (nix profile install nixpkgs#devenv && devenv shell -- true) > devenv.log 2>&1 &
+          dev=$!
+          failed=0
+          wait "$apt" || { failed=1; cat apt.log; }
+          wait "$dev" || { failed=1; cat devenv.log; }
+          tail -n 2 apt.log devenv.log
+          df -h /
+          exit "$failed"
+
+      - name: just pr-test
+        # This runner's part of the checks the change selects (pr-test.py
+        # --shard), on master's base switched to the image the build job
+        # pushed, or on a fresh install of it when there is no base or the
+        # change needs one. One machine per runner, so nothing waits.
+        env:
+          IMAGE: ${{ needs.build.outputs.image }}
+          SHARD: ${{ matrix.shard }}
+        run: |
+          devenv shell -- just pr-test HEAD --id ci --vms 1 --shard "$SHARD" \
+            --registry-image "$IMAGE" --prefer-base
+
+      - name: Report
+        if: always()
+        run: |
+          if [ -f build/pr-test/ci/report.md ]; then
+            cat build/pr-test/ci/report.md >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: vm-test-${{ inputs.id || github.event.pull_request.number || github.run_id }}-${{ matrix.name }}
+          path: |
+            build/pr-test/ci/
+            !build/pr-test/ci/**/*.qcow2
+            !build/pr-test/ci/src/
+            !build/pr-test/ci/id_ed25519*
+            !build/pr-test/ci/no-sudo/
+          retention-days: 14

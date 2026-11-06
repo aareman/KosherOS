@@ -43,12 +43,23 @@ def ca(tmp_path, monkeypatch):
     monkeypatch.setattr(mitmca, "ANCHOR", tmp_path / "anchors" / "kosheros.crt")
     monkeypatch.setattr(mitmca, "FIREFOX_POLICY_DIR", tmp_path / "firefox")
     monkeypatch.setattr(mitmca, "FIREFOX_POLICY", tmp_path / "firefox" / "policies.json")
+    bundle = tmp_path / "extracted" / "tls-ca-bundle.pem"
+    bundle.parent.mkdir()
+    bundle.write_text("-----ROOTS-----\n")
+    monkeypatch.setattr(mitmca, "SYSTEM_BUNDLE", bundle)
+    monkeypatch.setattr(mitmca, "FLATPAK_CA_DIR", tmp_path / "kosher-ca")
+    monkeypatch.setattr(mitmca, "FLATPAK_BUNDLE", tmp_path / "kosher-ca" / "tls-ca-bundle.pem")
+    monkeypatch.setattr(mitmca, "FLATPAK_OVERRIDE", tmp_path / "overrides" / "global")
 
     def generate(argv):
         # mitmdump writes its CA on first run; imitate that.
         if "mitmdump" in argv[0]:
             mitm_dir.mkdir(parents=True, exist_ok=True)
             (mitm_dir / "mitmproxy-ca-cert.pem").write_text("-----FAKE CA-----\n")
+        # update-ca-trust puts the anchors into the extracted bundle.
+        if argv[0] == "update-ca-trust":
+            anchor = mitmca.ANCHOR.read_text() if mitmca.ANCHOR.exists() else ""
+            bundle.write_text("-----ROOTS-----\n" + anchor)
 
     run = FakeRun(on_call=generate)
     monkeypatch.setattr(mitmca.subprocess, "run", run)
@@ -131,3 +142,76 @@ def test_remove_trust_deletes_the_anchor(ca):
 
 def test_remove_trust_is_safe_when_nothing_is_installed(ca):
     mitmca.remove_trust()  # must not raise
+
+
+# ---- Flatpak apps (#223) --------------------------------------------------------------
+
+def test_flatpak_apps_get_a_copy_of_the_bundle_with_the_ca_in_it(ca):
+    mitmca.ensure_ca()
+    assert "FAKE CA" in mitmca.FLATPAK_BUNDLE.read_text()
+    assert mitmca.FLATPAK_BUNDLE.read_bytes() == mitmca.SYSTEM_BUNDLE.read_bytes()
+    assert oct(mitmca.FLATPAK_BUNDLE.stat().st_mode & 0o777) == "0o644"
+    assert oct(mitmca.FLATPAK_CA_DIR.stat().st_mode & 0o777) == "0o755"
+
+
+def test_the_override_shares_the_copy_and_points_every_variable_at_it(ca):
+    mitmca.ensure_ca()
+    text = mitmca.FLATPAK_OVERRIDE.read_text()
+    assert f"filesystems={mitmca.FLATPAK_CA_DIR}:ro;" in text
+    for name in mitmca.FLATPAK_ENV:
+        assert f"{name}={mitmca.FLATPAK_BUNDLE}" in text
+
+
+def test_every_bundle_variable_the_session_sets_is_pointed_at_the_copy():
+    from pathlib import Path
+
+    conf = Path(__file__).parents[2] / "os-image/files/etc/environment.d/50-kosher-ca.conf"
+    names = {line.split("=", 1)[0] for line in conf.read_text().splitlines()
+             if line.endswith("tls-ca-bundle.pem")}
+    assert names and names == set(mitmca.FLATPAK_ENV)
+
+
+def test_a_new_ca_reaches_the_copy(ca):
+    mitmca.ensure_ca()
+    mitmca.CA_PEM.write_text("-----NEW CA-----\n")
+    mitmca.ensure_ca()
+    assert "NEW CA" in mitmca.FLATPAK_BUNDLE.read_text()
+
+
+def test_removing_trust_takes_the_ca_out_of_the_copy_too(ca):
+    mitmca.ensure_ca()
+    mitmca.remove_trust()
+    assert "FAKE CA" not in mitmca.FLATPAK_BUNDLE.read_text()
+
+
+def test_an_existing_override_keeps_what_else_it_says():
+    existing = ("# the administrator's own\n[Context]\nfilesystems=xdg-download;!home;\n"
+                "sockets=wayland;\n\n[Environment]\nFOO=bar\nSSL_CERT_FILE=/old\n"
+                "\n[Session Bus Policy]\norg.example=talk\n")
+    out = mitmca.render_override(existing)
+    assert "# the administrator's own" in out
+    assert f"filesystems=xdg-download;!home;{mitmca.FLATPAK_CA_DIR}:ro;" in out
+    assert "sockets=wayland;" in out and "FOO=bar" in out
+    assert "[Session Bus Policy]\norg.example=talk" in out
+    assert "SSL_CERT_FILE=/old" not in out
+    assert [l for l in out.splitlines() if l.startswith("SSL_CERT_FILE=")] == [
+        f"SSL_CERT_FILE={mitmca.FLATPAK_BUNDLE}"]
+
+
+def test_rendering_twice_changes_nothing():
+    once = mitmca.render_override("")
+    assert mitmca.render_override(once) == once
+    assert once.startswith("[Context]\n")
+
+
+def test_nothing_is_rewritten_when_nothing_changed(ca):
+    mitmca.ensure_ca()
+    assert mitmca.sync_flatpak() is False
+
+
+def test_a_missing_copy_is_reported_in_words(ca):
+    mitmca.ensure_ca()
+    assert mitmca.installed() == (True, None)
+    mitmca.FLATPAK_BUNDLE.unlink()
+    ok, why = mitmca.installed()
+    assert not ok and "apps from the Store" in why

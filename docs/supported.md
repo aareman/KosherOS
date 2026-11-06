@@ -10,7 +10,8 @@ behind it in the repository; where a limit is stated, it is a real one.
 |---|---|---|
 | Firefox | supported | The filter's certificate is trusted through the enterprise-roots policy the image ships. |
 | GNOME Web (Epiphany), Chromium and other browsers | supported | They read the system trust store, which holds the filter's certificate. |
-| Any Flatpak app that fetches from the web | supported | Same system trust store; the app must be approved in the KosherOS Store first. |
+| Any Flatpak app that fetches from the web | supported | The app must be approved in the KosherOS Store first. Inside a Flatpak, `/etc` belongs to the app's runtime, so KosherOS keeps a copy of the system's certificate list in `/var/lib/kosher-ca` and shares it with every Flatpak app through a system-wide override, with `SSL_CERT_FILE` and the other certificate variables pointing at it. A person's own `flatpak override` for an app still takes precedence. |
+| Syncthing | with an administrator's permission | From the Store, once an administrator turns it on under Advanced. Files from paired devices are not filtered; see [content filtering](content-filtering.md#syncthing). |
 | Sites behind a captive portal (hotel, airport Wi‑Fi) | supported | "Allow Wi‑Fi sign‑in" on the person's page opens a ten‑minute window; filtering resumes on its own. |
 | Certificate pinning inside an app | not filtered, not broken | An app that pins its own certificate refuses the filter's; such traffic is blocked rather than passed through. |
 
@@ -46,14 +47,118 @@ are reachable from every account, including whitelist‑only ones.
 | cargo, rustup | `CARGO_HTTP_CAINFO`, `SSL_CERT_FILE` | crates.io, static.rust-lang.org |
 | deno | `DENO_TLS_CA_STORE=system` | deno.land, jsr.io |
 | go | system store (no change needed) | proxy.golang.org, sum.golang.org, go.dev |
-| git | system store; `GIT_SSL_CAINFO` for builds with a bundled OpenSSL | github.com and its release hosts |
+| git | system store; `GIT_SSL_CAINFO` for builds with a bundled OpenSSL | github.com and its release hosts; with Developer tools on, SSH to GitHub, GitLab, Codeberg and Bitbucket |
 | curl, wget | system store (no change needed) | — |
+| nix, nix-shell, nix build | `ssl-cert-file` in `/etc/nix/nix.conf`; `NIX_SSL_CERT_FILE` for what a Nix shell brings | cache.nixos.org, channels.nixos.org, GitHub (nixpkgs and flakes) |
+| devenv | ships as a launcher; the first run adds it to the account's own Nix profile from nixpkgs | devenv.cachix.org, and nix's |
+| devbox | ships in the image, pinned by hash; uses the nix above | search.devbox.sh, and nix's |
 | Java (Maven, Gradle) | not set automatically | Fedora extracts a Java keystore at `/etc/pki/ca-trust/extracted/java/cacerts`; `JAVA_TOOL_OPTIONS` was left out because it prints a line on every JVM start. |
 
 The environment points at the system bundle
 (`/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem`), which contains the KosherOS
 authority once inspection is set up and is Fedora's ordinary bundle
 otherwise, so it is harmless on an account that is not inspected.
+
+**AI tools and editors.** Claude Code, Codex, OpenCode, Gemini CLI,
+Copilot (the command line and the desktop app), Aider, the GitHub CLI,
+Cursor, Antigravity and Neovim are on the Store's Developer tools shelf.
+Most of them have no Flatpak, so they come from upstream nixpkgs instead
+of Flathub: an entry whose ref is `nixpkgs#<package>` is installed by
+kosherd into the asking account's own Nix profile, as that account, under
+the same approval rule as any other app. Nobody else's account sees it,
+and an account on "No internet" cannot install one, because the Nix
+daemon refuses it. The licence an unfree tool (Claude Code, Cursor,
+Copilot) comes with is the publisher's and the person installing agrees
+to it, as with a non-free app on Flathub. Claude's and Codex's desktop
+apps are not here: neither publishes a Linux build.
+
+**Languages and toolchains.** Nothing is baked into the image beyond the
+Python the system itself runs on (with pip). Node.js with npm, pnpm,
+Yarn and Bun; the newest Python, uv, Poetry and Pipenv; Rust through
+rustup; Go; PHP and Composer; Ruby with gem and bundler; and Zig are on
+the Store's Developer tools shelf, each from nixpkgs into the account's
+own profile. A project that wants its own versions pins them in a
+`devenv.nix` or a `devbox.json` and gets exactly those, on this machine
+and the next; both tools are on every KosherOS machine. The registries
+every toolchain fetches from are reachable from every account (the
+table above), and the filter's certificate is trusted by each.
+
+**Containers.** Podman is the container engine, rootless, and `docker` is
+Podman's own shim, so a script or an extension that looks for `docker`
+finds it; `podman-compose` reads compose files. A rootless container's
+network is a process owned by the account, so what the container sends
+is filtered exactly as the account is: a container on a whitelist
+account reaches the approved sites and the registries and nothing else,
+and a "No internet" account's containers have none. Every account has a
+block of subordinate ids, so images carrying files of many owners unpack,
+and the firewall maps that block to the account's own rules, so a
+container running as another id (`--network=host`) is still filtered as
+its owner. Inside every container the system bundle is put over the
+bundle paths Debian, Alpine and Fedora images read, and the tools that
+carry their own bundle are pointed at it, so HTTPS from a container works
+on a filtered account as it does outside one. There is no Docker daemon:
+its bridge leaves through the kernel with no owner to filter by.
+
+**Dev Containers.** They work with Podman: the Dev Containers CLI is in
+the Store, and so is Visual Studio Code from nixpkgs beside the Flatpak
+one, because the Flatpak cannot reach the host's Podman from inside its
+sandbox (Cursor from the Store is in the same position as the nixpkgs
+VS Code). In the editor, point the extension at Podman
+(`dev.containers.dockerPath`: `podman`) and give the project
+`"runArgs": ["--userns=keep-id"]` so files in the workspace keep your
+ownership. Devcontainer images come from Microsoft's registry, which is
+reachable from every account like the other registries.
+
+**Nix.** Every KosherOS machine has Nix, with flakes on, the way Fedora
+packages it. The store is on `/var` (the rest of the system is read-only).
+Builds run in the sandbox as the build users, and a build that fetches its
+source gets the strictest filter among the accounts with developer tools on:
+with one such account, exactly that account's filter. If one of them is on
+approved sites only, a build may fetch only from the code forges, mirrors and
+registries nixpkgs fetches from, that account's approved sites, and hosts an
+administrator added with `kosherctl build-sources add`. A build refused a host
+says so in its log, with the account whose setting refused it. An account whose
+kind of internet is "No internet" cannot use the daemon at all. `devbox`
+is in the image; `devenv` installs itself into your profile the first time
+you run it, from nixpkgs, with devenv's own cache already trusted.
+
+devenv's local proxy (`process.proxy.enable`, the `http://web.demo.localhost`
+names) works as on any other machine: open `http://web.demo.localhost` or
+`https://web.demo.localhost`, no port. Behind that it listens on a pair of
+ports that are yours rather than on 80 and 443, which would need root
+(`echo $DEVENV_PROXY_LISTEN` shows them), and your own visits to 80 and 443
+on this computer go to it; devenv's own screen shows the addresses with
+that port, and both work. For HTTPS, devenv's mkcert adds its local
+certificate authority to your own browsers' certificate stores, so Firefox
+trusts the pages; it is trusted for your account only. The pair is closed to
+the other accounts on the computer. The proxy itself only talks to your own
+processes; what they fetch from the internet goes through your filter as
+usual.
+
+### 1Password
+
+Install **1Password** and **1Password CLI** from the Store. They come from
+nixpkgs, not Flathub: 1Password's Flatpak cannot run its SSH agent or let
+`op` use the app. In a terminal opened after the install, `op` is
+`/run/wrappers/bin/op`, a copy KosherOS keeps with the group the app
+trusts, so turning on **Settings → Developer → Integrate with 1Password
+CLI** in the app lets `op` sign in through it. For the SSH agent, turn on
+**Settings → Developer → Use the SSH agent**, and tell ssh where it is, in
+`~/.ssh/config`:
+
+```
+Host *
+    IdentityAgent ~/.1password/agent.sock
+```
+
+An SSH connection still goes only where the account's kind of internet lets
+it.
+
+The 1Password extension in Firefox talks to the app through the same kind
+of copy, `/run/wrappers/bin/1Password-BrowserSupport`, which KosherOS keeps
+once the app is installed. Turn on **Settings → Browser → Connect with
+1Password in the browser** in the app. The Firefox that comes with KosherOS
+works; a Flatpak browser from the Store cannot reach the app.
 
 ## Accounts and filtering
 
@@ -70,51 +175,37 @@ What an account gets by its kind of internet, before any group:
 | No filtering | open | shown | left alone | open | can install approved apps |
 | The first administrator | adult, gambling, dating and filter bypasses blocked | shown | left alone | open | can install approved apps |
 
-**Approved-site lists.** A Whitelist only account can switch on ready-made
-lists rather than typing domains: **Torah study** (Sefaria, YUTorah,
-TorahAnytime, the Daf Yomi sites, Chabad.org, HebrewBooks and more) and
-**Email and files** (Gmail, Outlook, OneDrive, Drive, Dropbox, Proton,
-iCloud). Both can be on at once, each brings the hosts those sites load
-from, and the family's own list is merged with them.
-
+An approved-sites account can switch on the ready-made **Torah study** and
+**Email and files** lists instead of typing domains; see
+[content filtering](content-filtering.md#ready-made-approved-site-lists).
 The guest account takes any of these by the kind of internet it gets, and
-is wiped at sign‑out. See [content filtering](content-filtering.md) and
-[media filtering](media-filtering.md) for what each layer does.
+is wiped at sign‑out.
 
 ## Time limits
 
-| | On a user account | Notes |
-|---|---|---|
-| A daily limit ("2 hours a day") | supported | Counts active, signed‑in time; idle time is free. Kept across a restart; starts again at midnight. One‑click 30 min / 1 h / 2 h / 3 h / no limit, or any number of minutes. |
-| Allowed hours, painted on a weekly calendar | supported | Presets: Always, After school, Not late at night, Weekdays only. Sign‑in outside the hours is refused at the login screen (`pam_time`). |
-| Warnings before the time is up | supported | Desktop notifications at 15 and 5 minutes and when it ends; then the screen locks and the session is ended a minute later. |
-| What the person sees | supported | My Filter shows their limit, what is left today and today's allowed hours. |
-| Administrator accounts | never limited | A parent must always be able to sign in and change a setting. |
-| The guest account | supported | Limited like any other account. |
-
-Both settings are off until a parent sets them. See
-[time limits](time-limits.md).
+A daily limit of active time and allowed hours on a weekly calendar, per
+user account, with warnings before the time is up. Administrators are
+never limited; the guest account is limited like any other. Both settings
+are off until a parent sets them. See [time limits](time-limits.md).
 
 ## Hardware
 
 | | |
 |---|---|
-| Architecture | x86_64. |
+| Architecture | x86_64 (Intel or AMD). Apple Silicon and other ARM computers are not supported. |
 | Firmware | UEFI and legacy BIOS; Secure Boot works out of the box through Fedora's signed shim. |
-| Picture checking | About 50 ms per picture on a current laptop CPU, 200–300 ms on four cores, near the limit on two: the filter hides pictures instead of checking them when the machine cannot keep up, and says so. See [media filtering](media-filtering.md). |
-| The advanced (niri) desktop | needs a real GPU; it does not run in a VM without one. |
+| Memory and disk | see the provisional [system requirements](install.md#system-requirements) in the installation guide. |
+| Picture checking | About 50 ms per picture on a current laptop CPU, 200–300 ms on four cores, near the limit on two: the filter hides pictures instead of checking them when the machine cannot keep up, and says so. See [pictures and video](media-filtering.md#running-on-the-familys-own-computer). |
+| The advanced desktop (niri, Hyprland or Umbriel) | needs a real GPU; it does not run in a VM without one. |
 
 ## Updates
 
 | Channel | Who | How it moves |
 |---|---|---|
-| `edge` | the maintainer's own machine | every push to the repository |
+| `edge` | the maintainer's own machine, and testers | every merge that changes the image |
 | `stable` | everyone else | a person promotes a version that has run well on edge |
 
-A machine installed from a release ISO follows its channel, and a parent
-applies updates from the admin app. If an update boots without the filter
-enforcing, the machine goes back to the previous version on its own. The Updates page in KosherOS Admin shows
-both channels and moves the computer between them: the download happens
-straight away and the new version is used from the next restart, with
-accounts, settings and files untouched. Changing it asks for the guardian
-password when one is set. See [updates and channels](deployment.md).
+A parent applies updates from the admin app, which can also move the
+machine between channels and go back to the previous version. If an update
+boots without the filter enforcing, the machine goes back on its own. See
+[updates and channels](deployment.md).

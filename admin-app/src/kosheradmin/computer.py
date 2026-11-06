@@ -1,12 +1,14 @@
 """This computer: the settings that are not about one person.
 
-The sidebar's second section. Three pages, each a real page rather than a
+The sidebar's second section. Four pages, each a real page rather than a
 tile with two words on it:
 
   Protection — is the filter actually working, what it blocks for
                everyone, and the guardian password that guards the answer
   Apps       — which apps this computer may install at all
   Updates    — what version it runs, and the way back if one goes wrong
+  Advanced   — Tailscale, Syncthing and key remapping, off until someone
+               turns them on
 
 "Applies to everyone" is the honest heading for the middle group. Ad
 blocking is rendered into the machine's own resolvers, the word lists are
@@ -17,18 +19,20 @@ on a person's page where they would look per-person.
 
 from __future__ import annotations
 
+import time
 from pathlib import Path
 
 import gi
 
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
-from gi.repository import Adw, GLib, Gtk  # noqa: E402
+gi.require_version("Pango", "1.0")
+from gi.repository import Adw, GLib, Gtk, Pango  # noqa: E402
 
 from . import labels  # noqa: E402
 from .common import (banner_slot, clear, confirm, error_text, pointer_cursors,  # noqa: E501
                      run_async, tag)  # noqa: E402
-from .dialogs import ListEditDialog, guardian_dialog  # noqa: E402
+from .dialogs import ListEditDialog, boot_menu_dialog, guardian_dialog  # noqa: E402
 
 
 def health_rows(status: dict | None) -> list[tuple[str, str, bool]]:
@@ -44,7 +48,7 @@ def health_rows(status: dict | None) -> list[tuple[str, str, bool]]:
 
     if status is None:
         return [("Could not check the filter",
-                 "kosherd did not answer. Try again in a moment.", False)]
+                 "The filter service did not respond. Try again.", False)]
     rows = []
     state = status.get("pictures")
     if state in labels.PICTURE_STATE:
@@ -116,7 +120,7 @@ class ProtectionPage(_Page):
 
     def __init__(self, win):
         super().__init__(win, "Protection", "protection")
-        self.health_group = Adw.PreferencesGroup(title="Is the filter working?")
+        self.health_group = Adw.PreferencesGroup(title="Filter status")
         check = Gtk.Button(label="Check again", valign=Gtk.Align.CENTER)
         check.connect("clicked", lambda _b: self._check())
         self.health_group.set_header_suffix(check)
@@ -127,18 +131,14 @@ class ProtectionPage(_Page):
 
         everyone = Adw.PreferencesGroup(
             title="Applies to everyone",
-            description="One answer for the whole computer: every account, "
-                        "the guest included, and every browser and app. "
-                        "These cannot be set per person.")
+            description=("These settings apply to all accounts, including guests, in every browser and"
+                " app."))
         self.ads_row = Adw.SwitchRow(
             title="Block ads and trackers",
-            subtitle="At this computer's own resolver, like a Pi-hole, so it "
-                     "covers every account and every app rather than one "
-                     "browser. An ad network is also where immodest pictures "
-                     "arrive uninvited, so on is the right answer for almost "
-                     "everyone.",
+            subtitle="Blocks known ad and tracking domains for everyone on this computer.",
             subtitle_lines=4,
             active=win.policy.get("adblock", {}).get("enabled", True))
+        self.ads_row.add_css_class("blocking")
         self.ads_row.connect("notify::active", self._on_ads)
         everyone.add(self.ads_row)
         for name, title, description, noun in labels.EDITABLE_LISTS:
@@ -151,16 +151,19 @@ class ProtectionPage(_Page):
         self.prefs.add(everyone)
 
         locking = Adw.PreferencesGroup(
-            title="Who may change all this",
-            description="Every setting in KosherOS Admin already needs an "
-                        "administrator. A guardian password adds a second one "
-                        "— the other spouse's, say — that any weakening of "
-                        "the filter also needs.")
+            title="Administrator access",
+            description=("Only administrators can change these settings. A guardian password adds an "
+                "extra check before reducing filter restrictions."))
         self.guardian_row = Adw.ActionRow(
             title="Guardian password", subtitle="—", activatable=True)
         self.guardian_row.add_suffix(Gtk.Image(icon_name="go-next-symbolic"))
         self.guardian_row.connect("activated", lambda _r: guardian_dialog(win))
         locking.add(self.guardian_row)
+        self.boot_row = Adw.ActionRow(title="Boot menu password", subtitle="Checking…",
+                                      activatable=True, subtitle_lines=3)
+        self.boot_row.add_suffix(Gtk.Image(icon_name="go-next-symbolic"))
+        self.boot_row.connect("activated", lambda _r: boot_menu_dialog(win))
+        locking.add(self.boot_row)
         self.prefs.add(locking)
 
         self.refresh()
@@ -181,10 +184,21 @@ class ProtectionPage(_Page):
             self.ads_row.set_active(wanted)
             self.ads_row.handler_unblock_by_func(self._on_ads)
 
+        def show_boot(protected: bool) -> None:
+            self.boot_row.set_subtitle(
+                "Set. Editing the boot menu asks for it; starting normally never does."
+                if protected else
+                "Not set. Anyone at the keyboard can edit the boot menu to start the "
+                "computer without filtering. Set one.")
+
+        run_async(self.win.client.boot_menu_protected, show_boot,
+                  lambda e: self.boot_row.set_subtitle(f"Could not read: {error_text(e)}"))
+
         on = self.win.policy.get("guardian", {}).get("enabled", False)
         self.guardian_row.set_subtitle(
-            "On. Weakening the filter asks for it once per session."
-            if on else "Off. Any administrator can weaken the filter alone.")
+            "Enabled. Required once per session to reduce filtering restrictions."
+            if on else ("Disabled. Administrators can change filtering without an additional "
+                "password."))
 
     def _check(self) -> None:
         self.win.toast("Checking the filter…")
@@ -202,6 +216,358 @@ class ProtectionPage(_Page):
         self.win.with_guardian(lambda pw: self.win.call(
             lambda: self.win.client.set_adblock(False, pw),
             done_msg="Ad blocking is off"))
+
+
+class AdvancedPage(_Page):
+    """Tailscale, Syncthing and key remapping, off until an administrator
+    turns them on (#220, #230).
+
+    Most families use none of them, so none runs on a new install. Turning
+    Tailscale on starts its service and shows the sign-in below the
+    switch; turning Syncthing on lets it be installed from the Store and
+    allowed on an account's Apps tab; turning key remapping on starts keyd,
+    which applies each person's ~/.config/keyd files while they use the
+    computer.
+    """
+
+    def __init__(self, win):
+        super().__init__(win, "Advanced", "advanced")
+        switches = Adw.PreferencesGroup(
+            title="Extra features",
+            description="These are off unless you turn them on here.")
+        self.tailscale_row = Adw.SwitchRow(
+            title="Tailscale",
+            subtitle=("Lets this computer join your tailnet, so the people who use it can "
+                      "reach your other machines by name."),
+            subtitle_lines=3)
+        self.tailscale_row.connect("notify::active", self._on_tailscale)
+        switches.add(self.tailscale_row)
+        self.syncthing_row = Adw.SwitchRow(
+            title="Syncthing",
+            subtitle=("Keeps folders the same on a person's computers and phone. Once it is "
+                      "on, you allow it for each account on that account's Apps tab."),
+            subtitle_lines=3)
+        self.syncthing_row.connect("notify::active", self._on_syncthing)
+        switches.add(self.syncthing_row)
+        self.keyd_row = Adw.SwitchRow(
+            title="Key remapping",
+            subtitle=("Lets each person change what keys do, with keyd files in their own "
+                      "~/.config/keyd folder. Their changes apply only while they use "
+                      "the computer."),
+            subtitle_lines=3)
+        self.keyd_row.connect("notify::active", self._on_keyd)
+        switches.add(self.keyd_row)
+        self.prefs.add(switches)
+
+        self.tailscale = TailscaleGroup(win)
+        self.prefs.add(self.tailscale)
+        self.refresh()
+
+    def _advanced(self) -> dict:
+        return self.win.policy.get("advanced") or {}
+
+    def _set_row(self, row: Adw.SwitchRow, handler, wanted: bool) -> None:
+        if row.get_active() != wanted:
+            row.handler_block_by_func(handler)
+            row.set_active(wanted)
+            row.handler_unblock_by_func(handler)
+
+    def refresh(self) -> None:
+        on = self._advanced()
+        self._set_row(self.tailscale_row, self._on_tailscale, bool(on.get("tailscale")))
+        self._set_row(self.syncthing_row, self._on_syncthing, bool(on.get("syncthing")))
+        self._set_row(self.keyd_row, self._on_keyd, bool(on.get("keyd")))
+        self.tailscale.set_visible(bool(on.get("tailscale")))
+        if on.get("tailscale"):
+            self.tailscale.refresh()
+
+    def _on_tailscale(self, row, _param) -> None:
+        wanted = row.get_active()
+        if wanted == bool(self._advanced().get("tailscale")):
+            return
+        if wanted:
+            self._switch(lambda pw: self.win.client.set_tailscale_enabled(True, pw),
+                         "Tailscale is on. Sign in below.")
+            return
+        dialog = confirm(self.win, "Turn off Tailscale?",
+                         "This computer leaves your tailnet until Tailscale is turned on "
+                         "again. It stays signed in, so turning it back on reconnects.",
+                         "Turn Off",
+                         lambda: self._switch(
+                             lambda pw: self.win.client.set_tailscale_enabled(False, pw),
+                             "Tailscale is off"))
+        dialog.connect("response", lambda _d, r: r != "yes" and self.refresh())
+
+    def _on_syncthing(self, row, _param) -> None:
+        wanted = row.get_active()
+        if wanted == bool(self._advanced().get("syncthing")):
+            return
+        if wanted:
+            self._switch(lambda pw: self.win.client.set_syncthing_enabled(True, pw),
+                         "Syncthing is on")
+            return
+        dialog = confirm(self.win, "Turn off Syncthing?",
+                         "Syncthing stops for every account, and the Store stops offering it. "
+                         "Synced folders stay where they are.",
+                         "Turn Off",
+                         lambda: self._switch(
+                             lambda pw: self.win.client.set_syncthing_enabled(False, pw),
+                             "Syncthing is off"))
+        dialog.connect("response", lambda _d, r: r != "yes" and self.refresh())
+
+    def _on_keyd(self, row, _param) -> None:
+        wanted = row.get_active()
+        if wanted == bool(self._advanced().get("keyd")):
+            return
+        if wanted:
+            self._switch(lambda pw: self.win.client.set_keyd_enabled(True, pw),
+                         "Key remapping is on")
+            return
+        dialog = confirm(self.win, "Turn off key remapping?",
+                         "Everyone's keys go back to normal. Their keyd files stay in their "
+                         "folders, so turning this on again brings their keys back.",
+                         "Turn Off",
+                         lambda: self._switch(
+                             lambda pw: self.win.client.set_keyd_enabled(False, pw),
+                             "Key remapping is off"))
+        dialog.connect("response", lambda _d, r: r != "yes" and self.refresh())
+
+    def _switch(self, work, done_msg: str) -> None:
+        # Refused or cancelled, the policy is as it was: the switch goes
+        # back to match it.
+        def failed(e) -> None:
+            self.win.toast(error_text(e))
+            self.refresh()
+
+        self.win.with_guardian(lambda pw: run_async(
+            lambda: work(pw),
+            lambda _r: (self.win.toast(done_msg), self.win.reload()),
+            failed), on_cancel=self.refresh)
+
+
+class TailscaleGroup(Adw.PreferencesGroup):
+    """This computer on the family's tailnet (#30).
+
+    Signing in happens in a browser: the daemon starts it and hands back an
+    address, the page shows it with Open and Copy (the administrator may
+    rather use a phone), and then checks every few seconds until the
+    sign-in is finished there. Signing in takes the guardian password;
+    signing out does not.
+    """
+
+    POLL_SECONDS = 3
+    # As long as the daemon's `tailscale up` waits (tailnet.LOGIN_WAIT).
+    POLL_FOR = 15 * 60
+
+    def __init__(self, win):
+        super().__init__(
+            title="Tailscale",
+            description=("Connects this computer to your tailnet, so the people who use "
+                         "it can reach your other machines by name. Each account's filter "
+                         "applies there as it does everywhere else."))
+        self.win = win
+        self.state: dict | None = None
+        self.login_url: str | None = None
+        self.busy: str | None = None
+        self._rows: list[Gtk.Widget] = []
+        self._poll_until = 0.0
+        self.action = Gtk.Button(valign=Gtk.Align.CENTER, visible=False)
+        self.action.connect("clicked", self._on_action)
+        self.set_header_suffix(self.action)
+        # Filled by refresh(), which the page calls on every reload.
+        self._show()
+
+    # -- reading ------------------------------------------------------------
+
+    def refresh(self) -> None:
+        if self.login_url or self.busy:
+            return  # a sign-in is in progress; the poll owns the group
+        self._show()
+        run_async(self.win.client.tailscale_status, self._loaded,
+                  lambda e: self._loaded({"error": error_text(e)}))
+
+    def _loaded(self, state: dict) -> None:
+        self.state = state
+        self._show()
+
+    # -- drawing ------------------------------------------------------------
+
+    def _add(self, title: str, subtitle: str = "", *, spinner: bool = False,
+             value: bool = False) -> Adw.ActionRow:
+        row = Adw.ActionRow(title=title, subtitle=subtitle, subtitle_lines=4,
+                            use_markup=False)
+        if value:
+            # A label and its value, with the value the line that is read.
+            row.add_css_class("property")
+            row.set_subtitle_selectable(True)
+        if spinner:
+            row.add_suffix(Gtk.Spinner(spinning=True, valign=Gtk.Align.CENTER))
+        self.add(row)
+        self._rows.append(row)
+        return row
+
+    def _button(self, label: str, style: str | None) -> None:
+        self.action.set_label(label)
+        for c in ("suggested-action", "destructive-action"):
+            self.action.remove_css_class(c)
+        if style:
+            self.action.add_css_class(style)
+        self.action.set_visible(True)
+        self.action.set_sensitive(True)
+
+    def _show(self) -> None:
+        for row in self._rows:
+            self.remove(row)
+        self._rows = []
+        self.action.set_visible(False)
+        state = self.state
+
+        if self.busy:
+            self._add(self.busy, spinner=True)
+            return
+        if self.login_url:
+            self._show_login()
+            return
+        if state is None:
+            self._add("Checking…", spinner=True)
+            return
+        if state.get("error") and "installed" not in state:
+            self._add("Could not check Tailscale", state["error"])
+            self._button("Check Again", None)
+            return
+        if not state.get("installed", True):
+            self._add("Tailscale is not installed on this computer")
+            return
+        if state.get("state") == "Unavailable":
+            self._add("Tailscale is not running",
+                      "Restarting the computer usually fixes it."
+                      + (f" ({state['error']})" if state.get("error") else ""))
+            self._button("Check Again", None)
+            return
+        if not state.get("signed_in"):
+            self._add("Not signed in",
+                      "Sign in with the Tailscale account your tailnet belongs to.")
+            self._button("Sign In…", "suggested-action")
+            return
+
+        self._add("Signed in as", state.get("user") or "—", value=True)
+        self._add("Tailnet", state.get("tailnet") or "—", value=True)
+        addresses = ", ".join(state.get("addresses") or []) or "No address yet"
+        self._add("This computer", f"{state.get('name') or '—'}\n{addresses}", value=True)
+        self._add("Connection", self._connection_text(state), value=True)
+        self._button("Sign Out", "destructive-action")
+
+    @staticmethod
+    def _connection_text(state: dict) -> str:
+        if state.get("connected"):
+            return "Connected"
+        return {
+            "Stopped": "Not connected. Tailscale is switched off on this computer.",
+            "Starting": "Connecting…",
+            "NeedsMachineAuth": ("Waiting for the tailnet's administrator to approve this "
+                                 "computer in the Tailscale admin console."),
+        }.get(state.get("state"), f"Not connected ({state.get('state')})")
+
+    def _show_login(self) -> None:
+        url = self.login_url or ""
+        row = self._add("Open the sign-in page",
+                        "Open it on this computer or on your phone, and sign in with the "
+                        f"account your tailnet belongs to.\n{url}")
+        row.set_subtitle_selectable(True)
+        copy = Gtk.Button(label="Copy", valign=Gtk.Align.CENTER)
+        copy.connect("clicked", lambda _b: self._copy(url))
+        row.add_suffix(copy)
+        open_button = Gtk.Button(label="Open", valign=Gtk.Align.CENTER)
+        open_button.add_css_class("suggested-action")
+        open_button.connect("clicked", lambda _b: self._open(url))
+        row.add_suffix(open_button)
+        self._add("Waiting for you to sign in…", spinner=True)
+        pointer_cursors(self)
+
+    def _copy(self, url: str) -> None:
+        from gi.repository import Gdk
+
+        self.get_clipboard().set_content(Gdk.ContentProvider.new_for_value(url))
+        self.win.toast("Address copied")
+
+    def _open(self, url: str) -> None:
+        try:
+            Gtk.UriLauncher.new(url).launch(self.get_root(), None, None, None)
+        except Exception as e:  # noqa: BLE001 - say so; the address is on screen to copy
+            self.win.toast(f"Could not open a browser: {error_text(e)}")
+
+    # -- acting -------------------------------------------------------------
+
+    def _on_action(self, _button) -> None:
+        state = self.state or {}
+        if state.get("error") or state.get("state") == "Unavailable":
+            self.state = None
+            self.refresh()
+        elif state.get("signed_in"):
+            confirm(self.win, "Sign out of Tailscale?",
+                    "This computer will leave the tailnet. Nobody using it can reach "
+                    "your other machines until it is signed in again.",
+                    "Sign Out", self._sign_out)
+        else:
+            self.win.with_guardian(self._sign_in)
+
+    def _sign_in(self, pw: str) -> None:
+        self.busy = "Asking Tailscale for a sign-in page…"
+        self._show()
+
+        def got(url: str) -> None:
+            self.busy = None
+            if not url:
+                self.win.toast("This computer is back on your tailnet")
+                self.refresh()
+                return
+            self.login_url = url
+            self._poll_until = time.monotonic() + self.POLL_FOR
+            self._show()
+            GLib.timeout_add_seconds(self.POLL_SECONDS, self._poll)
+
+        def failed(e) -> None:
+            self.busy = None
+            self.win.toast(error_text(e))
+            self.refresh()
+
+        run_async(lambda: self.win.client.tailscale_sign_in(pw), got, failed)
+
+    def _poll(self) -> bool:
+        if not self.login_url:
+            return False
+        if time.monotonic() > self._poll_until:
+            self.login_url = None
+            self.win.toast("The sign-in page has expired. Sign in again.")
+            self.refresh()
+            return False
+
+        def checked(state: dict) -> None:
+            if self.login_url and state.get("signed_in"):
+                self.login_url = None
+                self.state = state
+                self.win.toast("This computer is on your tailnet")
+                self._show()
+
+        run_async(self.win.client.tailscale_status, checked, lambda _e: None)
+        return True
+
+    def _sign_out(self) -> None:
+        self.busy = "Signing out…"
+        self._show()
+
+        def done(_r) -> None:
+            self.busy = None
+            self.state = None
+            self.win.toast("Signed out of Tailscale")
+            self.refresh()
+
+        def failed(e) -> None:
+            self.busy = None
+            self.win.toast(error_text(e))
+            self.refresh()
+
+        run_async(self.win.client.tailscale_sign_out, done, failed)
 
 
 class AppsPage(_Page):
@@ -242,10 +608,8 @@ class AppsPage(_Page):
             self.prefs.remove(self.group)
         group = Adw.PreferencesGroup(
             title=f"Approved apps ({len(self.approved)})",
-            description="What an account on \"Approved apps only\" may install from the "
-                        "KosherOS Store, which is every account unless its Apps tab says "
-                        "otherwise. An approval also lets an account opened to the whole "
-                        "store have an app rated above the computer's content ceiling.")
+            description=("Apps available to accounts set to Approved apps only. Approval also permits "
+                "apps that would otherwise be excluded by their content rating."))
         if not self.approved:
             row = Adw.ActionRow(title="No apps approved yet",
                                 subtitle="Search below to approve apps")
@@ -275,9 +639,8 @@ class AppsPage(_Page):
     def _build_search(self) -> None:
         group = Adw.PreferencesGroup(
             title="Add apps",
-            description="Search everything on Flathub, then approve what every "
-                        "account on this computer may install. To open one account "
-                        "to the whole store instead, use its Apps tab.")
+            description=("Search Flathub to approve an app. To give an account broader store access, "
+                "use its Apps tab."))
         entry = Adw.EntryRow(title="Search all apps")
         entry.set_show_apply_button(True)
         self.search_entry = entry
@@ -341,8 +704,7 @@ class UpdatesPage(_Page):
         group.add(Adw.ActionRow(title="Operating system", subtitle=pretty))
         self.status_row = Adw.ActionRow(
             title="Updates",
-            subtitle=win.update_state or "Not checked yet. KosherOS also "
-                                        "checks on its own in the background.")
+            subtitle=win.update_state or "Not checked yet.")
         check = Gtk.Button(label="Check", valign=Gtk.Align.CENTER)
         check.connect("clicked", self._check)
         apply_btn = Gtk.Button(label="Download Update", valign=Gtk.Align.CENTER)
@@ -364,10 +726,15 @@ class UpdatesPage(_Page):
         # that goes dead for ten minutes is a button that gets pressed
         # again. It listens to the daemon's own signals, so it also shows
         # an update somebody else (or the timer) started.
+        # Ellipsized: a progress bar is otherwise as wide as its text, and
+        # each long status line from bootc widened the whole page.
         self.progress = Gtk.ProgressBar(show_text=True, visible=False,
-                                        margin_top=8, margin_start=12, margin_end=12)
+                                        margin_top=8, margin_start=12, margin_end=12,
+                                        ellipsize=Pango.EllipsizeMode.END)
         group.add(self.progress)
         self.prefs.add(group)
+        self.auto_group = AutoUpdatesGroup(win)
+        self.prefs.add(self.auto_group)
         self._subscription: int | None = None
         self.connect("shown", lambda _p: self._listen())
         self.connect("hidden", lambda _p: self._stop_listening())
@@ -377,7 +744,7 @@ class UpdatesPage(_Page):
         # what it means, and the choice is made by pressing the thing you
         # want instead of by picking a word out of a list.
         self.channel_group = Adw.PreferencesGroup(
-            title="Which updates this computer gets",
+            title="Update channel",
             description=CHANNEL_INTRO)
         self.channel_box = Gtk.ListBox(selection_mode=Gtk.SelectionMode.NONE)
         self.channel_box.add_css_class("boxed-list")
@@ -390,10 +757,9 @@ class UpdatesPage(_Page):
         # a bare button: a "Roll back" with no target is the control that
         # gets clicked by accident.
         back = Adw.PreferencesGroup(
-            title="If an update went wrong",
-            description="The previous version stays on disk. Going back to it "
-                        "takes effect at the next restart and keeps every "
-                        "setting and file.")
+            title="Restore a previous version",
+            description=("Restore the previous system version at the next restart. Files and settings "
+                "are kept."))
         # No "running now" row: the Operating system row above already
         # names the version, and two rows saying it read as two things.
         self.back_row = Adw.ActionRow(title="Go back to the previous version",
@@ -538,10 +904,12 @@ class UpdatesPage(_Page):
                 "This computer will start the previous version of KosherOS at "
                 "its next restart. Settings and files are kept. Do this if an "
                 "update broke something.", "Go back",
-                lambda: self.win.call(
-                    self.win.client.rollback, refresh=False,
+                # The older version brings its own filter with it, so going
+                # back takes the guardian password like a filter change.
+                lambda: self.win.with_guardian(lambda pw: self.win.call(
+                    lambda: self.win.client.rollback(pw), refresh=False,
                     done_msg=f"Going back to {version} at the next restart",
-                    on_done=self._load_deployment),
+                    on_done=self._load_deployment)),
                 destructive=False)
 
     def _check(self, _b) -> None:
@@ -552,8 +920,11 @@ class UpdatesPage(_Page):
             self.win.update_state = short
             self.status_row.set_subtitle(sentence)
             if info.get("available"):
-                self.apply_button.set_visible(True)
-                self.restart_button.set_visible(False)
+                # Already on the disk: staged wants a restart, and the one
+                # you went back from is reached from Go back, not from here.
+                on_disk = info.get("on_disk")
+                self.apply_button.set_visible(not on_disk)
+                self.restart_button.set_visible(on_disk == "staged")
             self.win.sidebar.refresh() if hasattr(self.win, "sidebar") else None
 
         run_async(self.win.client.check_update, on_done,
@@ -608,8 +979,7 @@ class UpdatesPage(_Page):
         if ok:
             self.win.update_state = "Update ready — restart to use it"
             self.status_row.set_subtitle(
-                "The update is ready. Restart the computer to start using it; "
-                "until then everything carries on as it is.")
+                "Restart to apply the update. Save your work first.")
             self.restart_button.set_visible(True)
             self.apply_button.set_visible(False)
             self.win.toast("Update ready — restart to apply")
@@ -620,7 +990,112 @@ class UpdatesPage(_Page):
             self.win.toast(error or "The update did not finish")
 
 
-CHANNEL_INTRO = "Almost everyone should be on Stable."
+AUTO_INTRO = ("New versions download in the background and are used the next time "
+              "the computer restarts. It never restarts on its own.")
+AUTO_SCHEDULES = ("off", "daily", "weekly", "biweekly", "monthly")
+AUTO_LABELS = {"off": "Off", "daily": "Daily", "weekly": "Weekly",
+               "biweekly": "Every 2 weeks", "monthly": "Monthly"}
+
+
+def auto_words(status: dict | None, now: float | None = None) -> str:
+    """The line under the schedule: when it last checked, or that the last
+    try did not work. A failed check is never shown as up to date."""
+    status = status or {}
+    if status.get("schedule") == "off":
+        return "Only when you press Check above."
+    now = time.time() if now is None else now
+    ok, tried = status.get("last_success") or 0, status.get("last_attempt") or 0
+    if status.get("last_error") and tried >= ok:
+        return "The last check did not work. It tries again tomorrow."
+    if not ok:
+        return "Has not checked yet. The first check is within a day."
+    days = int((now - ok) // 86400)
+    when = ("today" if days < 1 else "yesterday" if days < 2
+            else f"{days} days ago")
+    return f"Last checked {when}."
+
+
+class AutoUpdatesGroup(Adw.PreferencesGroup):
+    """How often the computer fetches updates on its own (#19), and whether
+    the people signed in are told once when one is ready."""
+
+    def __init__(self, win):
+        super().__init__(title="Automatic updates", description=AUTO_INTRO)
+        self.win = win
+        settings = win.policy.get("updates") or {}
+        self.schedule = settings.get("auto", "weekly")
+        if self.schedule not in AUTO_SCHEDULES:
+            self.schedule = "weekly"
+        self.notify = bool(settings.get("notify", True))
+        self.status: dict | None = None
+
+        self.schedule_row = Adw.ComboRow(
+            title="Download updates",
+            model=Gtk.StringList.new([AUTO_LABELS[s] for s in AUTO_SCHEDULES]),
+            selected=AUTO_SCHEDULES.index(self.schedule), subtitle_lines=2)
+        self.schedule_row.connect("notify::selected", self._on_schedule)
+        self.add(self.schedule_row)
+        self.notify_row = Adw.SwitchRow(
+            title="Tell people when an update is ready",
+            subtitle=("One notice for each update. A small mark stays in the panel "
+                      "until the computer restarts either way."),
+            subtitle_lines=3, active=self.notify)
+        self.notify_row.connect("notify::active", self._on_notify)
+        self.add(self.notify_row)
+        self.schedule_row.set_subtitle("Checking…")
+        run_async(self.win.client.auto_update_status, self._loaded,
+                  lambda e: self.schedule_row.set_subtitle(
+                      f"Could not read when it last checked: {error_text(e)}"))
+
+    def _loaded(self, status: dict) -> None:
+        self.status = status
+        self.schedule_row.set_subtitle(auto_words({**status, "schedule": self.schedule}))
+
+    def _on_schedule(self, row, _param) -> None:
+        wanted = AUTO_SCHEDULES[row.get_selected()]
+        if wanted != self.schedule:
+            self._save(wanted, self.notify)
+
+    def _on_notify(self, row, _param) -> None:
+        wanted = row.get_active()
+        if wanted != self.notify:
+            self._save(self.schedule, wanted)
+
+    def _save(self, schedule: str, notify: bool) -> None:
+        before = (self.schedule, self.notify)
+        self.schedule_row.set_sensitive(False)
+        self.notify_row.set_sensitive(False)
+        self.schedule_row.set_subtitle("Saving…")
+
+        def done(_r) -> None:
+            self.schedule, self.notify = schedule, notify
+            self.win.policy["updates"] = {"auto": schedule, "notify": notify}
+            self._settle()
+            self.win.toast("Automatic updates are off" if schedule == "off" else
+                           f"Updates download {AUTO_LABELS[schedule].lower()}")
+
+        def failed(e) -> None:
+            self.schedule, self.notify = before
+            self._settle()
+            self.win.toast(error_text(e))
+
+        run_async(lambda: self.win.client.set_auto_updates(schedule, notify), done, failed)
+
+    def _settle(self) -> None:
+        """Put the rows back to what is saved, without saving again."""
+        self.schedule_row.handler_block_by_func(self._on_schedule)
+        self.notify_row.handler_block_by_func(self._on_notify)
+        self.schedule_row.set_selected(AUTO_SCHEDULES.index(self.schedule))
+        self.notify_row.set_active(self.notify)
+        self.schedule_row.handler_unblock_by_func(self._on_schedule)
+        self.notify_row.handler_unblock_by_func(self._on_notify)
+        self.schedule_row.set_sensitive(True)
+        self.notify_row.set_sensitive(True)
+        self.schedule_row.set_subtitle(auto_words({**(self.status or {}),
+                                                   "schedule": self.schedule}))
+
+
+CHANNEL_INTRO = "Stable is recommended for everyday use."
 
 
 def channel_note(info: dict) -> str:
@@ -647,6 +1122,15 @@ def check_words(info: dict, running: str | None) -> tuple[str, str]:
     version = info.get("version")
     channel = info.get("channel")
     if info.get("available"):
+        where = f" on the {channel} channel" if channel else ""
+        if version and info.get("on_disk") == "staged":
+            return (f"Version {version} is downloaded. Restart to start using it.",
+                    "Update ready")
+        if version and info.get("on_disk") == "rollback":
+            return (f"Version {version} is the newest{where}, and it is already on this "
+                    f"computer: it is the one you went back from. Going back again "
+                    f"returns to it; the next version will download here.",
+                    f"{version} is the one you left")
         if version:
             sentence = f"Version {version} is available"
             if running:
@@ -662,6 +1146,11 @@ def check_words(info: dict, running: str | None) -> tuple[str, str]:
         if running:
             return f"Up to date — {running} is the newest on the {channel or 'update'} channel.", "Up to date"
         return "Up to date.", "Up to date"
+    if info.get("ok") is False:
+        # The check never reached the update server, so nothing is known
+        # about newer versions; saying "up to date" here was wrong (#207).
+        return ("Couldn't check for updates. Make sure the computer is connected "
+                "to the internet, then check again.", "Couldn't check")
     raw = (info.get("raw") or "").strip()
     first = next((line for line in raw.splitlines() if line.strip()), "Could not check.")
     return first[:120], first[:24]

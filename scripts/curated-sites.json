@@ -62,5 +62,13 @@
     "proxysite.com", "kproxy.com", "croxyproxy.com", "hola.org", "psiphon.ca",
     "ultrasurf.us", "torproject.org", "1.1.1.1", "opendns.com", "windscribe.com",
     "mullvad.net", "privateinternetaccess.com", "ipvanish.com"
+  ],
+  "_calls": "Video-call services. Calls are a supported use and the account's video-calls switch is their control, so these are never in a category a family switches off: UT1 files Teams and Skype under chat, which became social, and a meeting link opened on the block page (#209). Each entry also clears the social, news, games and other taste rows UT1 has for its subdomains; ads, malware, adult and proxy rows stay.",
+  "calls": [
+    "teams.microsoft.com", "teams.live.com", "teams.cloud.microsoft",
+    "teams.events.data.microsoft.com", "teams.cdn.office.net", "teams.office.net",
+    "teams.office.com", "teams.cdn.live.net", "teams-msedge.net", "skype.com",
+    "skype.net", "skypeassets.com", "sfbassets.com", "lync.com",
+    "zoom.us", "zoom.com", "zoomgov.com", "meet.google.com"
   ]
 }

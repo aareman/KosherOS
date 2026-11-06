@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Welcome to KosherOS
+Comment=What this computer is and where things are, once per account
+Exec=kosher-welcome
+Icon=kosheros
+Terminal=false
+NoDisplay=true
+OnlyShowIn=GNOME;
+X-GNOME-Autostart-Phase=Applications

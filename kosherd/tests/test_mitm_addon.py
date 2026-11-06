@@ -626,6 +626,38 @@ def test_a_stale_content_length_is_not_left_behind(addon):
     assert "content-length" not in flow.response.headers
 
 
+def test_a_blocked_request_is_counted_and_timed(addon, tmp_path):
+    from kosherd import usage
+
+    filt = _shop_filter(addon)
+    filt.usage = usage.Tally("proxy", spool=tmp_path)
+    flow = _request_flow("https://www.amazon.com/s?k=lingerie")
+    filt.request(flow)
+    assert flow.metadata["kosher_filter_s"] > 0
+    filt._tally(flow)
+    filt._tally(flow)  # the error hook after the response hook: once only
+    filt.usage.flush()
+    [line] = [json.loads(x) for x in (tmp_path / "proxy.usage").read_text().splitlines()]
+    assert line["uid"] == 1001
+    assert line["requests"] == 1 and line["blocked"] == 1
+    assert sum(line["lat"]) == 1
+    assert "url" not in line
+
+
+def test_a_held_response_counts_what_reached_the_person(addon, tmp_path):
+    from kosherd import usage
+
+    filt = _shop_filter(addon)
+    filt.usage = usage.Tally("proxy", spool=tmp_path)
+    body = json.dumps(["lamp", "lingerie"]).encode()
+    flow = _suggestion_flow(
+        "https://completion.amazon.com/api/2017/suggestions?prefix=l", body)
+    asyncio.run(filt.response(flow))
+    filt.usage.flush()
+    [line] = [json.loads(x) for x in (tmp_path / "proxy.usage").read_text().splitlines()]
+    assert line["bytes_in"] == len(flow.response.content) < len(body)
+
+
 def test_suggestions_are_left_alone_for_accounts_that_did_not_ask(addon):
     import json
 
@@ -818,6 +850,88 @@ def test_an_approved_channel_plays(addon):
     flow = _player_flow(addon, body)
     filt._filter_youtube(flow, 1001)
     assert flow.response.content == body.encode() or flow.response.text == body
+
+
+# The shape of a real /youtubei/v1/player answer (ThePrimeTimeagen, October
+# 2026): the channel's handle appears ONLY in the microformat's profile
+# address. There is no canonicalBaseUrl anywhere in it.
+_PRIME_PLAYER = {
+    "videoDetails": {"channelId": "UCUyeluBRhGPCW4rPe_UvBZQ", "author": "The PrimeTime"},
+    "microformat": {"playerMicroformatRenderer": {
+        "ownerProfileUrl": "http://www.youtube.com/@ThePrimeTimeagen",
+        "externalChannelId": "UCUyeluBRhGPCW4rPe_UvBZQ",
+        "category": "Science & Technology"}},
+}
+
+
+def test_the_player_json_names_its_handle_only_by_profile_address(addon):
+    # "youtube channel allowed is still blocked": the admin approved the
+    # handle, as the dialog says to, and every video after the first was
+    # refused — the player JSON carries no canonicalBaseUrl, so the handle
+    # read as missing and matched nothing.
+    import json
+
+    body = json.dumps(_PRIME_PLAYER)
+    assert addon.YouTube.channel_of(body) == ("UCUyeluBRhGPCW4rPe_UvBZQ",
+                                              "@ThePrimeTimeagen")
+    filt = _yt_filter(addon, {"allowed_channels": ["@ThePrimeTimeagen"]})
+    flow = _player_flow(addon, body)
+    filt._filter_youtube(flow, 1001)
+    assert flow.response.content == body.encode() or flow.response.text == body
+
+
+@pytest.mark.parametrize("spelling", [
+    "@ThePrimeTimeagen", "@theprimetimeagen", "theprimetimeagen",
+    "https://www.youtube.com/@ThePrimeTimeagen",
+    "youtube.com/@ThePrimeTimeagen/videos",
+    "UCUyeluBRhGPCW4rPe_UvBZQ",
+    "https://www.youtube.com/channel/UCUyeluBRhGPCW4rPe_UvBZQ",
+])
+def test_a_channel_is_approved_however_the_admin_spelled_it(addon, spelling):
+    import json
+
+    body = json.dumps(_PRIME_PLAYER)
+    assert addon.KosherFilter._youtube_verdict(body, [spelling], [],
+                                               strict_unknown=True) is None
+
+
+def test_a_near_namesake_is_not_the_approved_channel(addon):
+    # The same person's other channel, one word apart in the handle.
+    import json
+
+    body = json.dumps(_PRIME_PLAYER)
+    why = addon.KosherFilter._youtube_verdict(body, ["@ThePrimeagen"], [],
+                                              strict_unknown=True)
+    assert why and "approved channels" in why
+
+
+def test_the_watch_page_handle_is_the_owners_not_a_suggestions(addon):
+    # A watch page names the owner in its player response and then every
+    # suggested video's channel further down; the owner's is the one read.
+    body = ('{"videoDetails":{"channelId":"UC1"},'
+            '"ownerProfileUrl":"http://www.youtube.com/@owner"}'
+            '... {"canonicalBaseUrl":"/@suggested"}')
+    assert addon.YouTube.channel_of(body) == ("UC1", "@owner")
+
+
+def test_channel_names_have_one_spelling(addon):
+    key = addon.YouTube.channel_key
+    assert key("@ThePrimeTimeagen") == key("theprimetimeagen") == "@theprimetimeagen"
+    assert key("https://www.youtube.com/@ThePrimeTimeagen?si=abc") == "@theprimetimeagen"
+    assert key("UCUyeluBRhGPCW4rPe_UvBZQ") == "UCUyeluBRhGPCW4rPe_UvBZQ"
+    assert key("www.youtube.com/channel/UCUyeluBRhGPCW4rPe_UvBZQ/videos") == \
+        "UCUyeluBRhGPCW4rPe_UvBZQ"
+    assert key("Torah Channel") == "torah channel"
+    assert key("") is None and key("  ") is None and key(None) is None
+
+
+def test_a_feed_matches_approved_channels_regardless_of_case(addon):
+    feed = {"contents": [_renderer("The PrimeTime", handle="@ThePrimeTimeagen",
+                                   browse_id="UCUyeluBRhGPCW4rPe_UvBZQ")]}
+    for allowed in ({"@theprimetimeagen"}, {"theprimetimeagen"},
+                    {"https://www.youtube.com/@ThePrimeTimeagen"}):
+        assert addon.YouTube.prune_feed(feed, allowed)["contents"], allowed
+    assert addon.YouTube.prune_feed(feed, {"@ThePrimeagen"})["contents"] == []
 
 
 def test_the_answer_is_json_the_player_understands(addon):
@@ -2030,3 +2144,381 @@ def test_an_address_or_nothing_is_a_bare_address(addon, host):
                                   "1.2.3.4.nip.io", "192-168-1-1.example"])
 def test_a_name_is_not(addon, host):
     assert not addon.is_bare_address(host)
+
+
+# ---- a client that never speaks (#164) ------------------------------------------
+
+class _Handler:
+    def __init__(self, client):
+        self.client = client
+        self.closed = []
+
+    def close_connection(self, connection):
+        self.closed.append(connection)
+
+
+def _guard_world(addon, monkeypatch, seconds=0.05):
+    client = types.SimpleNamespace(id="c1", transport_protocol="tcp",
+                                   sockname=("140.82.112.3", 22))
+    handler = _Handler(client)
+    proxyserver = types.SimpleNamespace(connections={"c1": handler})
+    master = types.SimpleNamespace(addons=types.SimpleNamespace(
+        get=lambda name: proxyserver if name == "proxyserver" else None))
+    monkeypatch.setattr(sys.modules["mitmproxy"], "ctx",
+                        types.SimpleNamespace(master=master), raising=False)
+    return addon.SilentClientGuard(seconds=seconds), client, handler
+
+
+def _nextlayer(client, data=b"", layer=None):
+    return types.SimpleNamespace(layer=layer, data_client=lambda: data,
+                                 context=types.SimpleNamespace(client=client))
+
+
+def test_a_client_that_never_speaks_is_closed(addon, monkeypatch):
+    # SSH in the proxy: the client waits for the banner, mitmproxy waits
+    # for the client. Without this the connection hung for good.
+    guard, client, handler = _guard_world(addon, monkeypatch)
+
+    async def run():
+        guard.client_connected(client)
+        guard.next_layer(_nextlayer(client))  # deferred: nothing sent yet
+        await asyncio.sleep(0.15)
+
+    asyncio.run(run())
+    assert handler.closed == [client]
+    assert guard.timers == {}
+
+
+def test_a_client_that_speaks_is_left_alone(addon, monkeypatch):
+    guard, client, handler = _guard_world(addon, monkeypatch)
+
+    async def run():
+        guard.client_connected(client)
+        guard.next_layer(_nextlayer(client))
+        guard.next_layer(_nextlayer(client, data=b"\x16\x03\x01"))
+        await asyncio.sleep(0.15)
+
+    asyncio.run(run())
+    assert handler.closed == []
+    assert guard.timers == {}
+
+
+def test_a_decided_layer_or_a_disconnect_stops_the_clock(addon, monkeypatch):
+    guard, client, handler = _guard_world(addon, monkeypatch)
+
+    async def run():
+        guard.client_connected(client)
+        guard.next_layer(_nextlayer(client, layer=object()))
+        other = types.SimpleNamespace(id="c2", transport_protocol="tcp")
+        guard.client_connected(other)
+        guard.client_disconnected(other)
+        await asyncio.sleep(0.15)
+
+    asyncio.run(run())
+    assert handler.closed == []
+    assert guard.timers == {}
+
+
+def test_the_guard_is_loaded_with_the_filter(addon):
+    assert any(isinstance(a, addon.SilentClientGuard) for a in addon.addons)
+    assert 5 <= addon.SILENT_CLIENT_SECONDS <= 10
+
+
+# -- Tailscale's sites while it is set up (#211) -----------------------------
+
+def test_host_in_matches_whole_hosts_and_wildcard_domains(addon):
+    names = ("tailscale.com", "*.tailscale.com", "*.tail230de1.ts.net")
+    for host in ("tailscale.com", "login.tailscale.com", "LOGIN.tailscale.com.",
+                 "git.tail230de1.ts.net", "tail230de1.ts.net"):
+        assert addon.host_in(host, names), host
+    for host in ("nottailscale.com", "tailscale.com.evil.example", "other.ts.net",
+                 "git.tail999.ts.net", "", None):
+        assert not addon.host_in(host, names), host
+
+
+def test_the_cache_reads_the_names_and_the_floor_gets_none(addon, tmp_path):
+    path = _rules_file(tmp_path, {
+        "1001": {"rules": [], "blocked_categories": ["proxy"],
+                 "system_allowed": ["tailscale.com", "*.tailscale.com"]},
+        "1002": {"rules": []},
+    })
+    cache = addon.PolicyCache(path)
+    assert cache.system_allowed_for(1001) == ("tailscale.com", "*.tailscale.com")
+    assert cache.system_allowed_for(1002) == ()
+    assert cache.system_allowed_for(4242) == ()
+
+
+def _tailscale_filter(addon, allowed):
+    filt = addon.KosherFilter.__new__(addon.KosherFilter)
+    filt.uids = type("U", (), {"uid_for_connection": staticmethod(lambda *a, **k: 1001)})()
+    policy = _request_policy(blocked=["proxy"])
+    type(policy).system_allowed_for = staticmethod(lambda uid: tuple(allowed))
+    filt.policy = policy
+    filt.categories = type("C", (), {
+        "blocked_categories_of": staticmethod(
+            lambda host, blocked: {"proxy"} if "proxy" in blocked and (
+                host == "tailscale.com" or host.endswith(".tailscale.com")
+                or host == "vpn.example") else set()),
+        "categories_of": staticmethod(lambda host: set()),
+    })()
+    filt.siterules = type("S", (), {"reason": staticmethod(lambda url: None)})()
+    filt.blocklist = _stub_blocklist()
+    filt._block = lambda flow, url, because, why="": setattr(
+        flow, "response", type("R", (), {"status_code": 403, "why": why})())
+    return filt
+
+
+# -- a checkout's fraud check (#265) ------------------------------------------
+
+def test_the_cache_adds_the_never_blocked_hosts_to_the_exceptions(addon, tmp_path):
+    # kosherd writes the payment and fraud-check hosts under a key of their
+    # own, so the reason is on record; the proxy treats them as it treats
+    # the tailnet's names. An older rules file without the key still loads.
+    path = _rules_file(tmp_path, {
+        "1001": {"rules": [], "blocked_categories": ["ads"],
+                 "system_allowed": ["tailscale.com"],
+                 "never_blocked": ["*.online-metrix.net", "*.signifyd.com"]},
+        "1002": {"rules": [], "system_allowed": ["tailscale.com"]},
+    })
+    cache = addon.PolicyCache(path)
+    assert cache.system_allowed_for(1001) == ("tailscale.com", "*.online-metrix.net",
+                                              "*.signifyd.com")
+    assert cache.system_allowed_for(1002) == ("tailscale.com",)
+
+
+def _checkout_filter(addon, allowed):
+    filt = addon.KosherFilter.__new__(addon.KosherFilter)
+    filt.uids = type("U", (), {"uid_for_connection": staticmethod(lambda *a, **k: 1001)})()
+    policy = _request_policy(blocked=["ads"])
+    type(policy).system_allowed_for = staticmethod(lambda uid: tuple(allowed))
+    filt.policy = policy
+    filt.categories = type("C", (), {
+        "blocked_categories_of": staticmethod(
+            lambda host, blocked: {"ads"} if "ads" in blocked and (
+                host.endswith("online-metrix.net") or host == "ads.example") else set()),
+        "categories_of": staticmethod(lambda host: set()),
+    })()
+    filt.siterules = type("S", (), {"reason": staticmethod(lambda url: None)})()
+    filt.blocklist = _stub_blocklist()
+    filt._block = lambda flow, url, because, why="": setattr(
+        flow, "response", type("R", (), {"status_code": 403, "why": why})())
+    return filt
+
+
+def test_the_fraud_check_is_refused_as_ads_without_the_exception(addon):
+    # What happened: the category step answered 403 to the script Lowe's
+    # needs to approve the card, and the order failed after the cart was
+    # consumed.
+    filt = _checkout_filter(addon, ())
+    flow = _request_flow("https://h.online-metrix.net/fp/tags.js?org_id=k8vif92e")
+    filt.request(flow)
+    assert flow.response is not None and flow.response.why == "category:ads"
+
+
+def test_with_the_exception_the_fraud_check_goes_through_and_ads_do_not(addon):
+    filt = _checkout_filter(addon, ("*.online-metrix.net", "*.signifyd.com"))
+    for url in ("https://h.online-metrix.net/fp/tags.js?org_id=k8vif92e",
+                "https://w2txo5aa.g.aa.online-metrix.net/viICygdAAIuM94iX"):
+        flow = _request_flow(url)
+        filt.request(flow)
+        assert flow.response is None, url
+    flow = _request_flow("https://ads.example/banner.js")
+    filt.request(flow)
+    assert flow.response is not None and flow.response.why == "category:ads"
+
+
+def test_signed_out_tailscales_sites_are_blocked_as_a_proxy(addon):
+    filt = _tailscale_filter(addon, ())
+    flow = _request_flow("https://login.tailscale.com/a/abc123")
+    filt.request(flow)
+    assert flow.response is not None and flow.response.why == "category:proxy"
+
+
+def test_while_set_up_tailscales_sites_pass_the_category_lists(addon):
+    filt = _tailscale_filter(addon, ("tailscale.com", "*.tailscale.com"))
+    flow = _request_flow("https://login.tailscale.com/a/abc123")
+    filt.request(flow)
+    assert flow.response is None
+    # and only those: another site in the same category is still blocked.
+    other = _request_flow("https://vpn.example/")
+    filt.request(other)
+    assert other.response is not None and other.response.why == "category:proxy"
+
+
+def test_a_tailscale_page_is_still_judged_by_its_pictures(addon):
+    # Allowed means "not blocked by category". The category no longer
+    # blanks its pictures wholesale; they go to the model like any page's.
+    filt = _tailscale_filter(addon, ("tailscale.com", "*.tailscale.com"))
+    assert filt._blocked_categories_of("login.tailscale.com", 1001) == set()
+    filt = _tailscale_filter(addon, ())
+    assert filt._blocked_categories_of("login.tailscale.com", 1001) == {"proxy"}
+
+
+# -- the three levels of a rule (#273) ----------------------------------------
+
+def _rules_policy(addon, raw, blocked=()):
+    return type("P", (), {
+        "uid_for_listener_port": staticmethod(lambda port: None),
+        "rules_for": staticmethod(lambda uid: addon.parse_rules(raw)),
+        "blocked_categories_for": staticmethod(lambda uid: list(blocked)),
+        "youtube_for": staticmethod(lambda uid: {}),
+    })()
+
+
+def test_a_bypass_rule_skips_the_categories_and_marks_the_request(addon):
+    # The site is in a blocked category; a bypass rule opens it anyway and
+    # marks the request, so the response hooks pass it through unread.
+    filt = addon.KosherFilter.__new__(addon.KosherFilter)
+    filt.uids = type("U", (), {"uid_for_connection": staticmethod(lambda *a, **k: 1001)})()
+    filt.categories = type("C", (), {
+        "blocked_categories_of": staticmethod(
+            lambda host, blocked: {"adult"} if host == "trusted.example" else set()),
+        "categories_of": staticmethod(lambda host: {"adult"}),
+    })()
+    filt.siterules = type("S", (), {"reason": staticmethod(lambda url: None),
+                                    "is_suggestions": staticmethod(lambda url: False)})()
+    filt.blocklist = _stub_blocklist()
+
+    filt.policy = _rules_policy(addon, [], blocked=["adult"])
+    refused = _request_flow("https://trusted.example/page")
+    filt.request(refused)
+    assert refused.response is not None and refused.response.status_code == 403
+
+    filt.policy = _rules_policy(
+        addon, [{"action": "bypass", "pattern": "trusted.example"}], blocked=["adult"])
+    passed = _request_flow("https://trusted.example/page")
+    filt.request(passed)
+    assert passed.response is None
+    assert passed.metadata.get("kosher_bypass") is True
+
+    # An allow rule opens the page too, but leaves it a page to be judged.
+    filt.policy = _rules_policy(
+        addon, [{"action": "allow", "pattern": "trusted.example"}], blocked=["adult"])
+    allowed = _request_flow("https://trusted.example/page")
+    filt.request(allowed)
+    assert allowed.response is None
+    assert not allowed.metadata.get("kosher_bypass")
+
+
+def test_what_a_bypassed_page_asks_for_is_bypassed_with_it(addon):
+    # The page's own pictures come on later requests, to another host as
+    # often as not; the browser names the page they came from.
+    filt = addon.KosherFilter.__new__(addon.KosherFilter)
+    filt.uids = type("U", (), {"uid_for_connection": staticmethod(lambda *a, **k: 1001)})()
+    filt.categories = _stub_categories()
+    filt.siterules = type("S", (), {"reason": staticmethod(lambda url: None),
+                                    "is_suggestions": staticmethod(lambda url: False)})()
+    filt.blocklist = _stub_blocklist()
+    filt.policy = _rules_policy(addon, [{"action": "bypass", "pattern": "trusted.example"}])
+
+    picture = _request_flow("https://cdn.example.net/p.jpg")
+    picture.request.headers["referer"] = "https://trusted.example/"
+    filt.request(picture)
+    assert picture.metadata.get("kosher_bypass") is True
+
+    elsewhere = _request_flow("https://cdn.example.net/p.jpg")
+    elsewhere.request.headers["referer"] = "https://other.example/"
+    filt.request(elsewhere)
+    assert not elsewhere.metadata.get("kosher_bypass")
+
+
+def _headers_hook(filt, flow):
+    """responseheaders, whichever shape it has: it is synchronous on one
+    branch and a coroutine on another (the source-sampled video), and a
+    test of the bypass must pass on both."""
+    result = filt.responseheaders(flow)
+    if asyncio.iscoroutine(result):
+        asyncio.run(result)
+
+
+def test_a_bypassed_response_streams_through_unread(addon):
+    for kind in ("text/html", "image/jpeg", "video/mp4"):
+        flow = _hflow(kind)
+        flow.metadata["kosher_bypass"] = True
+        _headers_hook(_filt(addon, media="immodest"), flow)
+        assert flow.response.stream is True, kind
+
+
+def test_an_allowed_pages_pictures_are_still_held_to_be_judged(addon):
+    # Reported as "once a page is allowed its pictures are not filtered"
+    # (#273). Allowing is the page scorer and the categories stepping
+    # aside; a picture on an allowed page is judged like any other.
+    filt = _filt(addon, media="immodest")
+    filt.policy.rules_for = lambda uid: addon.parse_rules(
+        [{"action": "allow", "pattern": "trusted.example"}])
+    picture = _hflow("image/jpeg", url="https://trusted.example/p.jpg")
+    picture.request.headers["referer"] = "https://trusted.example/"
+    _headers_hook(filt, picture)
+    assert not getattr(picture.response, "stream", False), "held, so it can be judged"
+
+
+
+# -- pictures allowed: a level between allow and bypass ------------------------------
+
+def _rules_filter(addon, raw):
+    filt = addon.KosherFilter.__new__(addon.KosherFilter)
+    filt.uids = type("U", (), {"uid_for_connection": staticmethod(lambda *a, **k: 1001)})()
+    filt.categories = _stub_categories()
+    filt.siterules = type("S", (), {"reason": staticmethod(lambda url: None),
+                                    "is_suggestions": staticmethod(lambda url: False)})()
+    filt.blocklist = _stub_blocklist()
+    filt.policy = _rules_policy(addon, raw)
+    return filt
+
+
+def test_a_pictures_rule_marks_its_page_and_what_the_page_shows(addon):
+    filt = _rules_filter(addon, [{"action": "pictures", "pattern": "shop.example/gallery/*"}])
+    page = _request_flow("https://shop.example/gallery/rings")
+    filt.request(page)
+    assert page.response is None
+    assert page.metadata.get("kosher_pictures") is True
+    assert page.metadata.get("kosher_pictures_page") is True
+    assert not page.metadata.get("kosher_bypass"), "its video and words are still read"
+
+    # A CDN picture names the page in full (the page's Referrer-Policy).
+    picture = _request_flow("https://cdn.example.net/ring.jpg")
+    picture.request.headers["referer"] = "https://shop.example/gallery/rings"
+    filt.request(picture)
+    assert picture.metadata.get("kosher_pictures") is True
+    assert not picture.metadata.get("kosher_pictures_page")
+
+    elsewhere = _request_flow("https://cdn.example.net/ring.jpg")
+    elsewhere.request.headers["referer"] = "https://shop.example/swimwear/"
+    filt.request(elsewhere)
+    assert not elsewhere.metadata.get("kosher_pictures")
+
+
+def test_a_pictures_page_shows_its_pictures_and_asks_for_full_referers(addon):
+    filt = _filt(addon, media="immodest")
+    picture = _hflow("image/jpeg", url="https://cdn.example.net/ring.jpg")
+    picture.metadata["kosher_pictures"] = True
+    _headers_hook(filt, picture)
+    assert picture.response.stream is True, "shown as it is, not judged"
+
+    page = _hflow("text/html", url="https://shop.example/gallery/rings")
+    page.metadata["kosher_pictures"] = True
+    page.metadata["kosher_pictures_page"] = True
+    _headers_hook(filt, page)
+    assert page.response.headers["Referrer-Policy"] == addon.PICTURES_REFERRER_POLICY
+    assert not getattr(page.response, "stream", False), "the page's words are still read"
+
+    # Without the rule a picture is held to be judged, as before.
+    plain = _hflow("image/jpeg", url="https://cdn.example.net/ring.jpg")
+    _headers_hook(filt, plain)
+    assert not getattr(plain.response, "stream", False)
+
+
+def test_hidden_pictures_from_another_site_name_the_page_not_the_site(addon):
+    # A CDN picture's Referer is the page's origin alone; the log named the
+    # site, and "allow this page" allowed the home page.
+    filt = _filt(addon)
+    filt._remember_last_page(1001, "https://shop.example/gallery/rings#top")
+    picture = _hflow("image/jpeg", url="https://cdn.example.net/ring.jpg")
+    picture.request.headers["referer"] = "https://shop.example/"
+    assert filt._page_of(picture) == "https://shop.example/gallery/rings"
+    # A full Referer is the page itself; another account's pages are its own.
+    picture.request.headers["referer"] = "https://shop.example/sale?x=1"
+    assert filt._page_of(picture) == "https://shop.example/sale?x=1"
+    other = _hflow("image/jpeg", uid=1002, url="https://cdn.example.net/ring.jpg")
+    other.request.headers["referer"] = "https://shop.example/"
+    assert filt._page_of(other) == "https://shop.example/"

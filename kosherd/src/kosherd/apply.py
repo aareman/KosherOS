@@ -7,6 +7,7 @@ the network comes up (fail-closed by unit ordering).
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import os
@@ -16,7 +17,8 @@ import tempfile
 from pathlib import Path
 
 from . import categories as categories_mod
-from . import dns, mitmca, nft
+from . import (buildsources, containers, dns, lists, mitmca, nft, nixdaemon,
+               paymentsecurity, sshin, syncthing, tailnet)
 from . import search as search_mod
 from .policy import INSPECTED_MODES, SAFESEARCH_MODES, UNFILTERED_MODES, Policy
 
@@ -26,11 +28,14 @@ NFT_RULESET_PATH = Path("/etc/kosher/nft/kosher.nft")
 DNSMASQ_DROPIN_PATH = Path(dns.WHITELIST_CONF)
 SAFESEARCH_PATH = Path(dns.SAFESEARCH_CONF)
 CATEGORY_BLOCK_PATH = Path(dns.CATEGORY_BLOCK_CONF)
+LEGACY_CATEGORY_BLOCK_PATH = Path(dns.LEGACY_CATEGORY_BLOCK_CONF)
 ADBLOCK_PATH = Path(dns.ADBLOCK_CONF)
 ADBLOCK_OPEN_PATH = Path(dns.ADBLOCK_OPEN_CONF)
 DNS_SERVICE = "kosher-dns.service"
 # Only runs while somebody is unfiltered (see nft.OPEN_DNS_PORT).
 OPEN_DNS_SERVICE = "kosher-dns-open.service"
+# Only runs while somebody is on dnsfilter (see nft.DNSFILTER_DNS_PORT).
+DNSFILTER_DNS_SERVICE = "kosher-dns-dnsfilter.service"
 MITM_SERVICE = "kosher-mitm.service"
 # The proxy runs unprivileged and cannot traverse /var/lib/kosher
 # (root-only: it holds the policy), so it gets its own state dir.
@@ -39,8 +44,14 @@ MITM_RULES_PATH = MITM_DIR / "rules.json"
 # The search front end and the metasearch engine behind it, likewise
 # unprivileged and likewise given only what they filter with.
 SEARCH_SERVICES = ("kosher-searxng.service", "kosher-search.service")
+SEARCH_FRONT_END = "kosher-search.service"
+# What each restarted-on-demand service was last started with (see
+# _restart_if_changed). In kosherd's own state directory.
+STARTED_DIR = Path("/var/lib/kosher/started")
 SEARCH_DIR = Path("/var/lib/kosher-search")
 SEARCH_POLICY_PATH = Path(search_mod.SEARCH_POLICY_PATH)
+NIX_DAEMON_SERVICE = "nix-daemon.service"
+NIX_USERS_PATH = nixdaemon.CONF_PATH
 
 
 class ApplyError(Exception):
@@ -63,12 +74,18 @@ def mitm_uid() -> int | None:
         return None
 
 
-def write_mitm_rules(policy: Policy) -> None:
+def write_mitm_rules(policy: Policy, tailnet_allowed: tuple[str, ...] | None = None) -> None:
     """Render what the unprivileged proxy needs: per-uid rules and categories.
 
     The proxy never sees the policy itself — only what it must enforce,
     group readable by kosher-mitm.
+
+    `system_allowed` is what no category blocks for anybody: Tailscale's
+    sites and the tailnet's names while it is set up (tailnet.allowance,
+    #211). Only categories: rules, picture and text scoring still apply.
     """
+    if tailnet_allowed is None:
+        tailnet_allowed = tailnet.allowed()
     ports = nft.mitm_ports(policy)
     per_user = {}
     for user in policy.effective_users():
@@ -85,13 +102,41 @@ def write_mitm_rules(policy: Policy) -> None:
             "cover_style": getattr(user, "cover_style", "frost"),
             "language_filter": getattr(user, "language_filter", "off"),
             "youtube": user.youtube,
+            "calm": getattr(user, "calm", {}),
+            "system_allowed": list(tailnet_allowed),
+            # Payment and fraud-check hosts a checkout needs, which the
+            # tracker lists carry (#265): no category blocks them, for
+            # every filtered account. Same standing as system_allowed in
+            # the proxy; a key of its own so the reason is on record.
+            "never_blocked": paymentsecurity.combined(policy.adblock_allowed),
         }
+    listen_ports = sorted(ports.values())
+    if nixdaemon.build_gid() is not None:
+        # The Nix build users (#123): a supervised identity of their own,
+        # with bare addresses and DoH refused and no picture or text
+        # scoring, since what a build fetches is a tarball, not a page.
+        # What else it may fetch is the strictest filter among the
+        # developer accounts, the only ones that can start a build (#199,
+        # buildsources.py); with none, nothing.
+        per_user["builder"] = {
+            "port": nft.BUILDER_PORT,
+            "developers": buildsources.developer_filters(policy),
+            # Judged per developer account above, not here.
+            "rules": [],
+            "blocked_categories": [],
+            "media_level": "none",
+            "cover_style": "frost",
+            "language_filter": "off",
+            "youtube": {},
+            "calm": {},
+        }
+        listen_ports.append(nft.BUILDER_PORT)
     MITM_DIR.mkdir(parents=True, exist_ok=True)
     _write_atomic(MITM_RULES_PATH, json.dumps(per_user, indent=2) + "\n", mode=0o644)
-    # The listener list, one transparent mode per user port. systemd splits
-    # the unquoted $MITM_MODES on whitespace into separate arguments.
+    # The listener list, one transparent mode per port. systemd splits the
+    # unquoted $MITM_MODES on whitespace into separate arguments.
     modes = " ".join(f"--mode transparent@127.0.0.1:{port}"
-                     for port in sorted(ports.values()))
+                     for port in sorted(listen_ports))
     # Beside the rules file (not a fixed path), so a relocated rules file in
     # a test or a future layout takes its listener list with it. Read by
     # kosher-mitm.service as EnvironmentFile.
@@ -110,6 +155,64 @@ def write_search_policy(policy: Policy) -> None:
     SEARCH_DIR.mkdir(parents=True, exist_ok=True)
     _write_atomic(SEARCH_POLICY_PATH, search_mod.render_policy(policy),
                   mode=0o644)
+
+
+def write_nix_users(policy: Policy) -> bool:
+    """Tell the Nix daemon who may use it (nixdaemon.py). Returns whether
+    the list changed, in which case the daemon was told to pick it up.
+
+    Nothing happens on a machine without Nix (no /etc/nix): the stage-1
+    dev VM, or an image built without it.
+    """
+    path = NIX_USERS_PATH
+    if not path.parent.is_dir():
+        return False
+    # And who may run nix at all (#214): without the daemon, an account
+    # can still build into a store of its own.
+    nixdaemon.sync_cli_group(policy)
+    content = nixdaemon.render(policy)
+    try:
+        if path.read_text() == content:
+            return False
+    except OSError:
+        pass
+    _write_atomic(path, content, mode=0o644)
+    # try-restart: a daemon that is not running (socket-activated, nobody
+    # has used Nix yet) reads the new file when it starts; one that is
+    # running must be restarted to see it.
+    subprocess.run(["systemctl", "try-restart", NIX_DAEMON_SERVICE],
+                   capture_output=True, text=True)
+    return True
+
+
+def write_ssh_in(policy: Policy, run=subprocess.run) -> bool:
+    """Tell sshd who may sign in (sshin.py). Returns whether anything
+    changed, in which case sshd was restarted: started for the first
+    account, stopped with the last unless root has a key (a dev disk).
+    Sessions already open are their own scopes and survive a restart.
+    A machine without sshd's drop-in directory is left alone.
+    """
+    path = sshin.CONF_PATH
+    if not path.parent.is_dir():
+        return False
+    content = sshin.render(policy)
+    try:
+        current = path.read_text()
+    except OSError:
+        current = None
+    if current == content:
+        return False
+    if content is None:
+        path.unlink(missing_ok=True)
+    else:
+        # sshd refuses a group- or world-writable file; 0600 like the rest.
+        _write_atomic(path, content, mode=0o600)
+    # restart, not try-restart: the unit's condition is what starts or
+    # stops it, and a stopped sshd must start for the first account.
+    res = run(["systemctl", "restart", sshin.SERVICE], capture_output=True, text=True)
+    if res.returncode != 0:
+        log.warning("could not restart sshd: %s", (res.stderr or "").strip())
+    return True
 
 
 def _write_atomic(path: Path, content: str, mode: int = 0o644) -> None:
@@ -140,10 +243,75 @@ def _restart(service: str):
                           capture_output=True, text=True)
 
 
+def _lists_fingerprint() -> str:
+    """What the proxy and the search service load once, when they start:
+    the family's list edits and any category bundle delivered since the
+    image (both under lists.OVERRIDE_DIR). The shipped lists change only
+    with the image, which restarts everything."""
+    digest = hashlib.sha256()
+    root = lists.OVERRIDE_DIR
+    if root.is_dir():
+        for path in sorted(root.rglob("*")):
+            try:
+                if path.is_file():
+                    st = path.stat()
+                    digest.update(f"{path}:{st.st_mtime_ns}:{st.st_size}\n".encode())
+            except OSError:
+                continue
+    return digest.hexdigest()
+
+
+def _file_stamp(path: Path) -> str:
+    try:
+        return path.read_text()
+    except OSError:
+        return ""
+
+
+def _restart_if_changed(service: str, fingerprint: str):
+    """Restart `service` only when what it reads at start has changed since
+    kosherd last started it, or when it is not running; otherwise leave it.
+
+    Every policy change used to restart the proxy and both search services.
+    The proxy loads an image model, so each restart cost seconds before
+    kosherd could answer, and for those seconds every account's web was
+    down. Both re-read their policy file when it changes (rules.json,
+    policy.json); what they read only at start is the listener list and the
+    lists. The fingerprint of those is kept in STARTED_DIR.
+    """
+    stamp = STARTED_DIR / service
+    running = subprocess.run(["systemctl", "is-active", "--quiet", service],
+                             capture_output=True, text=True).returncode == 0
+    # A missing stamp is "never started by kosherd", even for an empty
+    # fingerprint.
+    if running and stamp.exists() and _file_stamp(stamp) == fingerprint:
+        return None
+    res = _restart(service)
+    if res.returncode == 0:
+        # Best effort: a stamp that cannot be written costs one more
+        # restart next time, never the apply.
+        try:
+            _write_atomic(stamp, fingerprint, mode=0o600)
+        except OSError as e:
+            log.warning("could not note what %s started with: %s", service, e)
+    return res
+
+
 def apply_policy(policy: Policy) -> None:
     """Render and load enforcement for `policy`. Raises ApplyError on failure."""
+    # What Tailscale, while it is set up, needs every account to reach
+    # (#211). Read once, so the proxy and the resolvers agree.
+    allowed = tailnet.allowed()
+    # Every managed account gets its block of subordinate ids (rootless
+    # containers), and the ruleset filters the block as the account.
+    try:
+        subids = containers.ensure(policy.effective_users())
+    except Exception:  # noqa: BLE001 - never leave the firewall unapplied
+        log.exception("could not read subordinate ids")
+        subids = {}
     ruleset = nft.render(policy, dns_uid=dnsmasq_uid(), mitm_uid=mitm_uid(),
-                         search_uid=search_uid())
+                         search_uid=search_uid(), build_gid=nixdaemon.build_gid(),
+                         subids=subids, syncthing=syncthing.nft_inputs())
 
     # Syntax-check before touching the live ruleset or the boot file.
     with tempfile.NamedTemporaryFile("w", suffix=".nft") as check:
@@ -157,9 +325,19 @@ def apply_policy(policy: Policy) -> None:
     res = subprocess.run(["nft", "-f", str(NFT_RULESET_PATH)], capture_output=True, text=True)
     if res.returncode != 0:
         raise ApplyError(f"nft load failed: {res.stderr}")
+    # The load emptied the Syncthing sets; put the running services back,
+    # and start or stop each one as the policy now says (syncthing.py).
+    try:
+        syncthing.apply(policy)
+    except Exception:  # noqa: BLE001 - never leave the rest unapplied
+        log.exception("could not bring the Syncthing services in line")
 
-    write_mitm_rules(policy)
-    inspected = any(u.mode == "filtered" for u in policy.effective_users())
+    write_mitm_rules(policy, allowed)
+    # The proxy runs for a filtered account — and wherever Nix is installed,
+    # because the build users' fetches go through it (#123): a stopped proxy
+    # would refuse every build, not let it through.
+    inspected = (any(u.mode == "filtered" for u in policy.effective_users())
+                 or nixdaemon.build_gid() is not None)
     if inspected:
         # Inspection needs the machine to trust the proxy's CA, or every
         # HTTPS page would warn. Generated once, on first use.
@@ -167,25 +345,39 @@ def apply_policy(policy: Policy) -> None:
             mitmca.ensure_ca()
         except Exception:  # noqa: BLE001 - never leave the firewall unapplied
             log.exception("could not prepare the inspection CA")
-    _restart(MITM_SERVICE) if inspected else subprocess.run(
-        ["systemctl", "stop", MITM_SERVICE], capture_output=True, text=True)
+    lists_now = _lists_fingerprint()
+    if inspected:
+        _restart_if_changed(MITM_SERVICE, "\n".join((
+            _file_stamp(MITM_RULES_PATH.with_name("listen.env")), lists_now,
+            _file_stamp(mitmca.CA_PEM))))
+    else:
+        subprocess.run(["systemctl", "stop", MITM_SERVICE], capture_output=True, text=True)
+
+    write_nix_users(policy)
+    try:
+        write_ssh_in(policy)
+    except Exception:  # noqa: BLE001 - never leave the rest unapplied
+        log.exception("could not tell sshd who may sign in")
 
     write_search_policy(policy)
     # Search is only useful to somebody whose results need filtering; an
     # unfiltered account has a real search engine already.
     if any(u.mode not in UNFILTERED_MODES and u.mode != "none"
            for u in policy.effective_users()):
+        # The engine reads nothing kosherd writes; the front end reads its
+        # policy file as it changes, and the lists at start.
         for service in SEARCH_SERVICES:
-            _restart(service)
+            _restart_if_changed(service, lists_now if service == SEARCH_FRONT_END else "")
     else:
         for service in reversed(SEARCH_SERVICES):
             subprocess.run(["systemctl", "stop", service],
                            capture_output=True, text=True)
 
-    _write_atomic(DNSMASQ_DROPIN_PATH, dns.render(policy))
+    _write_atomic(DNSMASQ_DROPIN_PATH, dns.render(policy, allowed))
     _write_atomic(SAFESEARCH_PATH, dns.render_safesearch(policy))
     bundle = categories_mod.load_any()
-    _write_atomic(CATEGORY_BLOCK_PATH, dns.render_category_blocks(policy, bundle))
+    _write_atomic(CATEGORY_BLOCK_PATH, dns.render_category_blocks(policy, bundle, allowed))
+    LEGACY_CATEGORY_BLOCK_PATH.unlink(missing_ok=True)
     # Ads and trackers, for every account: the same drop-in into both
     # resolvers, so the unfiltered account's plain resolver blocks them too.
     adblock = dns.render_adblock(policy, bundle)
@@ -200,6 +392,16 @@ def apply_policy(policy: Policy) -> None:
         _restart(OPEN_DNS_SERVICE)
     else:
         subprocess.run(["systemctl", "stop", OPEN_DNS_SERVICE],
+                       capture_output=True, text=True)
+    # The dnsfilter accounts' resolver, likewise only while one exists.
+    # Restarted on every change like the family one: the nft load above
+    # emptied the dns4/dns6 sets, and only a fresh cache refills them.
+    if any(u.mode == "dnsfilter" for u in policy.effective_users()):
+        res = _restart(DNSFILTER_DNS_SERVICE)
+        if res.returncode != 0:
+            log.error("failed to restart %s: %s", DNSFILTER_DNS_SERVICE, res.stderr)
+    else:
+        subprocess.run(["systemctl", "stop", DNSFILTER_DNS_SERVICE],
                        capture_output=True, text=True)
     # Full restart, not reload: dnsmasq's SIGHUP re-reads /etc/hosts and clears
     # the cache but does NOT re-read config files, so new nftset= directives

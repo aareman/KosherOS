@@ -150,7 +150,45 @@ def test_shipped_catalog_entries_are_well_formed():
     assert refs and len(refs) == len(set(refs)), "duplicate refs in the catalog"
     for entry in entries:
         assert entry.get("name"), f"{entry['ref']} has no display name"
-        # flatpak application ids are reverse-DNS; a typo here ships an app
-        # nobody can install (kosherctl check-catalog verifies against the
-        # real remote, which needs a network and so is not a unit test).
+        # flatpak application ids are reverse-DNS, and a nixpkgs entry names
+        # its package; a typo here ships an app nobody can install
+        # (kosherctl check-catalog verifies against the real sources, which
+        # needs a network and so is not a unit test).
+        if entry["ref"].startswith("nixpkgs#"):
+            assert entry["ref"][len("nixpkgs#"):], f"{entry['ref']} names no package"
+            continue
+        if entry["ref"].startswith("upstream#"):
+            from kosherd import upstreamapps
+            upstreamapps.package(entry["ref"])  # one KosherOS knows how to fetch
+            continue
         assert entry["ref"].count(".") >= 2, f"{entry['ref']} is not an app id"
+
+
+# -- leftover runtimes (#115) -------------------------------------------------
+
+def test_leftover_runtimes_are_listed_with_what_they_take():
+    from kosherd import apps
+
+    class Ref:
+        def __init__(self, ref, name, size):
+            self._ref, self._name, self._size = ref, name, size
+
+        def format_ref(self):
+            return self._ref
+
+        def get_name(self):
+            return self._name
+
+        def get_installed_size(self):
+            return self._size
+
+    class Installation:
+        def list_unused_refs(self, arch, cancellable):
+            assert arch is None and cancellable is None
+            return [Ref("runtime/org.gnome.Platform/x86_64/45", "org.gnome.Platform", 7)]
+
+    assert apps.unused_refs(Installation()) == [
+        {"ref": "runtime/org.gnome.Platform/x86_64/45", "name": "org.gnome.Platform", "size": 7}]
+    # The ref the daemon reports the cleanup under is the one the client watches.
+    from kosherd import client
+    assert client.CLEANUP_REF == apps.CLEANUP_REF

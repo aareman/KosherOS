@@ -1,0 +1,25 @@
+[Unit]
+Description=KosherOS: graphics drivers for Nix apps
+Documentation=file:///usr/share/kosher/nix-opengl-driver.env
+# Nix apps find their OpenGL and Vulkan drivers in /run/opengl-driver, as
+# on NixOS (the tmpfiles line points it at the root this service makes).
+# The driver is a pinned store path, so this fetches it from
+# cache.nixos.org once, checked against the cache's key like any other
+# substitute; on every later boot the path is already valid and nothing
+# is downloaded. Offline on first boot, it tries again every few minutes.
+Requires=nix.mount
+After=nix.mount nix-daemon.socket network-online.target
+Wants=nix-daemon.socket network-online.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+EnvironmentFile=/usr/share/kosher/nix-opengl-driver.env
+Environment=HOME=/root NIX_REMOTE=daemon
+ExecStart=/usr/bin/nix build --out-link /nix/var/nix/gcroots/kosher-opengl-driver ${KOSHER_OPENGL_DRIVER}
+Restart=on-failure
+RestartSec=3min
+
+[Install]
+WantedBy=multi-user.target

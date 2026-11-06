@@ -72,6 +72,8 @@ time on first use. `KOSHER_DEV_MODELS=1 devenv shell` brings them in, and
 | `admin-app/` | KosherOS Admin, the parent's app (GTK4, libadwaita) |
 | `store-app/` | KosherOS Store, open to every account |
 | `myfilter-app/` | My Filter, a read-only view of your own rules |
+| `welcome-app/` | the welcome an account sees at its first sign-in, admin or managed |
+| `look-app/` | Look, where each person picks their desktop |
 | `setup-app/` | the first-boot wizard |
 | `search-app/` | the filtered search front end in front of SearXNG |
 | `mitm/` | the mitmproxy addon that filters pages, pictures and video |
@@ -97,47 +99,50 @@ just test tests/test_nft.py     # one file; arguments pass through to pytest
 just render                     # render the example policy and check it with nft
 just admin-demo                 # the admin app on a pretend daemon with a sample family
 just store-demo                 # the same for the Store
-just docs-serve                 # this site, with live reload
+just docs serve                 # this site, with live reload
 ```
 
-For anything that touches a running service, there is a stock Fedora VM
-that takes about a minute to set up and a second to update:
+For anything that touches a running service, there is a machine that
+stays up — master's image, installed and set up, the base `just pr-test`
+keeps — and a change is on it seconds after it is saved:
 
 ```sh
-just fedora-vm        # fetch and boot the test VM (plain QEMU/KVM)
-just dev-install      # install the whole filter stack into it
-just deploy-kosherd   # push local kosherd code into the VM and restart it
-just fedora-ssh       # a shell in the VM
-just test-vm          # the integration suites, inside the VM
+just dev-vm                 # boot it (a window, a root shell on 127.0.0.1:2223)
+just deploy                 # this checkout's code into it, services restarted
+just test-vm kosher-dev 20  # a suite, inside it
+just dev-vm ssh             # a shell in it
+just dev-vm fresh           # start over from the base
 ```
+
+The one change a deploy cannot carry is one to the Containerfile itself:
+`just build && just vm-upgrade` updates the machine to the built image.
+The older road, a stock Fedora cloud VM with the stack installed into it,
+is still there: `just fedora-vm && just dev-install`, then
+`just deploy-kosherd` and `just test-vm`.
 
 Changes to the image itself go through a build:
 
 ```sh
 just build        # build the OS image (layer-cached; minutes the first time)
-just vm           # make a bootable disk from it (needs sudo)
+just vm-rootless  # make a bootable disk from it, as your own user
 just try          # boot a throwaway copy; the first boot runs the setup wizard
 just vm-upgrade   # update a running VM to the image just built, without a new disk
 just check-all    # the live checks inside the built image: firewall, resolver, redirect, services
+just pr-test 168  # a whole pull request through a VM, start to finish
 ```
 
-`just vm`, `just iso` and the other recipes that run podman as root ask for
-the sudo password first and keep it fresh until they finish, so the prompt
-never appears in the middle of a long build.
+None of these needs sudo; being in the `kvm` group is enough. `just vm`
+makes the same disk with bootc-image-builder, which runs as root. It and
+`just iso`, which has no rootless equivalent yet, ask for the sudo
+password first and keep it fresh until they finish, so the prompt never
+appears in the middle of a long build.
 
 ## Making a change
 
-**Add a test for what you changed.** Put it in the unit layer if you
-possibly can, because that is the layer that runs on every change. Reach
-for the VM suites only when the behaviour involves the kernel, a system
-service or real traffic. UI work gets a widget test that builds the real
-screen on the suite's own virtual display.
-
-**Keep the decision separate from the plumbing.** Where logic was trapped
-behind D-Bus or a typelib, it was moved into a pure function and the caller
-became a thin wrapper. That is why the security-critical parts can be
-asserted exhaustively in milliseconds, and new code should follow the same
-shape.
+**Add a test for what you changed**, and keep the decision separate from
+the plumbing so the test can be a unit test. [Testing](testing.md#writing-a-new-test)
+says where a new test belongs and why the security-critical parts are pure
+functions.
 
 **A failed operation undoes what it already did.** A daemon call that
 fails part-way must leave the machine as it found it. The person on the
@@ -184,12 +189,11 @@ while the product is at 0.x. The major never moves on its own. And it is
 what the release notes are generated from, so write it for the person
 running KosherOS, not for whoever wrote the code.
 
-KosherOS is intended to be released under the GNU Affero General Public
-License v3.0 or later. Sign off your commits with `git commit -s` to say
-you have the right to contribute the work under that licence, as the
+Sign off your commits with `git commit -s` to say you have the right to
+contribute the work under the project's licence, as the
 [Developer Certificate of Origin](https://developercertificate.org/)
-describes. There is no contributor licence agreement and there will not be
-one.
+describes. [Licensing](licensing.md) says what the licence is and why there
+is no contributor licence agreement.
 
 ## Pull requests
 
@@ -201,18 +205,21 @@ one.
 On a pull request, CI runs the unit suites with coverage, byte-compiles
 every app, and runs shellcheck over every script. It does not build the OS
 image: that is built once, from the merge, so several open pull requests
-do not each cost an eleven-minute build for an image nobody will run.
+do not each cost an eleven-minute build for an image nobody will run. A
+change that should be seen on a real machine first gets the `try-image`
+label, which builds the branch's image on every push and says in a comment
+how to run it on a KosherOS machine without losing the version it has;
+[trying a pull request's build](deployment.md#trying-a-pull-requests-build)
+explains what the machine does with it.
 
-After a merge, CI tags the commit with its version, builds and signs the
-image if anything that reaches the image changed, publishes it on the
-`edge` channel, writes the release, and rebuilds this site. A merge whose
-tests fail gets no version and its changes appear in the next release's
-notes. [Updates and channels](deployment.md) has the detail.
+After a merge, CI gives the commit its version, publishes the image on the
+`edge` channel, writes the release and rebuilds this site;
+[updates and channels](deployment.md#versions) has the detail.
 
 ## Writing docs
 
 The site is MkDocs with the Material theme. Pages are Markdown under
-`docs/`, the navigation is in `mkdocs.yml`, and `just docs-serve` previews
+`docs/`, the navigation is in `mkdocs.yml`, and `just docs serve` previews
 it. The Releases and Third-party pages are generated at build time; do not
 edit them by hand.
 

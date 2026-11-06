@@ -1,0 +1,9 @@
+# Checks that fail on master today, each with the issue that will fix it.
+#
+# `just pr-test` passes when every failing check is listed here, fails on
+# any failure that is not, and warns about a listed check that now passes:
+# the change that fixed it removes its line, in the same pull request.
+#
+# One per line: where it runs (boot, desktop or suites), the check's name
+# or the start of it, and the issue. A suite check is named with its suite.
+

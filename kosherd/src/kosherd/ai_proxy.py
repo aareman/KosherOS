@@ -20,7 +20,7 @@ import zlib
 from collections.abc import Callable
 from typing import Final, Literal, Protocol, final
 
-from mitmproxy import ctx, http
+from mitmproxy import http
 
 from . import activity, content, language, siterules, vision
 from .ai_api import ApiEvents, ApiLines, ApiStream
@@ -377,6 +377,7 @@ class AIFilter:
 
 def _inject(flow: http.HTTPFlow, frame: bytes) -> None:
     """Send one more frame to the client, after the one being handled."""
+    from mitmproxy import ctx  # at call time: the proxy's, not an import-time stand-in
     master = getattr(ctx, "master", None)
     if master is None:  # outside a running proxy (tests)
         log.debug("no proxy master to inject a websocket frame into")

@@ -15,11 +15,14 @@ price of that is a desktop they have to live with until they sign in again,
 when this puts it back. The keys the image does lock are the ones that are
 the same for everyone (see /etc/dconf/db/local.d/locks).
 
-The advanced layout is a separate niri session rather than GNOME, chosen
-for the account at the login screen by kosherd. Under niri this only seeds
-Noctalia's configuration once, so the shell starts with the polkit agent
-on and the KosherOS wallpaper, and leaves the person's own edits alone
-afterwards. Should someone with the advanced layout sign in to GNOME
+The advanced layout is the Noctalia shell in a separate session rather
+than GNOME, on niri, Hyprland or Umbriel as the person chose, picked for
+the account at the login screen by kosherd. Under any of the three this
+only seeds Noctalia's configuration once, so the shell starts with the
+polkit agent on and the KosherOS wallpaper, and leaves the person's own
+edits alone afterwards. The compositors need no seed: each reads a
+system-wide configuration the image ships until the person writes their
+own. Should someone with the advanced layout sign in to GNOME
 anyway (the login screen still offers it), they get the classic layout —
 a sane desktop rather than a bare one.
 """
@@ -39,7 +42,7 @@ from .policy import DEFAULT_LAYOUT, LAYOUTS
 
 log = logging.getLogger("kosher-layout")
 
-# The GNOME Shell extensions the image ships, by uuid. All three live under
+# The GNOME Shell extensions the image ships, by uuid. They live under
 # /usr/share/gnome-shell/extensions, so no account can remove them and every
 # account can be given them.
 EXT_DASH_TO_PANEL = "dash-to-panel@jderose9.github.com"
@@ -47,7 +50,12 @@ EXT_DASH_TO_PANEL = "dash-to-panel@jderose9.github.com"
 # not tell anyone where the apps were.
 EXT_ARCMENU = "arcmenu@arcmenu.com"
 EXT_APPINDICATOR = "appindicatorsupport@rgcjonas.gmail.com"
+EXT_BLUR = "blur-my-shell@aunetx"
+EXT_USER_THEME = "user-theme@gnome-shell-extensions.gcampax.github.com"
 EXT_PAPERWM = "paperwm@paperwm.github.com"
+# Says which window is in front, for the per-app keys in app.conf. Writes
+# nothing unless that person's key mapper is running (keyboard.py).
+EXT_KEYD_FOCUS = "keyd-focus@kosherlinux.org"
 
 # Where the seed for a Noctalia configuration ships, and where it goes.
 NOCTALIA_SEED = Path("/usr/share/kosher/desktop/noctalia.toml")
@@ -62,17 +70,21 @@ def _gvariant_list(items: list[str]) -> str:
 # are complete, not diffs: whatever the previous layout wrote is overridden.
 PLANS: dict[str, list[tuple[str, str, str]]] = {
     # A taskbar along the bottom with a start button, minimise buttons on
-    # windows, one workspace so nothing can get lost on another, no hot
-    # corner to trigger by accident. What a Windows, Mac or ChromeOS user
-    # already knows.
+    # windows, no hot corner to trigger by accident. What a Windows, Mac or
+    # ChromeOS user already knows. Workspaces stay GNOME's own: dynamic, a
+    # new one appearing as the last is used. An earlier plan pinned a single
+    # fixed workspace, and because this list is rewritten at every sign-in
+    # a person who turned dynamic workspaces back on lost them at the next
+    # login (#132); writing "true" here puts those accounts right.
     "classic": [
         ("org.gnome.shell", "enabled-extensions",
-         _gvariant_list([EXT_DASH_TO_PANEL, EXT_ARCMENU, EXT_APPINDICATOR])),
+         _gvariant_list([EXT_DASH_TO_PANEL, EXT_ARCMENU, EXT_APPINDICATOR, EXT_BLUR,
+                         EXT_USER_THEME, EXT_KEYD_FOCUS])),
         ("org.gnome.desktop.wm.preferences", "button-layout",
          "'appmenu:minimize,maximize,close'"),
         ("org.gnome.desktop.interface", "enable-hot-corners", "false"),
-        ("org.gnome.mutter", "dynamic-workspaces", "false"),
-        ("org.gnome.desktop.wm.preferences", "num-workspaces", "1"),
+        ("org.gnome.mutter", "dynamic-workspaces", "true"),
+        ("org.gnome.desktop.wm.preferences", "num-workspaces", "4"),
         ("org.gnome.mutter", "edge-tiling", "true"),
     ],
     # GNOME as GNOME ships it, plus PaperWM's scrolling tiling. PaperWM
@@ -80,12 +92,11 @@ PLANS: dict[str, list[tuple[str, str, str]]] = {
     # workspaces come back and its edge tiling gets out of the way.
     "tiling": [
         ("org.gnome.shell", "enabled-extensions",
-         _gvariant_list([EXT_PAPERWM, EXT_APPINDICATOR])),
+         _gvariant_list([EXT_PAPERWM, EXT_APPINDICATOR, EXT_BLUR, EXT_USER_THEME,
+                         EXT_KEYD_FOCUS])),
         ("org.gnome.desktop.wm.preferences", "button-layout", "'appmenu:close'"),
         ("org.gnome.desktop.interface", "enable-hot-corners", "false"),
         ("org.gnome.mutter", "dynamic-workspaces", "true"),
-        # GNOME's own default; only read when workspaces are not dynamic,
-        # but written so that classic's single workspace is undone.
         ("org.gnome.desktop.wm.preferences", "num-workspaces", "4"),
         ("org.gnome.mutter", "edge-tiling", "false"),
     ],
@@ -105,8 +116,19 @@ def current_desktop() -> str:
     return os.environ.get("XDG_CURRENT_DESKTOP", "").lower()
 
 
-def under_niri(desktop: str | None = None) -> bool:
-    return "niri" in (desktop if desktop is not None else current_desktop())
+# The compositors the advanced layout runs on, as they name themselves in
+# XDG_CURRENT_DESKTOP (their session files' DesktopNames), lower-cased.
+NOCTALIA_COMPOSITORS = ("niri", "hyprland", "umbriel")
+
+
+def running_compositor(desktop: str | None = None) -> str | None:
+    """Which of the advanced desktop's compositors is running, or None for
+    GNOME (or anything else)."""
+    names = (desktop if desktop is not None else current_desktop()).lower().split(":")
+    for name in NOCTALIA_COMPOSITORS:
+        if name in names:
+            return name
+    return None
 
 
 def apply_gsettings(steps, run=subprocess.run) -> list[str]:
@@ -122,7 +144,7 @@ def apply_gsettings(steps, run=subprocess.run) -> list[str]:
 
 
 def seed_noctalia(home: Path, seed: Path = NOCTALIA_SEED) -> bool:
-    """Give a first niri sign-in a Noctalia configuration; never overwrite.
+    """Give a first advanced sign-in a Noctalia configuration; never overwrite.
 
     Noctalia reads only the person's own ~/.config; there is no system-wide
     layer to put defaults in. What matters in the seed is the polkit agent
@@ -167,11 +189,12 @@ def main(argv=None) -> int:
                         stream=sys.stderr)
 
     layout = args.layout or fetch_layout()
-    if under_niri():
+    compositor = running_compositor()
+    if compositor is not None:
         # Not a GNOME session: nothing to write into GNOME Shell. Seed the
         # shell's own configuration on the first sign-in and leave it.
         if args.dry_run:
-            print("under niri: would seed Noctalia's configuration if absent")
+            print(f"under {compositor}: would seed Noctalia's configuration if absent")
             return 0
         if seed_noctalia(Path.home()):
             log.info("seeded Noctalia's configuration")

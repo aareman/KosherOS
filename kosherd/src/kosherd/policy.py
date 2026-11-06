@@ -117,15 +117,35 @@ def youtube_category_id(value: str | None) -> str | None:
 #             Dash to Panel)
 #   tiling    GNOME with PaperWM's scrolling tiling, for keyboard-driven
 #             power users; same lock screen, settings and accessibility
-#   advanced  a separate niri + Noctalia session, chosen at the login screen;
-#             configured by text files the user owns
+#   advanced  the Noctalia shell in a separate login-screen session, on the
+#             compositor the person picks (COMPOSITORS); configured by text
+#             files the user owns
 LAYOUTS = ("classic", "tiling", "advanced")
 LAYOUT_LABELS = {
     "classic": "Classic desktop",
     "tiling": "Tiling desktop",
-    "advanced": "Advanced (niri)",
+    "advanced": "Advanced (Noctalia)",
 }
 DEFAULT_LAYOUT = "classic"
+
+# Which compositor the advanced layout runs Noctalia on. Each is its own
+# session on the login screen, named by its wayland-sessions file:
+#   niri      windows in columns on a strip that scrolls sideways
+#   hyprland  dynamic tiling: each new window splits the space
+#   umbriel   Noctalia's own compositor, scrolling or tiled
+# Only read when the layout is advanced; kept when it is not, so going back
+# to advanced finds the compositor the person had.
+COMPOSITORS = ("niri", "hyprland", "umbriel")
+DEFAULT_COMPOSITOR = "niri"
+
+# How often the computer fetches a new KosherOS version on its own (#19).
+# The download is staged for the next restart; nothing restarts by itself.
+#   off       only when an administrator presses Check
+#   daily … monthly   that often, counted from the last check that worked
+# Weekly by default: a family gets fixes within a week, and a notice at
+# most once a week is not nagging (see updates.py).
+AUTO_UPDATE_SCHEDULES = ("off", "daily", "weekly", "biweekly", "monthly")
+DEFAULT_AUTO_UPDATES = "weekly"
 
 # What earlier policies called these modes.
 LEGACY_MODES = {"inspect": "filtered"}
@@ -192,6 +212,36 @@ DEVELOPER_REGISTRIES = (
     "sum.golang.org",
     "go.dev",
     "storage.googleapis.com",     # Go toolchain downloads
+    # Nix, devenv, devbox. The daemon's own downloads (the binary cache) run
+    # as root and are not filtered; these are what the account's side of a
+    # build reaches: the flake registry, nixpkgs as a tarball from GitHub,
+    # and devbox's package search.
+    "cache.nixos.org",
+    "channels.nixos.org",         # the flake registry (nixpkgs = github:NixOS/nixpkgs)
+    "api.github.com",             # a flake's branch -> commit lookup
+    "codeload.github.com",        # where github.com sends an archive download
+    "devenv.cachix.org",
+    "search.devbox.sh",
+    # Where the AI tools and editors the Store carries from nixpkgs are
+    # published (the unfree ones are not on the binary cache, so a build
+    # fetches the release itself): Claude Code, Cursor, Antigravity. The
+    # rest are GitHub releases, already above.
+    "downloads.claude.ai",
+    "downloads.cursor.com",
+    "edgedl.me.gvt1.com",         # Google's download host (Antigravity)
+    # Container image registries, for rootless podman: Docker Hub (not
+    # hub.docker.com, which is a site), Quay, Microsoft's (every
+    # devcontainer image), Red Hat's; Fedora's and GitHub's are above.
+    "docker.io",
+    "registry-1.docker.io",
+    "auth.docker.io",
+    "index.docker.io",
+    "production.cloudflare.docker.com",
+    "quay.io",
+    "*.quay.io",
+    "mcr.microsoft.com",
+    "*.data.mcr.microsoft.com",
+    "registry.access.redhat.com",
 )
 
 
@@ -229,8 +279,13 @@ class UserPolicy:
     blocked_categories: list[str] = field(default_factory=list)
     media_level: str = DEFAULT_MEDIA_LEVEL
     youtube: dict = field(default_factory=dict)
+    # Calmer versions of the addictive sites (calm.py, #179): feeds end
+    # after a set number of items, a linked post renders on its own, and
+    # a site may have a daily time budget. Empty means off.
+    calm: dict = field(default_factory=dict)
     language_filter: str = "off"
     layout: str = DEFAULT_LAYOUT
+    compositor: str = DEFAULT_COMPOSITOR
     cover_style: str = DEFAULT_COVER_STYLE
     # How long and when the account may be signed in (see timelimits.py).
     # Empty means no daily limit and always allowed — the default, so a
@@ -243,6 +298,33 @@ class UserPolicy:
     # web nor mail; everything not named is refused.
     video_calls: bool = True
     extra_ports: list[int] = field(default_factory=list)
+    # SSH to other machines (#257): the machines this account may open
+    # port 22 to — a name, an address, a range, or `tailnet` for every
+    # machine on this computer's tailnet — and nothing else; or anywhere,
+    # for the account an administrator trusts with a way around the filter.
+    ssh_hosts: list[str] = field(default_factory=list)
+    ssh_anywhere: bool = False
+    # Developer tools (#123): may this account use the Nix daemon itself —
+    # nix, devbox, devenv from a shell — and reach the package registries
+    # directly? Off by default: the Store still installs catalogue apps for
+    # everyone through kosherd, and an account that only browses never
+    # needs a build daemon that fetches as a system user.
+    developer_tools: bool = False
+    # May the account be signed in to from another machine over SSH, with a
+    # key in its own ~/.ssh/authorized_keys (sshin.py)? Only with developer
+    # tools on, and off by default: what arrives over the connection is not
+    # read by the filter.
+    ssh_in: bool = False
+    # Apps an administrator approved for this account alone (#213). Most
+    # apps are approved for the whole computer in catalog.json; the few in
+    # appaccess.INDIVIDUAL_APPROVAL (Syncthing) need it per account on a
+    # supervised one, whatever its app access, because what they bring in
+    # never passes the filter.
+    approved_apps: list[str] = field(default_factory=list)
+    # May devices on the home network connect to this account's Syncthing
+    # directly (syncthing.py)? Off by default: with it off, Syncthing only
+    # dials out, and nothing on the LAN reaches in.
+    syncthing_lan: bool = False
     # The group this account is in (a key in Policy.custom_profiles), or
     # None. Explicit, never inferred from matching settings: an account may
     # differ from its group and still belong to it, and a change to the
@@ -267,6 +349,8 @@ class UserPolicy:
             d["media_level"] = self.media_level
         if self.youtube:
             d["youtube"] = self.youtube
+        if self.calm:
+            d["calm"] = self.calm
         if self.language_filter != "off":
             d["language_filter"] = self.language_filter
         if self.apps:
@@ -281,6 +365,8 @@ class UserPolicy:
             d["blocked_apps"] = self.blocked_apps
         if self.layout != DEFAULT_LAYOUT:
             d["layout"] = self.layout
+        if self.compositor != DEFAULT_COMPOSITOR:
+            d["compositor"] = self.compositor
         if self.cover_style != DEFAULT_COVER_STYLE:
             d["cover_style"] = self.cover_style
         if self.time:
@@ -289,6 +375,18 @@ class UserPolicy:
             d["video_calls"] = False
         if self.extra_ports:
             d["extra_ports"] = sorted(set(int(p) for p in self.extra_ports))
+        if self.ssh_hosts:
+            d["ssh_hosts"] = list(dict.fromkeys(str(h) for h in self.ssh_hosts))
+        if self.ssh_anywhere:
+            d["ssh_anywhere"] = True
+        if self.developer_tools:
+            d["developer_tools"] = True
+        if self.ssh_in:
+            d["ssh_in"] = True
+        if self.approved_apps:
+            d["approved_apps"] = sorted(set(self.approved_apps))
+        if self.syncthing_lan:
+            d["syncthing_lan"] = True
         return d
 
 
@@ -318,6 +416,7 @@ class GuestPolicy:
     media_level: str = DEFAULT_MEDIA_LEVEL
     language_filter: str = "off"
     youtube: dict = field(default_factory=dict)
+    calm: dict = field(default_factory=dict)
     cover_style: str = DEFAULT_COVER_STYLE
     time: dict = field(default_factory=dict)
 
@@ -341,6 +440,8 @@ class GuestPolicy:
             d["language_filter"] = self.language_filter
         if self.youtube:
             d["youtube"] = self.youtube
+        if self.calm:
+            d["calm"] = self.calm
         if self.cover_style != DEFAULT_COVER_STYLE:
             d["cover_style"] = self.cover_style
         if self.time:
@@ -360,10 +461,31 @@ class Policy:
     # by default; not content filtering, so it applies to unfiltered
     # accounts too, and turning it off is the guardian-gated act.
     adblock: bool = True
+    # Hosts the ad blocker leaves reachable although the tracker lists
+    # carry them (#265): what an administrator added to the built-in
+    # payment-security set (paymentsecurity.py). The proxy's category step
+    # steps aside for them too. Guardian-gated to add, like switching the
+    # ad blocker off.
+    adblock_allowed: list[str] = field(default_factory=list)
+    # Automatic updates (#19): the schedule, and whether the people signed
+    # in are told once when a downloaded update waits for a restart.
+    auto_updates: str = DEFAULT_AUTO_UPDATES
+    update_notify: bool = True
+    # Features the administrator turns on for the whole computer (#220),
+    # off on a new install. None until kosherd's start decides for a
+    # computer that had them before there was a switch (daemon.py).
+    tailscale: bool | None = None
+    syncthing: bool | None = None
+    # Key remapping through keyd (#230): keyd.service runs, and a person's
+    # ~/.config/keyd files are applied while they are at the screen.
+    keyd: bool | None = None
     system_whitelist: list[str] = field(default_factory=list)
     guest: GuestPolicy = field(default_factory=GuestPolicy)
     # A family's own presets, saved from a tuned account (see profiles.py).
     custom_profiles: list[dict] = field(default_factory=list)
+    # Hosts an administrator added to where a Nix build may download from
+    # (#199); the built-in list is buildsources.DEFAULT_BUILD_SOURCES.
+    build_sources_extra: list[str] = field(default_factory=list)
 
     def user(self, uid: int) -> UserPolicy | None:
         return next((u for u in self.users if u.uid == uid), None)
@@ -400,14 +522,44 @@ class Policy:
                 media_level=self.guest.media_level,
                 language_filter=self.guest.language_filter,
                 youtube=dict(self.guest.youtube),
+                calm=dict(self.guest.calm),
                 cover_style=self.guest.cover_style,
                 time=dict(self.guest.time),
             ))
         return users
 
     def effective_system_whitelist(self) -> list[str]:
-        return list(dict.fromkeys([*BUILTIN_SYSTEM_WHITELIST, *DEVELOPER_REGISTRIES,
-                                   *self.system_whitelist]))
+        """What every account may reach on 80/443 without the proxy: the
+        machine's own needs. The developer registries are NOT here (#123):
+        they went in once for every account and made "whitelist only" mean
+        the family's list plus GitHub; a developer-flagged account reaches
+        them through its own mode (whitelists.effective adds them)."""
+        return list(dict.fromkeys([*BUILTIN_SYSTEM_WHITELIST, *self.system_whitelist]))
+
+    def switched_off_apps(self) -> frozenset[str]:
+        """Store apps this computer does not offer while their switch is off."""
+        return frozenset() if self.syncthing else frozenset({"nixpkgs#syncthing"})
+
+    def developer_accounts(self) -> list["UserPolicy"]:
+        return [u for u in self.effective_users() if u.developer_tools and u.mode != "none"]
+
+    def ssh_in_accounts(self) -> list["UserPolicy"]:
+        """The accounts that may be signed in to over SSH: developer tools
+        on, some internet, and the switch on."""
+        return [u for u in self.developer_accounts() if u.ssh_in]
+
+    def build_sources(self) -> list[str]:
+        """Every host a Nix build may download from: the built-in list and
+        the administrator's additions (#199)."""
+        from . import buildsources
+
+        return buildsources.combined(self.build_sources_extra)
+
+    def advanced(self) -> dict:
+        """The switches that have been decided, as the policy file keeps them."""
+        return {name: on for name, on in (("tailscale", self.tailscale),
+                                          ("syncthing", self.syncthing),
+                                          ("keyd", self.keyd)) if on is not None}
 
     def to_dict(self) -> dict:
         return {
@@ -416,10 +568,16 @@ class Policy:
             "source": self.source,
             "users": [u.to_dict() for u in self.users],
             "guardian": {"enabled": self.guardian_enabled},
-            "adblock": {"enabled": self.adblock},
+            "adblock": {"enabled": self.adblock,
+                        **({"allowed": list(self.adblock_allowed)}
+                           if self.adblock_allowed else {})},
+            "updates": {"auto": self.auto_updates, "notify": self.update_notify},
+            **({"advanced": self.advanced()} if self.advanced() else {}),
             **({"custom_profiles": list(self.custom_profiles)}
                if self.custom_profiles else {}),
             "system_whitelist": self.system_whitelist,
+            **({"developer": {"build_sources_extra": list(self.build_sources_extra)}}
+               if self.build_sources_extra else {}),
             "guest": self.guest.to_dict(),
         }
 
@@ -448,20 +606,35 @@ class Policy:
                     blocked_categories=list(u.get("blocked_categories", [])),
                     media_level=u.get("media_level", DEFAULT_MEDIA_LEVEL),
                     youtube=dict(u.get("youtube", {})),
+                    calm=dict(u.get("calm", {})),
                     language_filter=u.get("language_filter", "off"),
                     layout=u.get("layout", DEFAULT_LAYOUT),
+                    compositor=u.get("compositor", DEFAULT_COMPOSITOR),
                     cover_style=u.get("cover_style", DEFAULT_COVER_STYLE),
                     time=dict(u.get("time", {})),
                     video_calls=bool(u.get("video_calls", True)),
                     extra_ports=[int(p) for p in u.get("extra_ports", [])],
+                    ssh_hosts=[str(h) for h in u.get("ssh_hosts", [])],
+                    ssh_anywhere=bool(u.get("ssh_anywhere", False)),
+                    developer_tools=bool(u.get("developer_tools", False)),
+                    ssh_in=bool(u.get("ssh_in", False)),
+                    approved_apps=list(u.get("approved_apps", [])),
+                    syncthing_lan=bool(u.get("syncthing_lan", False)),
                     profile=u.get("profile") or None,
                 )
                 for u in doc["users"]
             ],
             guardian_enabled=doc["guardian"]["enabled"],
             adblock=bool(doc.get("adblock", {}).get("enabled", True)),
+            adblock_allowed=list(doc.get("adblock", {}).get("allowed", [])),
+            auto_updates=(doc.get("updates") or {}).get("auto", DEFAULT_AUTO_UPDATES),
+            update_notify=bool((doc.get("updates") or {}).get("notify", True)),
+            tailscale=(doc.get("advanced") or {}).get("tailscale"),
+            syncthing=(doc.get("advanced") or {}).get("syncthing"),
+            keyd=(doc.get("advanced") or {}).get("keyd"),
             custom_profiles=list(doc.get("custom_profiles") or []),
             system_whitelist=list(doc.get("system_whitelist", [])),
+            build_sources_extra=list((doc.get("developer") or {}).get("build_sources_extra", [])),
             guest=GuestPolicy(
                 enabled=guest_doc["enabled"],
                 uid=guest_doc.get("uid"),
@@ -473,6 +646,7 @@ class Policy:
                 media_level=guest_doc.get("media_level", DEFAULT_MEDIA_LEVEL),
                 language_filter=guest_doc.get("language_filter", "off"),
                 youtube=dict(guest_doc.get("youtube", {})),
+                calm=dict(guest_doc.get("calm", {})),
                 cover_style=guest_doc.get("cover_style", DEFAULT_COVER_STYLE),
                 time=dict(guest_doc.get("time", {})),
             ),

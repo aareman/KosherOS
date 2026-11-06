@@ -4,7 +4,7 @@ The base dnsmasq config (/etc/kosher/dnsmasq.conf, shipped in the OS image)
 binds 127.0.0.1:53 with the Cloudflare family resolvers hardcoded upstream and
 includes /etc/kosher/dnsmasq.d/*.conf. kosherd owns exactly one drop-in there:
 the whitelist rendering below. As dnsmasq resolves a whitelisted domain it adds
-the answer's IPs to the kosher table's wl4/wl6 (or sys4/sys6) sets via its
+the answer's IPs to the kosher table's wl4/wl6 (or sys4/sys6, git4/git6) sets via its
 native nftset support, which is what actually opens the firewall for that
 destination.
 """
@@ -12,12 +12,34 @@ destination.
 from __future__ import annotations
 
 import logging
+import re
 
-from .policy import INSPECTED_MODES, SAFESEARCH_MODES, Policy
+from .policy import UNFILTERED_MODES, INSPECTED_MODES, SAFESEARCH_MODES, Policy
 
 WHITELIST_CONF = "/etc/kosher/dnsmasq.d/whitelist.conf"
 SAFESEARCH_CONF = "/etc/kosher/dnsmasq.d/safesearch.conf"
-CATEGORY_BLOCK_CONF = "/etc/kosher/dnsmasq.d/categories.conf"
+# Category blocks belong to the dnsfilter accounts' own resolver (#183),
+# which reads dnsmasq.d as well as its own directory. In the family
+# resolver they answered filtered accounts and the proxy too, so a blocked
+# site was refused by DNS and the proxy never got to show its block page.
+CATEGORY_BLOCK_CONF = "/etc/kosher/dnsmasq-dnsfilter.d/categories.conf"
+# Where they used to be written; removed on apply so an upgraded machine
+# does not keep feeding them to the family resolver.
+LEGACY_CATEGORY_BLOCK_CONF = "/etc/kosher/dnsmasq.d/categories.conf"
+# The tailnet's names, forwarded to Tailscale's own resolver (render_tailnet).
+# In both resolvers, like the ad list: an unfiltered account reaches the
+# family's machines by name as much as a filtered one does.
+TAILNET_CONF = "/etc/kosher/dnsmasq.d/tailnet.conf"
+TAILNET_OPEN_CONF = "/etc/kosher/dnsmasq-open.d/tailnet.conf"
+# Where tailscaled answers for the tailnet's names (MagicDNS). Reached by
+# dnsmasq, a system user, so the per-account rules never see the query.
+TAILNET_RESOLVER = "100.100.100.100"
+
+# Never blocked at the resolver, whatever category lists them.
+# syncthing.net is where an approved Syncthing finds a person's other
+# devices and its relays (#213): a category that listed it would leave it
+# unable to find anything.
+RESOLVER_NEVER_BLOCKED = ("syncthing.net",)
 
 # Search engines publish hostnames that always answer with safe search on.
 # Pointing the normal hostname at them is how safe search is enforced for
@@ -65,39 +87,97 @@ SAFESEARCH_CNAMES = {
 }
 
 
-def _nftset_line(domain: str, set4: str, set6: str) -> str:
+def _nftset_line(domain: str, *pairs: tuple[str, str]) -> str:
     # dnsmasq nftset syntax: nftset=/example.org/4#inet#kosher#wl4,6#inet#kosher#wl6
     # A dnsmasq domain pattern matches the domain and all its subdomains, which
     # is what our "*." wildcard means; a bare domain should match exactly, but
     # dnsmasq has no exact-only form — accepting subdomains of an approved
     # domain is an acceptable over-match for a family whitelist.
     name = domain.removeprefix("*.")
-    return f"nftset=/{name}/4#inet#kosher#{set4},6#inet#kosher#{set6}"
+    sets = ",".join(f"4#inet#kosher#{set4},6#inet#kosher#{set6}" for set4, set6 in pairs)
+    return f"nftset=/{name}/{sets}"
 
 
-def render(policy: Policy) -> str:
+def _covers(pattern: str, name: str) -> bool:
+    return name == pattern or name.endswith("." + pattern)
+
+
+def render(policy: Policy, tailnet: tuple[str, ...] = ()) -> str:
     # Dedupe on the stripped name: "example.org" and "*.example.org" render
     # to the same dnsmasq pattern.
     # The account's own list PLUS any ready-made bundles switched on for it
     # (whitelists.py): a parent picks "Torah study" rather than typing the
     # thirty hosts those sites load from.
     from . import whitelists
+    from .policy import DEVELOPER_REGISTRIES
 
+    # A whitelist-only account with developer tools on (#123) reaches the
+    # package registries through its own list — they are no longer in the
+    # system set every account gets.
     user_domains = sorted(
         {d.removeprefix("*.")
          for u in policy.effective_users() if u.mode == "whitelist"
-         for d in whitelists.effective(u)}
+         for d in [*whitelists.effective(u),
+                   *(DEVELOPER_REGISTRIES if getattr(u, "developer_tools", False) else ())]}
     )
-    system_domains = sorted({d.removeprefix("*.") for d in policy.effective_system_whitelist()})
+    # `tailnet`: Tailscale's own sites and the tailnet's names while it
+    # is set up (tailnet.allowance, #211), in the system set like the
+    # machine's other needs, so whitelist and dnsfilter accounts reach them.
+    system_domains = sorted({d.removeprefix("*.")
+                             for d in [*policy.effective_system_whitelist(), *tailnet]})
 
+    # The git hosts developer accounts may reach over SSH (nft.py, #164).
+    from .nft import GIT_SSH_HOSTS
+    git_domains = sorted(GIT_SSH_HOSTS)
+    # Syncthing's discovery servers and relay list, which its service
+    # reaches on 443 without the proxy (nft.py, syncthing.py, #213).
+    from .syncthing import HOSTS as SYNCTHING_HOSTS
+    syncthing_domains = sorted(SYNCTHING_HOSTS)
+    # Each account's SSH machines by name (#257) -> its own ssh4_N/ssh6_N,
+    # for the accounts nft.py gives those sets.
+    # A name with a port goes into that port's sets (ssh4_N_222).
+    from .nft import ssh_entry, ssh_entry_kind, ssh_ports, ssh_set_names
+    ssh_groups = []
+    for u in sorted(policy.effective_users(), key=lambda u: u.uid):
+        if u.mode in UNFILTERED_MODES or u.mode == "none" or getattr(u, "ssh_anywhere", False):
+            continue
+        hosts = getattr(u, "ssh_hosts", ())
+        for port in ssh_ports(hosts):
+            names = sorted({host.removeprefix("*.")
+                            for host, p in map(ssh_entry, hosts)
+                            if p == port and ssh_entry_kind(host) == "name"})
+            if names:
+                s4, s6 = ssh_set_names(u.uid, port)
+                ssh_groups.append((f"# SSH machines of uid {u.uid} -> {s4}/{s6}",
+                                   (s4, s6), names))
+
+    # One directive per name, naming every set the name belongs in. dnsmasq
+    # uses only the single nftset= line with the longest matching domain, so
+    # github.com in two lists would have filled one set and not the other,
+    # and a whitelisted sub.example.org would have hidden a system-wide
+    # example.org from it. A name therefore also carries the sets of every
+    # shorter pattern that covers it.
+    groups = (
+        ("# System domains (updates, connectivity check, portal) -> sys4/sys6",
+         ("sys4", "sys6"), system_domains),
+        ("# User whitelists -> wl4/wl6", ("wl4", "wl6"), user_domains),
+        ("# Git over SSH for developer accounts -> git4/git6", ("git4", "git6"), git_domains),
+        ("# Syncthing's discovery and relay list -> st4/st6", ("st4", "st6"), syncthing_domains),
+        *ssh_groups,
+    )
     lines = [
         f"# Rendered by kosherd from policy revision {policy.revision}. DO NOT EDIT.",
-        "",
-        "# System domains (updates, connectivity check, portal) -> sys4/sys6",
     ]
-    lines += [_nftset_line(d, "sys4", "sys6") for d in system_domains]
-    lines += ["", "# User whitelists -> wl4/wl6"]
-    lines += [_nftset_line(d, "wl4", "wl6") for d in user_domains]
+    done: set[str] = set()
+    for heading, _, names in groups:
+        lines += ["", heading]
+        for name in names:
+            if name in done:
+                continue
+            done.add(name)
+            pairs = [pair for _, pair, patterns in groups
+                     if any(_covers(p, name) for p in patterns)]
+            lines.append(_nftset_line(name, *pairs))
     return "\n".join(lines) + "\n"
 
 
@@ -133,15 +213,19 @@ def render_safesearch(policy: Policy) -> str:
     return "\n".join(lines) + "\n"
 
 
-def render_category_blocks(policy: Policy, bundle) -> str:
+def render_category_blocks(policy: Policy, bundle, tailnet: tuple[str, ...] = ()) -> str:
     """dnsmasq entries blocking categorised domains at the DNS layer.
 
     Filtered users are handled precisely in the proxy, which knows who is
-    asking. Users whose traffic is NOT read (dnsfilter, whitelist) can only
-    be served by the resolver, and one resolver cannot answer differently
-    per user — so this blocks the UNION of what those users block. That is
-    a deliberate over-block: with mixed profiles the stricter one wins for
-    everybody on this resolver, which is the safe direction to err.
+    asking, and they never see these: the file is read only by the
+    resolver dnsfilter accounts are sent to (nft.DNSFILTER_DNS_PORT). One
+    resolver cannot answer differently per user, so this blocks the UNION
+    of what the dnsfilter accounts block. That is a deliberate over-block
+    among them: the stricter one wins, which is the safe direction to err.
+
+    `tailnet` is what tailnet.allowance() allows while Tailscale is set up
+    (#211). An address= line here would beat the system list's nftset=
+    line, so a name it covers is left out.
     """
     wanted: set[str] = set()
     for user in policy.effective_users():
@@ -181,10 +265,69 @@ def render_category_blocks(policy: Policy, bundle) -> str:
         lines.append(f"# Blocking {', '.join(sorted(rendered))} for users "
                      "the proxy does not see.")
     for domain in bundle.domains_in(rendered):
+        if _never_blocked(domain, (*tailnet, *RESOLVER_NEVER_BLOCKED,
+                                   *_adblock_never_blocked(policy))):
+            continue
         # 0.0.0.0 rather than NXDOMAIN: a browser shows a connection error
         # instead of retrying elsewhere.
         lines.append(f"address=/{domain}/0.0.0.0")
         lines.append(f"address=/{domain}/::")
+    return "\n".join(lines) + "\n"
+
+
+def _never_blocked(domain: str, allowed) -> bool:
+    return any(_covers(name.removeprefix("*."), domain) for name in allowed)
+
+
+def _adblock_never_blocked(policy) -> tuple[str, ...]:
+    """The payment and fraud-check hosts no resolver refuses (#265): the
+    built-in set and the administrator's additions. `getattr`, because the
+    tests hand these renderers bare policy stubs."""
+    from . import paymentsecurity
+    return tuple(paymentsecurity.combined(getattr(policy, "adblock_allowed", ())))
+
+
+# -- the tailnet --------------------------------------------------------------
+
+# A MagicDNS suffix is a DNS name and nothing else: it goes into a dnsmasq
+# line between slashes, so a slash, a space or a newline in it would be a
+# second directive.
+_SUFFIX = re.compile(r"^(?=.{1,253}$)([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$")
+
+
+def tailnet_name(suffix: str | None) -> str | None:
+    """The MagicDNS suffix as a checked, lower-case DNS name, or None."""
+    name = (suffix or "").strip().rstrip(".").lower()
+    if not name:
+        return None
+    if not _SUFFIX.match(name):
+        log.error("ignoring a tailnet name that is not a DNS name: %r", suffix)
+        return None
+    return name
+
+
+def render_tailnet(suffix: str | None) -> str:
+    """dnsmasq lines sending the tailnet's names to tailscaled.
+
+    tailscaled is run with --accept-dns=false (tailnet.py), so it never
+    rewrites /etc/resolv.conf: dnsmasq stays the only resolver and every
+    account's queries still reach it. MagicDNS keeps answering at
+    100.100.100.100 regardless, and this forwards the one tailnet this
+    computer is signed in to there. Only that tailnet, not all of ts.net:
+    tailscaled forwards a name it does not own back to the system
+    resolver, which is this dnsmasq, and a name of someone else's tailnet
+    would go round in a loop.
+    """
+    lines = ["# Rendered by kosherd from the tailnet this computer is signed in to. "
+             "DO NOT EDIT."]
+    name = (suffix or "").strip().rstrip(".").lower()
+    if not name:
+        lines.append("# Not signed in to a tailnet.")
+    elif not _SUFFIX.match(name):
+        log.error("ignoring a tailnet name that is not a DNS name: %r", suffix)
+        lines.append("# The tailnet's name was not a DNS name; nothing is forwarded.")
+    else:
+        lines.append(f"server=/{name}/{TAILNET_RESOLVER}")
     return "\n".join(lines) + "\n"
 
 
@@ -214,7 +357,15 @@ def render_adblock(policy: Policy, bundle) -> str:
     if not policy.adblock:
         lines.append("# Ad blocking is switched off.")
         return "\n".join(lines) + "\n"
+    # A checkout's fraud check is fingerprinting too, so the tracker lists
+    # carry it; refused, the order fails after the cart is consumed (#265).
+    # Those hosts, and what an administrator added, stay resolvable.
+    reachable = _adblock_never_blocked(policy)
     domains = bundle.domains_in({ADBLOCK_CATEGORY})
-    lines.append(f"# {len(domains)} advertising and tracker domains, for every account.")
-    lines += [f"address=/{domain}/" for domain in domains]
+    kept = [d for d in domains if not _never_blocked(d, reachable)]
+    lines.append(f"# {len(kept)} advertising and tracker domains, for every account.")
+    if len(kept) != len(domains):
+        lines.append(f"# {len(domains) - len(kept)} left reachable: payment and "
+                     "fraud-check hosts a checkout needs (paymentsecurity.py).")
+    lines += [f"address=/{domain}/" for domain in kept]
     return "\n".join(lines) + "\n"

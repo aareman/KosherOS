@@ -31,7 +31,13 @@ check_contains() {
     if printf '%s' "$output" | grep -qi -- "$needle"; then
         ok "$desc"
     else
-        bad "$desc (no '$needle' in: $(printf '%s' "$output" | head -c 120))"
+        # The end of the output, where a command's error is: a podman
+        # failure once showed "Trying to pull..." and nothing of why.
+        if [ "${#output}" -gt 300 ]; then
+            bad "$desc (no '$needle' in: ...$(printf '%s' "$output" | tail -c 300 | tr '\n' ' '))"
+        else
+            bad "$desc (no '$needle' in: $(printf '%s' "$output" | tr '\n' ' '))"
+        fi
     fi
 }
 
@@ -41,8 +47,18 @@ check_contains() {
 wait_for_dns() {
     local i
     for i in $(seq 1 30); do
-        if dig +time=2 +tries=1 +short example.com >/dev/null 2>&1; then
-            return 0
+        # getent where dig is absent (the Fedora 44 cloud base ships none):
+        # without a fallback this returned at once and every check raced
+        # the restarting resolver.
+        if command -v dig >/dev/null 2>&1; then
+            # The dnsfilter accounts' resolver restarts with it, when it runs.
+            if systemctl is-active --quiet kosher-dns-dnsfilter 2>/dev/null; then
+                dig +time=2 +tries=1 +short -p 5356 @127.0.0.1 example.com >/dev/null 2>&1 \
+                    || { sleep 1; continue; }
+            fi
+            dig +time=2 +tries=1 +short example.com >/dev/null 2>&1 && return 0
+        else
+            getent hosts example.com >/dev/null 2>&1 && return 0
         fi
         sleep 1
     done
@@ -76,6 +92,42 @@ wait_for_proxy_as() {
     return 1
 }
 
+# One UDP DNS query, as a user, to a server:port, without dig (the image
+# ships no bind-utils). Exits 0 when an answer came back, 1 otherwise.
+dns_query_as() {
+    runuser -u "$1" -- python3 - "$2" "$3" "$4" <<'PY'
+import os, socket, sys
+server, port, name = sys.argv[1], int(sys.argv[2]), sys.argv[3]
+q = os.urandom(2) + b"\x01\x00\x00\x01\x00\x00\x00\x00\x00\x00"
+for label in name.strip(".").split("."):
+    q += bytes([len(label)]) + label.encode()
+q += b"\x00\x00\x01\x00\x01"
+s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+s.settimeout(4)
+try:
+    s.sendto(q, (server, port))
+    s.recvfrom(512)
+    sys.exit(0)
+except OSError:
+    sys.exit(1)
+PY
+}
+
+# Bring the plain resolver (port 5354) up by adopting an unfiltered
+# account, for checks about it; put the account on "none" afterwards so it
+# cannot reach anything once the check is over.
+with_unfiltered_account() {
+    id freekid >/dev/null 2>&1 || useradd -m freekid
+    kosherctl get-policy 2>/dev/null | grep -q '"freekid"' \
+        || kosherctl adopt freekid unfiltered >/dev/null 2>&1
+    kctl set-mode "$(id -u freekid)" unfiltered >/dev/null
+    wait_for_dns
+    sleep 1
+}
+without_unfiltered_account() {
+    kctl set-mode "$(id -u freekid)" none >/dev/null 2>&1 || true
+}
+
 # assert_that <description> <command...> — passes when the command succeeds.
 assert_that() {
     local desc="$1"
@@ -83,8 +135,27 @@ assert_that() {
     if "$@"; then ok "$desc"; else bad "$desc"; fi
 }
 
-# Run a command as a test user.
-as() { local u="$1"; shift; runuser -u "$u" -- "$@"; }
+# Run a command as a test user, with that user's HOME and USER: runuser
+# alone keeps root's, and a login shell then set up /root's Nix profile
+# on the PATH and could not find what was installed for the account.
+as() {
+    local u="$1" home
+    shift
+    home=$(getent passwd "$u" | cut -d: -f6)
+    runuser -u "$u" -- env HOME="$home" USER="$u" LOGNAME="$u" "$@"
+}
+
+# Run a command as a test user INSIDE a logind session. The polkit rule
+# for the org.kosherlinux.* actions answers only a local, active session
+# (the person at the keyboard); runuser gives none, so a call to kosherd
+# from `as` is refused. A seat-less session is one logind counts as
+# active, which is what PAMName=login makes here. stdin is passed, so a
+# python heredoc works.
+as_session() {
+    local u="$1"
+    shift
+    systemd-run --quiet --pipe --wait --collect --uid="$u" -p PAMName=login "$@"
+}
 
 # HTTP status code a user gets for a URL ("000" means the connection failed).
 http_code_as() {

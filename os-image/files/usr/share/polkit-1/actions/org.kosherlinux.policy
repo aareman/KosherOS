@@ -44,6 +44,19 @@
     </defaults>
   </action>
 
+  <!-- The same setting, chosen by the person for themselves in the Look
+       app. A preference, not a protection: the filter does not care which
+       shell draws the windows. Every active local user, no prompt. -->
+  <action id="org.kosherlinux.set-own-desktop">
+    <description>Choose your own desktop</description>
+    <message>Authentication is required to change your desktop</message>
+    <defaults>
+      <allow_any>no</allow_any>
+      <allow_inactive>no</allow_inactive>
+      <allow_active>yes</allow_active>
+    </defaults>
+  </action>
+
   <action id="org.kosherlinux.manage-users">
     <description>Manage user accounts and profiles</description>
     <message>Authentication is required to manage user profiles</message>

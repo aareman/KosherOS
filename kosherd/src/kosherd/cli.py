@@ -21,10 +21,24 @@ from . import dns, nft, policy as policy_mod
 log = logging.getLogger(__name__)
 
 
-def _client():
-    from .client import DaemonClient  # Gio import deferred: offline cmds need no GObject
+_shared_client = None
 
-    return DaemonClient()
+
+def _client():
+    """The one daemon client for this command.
+
+    It opens the administrator session before its first call that needs
+    one, so a command that reads a setting and then changes it asks for
+    the password once: polkit keeps an answer per action, and a read
+    followed by a change was two prompts on any account that is not an
+    administrator's. Root needs no session; kosherd does not ask root.
+    """
+    global _shared_client
+    if _shared_client is None:
+        from .client import DaemonClient  # Gio import deferred: offline cmds need no GObject
+
+        _shared_client = DaemonClient(unlock_first=os.geteuid() != 0)
+    return _shared_client
 
 
 def _guardian_pw(args) -> str:
@@ -170,6 +184,72 @@ def cmd_set_mode(args) -> int:
     return 0
 
 
+def cmd_developer_tools(args) -> int:
+    """kosherctl developer-tools UID on|off"""
+    on = args.state == "on"
+    _client().set_developer_tools(args.uid, on, _guardian_pw(args))
+    print(f"uid {args.uid}: developer tools {'on' if on else 'off'}")
+    return 0
+
+
+def cmd_ssh_in(args) -> int:
+    """kosherctl ssh-in UID on|off
+
+    May the account be signed in to from another machine over SSH? Keys
+    only: the account adds its public key to ~/.ssh/authorized_keys.
+    Needs developer tools on.
+    """
+    on = args.state == "on"
+    _client().set_ssh_in(args.uid, on, _guardian_pw(args))
+    print(f"uid {args.uid}: sign in over SSH {'on' if on else 'off'}")
+    if on:
+        print("Add the key to ~/.ssh/authorized_keys in that account; passwords are refused.")
+    return 0
+
+
+def cmd_build_sources(args) -> int:
+    """kosherctl build-sources [list | add HOST... | remove HOST...]
+
+    Where a Nix build may download from while an account with developer
+    tools on is on approved sites only (#199): the built-in hosts and the
+    ones an administrator added. Otherwise a build gets the strictest
+    developer account's filter, and this list does not apply.
+    """
+    from . import buildsources
+
+    c = _client()
+    extra = list((c.get_policy().get("developer") or {}).get("build_sources_extra", []))
+    if args.action == "list":
+        print("Used only while an account with developer tools on is on approved sites only.")
+        print("Built in:")
+        for host in buildsources.DEFAULT_BUILD_SOURCES:
+            print(f"  {host}")
+        print("Added:" if extra else "Added: none")
+        for host in extra:
+            print(f"  {host}")
+        return 0
+    if not args.hosts:
+        print(f"name at least one host to {args.action}", file=sys.stderr)
+        return 2
+    try:
+        hosts = [buildsources.normalize(h) for h in args.hosts]
+    except ValueError as e:
+        print(e, file=sys.stderr)
+        return 2
+    if args.action == "add":
+        wanted = list(dict.fromkeys([*extra, *hosts]))
+    else:
+        builtin = [h for h in hosts if h in buildsources.DEFAULT_BUILD_SOURCES]
+        if builtin:
+            print(f"{', '.join(builtin)} is built in and cannot be removed",
+                  file=sys.stderr)
+            return 2
+        wanted = [h for h in extra if h not in hosts]
+    c.set_build_sources(wanted, _guardian_pw(args))
+    print("Nix builds may also download from: " + (", ".join(wanted) or "nothing else"))
+    return 0
+
+
 def cmd_network(args) -> int:
     """kosherctl network UID [--video-calls on|off] [--extra-ports 22,2222|none]"""
     c = _client()
@@ -191,6 +271,28 @@ def cmd_network(args) -> int:
     c.set_network_access(args.uid, video, ports, _guardian_pw(args))
     print(f"uid {args.uid}: video calls {'on' if video else 'off'}; extra ports: "
           + (", ".join(map(str, ports)) or "none"))
+    return 0
+
+
+def cmd_ssh(args) -> int:
+    """kosherctl ssh UID [--hosts nas.example.org,git.example.org:222,10.0.0.5,tailnet|none]
+    [--anywhere on|off]"""
+    c = _client()
+    user = next((u for u in c.get_policy().get("users", []) if u.get("uid") == args.uid), None)
+    if user is None:
+        print(f"uid {args.uid} is not managed", file=sys.stderr)
+        return 1
+    hosts = list(user.get("ssh_hosts", []))
+    anywhere = bool(user.get("ssh_anywhere", False))
+    if args.hosts is not None:
+        hosts = [] if args.hosts.strip().lower() in ("", "none") else \
+            [h.strip() for h in args.hosts.split(",") if h.strip()]
+    if args.anywhere:
+        anywhere = args.anywhere == "on"
+    if args.hosts is not None or args.anywhere:
+        c.set_ssh(args.uid, anywhere, hosts, _guardian_pw(args))
+    where = "anywhere" if anywhere else (", ".join(hosts) if hosts else "no other machine")
+    print(f"uid {args.uid}: ssh to {where}")
     return 0
 
 
@@ -230,14 +332,14 @@ def cmd_rules(args) -> int:
         rules = user.get("rules", [])
         print(f"{len(rules)} rule(s) for {user['username']} (mode: {user['mode']})")
         for i, r in enumerate(rules, 1):
-            print(f"  {i}. {r['action']:5} {r['pattern']}")
+            print(f"  {i}. {r['action']:8} {r['pattern']}")
         if rules and user["mode"] != "filtered":
             print("  note: rules only apply in filtered mode", file=sys.stderr)
         return 0
 
     user = next((u for u in c.get_policy()["users"] if u["uid"] == args.uid), None)
     rules = list(user.get("rules", [])) if user else []
-    if args.action in ("allow", "block"):
+    if args.action in ("allow", "block", "bypass", "pictures"):
         rules.append({"action": args.action, "pattern": args.pattern})
     elif args.action == "remove":
         index = int(args.pattern) - 1
@@ -399,6 +501,16 @@ def cmd_apps(args) -> int:
     from kosherd import appaccess, appkinds
 
     c = _client()
+    if args.action == "install":
+        # For an account: a nixpkgs app lands in that account's own
+        # profile, which is why "for" exists. Queued; the outcome is on
+        # the AppProgress/AppFinished signals, as in the Store.
+        if len(args.values) != 1:
+            print("usage: kosherctl apps install <uid> <app>", file=sys.stderr)
+            return 2
+        c.install_app_for(args.uid, args.values[0])
+        print(f"queued {args.values[0]} for uid {args.uid}")
+        return 0
     if args.action == "kinds":
         for key in appkinds.KIND_KEYS:
             print(f"  {key:<10} {appkinds.label(key)}")
@@ -417,6 +529,33 @@ def cmd_apps(args) -> int:
         print("  blocked kinds: " + (", ".join(kinds) if kinds else "none"))
         print("  blocked apps:  " + (", ".join(blocked) if blocked else "none"))
         print("  can install:   " + ("yes" if user.get("can_install_apps", True) else "no"))
+        approved = list(user.get("approved_apps", []))
+        print("  allowed here:  " + (", ".join(approved) if approved else "none"))
+        print("  Syncthing from this network: "
+              + ("on" if user.get("syncthing_lan") else "off"))
+        return 0
+    if args.action in ("approve", "unapprove"):
+        # Per account, for the apps that need it (Syncthing, #213).
+        if len(args.values) != 1:
+            print(f"usage: kosherctl apps {args.action} <uid> <app>", file=sys.stderr)
+            return 2
+        ref = args.values[0]
+        if ref not in appaccess.INDIVIDUAL_APPROVAL:
+            print(f"{ref} is approved for the whole computer, not per account "
+                  "(the admin app's approved list)", file=sys.stderr)
+            return 2
+        c.set_user_app_approval(args.uid, ref, args.action == "approve", _guardian_pw(args))
+        print(f"{user['username']}: {ref} "
+              + ("allowed" if args.action == "approve" else "no longer allowed"))
+        return 0
+    if args.action == "syncthing-lan":
+        if args.values[:1] not in (["on"], ["off"]):
+            print("usage: kosherctl apps syncthing-lan <uid> on|off", file=sys.stderr)
+            return 2
+        on = args.values[0] == "on"
+        c.set_syncthing_lan(args.uid, on, _guardian_pw(args))
+        print(f"{user['username']}: devices on this network "
+              + ("may connect to Syncthing directly" if on else "may not connect to Syncthing"))
         return 0
     if args.action == "access":
         if args.values[:1] not in (["approved"], ["store"]):
@@ -445,6 +584,80 @@ def cmd_apps(args) -> int:
     return 2
 
 
+def _size_words(size: int) -> str:
+    """'412 MB', or '-' when the daemon does not know (a nixpkgs app)."""
+    if not size:
+        return "-"
+    if size >= 1024 ** 3:
+        return f"{size / 1024 ** 3:.1f} GB"
+    return f"{max(1, round(size / 1024 ** 2))} MB"
+
+
+def cmd_store(args) -> int:
+    """What is installed from the Store, what has an update, and updating.
+
+    The Store window has had these for a while; over ssh, in a VM suite
+    or on a support call, "what is installed and is it current" needs an
+    answer from a shell too. Nothing new in the daemon: every method here
+    is the one the Store calls.
+    """
+    c = _client()
+    if args.action == "installed":
+        try:
+            details = c.list_installed_details()
+        except Exception:  # noqa: BLE001 - an older daemon has only the refs
+            details = [{"ref": r, "name": r} for r in c.list_installed()]
+        if not details:
+            print("nothing is installed from the Store")
+            return 0
+        for app in sorted(details, key=lambda a: (a.get("name") or a["ref"]).lower()):
+            by = app.get("installed_by") or ""
+            print(f"  {app['ref']:<42} {(app.get('name') or ''):<26} "
+                  f"{_size_words(app.get('size', 0)):>8}  {by}")
+        print(f"{len(details)} installed")
+        return 0
+    if args.action == "updates":
+        found = c.check_app_updates() if args.check else c.list_app_updates()
+        if not found:
+            print("everything installed from the Store is up to date"
+                  + ("" if args.check else " (as far as this computer knows; --check asks the store)"))
+            return 0
+        for app in found:
+            version = app.get("version") or app.get("commit") or ""
+            latest = app.get("latest") or ""
+            print(f"  {app['ref']:<42} {(app.get('name') or ''):<26} "
+                  f"{version} -> {latest}" if latest else
+                  f"  {app['ref']:<42} {(app.get('name') or ''):<26} {version}")
+        print(f"{len(found)} with an update; 'kosherctl store update --all' takes them")
+        return 0
+    if args.action == "clean":
+        leftovers = c.list_unused_apps()
+        if not leftovers:
+            print("nothing to clean up: every installed runtime is in use")
+            return 0
+        for item in leftovers:
+            print(f"  {item['ref']:<56} {_size_words(item.get('size', 0)):>8}")
+        summary = c.remove_unused_apps()
+        print(f"removing {summary['count']} leftover runtime{'s' if summary['count'] != 1 else ''}"
+              f" ({_size_words(summary['size'])}); the Store shows the progress")
+        return 0
+    if args.action == "update":
+        if args.all:
+            count = c.update_all_apps()
+            print(f"queued {count} update{'s' if count != 1 else ''}"
+                  if count else "nothing to update")
+        elif not args.apps:
+            print("usage: kosherctl store update <app>... | --all", file=sys.stderr)
+            return 2
+        else:
+            for ref in args.apps:
+                c.update_app(ref)
+                print(f"queued {ref}")
+        print("the Store shows the progress; 'kosherctl store updates' says what is left")
+        return 0
+    return 2
+
+
 def cmd_layout(args) -> int:
     from .policy import LAYOUT_LABELS
 
@@ -465,10 +678,51 @@ def cmd_cover(args) -> int:
 
 
 def cmd_adblock(args) -> int:
+    """kosherctl adblock on | off | allowed | allow HOST... | disallow HOST...
+
+    Ads and trackers blocked at the resolvers for every account. `allow`
+    names a host the blocker leaves reachable although the tracker lists
+    carry it (#265): a checkout's fraud check looks like a tracker, and a
+    shop that cannot run it declines the order. The payment-security hosts
+    are built in; this is for the next one.
+    """
+    from . import paymentsecurity
+
     c = _client()
-    on = args.state == "on"
-    c.set_adblock(on, _guardian_pw(args) if not on else "")
-    print(f"ad and tracker blocking {'on' if on else 'off'} for every account")
+    if args.action in ("on", "off"):
+        on = args.action == "on"
+        c.set_adblock(on, _guardian_pw(args) if not on else "")
+        print(f"ad and tracker blocking {'on' if on else 'off'} for every account")
+        return 0
+    extra = list((c.get_policy().get("adblock") or {}).get("allowed", []))
+    if args.action == "allowed":
+        print("Left reachable by the ad blocker, and by the proxy's category lists:")
+        print("Built in (payment and fraud checks a checkout needs):")
+        for host in paymentsecurity.PAYMENT_SECURITY_HOSTS:
+            print(f"  {host}")
+        print("Added:" if extra else "Added: none")
+        for host in extra:
+            print(f"  {host}")
+        return 0
+    if not args.hosts:
+        print(f"name at least one host to {args.action}", file=sys.stderr)
+        return 2
+    try:
+        hosts = [paymentsecurity.normalize(h) for h in args.hosts]
+    except ValueError as e:
+        print(e, file=sys.stderr)
+        return 2
+    if args.action == "allow":
+        wanted = list(dict.fromkeys([*extra, *hosts]))
+    else:
+        builtin = [h for h in hosts if paymentsecurity.is_builtin(h)]
+        if builtin:
+            print(f"{', '.join(builtin)} is built in and cannot be removed; "
+                  "a URL rule blocks it for one account", file=sys.stderr)
+            return 2
+        wanted = [h for h in extra if h not in hosts]
+    c.set_adblock_allowed(wanted, _guardian_pw(args))
+    print("The ad blocker also leaves reachable: " + (", ".join(wanted) or "nothing else"))
     return 0
 
 
@@ -631,6 +885,34 @@ def cmd_system(args) -> int:
         print(_deployment_line("go back to", st.get("rollback")))
         if st.get("rollback_queued"):
             print("  a rollback is already queued for the next restart")
+        if st.get("kept"):
+            print(_deployment_line("kept", st["kept"]))
+            print("             while builds are tried; "
+                  "'kosherctl system try done' returns to it")
+        return 0
+    if args.action == "try":
+        what = (args.value or "").strip()
+        if not what:
+            print("say which build to try: a pull request number (kosherctl "
+                  "system try 123), a tag, or 'done' to go back to the version "
+                  "kept", file=sys.stderr)
+            return 2
+        if what == "done":
+            st = c.deployment_status()
+            kept = st.get("kept")
+            if not kept:
+                print("nothing is kept: this computer is not trying a build",
+                      file=sys.stderr)
+                return 1
+            c.return_to_kept()
+            print(f"going back to {kept.get('version') or 'the kept version'} "
+                  f"({kept.get('image') or 'unknown image'}) at the next restart")
+            return 0
+        c.try_image(what, _guardian_pw(args))
+        print(f"trying {what}; the download runs in the background, a notice "
+              "says when it is ready, and the build is used from the next restart\n"
+              "the version running now is kept: 'kosherctl system try done' "
+              "returns to it, 'kosherctl system status' shows both")
         return 0
     if args.action == "check":
         print(check_sentence(c.check_update()))
@@ -646,7 +928,7 @@ def cmd_system(args) -> int:
             print("there is no previous version to go back to",
                   file=sys.stderr)
             return 1
-        c.rollback()
+        c.rollback(_guardian_pw(args))
         print(f"going back to {target.get('version') or 'the previous version'}"
               " at the next restart")
         return 0
@@ -806,7 +1088,9 @@ def cmd_setup(args) -> int:
         password = sys.stdin.readline().rstrip("\n")
         uid = c.create_first_admin(args.username, args.full_name or args.username,
                                    password)
-        c.finish_setup(args.guardian_password or "", "")
+        # The boot menu takes the administrator's password (#129), as the
+        # wizard does by default.
+        c.finish_setup(args.guardian_password or "", password)
         print(f"created {args.username} (uid {uid}); setup complete")
         return 0
 
@@ -868,8 +1152,9 @@ def cmd_setup(args) -> int:
                 break
             console.say("  At least 6 characters, and both must match.")
 
-    c.finish_setup(guardian, "")
-    console.say("\nSetup complete. Starting the login screen.\n")
+    c.finish_setup(guardian, password)
+    console.say("\nSetup complete. The boot menu takes the administrator's password.")
+    console.say("Starting the login screen.\n")
     return 0
 
 
@@ -877,10 +1162,19 @@ def check_sentence(info: dict) -> str:
     """One line from a CheckUpdate answer."""
     if info.get("available"):
         where = f" on the {info['channel']} channel" if info.get("channel") else ""
+        if info.get("on_disk") == "staged":
+            return f"update downloaded: {info.get('version') or 'a new version'}; restart to use it"
+        if info.get("on_disk") == "rollback":
+            return (f"newest{where}: {info.get('version') or 'a newer version'}, already on this "
+                    f"computer as the version you went back from (rollback returns to it)")
         return (f"update available: {info['version']}{where}" if info.get("version")
                 else f"update available{where}")
     if info.get("available") is False:
         return "up to date"
+    if info.get("ok") is False:
+        # Not "up to date": nothing was learned (#207).
+        reason = info.get("error") or "the update check failed"
+        return f"could not check for updates: {reason}"
     return (info.get("raw") or "").strip() or "no update information"
 
 
@@ -888,18 +1182,76 @@ def cmd_check_catalog(args) -> int:
     """Verify every approved app actually exists on the remote."""
     from kosherd import apps
 
+    from kosherd import accountapps
+
     available = apps.available_refs()
     catalog = apps.load_catalog().get("apps", [])
-    missing = [a["ref"] for a in catalog if a["ref"] not in available]
+    missing = []
+    for a in catalog:
+        if accountapps.is_account_app(a["ref"]):
+            # Asked of nixpkgs or the developer; None is "cannot say here".
+            if accountapps.exists(a["ref"]) is False:
+                missing.append(a["ref"])
+        elif a["ref"] not in available:
+            missing.append(a["ref"])
     print(f"{len(catalog)} approved apps, {len(missing)} unavailable")
     for ref in missing:
         print(f"  MISSING: {ref}", file=sys.stderr)
     return 1 if missing else 0
 
 
+def cmd_advanced(args) -> int:
+    """kosherctl advanced [tailscale|syncthing|keyd [on|off]]"""
+    c = _client()
+    if args.feature and args.value:
+        on = args.value == "on"
+        setter = {"tailscale": c.set_tailscale_enabled,
+                  "syncthing": c.set_syncthing_enabled,
+                  "keyd": c.set_keyd_enabled}[args.feature]
+        setter(on, _guardian_pw(args))
+        print(f"{args.feature}: {'on' if on else 'off'}")
+        return 0
+    advanced = c.get_policy().get("advanced") or {}
+    for feature in ([args.feature] if args.feature else ["tailscale", "syncthing", "keyd"]):
+        print(f"{feature}: {'on' if advanced.get(feature) else 'off'}")
+    return 0
+
+
 def cmd_captive(args) -> int:
     _client().set_captive_mode(args.uid, args.minutes)
     print(f"captive-portal window open for uid {args.uid} ({args.minutes}m)")
+    return 0
+
+
+def cmd_tailscale(args) -> int:
+    """kosherctl tailscale [status|sign-in|sign-out]"""
+    c = _client()
+    if args.action == "sign-in":
+        url = c.tailscale_sign_in(_guardian_pw(args))
+        print(f"Open this address to finish signing in:\n  {url}" if url
+              else "Signed in again; no sign-in page was needed.")
+        return 0
+    if args.action == "sign-out":
+        c.tailscale_sign_out()
+        print("signed out of Tailscale")
+        return 0
+    now = c.tailscale_status()
+    if args.json:
+        print(json.dumps(now, indent=2))
+    elif not now.get("installed", True):
+        print("Tailscale is not installed")
+    elif not now.get("enabled", True):
+        print("Tailscale is switched off on this computer (kosherctl advanced tailscale on)")
+    elif not now.get("signed_in"):
+        print(f"not signed in ({now.get('state')})"
+              + (f": {now['error']}" if now.get("error") else ""))
+        if now.get("login_url"):
+            print(f"waiting for sign-in at {now['login_url']}")
+    else:
+        print(f"signed in as {now.get('user')} on {now.get('tailnet')}, "
+              + ("connected" if now.get("connected") else f"not connected ({now.get('state')})"))
+        print(f"this computer: {now.get('name')} "
+              f"({', '.join(now.get('addresses') or []) or 'no address yet'})")
     return 0
 
 
@@ -917,6 +1269,88 @@ def cmd_guardian(args) -> int:
         c.disable_guardian(getpass.getpass("Guardian password: "))
         print("guardian mode disabled")
     return 0
+
+
+AUTO_WORDS = {"off": "off", "daily": "every day", "weekly": "every week",
+              "biweekly": "every 2 weeks", "monthly": "every month"}
+
+
+def _when(stamp) -> str:
+    import time as _time
+
+    if not stamp:
+        return "never"
+    return _time.strftime("%a %d %b %H:%M", _time.localtime(float(stamp)))
+
+
+def cmd_updates(args) -> int:
+    """Automatic updates (#19): the schedule, the notice, and the run the
+    timer starts."""
+    c = _client()
+    value = (args.value or "").strip().lower()
+    if args.action == "run":
+        try:
+            result = c.run_auto_update(now=args.now)
+        except Exception:  # noqa: BLE001 - kosherd logs it; the timer tries again
+            if args.quiet:
+                return 0
+            raise
+        if not args.quiet:
+            print(auto_run_sentence(result))
+        return 1 if result.get("result") == "failed" and not args.quiet else 0
+    st = c.auto_update_status()
+    if args.action == "auto" and value:
+        if value in ("every-2-weeks", "fortnightly"):
+            value = "biweekly"
+        if value not in AUTO_WORDS:
+            print(f"unknown schedule: {args.value} (off, daily, weekly, biweekly or monthly)",
+                  file=sys.stderr)
+            return 2
+        c.set_auto_updates(value, bool(st.get("notify", True)))
+        print("automatic updates are off; 'kosherctl system check' still checks by hand"
+              if value == "off" else
+              f"this computer looks for updates {AUTO_WORDS[value]} and downloads them; "
+              "it never restarts on its own")
+        return 0
+    if args.action == "notify" and value:
+        if value not in ("on", "off"):
+            print("say on or off", file=sys.stderr)
+            return 2
+        c.set_auto_updates(st.get("schedule") or "weekly", value == "on")
+        print("people are told once when an update is ready" if value == "on"
+              else "no pop-up when an update is ready; the mark in the panel still shows")
+        return 0
+    schedule = st.get("schedule") or "weekly"
+    print(f"automatic updates: {AUTO_WORDS.get(schedule, schedule)}")
+    print(f"notice when ready: {'on' if st.get('notify', True) else 'off'}")
+    print(f"last check that worked: {_when(st.get('last_success'))}")
+    if st.get("last_error") and (st.get("last_attempt") or 0) >= (st.get("last_success") or 0):
+        print(f"last try failed ({_when(st.get('last_attempt'))}): {st['last_error']}")
+    if schedule != "off":
+        due = st.get("next_due")
+        print("next check: " + ("at the next daily run" if not due else f"from {_when(due)}"))
+    pending = st.get("pending")
+    if pending:
+        print(f"waiting for a restart: {pending.get('version') or 'an update'}")
+    return 0
+
+
+def auto_run_sentence(result: dict) -> str:
+    """One line from a RunAutoUpdate answer."""
+    what = result.get("result")
+    version = result.get("version") or "a new version"
+    if what == "skipped":
+        return f"not checking: {result.get('reason')}"
+    if what == "failed":
+        return f"could not check for updates, will try again at the next run: {result.get('error')}"
+    if what == "downloading":
+        return f"downloading {version} in the background; it is used from the next restart"
+    if what == "staged":
+        return f"{version} is already downloaded; restart to use it"
+    if what == "left":
+        return (f"the newest is {version}, the version this computer went back from; "
+                "it is not downloaded again on its own")
+    return "up to date"
 
 
 def cmd_update(args) -> int:
@@ -992,6 +1426,29 @@ def main(argv: list[str] | None = None) -> int:
     s.set_defaults(func=cmd_log)
     sub.add_parser("get-policy", help="dump the full policy JSON").set_defaults(func=cmd_get_policy)
 
+    s = sub.add_parser("developer-tools",
+                       help="may an account use nix, devbox and devenv itself (and the registries)")
+    s.add_argument("uid", type=int)
+    s.add_argument("state", choices=["on", "off"])
+    s.add_argument("--guardian-password")
+    s.set_defaults(func=cmd_developer_tools)
+
+    s = sub.add_parser("ssh-in",
+                       help="may an account with developer tools be signed in to over SSH, "
+                            "with a key")
+    s.add_argument("uid", type=int)
+    s.add_argument("state", choices=["on", "off"])
+    s.add_argument("--guardian-password")
+    s.set_defaults(func=cmd_ssh_in)
+
+    s = sub.add_parser("build-sources",
+                       help="where a Nix build may download from while a developer account "
+                            "is on approved sites only")
+    s.add_argument("action", nargs="?", default="list", choices=["list", "add", "remove"])
+    s.add_argument("hosts", nargs="*")
+    s.add_argument("--guardian-password")
+    s.set_defaults(func=cmd_build_sources)
+
     s = sub.add_parser("network",
                        help="what an account may reach beyond the web: video calls, extra ports")
     s.add_argument("uid", type=int)
@@ -999,6 +1456,14 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("--extra-ports", help="comma-separated TCP ports, or 'none'")
     s.add_argument("--guardian-password")
     s.set_defaults(func=cmd_network)
+
+    s = sub.add_parser("ssh", help="which other machines an account may ssh to (#257)")
+    s.add_argument("uid", type=int)
+    s.add_argument("--hosts", help="comma-separated names, addresses, ranges or 'tailnet', "
+                                   "each with :PORT if not 22; or 'none'")
+    s.add_argument("--anywhere", choices=["on", "off"])
+    s.add_argument("--guardian-password")
+    s.set_defaults(func=cmd_ssh)
 
     s = sub.add_parser("set-mode", help="change a user's filter mode")
     s.add_argument("uid", type=int)
@@ -1030,9 +1495,12 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("mode", choices=policy_mod.MODES)
     s.set_defaults(func=cmd_adopt)
 
-    s = sub.add_parser("rules", help="URL allow/block rules (inspect mode)")
+    s = sub.add_parser("rules", help="URL rules: block, allow, pictures or bypass (filtered mode)")
     s.add_argument("uid", type=int)
-    s.add_argument("action", choices=["list", "allow", "block", "remove", "clear"])
+    s.add_argument("action", choices=["list", "allow", "block", "pictures", "bypass", "remove", "clear"],
+                   help="allow opens the page but still filters its pictures, video "
+                        "and words; pictures also shows its pictures; bypass filters "
+                        "nothing on it")
     s.add_argument("pattern", nargs="?", default="",
                    help="URL pattern, or the rule number for 'remove'")
     s.add_argument("--guardian-password")
@@ -1104,7 +1572,10 @@ def main(argv: list[str] | None = None) -> int:
     s.set_defaults(func=cmd_language)
 
     s = sub.add_parser("adblock", help="block ads and trackers for every account (like a Pi-hole)")
-    s.add_argument("state", choices=["on", "off"])
+    s.add_argument("action", choices=["on", "off", "allowed", "allow", "disallow"],
+                   help="on/off for everyone; allowed lists the hosts it leaves reachable; "
+                        "allow/disallow HOST... change that list")
+    s.add_argument("hosts", nargs="*")
     s.add_argument("--guardian-password")
     s.set_defaults(func=cmd_adblock)
 
@@ -1134,12 +1605,24 @@ def main(argv: list[str] | None = None) -> int:
 
     s = sub.add_parser("apps", help="what the Store offers a user, and what is blocked")
     s.add_argument("action", choices=["show", "access", "block-kind", "unblock-kind",
-                                      "block", "unblock", "kinds"])
+                                      "block", "unblock", "kinds", "install",
+                                      "approve", "unapprove", "syncthing-lan"])
     s.add_argument("uid", type=int, nargs="?", default=0)
     s.add_argument("values", nargs="*", default=[],
-                   help="approved|store, kinds (see 'kinds'), or app ids")
+                   help="approved|store, kinds (see 'kinds'), app ids, "
+                        "for 'install' the app to install for that account, "
+                        "for 'approve'/'unapprove' the app to allow for that account "
+                        "alone (nixpkgs#syncthing), for 'syncthing-lan' on|off")
     s.add_argument("--guardian-password")
     s.set_defaults(func=cmd_apps)
+
+    s = sub.add_parser("store", help="what is installed from the Store, and updates")
+    s.add_argument("action", choices=["installed", "updates", "update", "clean"])
+    s.add_argument("apps", nargs="*", default=[], help="apps to update (update)")
+    s.add_argument("--check", action="store_true",
+                   help="ask the store for news before listing updates")
+    s.add_argument("--all", action="store_true", help="update everything that has an update")
+    s.set_defaults(func=cmd_store)
 
     s = sub.add_parser("categories", help="content categories to block for a user")
     s.add_argument("uid", type=int, nargs="?", default=0)
@@ -1157,12 +1640,14 @@ def main(argv: list[str] | None = None) -> int:
 
     s = sub.add_parser("system",
                        help="which system version is running, which channel "
-                            "it follows, and going back")
+                            "it follows, going back, and trying a build")
     s.add_argument("action",
-                   choices=["status", "check", "update", "rollback", "channel"])
+                   choices=["status", "check", "update", "rollback", "channel", "try"])
     s.add_argument("value", nargs="?", default="",
-                   help="with 'channel': the channel to switch to "
-                        "(omit to list them)")
+                   help="with 'channel': the channel to switch to (omit to "
+                        "list them); with 'try': a pull request number or a "
+                        "tag to run while keeping the current version, or "
+                        "'done' to return to the kept one")
     s.add_argument("--guardian-password")
     s.set_defaults(func=cmd_system)
 
@@ -1189,9 +1674,34 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("minutes", type=int, nargs="?", default=5)
     s.set_defaults(func=cmd_captive)
 
+    s = sub.add_parser("tailscale", help="this computer's Tailscale sign-in")
+    s.add_argument("action", nargs="?", default="status",
+                   choices=["status", "sign-in", "sign-out"])
+    s.add_argument("--json", action="store_true", help="status as JSON")
+    s.add_argument("--guardian-password")
+    s.set_defaults(func=cmd_tailscale)
+
+    s = sub.add_parser("advanced", help="Tailscale, Syncthing and key remapping, off until switched on")
+    s.add_argument("feature", nargs="?", choices=["tailscale", "syncthing", "keyd"])
+    s.add_argument("value", nargs="?", choices=["on", "off"])
+    s.add_argument("--guardian-password")
+    s.set_defaults(func=cmd_advanced)
+
     s = sub.add_parser("guardian", help="manage the guardian password")
     s.add_argument("action", choices=["enable", "set-password", "disable"])
     s.set_defaults(func=cmd_guardian)
+
+    s = sub.add_parser("updates", help="automatic OS updates: how often, and the notice")
+    s.add_argument("action", nargs="?", default="status",
+                   choices=["status", "auto", "notify", "run"])
+    s.add_argument("value", nargs="?", default="",
+                   help="with 'auto': off, daily, weekly, biweekly or monthly; "
+                        "with 'notify': on or off")
+    s.add_argument("--now", action="store_true",
+                   help="with 'run': check even when the next check is not due yet")
+    s.add_argument("--quiet", action="store_true",
+                   help="with 'run': say nothing (the timer's way)")
+    s.set_defaults(func=cmd_updates)
 
     s = sub.add_parser("update", help="check for or apply OS updates")
     s.add_argument("--apply", action="store_true")

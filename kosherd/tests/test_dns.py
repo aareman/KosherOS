@@ -204,3 +204,132 @@ def test_nothing_is_rendered_when_no_account_needs_safe_search():
     out = dns.render_safesearch(Policy(revision=1, users=[
         UserPolicy(uid=1001, username="a", mode="unfiltered")]))
     assert "cname=" not in out and "host-record=" not in out
+
+
+# -- git over SSH, and names in more than one list (#164) -----------------------
+
+def test_the_git_hosts_feed_the_git_sets():
+    from kosherd.nft import GIT_SSH_HOSTS
+
+    out = dns.render(Policy())
+    for host in GIT_SSH_HOSTS:
+        assert f"nftset=/{host}/4#inet#kosher#git4,6#inet#kosher#git6" in out
+
+
+def test_a_name_in_two_lists_fills_both_sets_from_one_line():
+    # dnsmasq uses one nftset= line per name (the longest match), so a
+    # second line for github.com would have been ignored.
+    from kosherd.policy import UserPolicy
+
+    dev = UserPolicy(uid=1002, username="dev", mode="whitelist", developer_tools=True)
+    out = dns.render(Policy(users=[dev]))
+    lines = [l for l in out.splitlines() if l.startswith("nftset=/github.com/")]
+    assert lines == ["nftset=/github.com/4#inet#kosher#wl4,6#inet#kosher#wl6,"
+                     "4#inet#kosher#git4,6#inet#kosher#git6"]
+    names = [l.split("/")[1] for l in out.splitlines() if l.startswith("nftset=")]
+    assert len(names) == len(set(names))
+
+
+def test_a_longer_name_keeps_the_sets_of_the_pattern_that_covers_it():
+    from kosherd.policy import UserPolicy
+
+    kid = UserPolicy(uid=1001, username="kid", mode="whitelist",
+                     whitelist=["example.org", "docs.example.org"])
+    pol = Policy(users=[kid], system_whitelist=["docs.example.org"])
+    out = dns.render(pol)
+    assert ("nftset=/docs.example.org/4#inet#kosher#sys4,6#inet#kosher#sys6,"
+            "4#inet#kosher#wl4,6#inet#kosher#wl6") in out
+    assert "nftset=/example.org/4#inet#kosher#wl4,6#inet#kosher#wl6" in out
+
+
+# -- the dnsfilter accounts' own resolver (#183, #189) ------------------------
+
+FILES = Path(__file__).parents[2] / "os-image" / "files"
+
+
+def _conf_dirs(conf: str) -> list[str]:
+    return [l.split("=", 1)[1].split(",")[0] for l in conf.splitlines()
+            if l.startswith("conf-dir=")]
+
+
+def test_category_blocks_are_read_by_the_dnsfilter_resolver_alone():
+    # In the family resolver they answered filtered accounts and the proxy
+    # as well, so a blocked site was refused by DNS and the proxy's block
+    # page never came: Firefox sat on a blank page.
+    from kosherd import nft
+
+    family = (FILES / "etc/kosher/dnsmasq.conf").read_text()
+    dnsfilter = (FILES / "etc/kosher/dnsmasq-dnsfilter.conf").read_text()
+    where = str(Path(dns.CATEGORY_BLOCK_CONF).parent) + "/"
+    assert where not in _conf_dirs(family)
+    assert where in _conf_dirs(dnsfilter)
+    # It still has everything the family resolver has: safe search, ads,
+    # the whitelist sets, and the family upstream.
+    assert "/etc/kosher/dnsmasq.d/" in _conf_dirs(dnsfilter)
+    assert "server=1.1.1.3" in dnsfilter
+    assert f"port={nft.DNSFILTER_DNS_PORT}" in dnsfilter
+    # dnsmasq refuses to start on a conf-dir that does not exist.
+    assert any((FILES / "etc/kosher/dnsmasq-dnsfilter.d").glob("*.conf"))
+    unit = (FILES / "usr/lib/systemd/system/kosher-dns-dnsfilter.service").read_text()
+    assert "--conf-file=/etc/kosher/dnsmasq-dnsfilter.conf" in unit
+
+
+def test_every_answer_of_the_dnsfilter_resolver_opens_its_address():
+    # The firewall lets a dnsfilter account connect only to an address in
+    # dns4/dns6, so the resolver must put every answer there (#189).
+    dnsfilter = (FILES / "etc/kosher/dnsmasq-dnsfilter.conf").read_text()
+    assert "nftset=/#/4#inet#kosher#dns4,6#inet#kosher#dns6" in dnsfilter.splitlines()
+    family = (FILES / "etc/kosher/dnsmasq.conf").read_text()
+    assert "kosher#dns4" not in family
+
+
+def test_the_dnsfilter_resolver_port_is_labelled_for_dnsmasq():
+    from kosherd import nft
+
+    containerfile = (FILES.parent / "Containerfile").read_text()
+    for proto in ("udp", "tcp"):
+        assert f"semanage port -a -t dns_port_t -p {proto} {nft.DNSFILTER_DNS_PORT}" in containerfile
+
+
+# -- SSH to other machines (#257) ---------------------------------------------------
+
+def test_an_accounts_ssh_names_feed_its_own_sets():
+    from kosherd.policy import UserPolicy
+
+    u = UserPolicy(uid=1003, username="s", mode="filtered",
+                   ssh_hosts=["NAS.example.org", "10.0.0.5", "tailnet"])
+    out = dns.render(Policy(users=[u]))
+    assert "nftset=/nas.example.org/4#inet#kosher#ssh4_1003,6#inet#kosher#ssh6_1003" in out
+    assert "nftset=/10.0.0.5" not in out and "nftset=/tailnet" not in out
+
+
+def test_a_name_with_a_port_feeds_that_ports_sets():
+    from kosherd.policy import UserPolicy
+
+    u = UserPolicy(uid=1003, username="s", mode="filtered",
+                   ssh_hosts=["nas.example.org", "git.example.org:222"])
+    out = dns.render(Policy(users=[u]))
+    assert "nftset=/nas.example.org/4#inet#kosher#ssh4_1003,6#inet#kosher#ssh6_1003" in out
+    assert ("nftset=/git.example.org/4#inet#kosher#ssh4_1003_222,"
+            "6#inet#kosher#ssh6_1003_222") in out
+    assert "git.example.org:222" not in out
+
+
+def test_ssh_anywhere_and_unfiltered_accounts_get_no_ssh_set():
+    from kosherd.policy import UserPolicy
+
+    for u in (UserPolicy(uid=1003, username="s", mode="filtered", ssh_hosts=["nas.example.org"],
+                         ssh_anywhere=True),
+              UserPolicy(uid=1003, username="s", mode="unfiltered", ssh_hosts=["nas.example.org"])):
+        assert "ssh4_1003" not in dns.render(Policy(users=[u]))
+
+
+def test_a_whitelisted_name_on_the_ssh_list_fills_both_sets_from_one_line():
+    from kosherd.policy import UserPolicy
+
+    u = UserPolicy(uid=1003, username="s", mode="whitelist", whitelist=["nas.example.org"],
+                   ssh_hosts=["nas.example.org"])
+    lines = [l for l in dns.render(Policy(users=[u])).splitlines()
+             if l.startswith("nftset=/nas.example.org/")]
+    assert lines == ["nftset=/nas.example.org/4#inet#kosher#wl4,6#inet#kosher#wl6,"
+                     "4#inet#kosher#ssh4_1003,6#inet#kosher#ssh6_1003"]

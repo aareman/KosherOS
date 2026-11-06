@@ -18,10 +18,14 @@ edits take effect without a restart.
 from __future__ import annotations
 
 import base64
+import hashlib
+import hmac
 import ipaddress
 import json
 import logging
 import re
+import secrets
+from collections import OrderedDict
 from pathlib import Path
 from urllib.parse import urlencode, urlsplit
 
@@ -38,14 +42,17 @@ try:
     from kosherd import imageedit as imageedit_mod
     from kosherd import language as language_mod
     from kosherd import accessreq as accessreq_mod
+    from kosherd import buildsources as buildsources_mod
     from kosherd import activity as activity_mod
+    from kosherd import calm as calm_mod
     from kosherd import search as search_mod
     from kosherd import siterules as siterules_mod
     from kosherd import suggest as suggest_mod
+    from kosherd import usage as usage_mod
     from kosherd import videocheck as videocheck_mod
     from kosherd import vision as vision_mod
     from kosherd.uidmap import UidLookup
-    from kosherd.urlrules import BLOCK, decide, parse_rules
+    from kosherd.urlrules import BLOCK, BYPASS, PICTURES, decide, parse_rules
 except ImportError:  # pragma: no cover - only when interpreters differ
     # mitmproxy may run under a different interpreter than the one kosherd
     # is installed for. Discover site-packages instead of hardcoding a
@@ -61,14 +68,17 @@ except ImportError:  # pragma: no cover - only when interpreters differ
     from kosherd import imageedit as imageedit_mod
     from kosherd import language as language_mod
     from kosherd import accessreq as accessreq_mod
+    from kosherd import buildsources as buildsources_mod
     from kosherd import activity as activity_mod
+    from kosherd import calm as calm_mod
     from kosherd import search as search_mod
     from kosherd import siterules as siterules_mod
     from kosherd import suggest as suggest_mod
+    from kosherd import usage as usage_mod
     from kosherd import videocheck as videocheck_mod
     from kosherd import vision as vision_mod
     from kosherd.uidmap import UidLookup
-    from kosherd.urlrules import BLOCK, decide, parse_rules
+    from kosherd.urlrules import BLOCK, BYPASS, PICTURES, decide, parse_rules
 
 RULES_PATH = Path("/var/lib/kosher-mitm/rules.json")
 log = logging.getLogger("kosher-filter")
@@ -79,6 +89,34 @@ log = logging.getLogger("kosher-filter")
 # site's own origin keeps the scheme, and the proxy answers the request
 # itself — nothing is ever forwarded to the site.
 REQUEST_PATH = "/__kosheros__/request"
+# The page filter (kosher_page.js, beside this file): what the proxy
+# cannot see, the page shows it. Served on every host, cacheable for a
+# day, injected into every page the proxy filters; the words it matches
+# with and the judgement it asks for come back from the same two lists
+# and the same scorer, on the page's own origin, never forwarded.
+SCRIPT_PATH = "/__kosheros__/filter.js"
+WORDS_PATH = "/__kosheros__/words.json"
+JUDGE_PATH = "/__kosheros__/judge"
+# The calm filter (kosher_calm.js, beside this file): the calmer versions
+# of the addictive sites (#179). Served on every host like the page
+# filter, injected into the pages of the sites an account calms, and the
+# heartbeats it sends back are what the daily budget counts.
+CALM_SCRIPT_PATH = "/__kosheros__/calm.js"
+CALM_BEAT_PATH = "/__kosheros__/calm-beat"
+CALM_SCRIPT = Path(__file__).with_name("kosher_calm.js")
+# Where the per-day budgets accumulate, so a proxy restart — which every
+# policy apply causes — does not hand the time back.
+CALM_TIME_PATH = Path("/var/lib/kosher-mitm/calm-time.json")
+# One heartbeat may credit at most this many seconds, whatever the page
+# claims: the script beats far more often.
+CALM_BEAT_MAX_SECONDS = 120
+CALM_TIME_FLUSH_SECONDS = 30
+# The token each page gets with its script, sent back on every call.
+PAGE_TOKEN_HEADER = "X-KosherOS-Page"
+JUDGE_CALLS_PER_MINUTE = 120
+PAGE_SCRIPT = Path(__file__).with_name("kosher_page.js")
+# What a page may send to be judged at once; the script batches to this.
+MAX_JUDGED_BYTES = 200_000
 
 BLOCK_STYLE = """
  body { font-family: system-ui, sans-serif; background:#0b1a33; color:#e8eefc;
@@ -152,6 +190,28 @@ def is_bare_address(host: str | None) -> bool:
     return True
 
 
+def host_in(host: str | None, names) -> bool:
+    """Whether `host` is one of `names`: "example.org" is that host only,
+    "*.example.org" the domain and every host under it."""
+    host = (host or "").lower().rstrip(".")
+    if not host:
+        return False
+    for name in names:
+        if name.startswith("*."):
+            base = name[2:]
+            if host == base or host.endswith("." + base):
+                return True
+        elif host == name:
+            return True
+    return False
+
+
+# The Nix build users' entry in the rules file is keyed "builder", not by a
+# uid: the firewall sends their web to their own listener (#123), and the
+# proxy judges it as this one identity.
+BUILDER_UID = -2
+
+
 def _fail_closed_entry() -> dict:
     try:
         blocked = list(categories_mod.DEFAULT_BLOCKED)
@@ -160,7 +220,7 @@ def _fail_closed_entry() -> dict:
     return {"rules": [], "blocked_categories": blocked,
             "media_level": "immodest", "cover_style": "frost",
             "language_filter": "substitute",
-            "youtube": {"restrict": "strict"}}
+            "youtube": {"restrict": "strict"}, "calm": {}}
 
 
 class PolicyCache:
@@ -181,6 +241,9 @@ class PolicyCache:
         self._cover: dict[int, str] = {}
         self._language: dict[int, str] = {}
         self._youtube: dict[int, dict] = {}
+        self._calm: dict[int, dict] = {}
+        self._system_allowed: dict[int, tuple] = {}
+        self._build_developers: list[dict] | None = None
         self._fallback = _fail_closed_entry()
 
     def uid_for_listener_port(self, port: int | None) -> int | None:
@@ -211,6 +274,14 @@ class PolicyCache:
             return list(self._fallback["blocked_categories"])
         return self._blocked.get(uid, [])
 
+    def system_allowed_for(self, uid: int | None) -> tuple:
+        """Names no category blocks for this account: Tailscale's sites
+        and the tailnet's own while Tailscale is set up (#211). Nothing
+        for an account the floor applies to."""
+        if not self._is_known(uid):
+            return ()
+        return self._system_allowed.get(uid, ())
+
     def media_level_for(self, uid: int | None) -> str:
         if not self._is_known(uid):
             return self._fallback["media_level"]
@@ -231,6 +302,21 @@ class PolicyCache:
             return dict(self._fallback["youtube"])
         return self._youtube.get(uid, {})
 
+    def calm_for(self, uid: int | None) -> dict:
+        """The account's calmer-sites settings (#179); empty = off. The
+        fail-closed floor calms nothing: it is a content floor, and this
+        is not content."""
+        if not self._is_known(uid):
+            return dict(self._fallback["calm"])
+        return self._calm.get(uid, {})
+
+    def build_developers(self) -> list[dict] | None:
+        """The developer accounts' filters a Nix build is held to (#199,
+        buildsources.judge), or None for a rules file written before
+        there were any: that one gets the built-in source hosts."""
+        self._refresh()
+        return self._build_developers
+
     def _refresh(self) -> None:
         try:
             mtime = self.path.stat().st_mtime
@@ -250,10 +336,13 @@ class PolicyCache:
         cover: dict[int, str] = {}
         language: dict[int, str] = {}
         youtube: dict[int, dict] = {}
+        calm: dict[int, dict] = {}
+        system_allowed: dict[int, tuple] = {}
         by_port: dict[int, int] = {}
+        build_developers: list[dict] | None = None
         for uid_text, raw in doc.items():
             try:
-                uid = int(uid_text)
+                uid = BUILDER_UID if uid_text == "builder" else int(uid_text)
                 # Older files were {uid: [rules]}; current ones carry
                 # categories too.
                 entry = raw if isinstance(raw, dict) else {"rules": raw}
@@ -265,6 +354,17 @@ class PolicyCache:
                 cover[uid] = entry.get("cover_style", "frost")
                 language[uid] = entry.get("language_filter", "off")
                 youtube[uid] = dict(entry.get("youtube", {}))
+                calm[uid] = dict(entry.get("calm", {}))
+                # `never_blocked` (#265): the payment and fraud-check hosts
+                # a checkout needs, which the tracker lists carry. Same
+                # standing as the tailnet's names: no category blocks
+                # them, the page is still read and scored.
+                system_allowed[uid] = tuple(
+                    str(n).lower()
+                    for n in [*entry.get("system_allowed", []),
+                              *entry.get("never_blocked", [])])
+                if uid == BUILDER_UID and entry.get("developers") is not None:
+                    build_developers = buildsources_mod.load_developers(entry["developers"])
             except Exception as e:  # noqa: BLE001 - one bad entry must not break all
                 log.error("bad entry for uid %s: %s", uid_text, e)
         self._rules = rules
@@ -273,6 +373,9 @@ class PolicyCache:
         self._cover = cover
         self._language = language
         self._youtube = youtube
+        self._calm = calm
+        self._system_allowed = system_allowed
+        self._build_developers = build_developers
         self._known = set(rules)
         self._by_port = by_port
         self._mtime = mtime
@@ -391,6 +494,10 @@ STREAM_LARGE_BYTES = 8 * 1024 * 1024
 # Below this, an image is an icon, a spacer or a tracking pixel: not worth
 # hiding and not worth a classifier's time.
 MIN_IMAGE_BYTES = 2500  # keep in step with kosherd.vision
+# What a page whose pictures an administrator allowed is told to send as
+# Referer: its full address to other sites too (over https), so a picture
+# from a CDN names the page and a page or folder rule reaches it.
+PICTURES_REFERRER_POLICY = "no-referrer-when-downgrade"
 # Media level -> catalogue categories whose sites get their imagery hidden
 # outright at that level. The weakest level only distrusts adult sites; the
 # modesty levels also distrust celebrity/immodest ones.
@@ -627,6 +734,43 @@ class YouTube:
         path = (path or "").split("?", 1)[0]
         return any(path.startswith(p) for p in YouTube.FEED_PATHS)
 
+    # A channel id as YouTube mints them: "UC" and twenty-two more.
+    CHANNEL_ID = re.compile(r"UC[\w-]{22}")
+
+    @staticmethod
+    def channel_key(value) -> str | None:
+        """One spelling for every way a person or YouTube names a channel.
+
+        The admin pastes what they see — "@ThePrimeTimeagen",
+        "theprimetimeagen", the channel's address, its UC… id — and
+        YouTube names the same channel with whatever case it likes. A
+        handle is one name regardless of case; an id is kept as it is.
+        A handle comes back with its "@" so it can never be mistaken
+        for an id or a title.
+        """
+        value = (value or "").strip()
+        if not value:
+            return None
+        value = re.sub(r"^(https?:)?//", "", value)
+        value = re.sub(r"^(www\.|m\.)?(youtube\.com|youtu\.be)/", "",
+                       value, flags=re.IGNORECASE)
+        value = value.split("?", 1)[0].split("#", 1)[0].strip("/")
+        value = re.sub(r"^(channel|c|user)/", "", value, flags=re.IGNORECASE)
+        value = value.split("/", 1)[0].strip()
+        if not value:
+            return None
+        if YouTube.CHANNEL_ID.fullmatch(value):
+            return value
+        if value.startswith("@") or " " not in value:
+            return "@" + value.lstrip("@").lower()
+        # A channel's displayed title, which the feeds name alongside the
+        # id and handle; compared as written, case aside.
+        return value.lower()
+
+    @staticmethod
+    def channel_keys(values) -> set:
+        return {key for key in map(YouTube.channel_key, values or ()) if key}
+
     @staticmethod
     def renderer_channel(item: dict) -> set:
         """Every way this item names its channel: id, handle and title."""
@@ -660,6 +804,8 @@ class YouTube:
         """
         if depth > 24:
             return node
+        if depth == 0:
+            allowed = YouTube.channel_keys(allowed)
         if isinstance(node, list):
             kept = []
             for item in node:
@@ -668,7 +814,7 @@ class YouTube:
                     for value in item.values():
                         if not isinstance(value, dict):
                             continue
-                        named = YouTube.renderer_channel(value)
+                        named = YouTube.channel_keys(YouTube.renderer_channel(value))
                         if named and not (named & allowed):
                             dropped = True
                             break
@@ -744,12 +890,21 @@ class YouTube:
 
     @staticmethod
     def channel_of(body: str) -> tuple[str | None, str | None]:
-        """(channel id, handle) from the watch page, either of which may be
-        what an admin listed."""
+        """(channel id, handle) from the player JSON or the watch page,
+        either of which may be what an admin listed.
+
+        The handle is read from the owner's profile address first: the
+        player JSON, which answers every video after the first, names
+        the channel ONLY there — it carries no canonicalBaseUrl at all,
+        so a handle the admin approved used to match nothing and every
+        video of an approved channel was refused. The watch page carries
+        both, and its first canonicalBaseUrl is the owner's.
+        """
         import re
 
         channel_id = re.search(r'"channelId"\s*:\s*"([^"]+)"', body)
-        handle = re.search(r'"canonicalBaseUrl"\s*:\s*"/(@[^"]+)"', body)
+        handle = (re.search(r'"ownerProfileUrl"\s*:\s*"[^"]*/(@[^"/]+)"', body)
+                  or re.search(r'"canonicalBaseUrl"\s*:\s*"/(@[^"]+)"', body))
         return (channel_id.group(1) if channel_id else None,
                 handle.group(1) if handle else None)
 
@@ -788,6 +943,39 @@ class KosherFilter:
         # page's images within seconds of the page.
         self.page_levels: dict[str, str] = {}
         self.blocklist = search_mod.load_blocklist()
+        # Running totals for the admin app's Usage page, written out once a
+        # minute (usage.py). Numbers only; no address is ever kept.
+        self.usage = usage_mod.Tally("proxy")
+        self._flusher = None
+
+    def _blocked_categories_of(self, host: str, uid) -> set:
+        """The categories this account blocks that `host` is in; none for
+        a name Tailscale needs while it is set up (#211). Only the
+        category lists step aside: the page is still read and scored."""
+        allowed = getattr(self.policy, "system_allowed_for", None)
+        if allowed is not None and host_in(host, allowed(uid)):
+            return set()
+        return self.categories.blocked_categories_of(
+            host, self.policy.blocked_categories_for(uid))
+
+    @staticmethod
+    def _referer_action(rules, flow) -> str | None:
+        """The rule level of the page this request comes from (#273), or
+        None without a Referer or rules: a bypassed page's own pictures,
+        scripts and calls are left alone with it, and a page whose pictures
+        are allowed has its pictures shown. Browsers send a same-site
+        Referer in full and another site's as its origin alone, so a
+        whole-site rule reaches a page's pictures wherever they come from;
+        for a page or folder rule on pictures the page is told to send its
+        address in full (PICTURES_REFERRER_POLICY)."""
+        referer = flow.request.headers.get("referer") or ""
+        if not referer or not rules:
+            return None
+        return decide(rules, referer)[0]
+
+    @classmethod
+    def _referer_bypassed(cls, rules, flow) -> bool:
+        return cls._referer_action(rules, flow) == BYPASS
 
     def _uid_of(self, flow) -> int | None:
         """Who made this connection: the LISTENER PORT it arrived on.
@@ -832,7 +1020,97 @@ class KosherFilter:
         match = re.search(r"@[^@]*:(\d+)\b", spec)
         return int(match.group(1)) if match else None
 
+    # ---- usage: how much went through and how long the filter took --------
+
+    def running(self) -> None:
+        """Start writing the usage totals out once a minute."""
+        import asyncio
+
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return
+        self._flusher = loop.create_task(self._flush_usage())
+
+    async def _flush_usage(self) -> None:
+        import asyncio
+
+        while True:
+            await asyncio.sleep(usage_mod.FLUSH_SECONDS)
+            self.usage.flush()
+
+    def done(self) -> None:
+        self.usage.flush()
+        self._calm_flush(force=True)
+
+    @staticmethod
+    def _timed(flow: http.HTTPFlow, started: float) -> None:
+        """Add the time since `started` to this request's time in the filter."""
+        flow.metadata["kosher_filter_s"] = \
+            flow.metadata.get("kosher_filter_s", 0.0) + time.perf_counter() - started
+
+    def _tally(self, flow: http.HTTPFlow) -> None:
+        """Count one finished request, once. Never lets counting become a
+        filtering problem."""
+        try:
+            metadata = flow.metadata
+            if metadata.get("kosher_tallied"):
+                return
+            metadata["kosher_tallied"] = True
+            uid = metadata.get("kosher_uid")
+            if uid is None:
+                return
+            response = flow.response
+            stream = getattr(response, "stream", False)
+            if response is None:
+                received = 0
+            elif callable(stream):
+                received = 0  # refused as it arrived; nothing reached the person
+            elif stream:
+                # Let through without being held, so never in memory to
+                # measure; the length the server declared is the best count.
+                received = _content_length(flow) or 0
+            else:
+                received = len(_body(response))
+            sent = len(_body(flow.request))
+            self.usage.add(uid, requests=1, bytes_in=received, bytes_out=sent)
+            self.usage.latency(uid, metadata.get("kosher_filter_s", 0.0))
+        except Exception:  # noqa: BLE001 - the numbers are a convenience
+            log.debug("could not count usage", exc_info=True)
+
+    def _count(self, flow: http.HTTPFlow, **counts: int) -> None:
+        try:
+            self.usage.add(flow.metadata.get("kosher_uid"), **counts)
+        except Exception:  # noqa: BLE001 - the numbers are a convenience
+            log.debug("could not count usage", exc_info=True)
+
     def request(self, flow: http.HTTPFlow) -> None:
+        started = time.perf_counter()
+        try:
+            self._request(flow)
+        finally:
+            self._timed(flow, started)
+
+    def responseheaders(self, flow: http.HTTPFlow) -> None:
+        started = time.perf_counter()
+        try:
+            self._responseheaders(flow)
+        finally:
+            self._timed(flow, started)
+
+    async def response(self, flow: http.HTTPFlow) -> None:
+        started = time.perf_counter()
+        try:
+            await self._response(flow)
+        finally:
+            self._timed(flow, started)
+            self._tally(flow)
+
+    def error(self, flow: http.HTTPFlow) -> None:
+        """A request that failed still went through the filter."""
+        self._tally(flow)
+
+    def _request(self, flow: http.HTTPFlow) -> None:
         # Everything reaching this proxy belongs to a filtered user: only
         # their traffic is redirected here.
         _force_safesearch(flow)
@@ -840,12 +1118,21 @@ class KosherFilter:
         uid = self._uid_of(flow)
         flow.metadata["kosher_uid"] = uid
 
+        # A Nix build is held to the strictest developer account's filter
+        # (#199); bare addresses are refused below as for everyone.
+        if uid == BUILDER_UID and self._refuse_build_source(flow):
+            return
+
         # Reserved on every host, because the form is posted to the
         # blocked site's own origin (see REQUEST_PATH). The site never
         # sees it.
         if flow.request.method == "POST" and \
                 flow.request.path.split("?", 1)[0] == REQUEST_PATH:
             self._handle_request_form(flow, uid)
+            return
+        if self._serve_page_filter(flow, uid):
+            return
+        if self._serve_calm(flow, uid):
             return
 
         query = _search_query(flow)
@@ -872,6 +1159,24 @@ class KosherFilter:
             self._block(flow, url, "", why=f"rule:{pattern}")
             return
 
+        # A bypass rule (#273) is the administrator's word that nothing on
+        # these pages is to be filtered: no categories, no judging of the
+        # page, its pictures, its video or its words. The response hooks
+        # see the mark and pass the answer through as it came. A page's
+        # own pictures and scripts come on later requests, so a request
+        # made by a bypassed page (its Referer) is bypassed with it.
+        referer_action = self._referer_action(rules, flow)
+        if action == BYPASS or referer_action == BYPASS:
+            flow.metadata["kosher_bypass"] = True
+            return
+        # Pictures allowed: a picture this page shows, or one at an address
+        # the rule names, is shown as it is. The page itself is allowed
+        # like any other (pattern set), and its video and words are judged.
+        if action == PICTURES or referer_action == PICTURES:
+            flow.metadata["kosher_pictures"] = True
+        if action == PICTURES:
+            flow.metadata["kosher_pictures_page"] = True
+
         # An explicit allow rule beats the category lists, so an admin can
         # permit one site from a category they otherwise block.
         if pattern is None:
@@ -884,8 +1189,7 @@ class KosherFilter:
                             "than a site", why="address")
                 return
             blocked = self.policy.blocked_categories_for(uid)
-            hit = self.categories.blocked_categories_of(
-                flow.request.pretty_host or "", blocked)
+            hit = self._blocked_categories_of(flow.request.pretty_host or "", uid)
             if hit:
                 names = ", ".join(sorted(hit))
                 log.info("blocked uid=%s %s (category: %s)", uid, url, names)
@@ -907,7 +1211,7 @@ class KosherFilter:
 
     # ---- what to hold and what to let through as it arrives ----------------
 
-    def responseheaders(self, flow: http.HTTPFlow) -> None:
+    def _responseheaders(self, flow: http.HTTPFlow) -> None:
         """Decide, from the headers alone, whether the body must be held.
 
         mitmproxy buffers every response body before `response` runs unless
@@ -922,6 +1226,16 @@ class KosherFilter:
             # to inspect, so nothing to hold.
             flow.response.stream = True
             return
+        if flow.metadata.get("kosher_bypass"):
+            # A bypass rule (#273): through as it came, body unread.
+            flow.response.stream = True
+            return
+        if flow.metadata.get("kosher_pictures_page"):
+            # A page whose pictures are allowed: its pictures from another
+            # host (a CDN) must name the page in full for a page or folder
+            # rule to reach them, and by default a browser names only the
+            # site. For the administrator's chosen pages alone.
+            flow.response.headers["Referrer-Policy"] = PICTURES_REFERRER_POLICY
         content_type = (flow.response.headers.get("content-type") or "").lower()
         if content_type.startswith(PLAYLIST_TYPES):
             return  # small text; response() decides
@@ -937,7 +1251,8 @@ class KosherFilter:
                                            getattr(flow.request, "path", "") or ""):
                 return  # response() decides: it may be a video in a picture
             level = self.policy.media_level_for(uid)
-            if level == "none" or self._recently_clean(flow, level):
+            if level == "none" or flow.metadata.get("kosher_pictures") \
+                    or self._recently_clean(flow, level):
                 flow.response.stream = True
             return
         if "text/html" in content_type or YouTube.applies(flow.request.pretty_host) \
@@ -949,7 +1264,7 @@ class KosherFilter:
                 and not content_type.startswith("text/")):
             flow.response.stream = True
 
-    async def response(self, flow: http.HTTPFlow) -> None:
+    async def _response(self, flow: http.HTTPFlow) -> None:
         # Async so that a picture being judged, or a clip being sampled,
         # waits on its own: the synchronous hook held the proxy's one event
         # loop for up to the detection deadline per picture, and every other
@@ -972,13 +1287,13 @@ class KosherFilter:
 
         if YouTube.applies(flow.request.pretty_host):
             self._filter_youtube(flow, uid)
-            return
-
-        if self.siterules.is_suggestions(flow.request.pretty_url):
+        elif self.siterules.is_suggestions(flow.request.pretty_url):
             self._filter_suggestions(flow, uid)
-            return
-
-        self._filter_page(flow, uid)
+        else:
+            self._filter_page(flow, uid)
+        # The calmer sites run last, on whatever the content filters let
+        # through: a page they blocked is theirs, not ours to soften.
+        self._calm_filter(flow, uid)
 
     def _youtube_limited(self, uid: int) -> bool:
         """Whether this account has YouTube limits of any kind."""
@@ -1114,11 +1429,13 @@ class KosherFilter:
         content_type = (flow.response.headers.get("content-type") or "").lower()
         if "text/html" not in content_type:
             return
+        self._remember_last_page(uid, flow.request.pretty_url)
         body = flow.response.get_text(strict=False) or ""
         if not body:
             return
         stripped = False
-        if level == "all" and "data:image/" in body:
+        if level == "all" and "data:image/" in body \
+                and not flow.metadata.get("kosher_pictures"):
             # Shopping sites inline thumbnails as data: URIs straight into
             # the HTML, so they never appear as image responses at all —
             # and "block all pictures" showed pictures. Replace every
@@ -1145,6 +1462,9 @@ class KosherFilter:
             text = content_mod.visible_text(cleaned[:MAX_SCORED_BYTES])
 
         if level == "none" and not immodest_blocked:
+            # Nothing to judge the page by; the language filter alone,
+            # and the page keeps it for what it adds later.
+            self._inject_page_script(flow, language_filter, judge=False)
             return
         # An explicit ALLOW rule is the administrator overriding the
         # machine's judgement for this page; the content scorer must honour
@@ -1154,6 +1474,7 @@ class KosherFilter:
         action, pattern = decide(self.policy.rules_for(uid),
                                  flow.request.pretty_url)
         if action != BLOCK and pattern is not None:
+            self._inject_page_script(flow, language_filter, judge=False)
             return
         tolerance = self._content_tolerance(
             uid, flow.request.pretty_host or "", stripped)
@@ -1166,6 +1487,222 @@ class KosherFilter:
             self._block(flow, flow.request.pretty_url,
                         f" because the page reads as {verdict.level}",
                         why=f"content:{verdict.level}")
+            return
+        # The page passed as it arrived; what it renders afterwards is
+        # judged by the same scorer, from inside the page.
+        self._inject_page_script(flow, language_filter, judge=True)
+
+    # ---- the page filter: what the page shows after it arrived ----------------
+    #
+    # A chat message, a feed item, a search result fetched as JSON and
+    # drawn by script never passes through the proxy as text. A script of
+    # ours in the page sees it: the same word list, as the same patterns,
+    # over every text node the page adds; and the words the page adds,
+    # sent back here to be judged by the same scorer with the same
+    # tolerance. Three reserved addresses on every host, answered here.
+
+    _page_script_cache: tuple[bytes, str] | None = None
+    _words_cache: tuple[bytes, str] | None = None
+
+    def _page_script(self) -> tuple[bytes, str]:
+        if self._page_script_cache is None:
+            body = PAGE_SCRIPT.read_bytes()
+            self._page_script_cache = (body, '"' + hashlib.sha256(body).hexdigest()[:32] + '"')
+        return self._page_script_cache
+
+    def _words_payload(self) -> tuple[bytes, str]:
+        """The word list as the page needs it: the per-script patterns
+        with their one group, and each word's own pattern and replacement
+        (language.py builds both; the page names a hit the same way)."""
+        if self._words_cache is None:
+            wl = self.wordlist
+            patterns = [{"presence": p.pattern if p is not None else None,
+                         "pattern": pat.pattern}
+                        for p, pat in getattr(wl, "_patterns", [])]
+            words = [[w, language_mod.word_pattern(w), wl.replacements[w]]
+                     for w in getattr(wl, "_order", [])]
+            body = json.dumps({"patterns": patterns, "words": words},
+                              ensure_ascii=False).encode()
+            self._words_cache = (body, '"' + hashlib.sha256(body).hexdigest()[:32] + '"')
+        return self._words_cache
+
+    @staticmethod
+    def _cached(flow: http.HTTPFlow, body: bytes, etag: str, content_type: str,
+                vary: str = "") -> None:
+        headers = {"ETag": etag, "Cache-Control": "public, max-age=86400"}
+        if vary:
+            headers["Vary"] = vary
+        if flow.request.headers.get("if-none-match") == etag:
+            flow.response = http.Response.make(304, b"", headers)
+            return
+        flow.response = http.Response.make(
+            200, body, {"Content-Type": content_type, "X-Content-Type-Options": "nosniff",
+                        **headers})
+
+    # Every page the script goes into gets a token of its own on the tag,
+    # signed for this account and this host, and the script sends it back
+    # with each call. Without it the judge and the word list answer 403:
+    # a page cannot, by naming the reserved path, have a block written to
+    # the log under any address it likes, nor read the list; and a block
+    # the page reported is marked as such. The token is in the page, so
+    # the page's own scripts could read it (the tag drops it once the
+    # script has it); what the token settles is where a call came from.
+    _page_secret: bytes | None = None
+    _judge_calls: OrderedDict | None = None
+    MAX_JUDGE_COUNTERS = 1024
+
+    def _page_token(self, uid, host: str) -> str:
+        if self._page_secret is None:
+            self._page_secret = secrets.token_bytes(32)
+        nonce = secrets.token_urlsafe(12)
+        return f"{nonce}.{self._page_sign(uid, host, nonce)}"
+
+    def _page_sign(self, uid, host: str, nonce: str) -> str:
+        message = f"{uid}:{(host or '').lower()}:{nonce}".encode()
+        return hmac.new(self._page_secret, message, hashlib.sha256).hexdigest()[:32]
+
+    def _page_token_ok(self, flow: http.HTTPFlow, uid) -> bool:
+        token = flow.request.headers.get(PAGE_TOKEN_HEADER) or ""
+        nonce, _, signature = token.partition(".")
+        if not nonce or not signature or self._page_secret is None:
+            return False
+        return hmac.compare_digest(signature, self._page_sign(uid, flow.request.pretty_host, nonce))
+
+    def _judge_allowed(self, token: str) -> bool:
+        """At most JUDGE_CALLS_PER_MINUTE judge calls per page: the script
+        sends a batch every two seconds, so a page that asks far more is
+        not the script."""
+        if self._judge_calls is None:
+            self._judge_calls = OrderedDict()
+        now = time.monotonic()
+        started, count = self._judge_calls.pop(token, (now, 0))
+        if now - started >= 60:
+            started, count = now, 0
+        self._judge_calls[token] = (started, count + 1)
+        while len(self._judge_calls) > self.MAX_JUDGE_COUNTERS:
+            self._judge_calls.popitem(last=False)
+        return count < JUDGE_CALLS_PER_MINUTE
+
+    @staticmethod
+    def _refuse(flow: http.HTTPFlow, status: int, error: str) -> None:
+        flow.response = http.Response.make(
+            status, json.dumps({"blocked": False, "error": error}).encode(),
+            {"Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store"})
+
+    def _serve_page_filter(self, flow: http.HTTPFlow, uid) -> bool:
+        """Answer the page filter's three addresses. True when answered."""
+        path = flow.request.path.split("?", 1)[0]
+        if path == SCRIPT_PATH and flow.request.method == "GET":
+            body, etag = self._page_script()
+            self._cached(flow, body, etag, "application/javascript; charset=utf-8")
+            return True
+        if path == WORDS_PATH and flow.request.method == "GET":
+            if not self._page_token_ok(flow, uid):
+                self._refuse(flow, 403, "the word list is for the page filter's script")
+                return True
+            body, etag = self._words_payload()
+            self._cached(flow, body, etag, "application/json; charset=utf-8",
+                         vary=PAGE_TOKEN_HEADER)
+            return True
+        if path == JUDGE_PATH and flow.request.method == "POST":
+            if not self._page_token_ok(flow, uid):
+                self._refuse(flow, 403, "no page token")
+            elif not self._judge_allowed(flow.request.headers.get(PAGE_TOKEN_HEADER)):
+                self._refuse(flow, 429, "too many calls from one page")
+            else:
+                self._judge_rendered(flow, uid)
+            return True
+        return False
+
+    def _judge_rendered(self, flow: http.HTTPFlow, uid) -> None:
+        """Judge what a page rendered after it arrived, by the rules that
+        judged the page: a listed word in block mode, or the content
+        scorer with this account's tolerance. The answer carries the
+        block page when there is one, for the script to show."""
+        from urllib.parse import urlsplit
+
+        try:
+            body = json.loads(flow.request.get_text(strict=False) or "{}")
+        except ValueError:
+            body = {}
+        url = str(body.get("url") or "")[:2048]
+        host = urlsplit(url).hostname or flow.request.pretty_host or ""
+        if host.lower() != (flow.request.pretty_host or "").lower():
+            # The page names itself; a block is logged under the page it
+            # came from and no other.
+            self._refuse(flow, 403, "the address is not this page's")
+            return
+        verdict_level, because, why = "", "", ""
+        word = str(body.get("language") or "")[:64]
+        if word and self.policy.language_filter_for(uid) == "block" \
+                and self.wordlist.contains_any(word):
+            because, why = " because of the language on it", "language"
+        text = str(body.get("text") or "")[:MAX_JUDGED_BYTES]
+        if not because and text:
+            action, pattern = decide(self.policy.rules_for(uid), url)
+            if action != BLOCK and pattern is not None:
+                text = ""   # an allow rule is the administrator's word
+        if not because and text:
+            tolerance = self._content_tolerance(uid, host, False)
+            verdict = self.scorer.score(text)
+            verdict_level = verdict.level
+            if verdict.at_least(tolerance):
+                because = f" because the page reads as {verdict.level}"
+                why = f"content:{verdict.level}"
+                log.info("blocked uid=%s %s (rendered content: %s, %d points, %s)",
+                         uid, url, verdict.level, verdict.points, ", ".join(verdict.hits))
+        if because:
+            self._note(activity_mod.BLOCK, flow, url=url, why=why, source="page")
+            page = BLOCK_PAGE.format(style=BLOCK_STYLE, url=_escape(url),
+                                     because=_escape(because), why=_escape(why),
+                                     request_path=REQUEST_PATH)
+            answer = {"blocked": True, "why": why, "page": page}
+        else:
+            answer = {"blocked": False, "level": verdict_level}
+        flow.response = http.Response.make(
+            200, json.dumps(answer).encode(),
+            {"Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store"})
+
+    def _inject_page_script(self, flow: http.HTTPFlow, language_filter: str,
+                            judge: bool) -> None:
+        """Put the page filter into an HTML page that is being let through.
+
+        Only where it has something to do: a language setting other than
+        off, or a page whose rendered content is to be judged. A page
+        that names a script nonce in its Content-Security-Policy gets
+        the nonce on the tag, so the policy lets it run; 'self' covers
+        it otherwise, since the address is the page's own origin.
+        """
+        if language_filter == "off" and not judge:
+            return
+        content_type = (flow.response.headers.get("content-type") or "").lower()
+        if "text/html" not in content_type:
+            return
+        body = flow.response.get_text(strict=False) or ""
+        if not body or SCRIPT_PATH in body:
+            return
+        if not _is_markup(body):
+            # Labelled text/html but not a page: Cloudflare's bot check
+            # answers its own requests with base64 under that label, and
+            # a tag added to the end broke its decoding, so the check
+            # failed and Linear said it could not verify the account (#215).
+            return
+        uid = (getattr(flow, "metadata", None) or {}).get("kosher_uid")
+        token = self._page_token(uid, flow.request.pretty_host)
+        attrs = (f'src="{SCRIPT_PATH}" data-kosheros-language="{language_filter}" '
+                 f'data-kosheros-judge="{"1" if judge else "0"}" '
+                 f'data-kosheros-token="{token}" defer')
+        csp = flow.response.headers.get("content-security-policy") or ""
+        nonce = re.search(r"'nonce-([A-Za-z0-9+/=_-]+)'", csp)
+        if nonce:
+            attrs += f' nonce="{nonce.group(1)}"'
+        tag = f"<script {attrs}></script>"
+        at = _injection_point(body)
+        if at is None:
+            return  # the page ends inside a script; nowhere safe to put it
+        body = body[:at] + tag + body[at:]
+        flow.response.text = body
+        flow.response.headers["x-kosheros-page"] = "filter-script"
 
     MAX_REMEMBERED_PAGES = 64
 
@@ -1208,8 +1745,7 @@ class KosherFilter:
         # its imagery goes too — no model needed and no chance of a model
         # being wrong.
         host = flow.request.pretty_host or ""
-        if self.categories.blocked_categories_of(
-                host, self.policy.blocked_categories_for(uid)):
+        if self._blocked_categories_of(host, uid):
             self._blank_image(flow)
             return True
 
@@ -1359,8 +1895,7 @@ class KosherFilter:
         if level == "none":
             return "stream"
         host = flow.request.pretty_host or ""
-        if self.categories.blocked_categories_of(
-                host, self.policy.blocked_categories_for(uid)):
+        if self._blocked_categories_of(host, uid):
             return "refuse"  # a clip from a site this account blocks
         if level not in VIDEO_CHECKED_LEVELS:
             return "refuse"  # "all": no video, as no pictures
@@ -1429,9 +1964,7 @@ class KosherFilter:
         level = self.policy.media_level_for(uid)
         if level == "none":
             return False
-        if self.categories.blocked_categories_of(
-                flow.request.pretty_host or "",
-                self.policy.blocked_categories_for(uid)):
+        if self._blocked_categories_of(flow.request.pretty_host or "", uid):
             return True
         return level not in VIDEO_CHECKED_LEVELS
 
@@ -1469,6 +2002,233 @@ class KosherFilter:
         verdict = await self._checker().verdict_async(
             flow.response.content or b"", videocheck_mod.key(flow.request.pretty_url, total))
         self._video_settle(flow, uid, level, verdict)
+
+    # ---- the calm filter: calmer versions of the addictive sites (#179) ---------
+    #
+    # A feed page ends after a set number of items; a direct link to a post
+    # renders as the post alone; a site may carry a daily budget, counted
+    # from the page's heartbeats while it is on screen. The pages are
+    # single-page apps, so the rewriting happens in the page itself, by
+    # kosher_calm.js; here is where the script is served, injected, and
+    # the budget kept.
+
+    _calm_script_cache: tuple[bytes, str] | None = None
+
+    def _calm_script(self) -> tuple[bytes, str] | None:
+        if self._calm_script_cache is None:
+            try:
+                body = CALM_SCRIPT.read_bytes()
+            except OSError as e:
+                # The script is shipped beside this file (os-image does
+                # copy the whole mitm/ directory); if it is missing the
+                # feature does nothing, and the rest of the proxy must
+                # still run.
+                log.warning("calm script missing at %s: %s", CALM_SCRIPT, e)
+                return None
+            self._calm_script_cache = (body, '"' + hashlib.sha256(body).hexdigest()[:32] + '"')
+        return self._calm_script_cache
+
+    def _serve_calm(self, flow: http.HTTPFlow, uid) -> bool:
+        """Answer the calm filter's two addresses. True when answered."""
+        path = flow.request.path.split("?", 1)[0]
+        if path == CALM_SCRIPT_PATH and flow.request.method == "GET":
+            script = self._calm_script()
+            if script is None:
+                self._refuse(flow, 404, "the calm script is not installed")
+                return True
+            body, etag = script
+            self._cached(flow, body, etag, "application/javascript; charset=utf-8")
+            return True
+        if path == CALM_BEAT_PATH and flow.request.method == "POST":
+            if not self._page_token_ok(flow, uid):
+                self._refuse(flow, 403, "no page token")
+            else:
+                self._calm_beat(flow, uid)
+            return True
+        return False
+
+    CALM_OVER_PAGE = """<!doctype html>
+<html><head><meta charset="utf-8"><title>Enough for today — KosherOS</title>
+<style>{style}</style></head>
+<body><div class="card">
+  <h1>Enough {site} for today</h1>
+  <p>KosherOS counted the time <code>{site}</code> was on screen today,
+     and it is spent. The site comes back tomorrow.</p>
+</div></body></html>
+"""
+
+    def _calm_over_page(self, site_label: str) -> str:
+        return self.CALM_OVER_PAGE.format(style=BLOCK_STYLE,
+                                          site=_escape(site_label))
+
+    # -- the budget -----------------------------------------------------------
+    #
+    # Seconds per (uid, site) per local day, kept in memory and written out
+    # every CALM_TIME_FLUSH_SECONDS so a proxy restart — which every policy
+    # apply causes — does not hand spent time back. The page reports its
+    # own seconds; a page could lie, but this limit is a nudge, not a wall:
+    # the wall is the category block. A beat may never credit more than
+    # CALM_BEAT_MAX_SECONDS.
+
+    def _calm_store(self) -> dict:
+        store = getattr(self, "_calm_time", None)
+        if store is None:
+            path = getattr(self, "_calm_time_path", None) or CALM_TIME_PATH
+            try:
+                store = json.loads(Path(path).read_text())
+            except (OSError, ValueError):
+                store = {}
+            store = store if isinstance(store, dict) else {}
+            # A file from yesterday is yesterday's business: drop it on
+            # the way in so a restart does not leave the accounts with
+            # yesterday's spent time.
+            today = usage_mod.day_key()
+            store = {k: v for k, v in store.items()
+                     if isinstance(v, dict) and v.get("day") == today}
+            self._calm_time = store
+        return store
+
+    def _calm_entry(self, uid, site: str) -> dict:
+        store = self._calm_store()
+        key = f"{uid}:{site}"
+        entry = store.get(key)
+        today = usage_mod.day_key()
+        if not isinstance(entry, dict) or entry.get("day") != today:
+            entry = {"day": today, "seconds": 0.0}
+            store[key] = entry
+        return entry
+
+    def _calm_remaining(self, uid, site: str, minutes: int) -> float:
+        """Seconds of today's budget left; the budget is `minutes` minutes."""
+        entry = self._calm_entry(uid, site)
+        return max(0.0, minutes * 60 - float(entry.get("seconds", 0)))
+
+    def _calm_credit(self, uid, site: str, seconds: float, minutes: int) -> float:
+        """Count a page's heartbeat and say what is left of today."""
+        entry = self._calm_entry(uid, site)
+        spent = min(minutes * 60 + CALM_BEAT_MAX_SECONDS,
+                    float(entry.get("seconds", 0)) + seconds)
+        entry["seconds"] = spent
+        self._calm_flush()
+        return max(0.0, minutes * 60 - spent)
+
+    def _calm_flush(self, force: bool = False) -> None:
+        store = getattr(self, "_calm_time", None)
+        if not store:
+            return
+        now = time.monotonic()
+        if not force and now - getattr(self, "_calm_flushed_at", 0.0) < CALM_TIME_FLUSH_SECONDS:
+            return
+        self._calm_flushed_at = now
+        today = usage_mod.day_key()
+        keep = {k: v for k, v in store.items()
+                if isinstance(v, dict) and v.get("day") == today}
+        path = Path(getattr(self, "_calm_time_path", None) or CALM_TIME_PATH)
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            tmp = path.with_suffix(".tmp")
+            tmp.write_text(json.dumps(keep, separators=(",", ":")) + "\n")
+            tmp.replace(path)
+        except OSError as e:
+            log.warning("could not write calm time to %s: %s", path, e)
+
+    def _calm_beat(self, flow: http.HTTPFlow, uid) -> None:
+        """One page's heartbeat: credit the seconds it stayed visible and
+        answer with what is left, so the page can stop itself at zero."""
+        try:
+            body = json.loads(flow.request.get_text(strict=False) or "{}")
+        except ValueError:
+            body = {}
+        url = str(body.get("url") or "")[:2048]
+        host = urlsplit(url).hostname or flow.request.pretty_host or ""
+        if host.lower() != (flow.request.pretty_host or "").lower():
+            # As with the judge: a page names itself and no other page.
+            self._refuse(flow, 403, "the address is not this page's")
+            return
+        site = calm_mod.site_for(host)
+        settings = self.policy.calm_for(uid)
+        minutes = calm_mod.daily_minutes(settings, site) if site else 0
+        if site is None or not calm_mod.applies(settings, site):
+            self._refuse(flow, 404, "this site is not calmed for this account")
+            return
+        try:
+            seconds = float(body.get("seconds") or 0)
+        except (TypeError, ValueError):
+            seconds = 0.0
+        seconds = max(0.0, min(float(CALM_BEAT_MAX_SECONDS), seconds))
+        if minutes <= 0:
+            answer: dict = {"remaining": -1, "over": False}
+        else:
+            remaining = self._calm_credit(uid, site, seconds, minutes)
+            over = remaining <= 0
+            answer = {"remaining": int(remaining), "over": over}
+            if over:
+                answer["page"] = self._calm_over_page(calm_mod.label(site))
+                self._note(activity_mod.BLOCK, flow, url=url, why=f"calm:{site}")
+        flow.response = http.Response.make(
+            200, json.dumps(answer).encode(),
+            {"Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store"})
+
+    def _calm_filter(self, flow: http.HTTPFlow, uid: int) -> None:
+        """Give an account the calmer version of a page, after the content
+        filters have had their say: they own a page they blocked, and a
+        calm page must still be the page the filters let through."""
+        site = calm_mod.site_for(flow.request.pretty_host)
+        if site is None:
+            return
+        settings = self.policy.calm_for(uid)
+        if not calm_mod.applies(settings, site):
+            return
+        if getattr(flow.response, "status_code", 0) != 200:
+            return
+        content_type = (flow.response.headers.get("content-type") or "").lower()
+        if "text/html" not in content_type:
+            return
+        mode = calm_mod.mode_for(site, flow.request.path or "")
+        if mode == "login":
+            return  # signing in is never touched
+        minutes = calm_mod.daily_minutes(settings, site)
+        if minutes and self._calm_remaining(uid, site, minutes) <= 0:
+            log.info("calm budget spent for uid=%s on %s", uid, site)
+            flow.response = http.Response.make(
+                403, self._calm_over_page(calm_mod.label(site)).encode(),
+                {"Content-Type": "text/html; charset=utf-8"})
+            self._note(activity_mod.BLOCK, flow, url=flow.request.pretty_url,
+                       why=f"calm:{site}")
+            return
+        self._inject_calm(flow, uid, site, settings, mode, minutes)
+
+    def _inject_calm(self, flow: http.HTTPFlow, uid, site: str, settings: dict,
+                     mode: str, minutes: int) -> None:
+        """Put the calm filter into a page that is being let through, the
+        way the page filter goes in: same token, same CSP nonce handling.
+        The script re-reads the address on every soft navigation — these
+        sites are single-page apps — so the mode on the tag is only where
+        it starts."""
+        body = flow.response.get_text(strict=False) or ""
+        if not body or CALM_SCRIPT_PATH in body or not _is_markup(body):
+            return
+        remaining = -1
+        if minutes:
+            remaining = int(self._calm_remaining(uid, site, minutes))
+        token = self._page_token(uid, flow.request.pretty_host)
+        rules = _attrs_json(calm_mod.path_rules(site))
+        attrs = (f'src="{CALM_SCRIPT_PATH}" data-kosheros-calm-site="{site}" '
+                 f'data-kosheros-calm-mode="{mode}" '
+                 f'data-kosheros-calm-items="{calm_mod.feed_items(settings)}" '
+                 f'data-kosheros-calm-remaining="{remaining}" '
+                 f'data-kosheros-calm-rules="{rules}" '
+                 f'data-kosheros-token="{token}" defer')
+        csp = flow.response.headers.get("content-security-policy") or ""
+        nonce = re.search(r"'nonce-([A-Za-z0-9+/=_-]+)'", csp)
+        if nonce:
+            attrs += f' nonce="{nonce.group(1)}"'
+        tag = f"<script {attrs}></script>"
+        at = _injection_point(body)
+        if at is None:
+            return  # the page ends inside a script; nowhere safe to put it
+        flow.response.text = body[:at] + tag + body[at:]
+        flow.response.headers["x-kosheros-calm"] = f"{site}:{mode}"
 
     # -- pictures judged clean a moment ago ----------------------------------------
     #
@@ -1525,7 +2285,11 @@ class KosherFilter:
         self._note_picture(flow)
 
     def _note_picture(self, flow: http.HTTPFlow) -> None:
-        """Write down that pictures were hidden on the page this one is on."""
+        """Write down that pictures were hidden on the page this one is on.
+
+        Every picture counts on the Usage page; the activity log gets one
+        line per page."""
+        self._count(flow, pictures=1)
         try:
             page = self._page_of(flow)
             uid = flow.metadata.get("kosher_uid")
@@ -1541,11 +2305,34 @@ class KosherFilter:
             return
         self._note(activity_mod.PICTURES, flow, url=page)
 
-    @staticmethod
-    def _page_of(flow: http.HTTPFlow) -> str:
-        """The page a picture or video was on, as far as the browser says."""
-        referer = flow.request.headers.get("referer") or ""
-        return (referer or flow.request.pretty_url).split("#", 1)[0]
+    MAX_LAST_PAGES = 64
+
+    def _remember_last_page(self, uid, url: str) -> None:
+        """The page this account last opened on each site, for _page_of."""
+        parts = urlsplit(url)
+        key = (uid, f"{parts.scheme}://{parts.netloc}")
+        pages = self.__dict__.setdefault("_last_pages", {})
+        pages.pop(key, None)
+        pages[key] = url.split("#", 1)[0]
+        while len(pages) > self.MAX_LAST_PAGES:
+            pages.pop(next(iter(pages)))
+
+    def _page_of(self, flow: http.HTTPFlow) -> str:
+        """The page a picture or video was on, as far as the browser says.
+
+        A picture from another site names only the page's site
+        (`https://site.com/`), so the activity log said "pictures hidden on
+        site.com" and allowing that page allowed the home page. The page
+        this account last opened on that site is the better guess."""
+        referer = (flow.request.headers.get("referer") or "").split("#", 1)[0]
+        if referer:
+            parts = urlsplit(referer)
+            if parts.path in ("", "/") and not parts.query:
+                last = self.__dict__.get("_last_pages", {}).get(
+                    (flow.metadata.get("kosher_uid"), f"{parts.scheme}://{parts.netloc}"))
+                if last:
+                    return last
+        return referer or flow.request.pretty_url.split("#", 1)[0]
 
     def _filter_youtube(self, flow: http.HTTPFlow, uid: int) -> None:
         settings = self.policy.youtube_for(uid)
@@ -1604,8 +2391,8 @@ class KosherFilter:
         for a page's HTML, which may simply not carry it.
         """
         if allowed:
-            channel_id, handle = YouTube.channel_of(body)
-            if not ({channel_id, handle} & set(allowed)):
+            named = YouTube.channel_keys(YouTube.channel_of(body))
+            if not (named & YouTube.channel_keys(allowed)):
                 return " because only approved channels are allowed"
         kinds = set(blocked) - {YouTube.SHORTS_KIND}
         if kinds:
@@ -1694,11 +2481,42 @@ class KosherFilter:
         )
         self._note(activity_mod.BLOCK, flow, url=url, why=why)
 
+    def _refuse_build_source(self, flow: http.HTTPFlow) -> bool:
+        """Refuse a build's download that the strictest developer
+        account's filter would refuse (#199). Plain text, not the block
+        page: nobody reads it in a browser, and Nix prints an error's body
+        in the build log."""
+        host = (flow.request.pretty_host or "").lower().rstrip(".")
+        url = flow.request.pretty_url
+        developers = self.policy.build_developers()
+        if developers is None:
+            # Written by an older kosherd: the source hosts, not the web.
+            if buildsources_mod.allows(host, buildsources_mod.DEFAULT_BUILD_SOURCES):
+                return False
+            refused = (buildsources_mod.refusal(host or "this address"), "build-source")
+        else:
+            refused = buildsources_mod.judge(
+                host, url, developers, self.categories.blocked_categories_of)
+            if refused is None:
+                return False
+        text, why = refused
+        log.info("blocked a Nix build's download %s (%s)", url, why)
+        flow.response = http.Response.make(
+            403, text.encode(),
+            {"Content-Type": "text/plain; charset=utf-8",
+             "Cache-Control": "no-store"})
+        self._note(activity_mod.BLOCK, flow, url=url, why=why)
+        return True
+
     def _note(self, kind: str, flow: http.HTTPFlow, **fields) -> None:
         """One line in the activity log. Never lets a logging problem
         become a filtering problem."""
         try:
             metadata = getattr(flow, "metadata", None) or {}
+            if kind == activity_mod.BLOCK:
+                self._count(flow, blocked=1)
+            elif kind == activity_mod.VIDEO:
+                self._count(flow, videos=1)
             activity_mod.record("proxy", kind, metadata.get("kosher_uid"),
                                 **fields)
         except Exception:  # noqa: BLE001 - the log is a convenience
@@ -1744,11 +2562,154 @@ class KosherFilter:
              "Cache-Control": "no-store"})
 
 
+# Elements whose content the HTML parser reads as text up to their own end
+# tag, not as markup: a "</head>" inside one is not the end of the head.
+_RAW_TEXT_ELEMENTS = ("script", "style", "textarea", "title", "xmp",
+                      "noscript", "iframe", "noembed", "noframes")
+_MARKUP_RE = re.compile(
+    r"<!--|<(?P<raw>" + "|".join(_RAW_TEXT_ELEMENTS) + r")(?=[\s>/])"
+    r"|</(?P<end>head|body|html)\s*>", re.IGNORECASE)
+
+
+def _injection_point(body: str) -> int | None:
+    """Where the page filter's tag can go: before the page's real </head>,
+    else its real </body> or </html>, else the end of the page.
+
+    "Real" means in markup, not inside a script, a style or a comment.
+    Teams' app shell (#209) carries its own HTML template in a script, so
+    the LAST "</head>" in its page is inside that script: a tag put there
+    closed the script half way, the page threw "Unexpected end of input"
+    and showed its own source instead of the meeting. None when the page
+    ends inside a script or a comment, where nothing can go safely.
+    """
+    found: dict[str, int] = {}
+    pos = 0
+    while True:
+        match = _MARKUP_RE.search(body, pos)
+        if match is None:
+            break
+        if match.group(0) == "<!--":
+            close = body.find("-->", match.end())
+            if close == -1:
+                return None
+            pos = close + 3
+        elif match.group("raw"):
+            name = match.group("raw").lower()
+            close = re.compile(r"</" + name + r"[\s>/]", re.IGNORECASE).search(
+                body, match.end())
+            if close is None:
+                return None
+            pos = close.end()
+        else:
+            found.setdefault(match.group("end").lower(), match.start())
+            pos = match.end()
+    for name in ("head", "body", "html"):
+        if name in found:
+            return found[name]
+    return len(body)
+
+
+def _body(message) -> bytes:
+    """A request's or response's body as it went over the wire."""
+    body = getattr(message, "raw_content", None)
+    if body is None:
+        body = getattr(message, "content", None)
+    return body if isinstance(body, bytes) else b""
+
+
+def _is_markup(body: str) -> bool:
+    """Whether a body labelled text/html really is a page: one that starts,
+    past a byte-order mark and white space, with a tag, a comment or a
+    doctype. Script calls often send data under that label."""
+    return body.lstrip("\ufeff \t\r\n\f").startswith("<")
+
+
 def _escape(text: str) -> str:
     return (text.replace("&", "&amp;").replace("<", "&lt;")
                 .replace(">", "&gt;").replace('"', "&quot;"))[:300]
 
 
+def _attrs_json(value) -> str:
+    """JSON safe to put in an HTML attribute: no quote, angle or ampersand
+    of its own may end the attribute or start markup."""
+    return (json.dumps(value, separators=(",", ":"))
+            .replace("&", "&amp;").replace("<", "&lt;")
+            .replace(">", "&gt;").replace('"', "&quot;"))
+
+
+# How long a connection may sit with nothing from the client and no
+# protocol chosen before the proxy closes it (#164).
+SILENT_CLIENT_SECONDS = 10
+
+
+class SilentClientGuard:
+    """Close connections where the client never speaks.
+
+    mitmproxy picks a connection's protocol from the client's first
+    bytes, and waits for them as long as it takes. Some protocols have the
+    server speak first (SSH, FTP, SMTP, POP3, IMAP): the client waits for
+    a greeting, the proxy waits for the client, and the connection hangs
+    open with nothing to show for it. The firewall refuses the well-known
+    ports of those protocols outright (kosherd/nft.py SERVER_FIRST_TCP_PORTS),
+    so this is for the rest. A client that has said nothing after
+    SILENT_CLIENT_SECONDS is closed, and the program on the other end gets
+    an error it can show instead of a wait that never ends.
+    """
+
+    def __init__(self, seconds: float = SILENT_CLIENT_SECONDS):
+        self.seconds = seconds
+        self.timers: dict = {}
+
+    def client_connected(self, client) -> None:
+        if getattr(client, "transport_protocol", "tcp") != "tcp":
+            return
+        import asyncio
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return
+        self.timers[client.id] = loop.call_later(
+            self.seconds, self._close_if_silent, client.id)
+
+    def next_layer(self, nextlayer) -> None:
+        # Runs after mitmproxy's own next_layer addon (script addons load
+        # after the built-in ones), so a decision it made is visible here.
+        # Either a decision or any bytes at all from the client means the
+        # client spoke; whatever happens next is the normal idle timeout's.
+        if nextlayer.layer is None and not nextlayer.data_client():
+            return
+        self._forget(nextlayer.context.client.id)
+
+    def client_disconnected(self, client) -> None:
+        self._forget(client.id)
+
+    def _forget(self, client_id) -> None:
+        timer = self.timers.pop(client_id, None)
+        if timer is not None:
+            timer.cancel()
+
+    def _close_if_silent(self, client_id) -> None:
+        self.timers.pop(client_id, None)
+        handler = self._handler(client_id)
+        if handler is None:
+            return
+        log.info("closing a connection that sent nothing for %ss: %s",
+                 self.seconds, handler.client.sockname)
+        try:
+            handler.close_connection(handler.client)
+        except Exception:  # noqa: BLE001 - it may have closed meanwhile
+            log.debug("connection %s was already gone", client_id)
+
+    @staticmethod
+    def _handler(client_id):
+        try:
+            from mitmproxy import ctx
+            proxyserver = ctx.master.addons.get("proxyserver")
+            return proxyserver.connections.get(client_id)
+        except Exception:  # noqa: BLE001 - no master, no proxy server
+            return None
+
+
 # The AI addon runs after the main one and borrows its policy and detectors.
 _filter = KosherFilter()
-addons = [_filter, AIFilter(_filter)]
+addons = [_filter, AIFilter(_filter), SilentClientGuard()]

@@ -1,0 +1,11 @@
+# KosherOS: where the signatures on KosherOS's own images are.
+#
+# CI signs every image it publishes with cosign, and cosign stores the
+# signature in the same repository as the image (a tag named after the
+# image's digest). This tells the image tools, and bootc through them,
+# to look for that signature there. /etc/containers/policy.json is what
+# requires it: an image from this repository is accepted only with a
+# signature by the KosherOS key (/etc/pki/containers/kosheros-images.pub).
+docker:
+    ghcr.io/aareman/kosher-linux:
+        use-sigstore-attachments: true

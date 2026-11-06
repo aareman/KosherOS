@@ -1,0 +1,19 @@
+[Unit]
+Description=KosherOS: the advanced desktop's shell, if the compositor did not start it
+Documentation=file:///usr/share/doc/kosher/desktop.md
+# A personal niri, Hyprland or Umbriel configuration replaces the one
+# KosherOS ships, and one without Noctalia's autostart left the person at a
+# black screen. /usr/libexec/kosher-shell waits for the compositor's own
+# autostart and starts Noctalia only if nothing did; on GNOME it exits at
+# once. Stopped with the session, which takes Noctalia with it if it
+# started it.
+PartOf=graphical-session.target
+After=graphical-session.target
+ConditionUser=!@system
+
+[Service]
+Type=simple
+ExecStart=/usr/libexec/kosher-shell
+
+[Install]
+WantedBy=graphical-session.target

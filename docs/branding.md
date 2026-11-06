@@ -16,41 +16,23 @@ Everything the family sees is made from two files in `branding/`:
 - `logo.png`, the mark with transparency, and its GIMP source.
 
 `branding/rasters.py` runs at image build and makes every raster from
-those two:
-
-- the boot-splash logo;
-- the front of the Bais Hamikdosh in the brand blue for the classic
-  desktop's Apps button, drawn from the measurements in Mishnah Middos
-  rather than taken from the mark, because the mark is the admin app's
-  icon and read as "admin" on the taskbar;
-- the admin app's icon at every size, named `org.kosherlinux.Admin`. The
-  one app that is the product carries the mark; the Store and Setup keep
-  stock icons until they get their own;
-- the login-screen lockup, the logo with "KosherOS" set beside it in an
-  italic serif, because the login screen draws one image at native size
-  and the mark alone read as a faint blob;
-- the wallpaper plus a crop per screen shape (16:9, 16:10, 3:2, 4:3, 5:4,
-  21:9), each anchored top-left so the wordmark survives, and the XML that
-  lists them so GNOME picks the one matching the screen. GNOME's own zoom
-  on a single picture cropped from the centre and cut the word off;
-- the GRUB menu's background and theme.
-
-Replacing either artwork file re-brands everything on the next build. If
-the wallpaper is ever repainted, a wordmark kept about 10% in from every
-edge would need none of the cropping care.
+those two, so replacing either artwork file re-brands everything on the
+next build.
 
 ## Where the brand appears
 
-| Surface | How |
-|---|---|
-| OS identity: the About dialog, `hostnamectl`, device lists | `/usr/lib/os-release` carries the name, pretty name and variant. `ID` stays `fedora` and `VERSION_ID` stays Fedora's, because tooling keys off them |
-| Boot splash | a Plymouth theme: navy gradient, pulsing logo, the disk-password prompt |
-| GRUB menu | a theme: navy, the mark and name, the entries, a countdown bar |
-| Login screen | the lockup and a banner, through locked dconf keys |
-| First-boot wizard | the project's own GTK app |
-| Desktop defaults | wallpaper, light scheme, favourites including the Store, the classic taskbar layout; see [desktop](desktop.md) |
-| Admin app | the mark as its icon |
-| Installer | a product image injected onto the ISO; see below |
+| Surface | How | Made from |
+|---|---|---|
+| OS identity: the About dialog, `hostnamectl`, device lists | `/usr/lib/os-release` carries the name, pretty name and variant. `ID` stays `fedora` and `VERSION_ID` stays Fedora's, because tooling keys off them | text |
+| Boot splash | a Plymouth theme: navy gradient, pulsing logo, the disk-password prompt | the mark |
+| GRUB menu | a theme: navy, the mark and name, the entries, a countdown bar; see below | the mark |
+| Login screen | the lockup and a banner, through locked dconf keys. The lockup is the mark with "KosherOS" set beside it in an italic serif, because the login screen draws one image at native size and the mark alone read as a faint blob | the mark |
+| Desktop wallpaper | one crop per screen shape (16:9, 16:10, 3:2, 4:3, 5:4, 21:9), each anchored top-left so the wordmark survives, and the XML that lets GNOME pick the one matching the screen. GNOME's own zoom cropped from the centre and cut the word off; a repainted wallpaper with the wordmark 10% in from every edge would need none of this | the wallpaper |
+| Desktop defaults | light scheme, favourites including the Store, the classic taskbar layout; see [desktop](desktop.md) | dconf |
+| Apps button | the front of the Bais Hamikdosh in the brand blue, drawn from the measurements in Mishnah Middos rather than taken from the mark, because the mark is the admin app's icon and read as "admin" on the taskbar | drawn |
+| Admin app | the mark as its icon at every size, `org.kosherlinux.Admin`. The Store and Setup keep stock icons until they get their own | the mark |
+| First-boot wizard | the project's own GTK app | |
+| Installer | a product image injected onto the ISO; see below | the mark |
 
 ## The GRUB menu
 

@@ -9,7 +9,16 @@ kctl set-whitelist "$(id -u wlkid)" example.com >/dev/null
 kctl set-mode "$(id -u nokid)" none >/dev/null
 kctl set-mode "$(id -u dnskid)" dnsfilter >/dev/null
 wait_for_dns  # the resolver restarts on every policy change
-sleep 1       # ...and then repopulates the whitelist sets
+# ...and only then loads the new whitelist. A fixed second was not always
+# enough on a slow runner: the fetch below reached the restarted resolver
+# before example.com was on wlkid's list, and failed with the set still
+# empty, while every faster machine passed. Wait for the list to be in
+# force (the site loads), for up to a minute; a whitelist that never
+# loads still fails the check below.
+for _ in $(seq 1 30); do
+    fetch_as wlkid https://example.com >/dev/null 2>&1 && break
+    sleep 2
+done
 
 section "Filter modes"
 check "root is unrestricted"                    0 fetch https://fedoraproject.org
@@ -43,11 +52,229 @@ check "the ad list is rendered for the family resolver" 0 \
     grep -q '^address=/' /etc/kosher/dnsmasq.d/adblock.conf
 check "and identically for the plain resolver" 0 \
     cmp -s /etc/kosher/dnsmasq.d/adblock.conf /etc/kosher/dnsmasq-open.d/adblock.conf
-check "a known ad domain does not resolve" 1 \
-    dig +short +time=3 @127.0.0.1 doubleclick.net A
+# dig exits 0 whatever the answer, so the answer is what is judged: none,
+# or the null address the block list gives.
+ad_answer=$(dig +short +time=3 @127.0.0.1 doubleclick.net A | head -1)
+if [ -z "$ad_answer" ] || [ "$ad_answer" = "0.0.0.0" ]; then
+    ok "a known ad domain does not resolve"
+else
+    bad "a known ad domain does not resolve (got $ad_answer)"
+fi
+
+section "SSH: refused at once, and git over SSH for developer accounts (#164)"
+# ssh is a server-speaks-first protocol: in the proxy it waited forever
+# for a greeting that never came. Now it is refused in the mode chain, and
+# an account with developer tools on may use port 22 to the git hosts
+# (@git4/@git6, filled by dnsmasq as those names resolve) and nowhere else.
+# Every ssh runs in batch mode with no key, so the most a reachable server
+# gives is its banner and an auth denial, and that is what is judged.
+if ! command -v ssh >/dev/null 2>&1; then
+    skip "no ssh client in the image"
+else
+    id sshkid >/dev/null 2>&1 || useradd -m sshkid
+    kosherctl get-policy 2>/dev/null | grep -q '"sshkid"' \
+        || kosherctl adopt sshkid filtered >/dev/null 2>&1
+    kctl set-mode "$(id -u sshkid)" filtered >/dev/null
+    kctl developer-tools "$(id -u sshkid)" off >/dev/null
+    wait_for_dns >/dev/null 2>&1 || true
+    wait_for_proxy_as sshkid || true
+    # ssh_as <user|-> <user@host>: prints "<seconds> <ssh's output>". "-" is root.
+    ssh_as() {
+        local u="$1" t0 out
+        shift
+        local opts=(-T -o BatchMode=yes -o StrictHostKeyChecking=no
+                    -o UserKnownHostsFile=/dev/null -o ConnectTimeout=30)
+        t0=$(date +%s)
+        if [ "$u" = - ]; then
+            out=$(timeout 40 ssh "${opts[@]}" "$@" 2>&1 </dev/null)
+        else
+            out=$(as "$u" timeout 40 ssh "${opts[@]}" "$@" 2>&1 </dev/null)
+        fi
+        printf '%s %s' "$(( $(date +%s) - t0 ))" "$(printf '%s' "$out" | tr '\n' ' ' | head -c 200)"
+    }
+    # An answer from the server: GitHub's greeting or its auth denial.
+    answered() { printf '%s' "$1" | grep -qiE 'successfully authenticated|permission denied'; }
+    # Refused, and quickly: what the firewall does, rather than a hang.
+    refused_fast() {
+        printf '%s' "$1" | grep -qi 'connection refused' && [ "${1%% *}" -le 5 ]
+    }
+    # A non-git host that runs an SSH server, to tell "refused by the
+    # firewall" from "nothing listens there". Root is never filtered.
+    # Public SSH servers: the first that answers root is the one used.
+    root_gh=$(ssh_as - git@github.com)
+    for other in sdf.org tty.sdf.org test.rebex.net; do
+        root_other=$(ssh_as - "demo@$other")
+        answered "$root_other" && break
+    done
+    if answered "$root_gh"; then
+        ok "root reaches GitHub over SSH (the precondition)"
+    else
+        skip "root cannot reach GitHub over SSH, so the git checks cannot judge: $root_gh"
+    fi
+
+    r=$(ssh_as sshkid git@github.com)
+    if refused_fast "$r"; then
+        ok "developer tools off: ssh git@github.com is refused at once"
+    else
+        bad "developer tools off: ssh git@github.com was not refused at once: $r"
+    fi
+    if answered "$root_other"; then
+        r=$(ssh_as sshkid "demo@$other")
+        if refused_fast "$r"; then
+            ok "developer tools off: ssh to a non-git host is refused at once"
+        else
+            bad "developer tools off: ssh to a non-git host was not refused at once: $r"
+        fi
+    else
+        skip "root cannot reach $other over SSH, so the non-git host is not judged: $root_other"
+    fi
+
+    kctl developer-tools "$(id -u sshkid)" on >/dev/null
+    wait_for_dns >/dev/null 2>&1 || true
+    sleep 1
+    gh_ip=$(as sshkid getent ahostsv4 github.com 2>/dev/null | awk '{print $1; exit}')
+    if [ -n "$gh_ip" ]; then
+        check_contains "github.com's address is in the git4 set once it resolves" "$gh_ip" \
+            nft list set inet kosher git4
+    else
+        bad "github.com did not resolve for a filtered account"
+    fi
+    r=$(ssh_as sshkid git@github.com)
+    if answered "$r"; then
+        ok "developer tools on: ssh -T git@github.com gets GitHub's answer"
+    elif answered "$root_gh"; then
+        bad "developer tools on: ssh -T git@github.com got no answer from GitHub: $r"
+    else
+        skip "developer tools on: GitHub over SSH not judged (root cannot reach it either): $r"
+    fi
+    if answered "$root_other"; then
+        r=$(ssh_as sshkid "demo@$other")
+        if refused_fast "$r"; then
+            ok "developer tools on: ssh to a non-git host is still refused at once"
+        else
+            bad "developer tools on: ssh to a non-git host was not refused at once: $r"
+        fi
+    fi
+    kctl developer-tools "$(id -u sshkid)" off >/dev/null
+fi
+
+section "SSH to other machines: the listed ones, or anywhere (#257)"
+# An account may be given machines of its own to ssh to — a name, an
+# address, a range or the tailnet — in sets of its own that dnsmasq fills
+# as the names resolve; or anywhere, the administrator's call. The public
+# SSH server above stands in for a machine of the family's own.
+if ! command -v ssh >/dev/null 2>&1 || ! answered "${root_other:-}"; then
+    skip "no ssh client, or no public SSH server answered root: the SSH machines are not judged"
+else
+    ssh_uid=$(id -u sshkid)
+    kctl ssh "$ssh_uid" --hosts "$other" >/dev/null
+    wait_for_dns >/dev/null 2>&1 || true
+    sleep 1
+    other_ip=$(as sshkid getent ahostsv4 "$other" 2>/dev/null | awk '{print $1; exit}')
+    if [ -n "$other_ip" ]; then
+        check_contains "the listed machine's address is in the account's own set once it resolves" \
+            "$other_ip" nft list set inet kosher "ssh4_$ssh_uid"
+    else
+        bad "the listed machine $other did not resolve for the account"
+    fi
+    r=$(ssh_as sshkid "demo@$other")
+    if answered "$r"; then
+        ok "the listed machine answers the account over SSH"
+    else
+        bad "the listed machine did not answer the account over SSH: $r"
+    fi
+    r=$(ssh_as sshkid git@github.com)
+    if refused_fast "$r"; then
+        ok "a machine not on the list is still refused at once"
+    else
+        bad "a machine not on the list was not refused at once: $r"
+    fi
+    kctl ssh "$ssh_uid" --hosts none --anywhere on >/dev/null
+    sleep 1
+    r=$(ssh_as sshkid git@github.com)
+    if answered "$r"; then
+        ok "anywhere: GitHub answers the account over SSH"
+    elif answered "$root_gh"; then
+        bad "anywhere: GitHub did not answer the account over SSH: $r"
+    else
+        skip "anywhere: not judged against GitHub (root cannot reach it either)"
+    fi
+    kctl ssh "$ssh_uid" --anywhere off >/dev/null
+    sleep 1
+    r=$(ssh_as sshkid "demo@$other")
+    if refused_fast "$r"; then
+        ok "anywhere off, no list: SSH is refused at once again"
+    else
+        bad "anywhere off, no list: SSH was not refused at once: $r"
+    fi
+fi
+
+section "SSH to a machine on a port of its own"
+# A Forgejo whose SSH is on 222: `host:222` on the list opens that port to
+# that machine alone. The machine is a network namespace on a veth pair
+# (TEST-NET-2, not a LAN range) whose listener greets first, as sshd does.
+# Straight through, the greeting arrives at once; sent into the proxy, it
+# never does, because the proxy waits for the client to speak first.
+id sshkid >/dev/null 2>&1 || useradd -m sshkid
+kosherctl get-policy 2>/dev/null | grep -q '"sshkid"' \
+    || kosherctl adopt sshkid filtered >/dev/null 2>&1
+kctl set-mode "$(id -u sshkid)" filtered >/dev/null
+ssh_uid=$(id -u sshkid)
+cleanup_sshns() {
+    ip netns pids sshport 2>/dev/null | xargs -r kill 2>/dev/null
+    ip netns del sshport 2>/dev/null
+    ip link del vsshport 2>/dev/null
+}
+cleanup_sshns
+if ip netns add sshport && ip link add vsshport type veth peer name vsshportp \
+        && ip link set vsshportp netns sshport \
+        && ip addr add 198.51.100.1/24 dev vsshport && ip link set vsshport up \
+        && ip netns exec sshport ip addr add 198.51.100.2/24 dev vsshportp \
+        && ip netns exec sshport ip addr add 198.51.100.3/24 dev vsshportp \
+        && ip netns exec sshport ip link set vsshportp up; then
+    ip netns exec sshport python3 -c '
+import socket, threading
+s = socket.socket()
+s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+s.bind(("0.0.0.0", 222))
+s.listen(16)
+while True:
+    conn, _ = s.accept()
+    conn.sendall(b"SSH-2.0-kosher-test\r\n")
+    threading.Timer(5, conn.close).start()
+' &
+    sleep 1
+    greeted() {   # greeted <host>: did the listener's greeting reach sshkid?
+        as sshkid python3 -c '
+import socket, sys
+c = socket.create_connection((sys.argv[1], 222), 4)
+c.settimeout(4)
+sys.exit(0 if c.recv(64).startswith(b"SSH-2.0-kosher-test") else 1)
+' "$1" >/dev/null 2>&1
+    }
+    check "with nothing listed, port 222 does not reach the machine" 1 greeted 198.51.100.2
+    kctl ssh "$ssh_uid" --hosts 198.51.100.2:222 >/dev/null
+    sleep 1
+    check_contains "the machine is in the account's set for port 222" "198.51.100.2" \
+        nft list set inet kosher "ssh4_${ssh_uid}_222"
+    check "listed as 198.51.100.2:222, the machine answers on 222" 0 greeted 198.51.100.2
+    check "and port 222 on another machine still does not" 1 greeted 198.51.100.3
+    check_contains "port 443 cannot be named with a machine" "web or DNS" \
+        kctl ssh "$ssh_uid" --hosts 198.51.100.2:443
+    kctl ssh "$ssh_uid" --hosts none >/dev/null
+    sleep 1
+    check "with the list cleared, port 222 no longer reaches the machine" 1 greeted 198.51.100.2
+else
+    bad "could not make the test network for SSH on its own port"
+fi
+cleanup_sshns
 
 section "Captive portal"
 check "a temporary window can be opened" 0 kosherctl captive "$(id -u nokid)" 1
 check "the window lets that user out"    0 fetch_as nokid https://example.com
+
+# Leave wlkid's list as it was found: other suites use example.com as a
+# site that is NOT on it.
+kctl set-whitelist "$(id -u wlkid)" >/dev/null
 
 report

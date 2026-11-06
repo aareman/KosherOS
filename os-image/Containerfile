@@ -9,7 +9,7 @@
 # failing the whole image; the final stage warns and ships without it.
 # Lowercase "as": the podman on GitHub's Ubuntu runners (4.9) rejects "AS"
 # with "FROM requires either one argument, or three".
-FROM quay.io/fedora/fedora:44 as gnome-ext-build
+FROM ghcr.io/aareman/kosher-base-fedora:44-20261029@sha256:278ccc1c8af3d618b64accbba691bb14f82d371b2e13c86fa2ac7a447d1e03bb as gnome-ext-build
 ARG ARCMENU_REF=v69.2
 RUN dnf -y install glib2-devel gettext make git-core && dnf clean all
 RUN mkdir -p /out && ( git clone --depth 1 --branch "${ARCMENU_REF}" \
@@ -18,15 +18,135 @@ RUN mkdir -p /out && ( git clone --depth 1 --branch "${ARCMENU_REF}" \
     && grep -q '"50"' /out/usr/share/gnome-shell/extensions/arcmenu@arcmenu.com/metadata.json \
     || { echo "WARNING: ArcMenu did not build"; rm -rf /out/usr; touch /out/FAILED; } )
 
-FROM quay.io/fedora/fedora-bootc:44
+# Aura Glass's shell styling and patched Blur My Shell, built separately so
+# an optional ArcMenu failure cannot discard these assets. Fail closed on a
+# source/patch mismatch rather than shipping half of the desktop appearance.
+FROM ghcr.io/aareman/kosher-base-fedora:44-20261029@sha256:278ccc1c8af3d618b64accbba691bb14f82d371b2e13c86fa2ac7a447d1e03bb as glass-build
+ARG AURA_GLASS_REF=ac8253097b88bac1c9dea58dff67fcee8217d847
+ARG BLUR_MY_SHELL_REF=425761d5504941899cfb8cda24202d829024c622
+RUN dnf -y install git-core make gnome-shell glib2-devel gettext unzip python3 && dnf clean all
+RUN git init /tmp/aura-glass \
+    && git -C /tmp/aura-glass remote add origin https://github.com/DevWebeloper/aura-glass \
+    && git -C /tmp/aura-glass fetch --depth 1 origin "$AURA_GLASS_REF" \
+    && git -C /tmp/aura-glass checkout --detach FETCH_HEAD \
+    && git init /tmp/blur-my-shell \
+    && git -C /tmp/blur-my-shell remote add origin https://github.com/aunetx/blur-my-shell \
+    && git -C /tmp/blur-my-shell fetch --depth 1 origin "$BLUR_MY_SHELL_REF" \
+    && git -C /tmp/blur-my-shell checkout --detach FETCH_HEAD
+COPY os-image/desktop/ /build-glass/
+RUN bash /build-glass/build-glass.sh /tmp/aura-glass /tmp/blur-my-shell /out
+
+# Umbriel, one of the three compositors the advanced desktop can run Noctalia
+# on, and its screen-capture portal. Neither has a release tag or a Fedora
+# package, so both are built from pinned commits; the build script refuses a
+# checkout whose HEAD is not the pinned hash. Only the installed files and a
+# list of the runtime packages they need (NEEDS) go to the final stage.
+# Fedora 44's wlroots 0.20 is the series Umbriel is written against.
+FROM ghcr.io/aareman/kosher-base-fedora:44-20261029@sha256:278ccc1c8af3d618b64accbba691bb14f82d371b2e13c86fa2ac7a447d1e03bb as umbriel-build
+ARG UMBRIEL_REF=7097aeeb80e7b50d22c995b3905ce722e4fdbfaf
+ARG UMBRIEL_PORTAL_REF=1cc6eb18ba0d6c82dd66999646d7e554f76a85b6
+RUN dnf -y install --setopt=install_weak_deps=False git-core gcc-c++ meson ninja-build \
+        pkgconf-pkg-config wayland-devel wayland-protocols-devel wlroots-devel \
+        libxkbcommon-devel libinput-devel systemd-devel pixman-devel libdrm-devel \
+        libdisplay-info-devel cairo-devel pango-devel tomlplusplus-devel json-devel \
+        libxcb-devel xcb-util-wm-devel mesa-libEGL-devel mesa-libGLES-devel \
+        mesa-libgbm-devel lcms2-devel jemalloc-devel sdbus-cpp-devel pipewire-devel \
+        gtk4-devel \
+    && dnf clean all
+RUN for pair in "umbriel ${UMBRIEL_REF}" "xdg-desktop-portal-umbriel ${UMBRIEL_PORTAL_REF}"; do \
+        set -- $pair; \
+        git init "/tmp/$1" \
+        && git -C "/tmp/$1" remote add origin "https://github.com/noctalia-dev/$1" \
+        && git -C "/tmp/$1" fetch --depth 1 origin "$2" \
+        && git -C "/tmp/$1" checkout --detach FETCH_HEAD || exit 1; \
+    done
+COPY os-image/desktop/build-umbriel.sh /build-umbriel.sh
+RUN bash /build-umbriel.sh /tmp/umbriel /tmp/xdg-desktop-portal-umbriel /out \
+        "$UMBRIEL_REF" "$UMBRIEL_PORTAL_REF"
+
+# keyd, the key remapper (kosherd/keyboard.py), is not packaged by Fedora
+# 44. A pinned release, checked against its hash, is compiled here so the
+# compiler stays out of the image. CONFIG_DIR=/run/keyd: keyd reads the
+# config of whoever's session is on the screen from /run, where kosherd
+# writes it, so nothing at run time writes /etc and every boot starts from
+# the computer's own config (files/etc/keyd, which remaps nothing).
+# keyd-application-mapper (per-app keys) goes to /usr/libexec/kosher, not
+# PATH: on its own it would call keyd's socket, which nobody has (see
+# keyboard.py). kosher-keyd-apps.service runs it with KEYD_BIN pointing at
+# kosher-keyd-bind, which goes through kosherd. Its GNOME extension is
+# replaced by KosherOS's own (files/usr/share/gnome-shell/extensions), which
+# only reports the window in front: upstream's also starts the mapper, and
+# kills it whenever GNOME turns extensions off, as it does at the lock screen.
+FROM ghcr.io/aareman/kosher-base-fedora:44-20261029@sha256:278ccc1c8af3d618b64accbba691bb14f82d371b2e13c86fa2ac7a447d1e03bb as keyd-build
+ARG KEYD_VERSION=2.6.0
+ARG KEYD_SHA256=697089681915b89d9e98caf93d870dbd4abce768af8a647d54650a6a90744e26
+RUN dnf -y install gcc make && dnf clean all
+RUN curl -fsSL -o /tmp/keyd.tar.gz \
+        "https://github.com/rvaiya/keyd/archive/refs/tags/v${KEYD_VERSION}.tar.gz" \
+    && echo "${KEYD_SHA256}  /tmp/keyd.tar.gz" | sha256sum -c - \
+    && tar -xzf /tmp/keyd.tar.gz -C /tmp \
+    && cd "/tmp/keyd-${KEYD_VERSION}" \
+    && make PREFIX=/usr CONFIG_DIR=/run/keyd COMMIT="v${KEYD_VERSION}" \
+    && make install PREFIX=/usr CONFIG_DIR=/run/keyd COMMIT="v${KEYD_VERSION}" \
+        DESTDIR=/out FORCE_SYSTEMD=1 \
+    && install -Dm755 scripts/keyd-application-mapper \
+        /out/usr/libexec/kosher/keyd-application-mapper \
+    && grep -q "KEYD_BIN = os.environ.get('KEYD_BIN', 'keyd')" \
+        /out/usr/libexec/kosher/keyd-application-mapper \
+    && grep -q zwlr_foreign_toplevel_manager_v1 /out/usr/libexec/kosher/keyd-application-mapper \
+    && rm -rf /out/run /out/usr/bin/keyd-application-mapper \
+        /out/usr/share/keyd/gnome-extension* \
+    && install -Dm644 LICENSE /out/usr/share/licenses/keyd/LICENSE \
+    && /out/usr/bin/keyd -v | grep -q "v${KEYD_VERSION}" \
+    && test -f /out/usr/lib/systemd/system/keyd.service \
+    && test -f /out/usr/lib/sysusers.d/keyd.conf
+
+# The person segmenter (kosherd/persons.py, #274): Google's multiclass
+# selfie segmenter, Apache-2.0, which says per pixel whether it is a
+# person, and of a person whether skin, hair or clothes. Google ships it
+# as TFLite only, and the image runs onnxruntime, so it is converted here
+# with tf2onnx from the pinned original, in Fedora's parallel Python 3.12
+# because TensorFlow has no wheel for Fedora 44's own Python. 16 MB,
+# ~150 ms on a laptop CPU, asked only for a figure that measures near the
+# line, so an ordinary picture never pays for it.
+FROM ghcr.io/aareman/kosher-base-fedora:44-20261029@sha256:278ccc1c8af3d618b64accbba691bb14f82d371b2e13c86fa2ac7a447d1e03bb as segmenter-build
+ARG SEGMENTER_SHA256=c6748b1253a99067ef71f7e26ca71096cd449baefa8f101900ea23016507e0e0
+RUN dnf -y install python3.12 && dnf clean all \
+    && python3.12 -m venv /tmp/venv \
+    && /tmp/venv/bin/pip install --no-cache-dir -q "tensorflow-cpu==2.17.1" "tf2onnx==1.16.1" "onnx<1.17" \
+    && curl -fsSL -o /tmp/selfie_multiclass_256x256.tflite \
+         "https://storage.googleapis.com/mediapipe-models/image_segmenter/selfie_multiclass_256x256/float32/latest/selfie_multiclass_256x256.tflite" \
+    && echo "${SEGMENTER_SHA256}  /tmp/selfie_multiclass_256x256.tflite" | sha256sum -c - \
+    && mkdir -p /out \
+    && /tmp/venv/bin/python -m tf2onnx.convert --tflite /tmp/selfie_multiclass_256x256.tflite \
+         --output /out/selfie_multiclass.onnx --opset 14 \
+    && test -s /out/selfie_multiclass.onnx
+
+FROM ghcr.io/aareman/kosher-base-fedora-bootc:44-20261029@sha256:cbca5adc859a7c973aef49b5de1e43cc540409758f598674e3c5594099448a75
 
 # --- Packages ---------------------------------------------------------------
-# GNOME desktop + our runtime deps. Remove escape hatches (toolbox/container
-# tooling is attack-surface hygiene; the skuid firewall holds regardless).
+# GNOME desktop + our runtime deps. toolbox is excluded: a mutable Fedora
+# beside the locked-down one is an escape hatch. Containers themselves
+# are not — see podman below.
 # dnf5 can't mix a @group with plain packages in one install, hence two calls.
-RUN dnf -y install --exclude=toolbox --exclude=podman @workstation-product-environment && dnf clean all
+RUN dnf -y install --exclude=toolbox @workstation-product-environment && dnf clean all
 RUN dnf -y install dnsmasq nftables python3-gobject python3-jsonschema python3-pip \
+        # Rootless containers (issue #34): podman, with `docker` as its own
+        # shim (podman-docker) so the tools that look for one — the Dev
+        # Containers extension, scripts — find it, and podman-compose for
+        # compose files. Rootless only: a rootless container's network is a
+        # user-space process owned by the account, so every packet it
+        # sends carries the account's uid and is filtered as the account.
+        # A root daemon's bridge would leave through the kernel's forward
+        # path with no owner to dispatch on, which is why there is no
+        # Docker daemon. /etc/containers/mounts.conf and
+        # containers.conf.d/ put the filter's certificate inside every
+        # container; kosherd gives each account its subordinate ids.
+        podman podman-docker podman-compose passt \
         malcontent malcontent-tools flatpak accountsservice cage \
+        # gpgv checks a developer's own signed build before the Store
+        # unpacks it (kosherd/upstreamapps.py); dnf itself no longer needs it.
+        gnupg2 \
         ca-certificates \
         # greenboot: if a new image boots without the filter coming up, the
         # machine puts ITSELF back. A locked-down computer that fails to
@@ -36,11 +156,18 @@ RUN dnf -y install dnsmasq nftables python3-gobject python3-jsonschema python3-p
         greenboot \
         # The desktop layouts (docs/desktop.md). Classic: GNOME with a
         # taskbar (Dash to Panel) and tray icons; tiling adds PaperWM, which
-        # Fedora does not package, so it is fetched below. Advanced: a
-        # separate niri session with the Noctalia shell, plus the portal
-        # backend Flatpak apps need outside GNOME.
+        # Fedora does not package, so it is fetched below. Advanced: the
+        # Noctalia shell in a separate session on niri (here), Hyprland or
+        # Umbriel (both below), plus the portal backend Flatpak apps need
+        # outside GNOME.
         gnome-shell-extension-dash-to-panel gnome-shell-extension-appindicator \
+        gnome-shell-extension-user-theme \
         niri noctalia xdg-desktop-portal-gtk \
+        # Typing into other windows on the desktops without GNOME's Remote
+        # Desktop portal: Hex (the Store's dictation app) pastes there with
+        # wtype over the virtual-keyboard protocol, and wl-clipboard is its
+        # clipboard on every Wayland desktop.
+        wtype wl-clipboard \
         # Hebrew, properly: the Culmus family (David, Frank Ruehl, Hadasim,
         # Miriam, Nachlieli, Taamey Frank with te'amim), Noto Sans/Serif
         # Hebrew, Noto Rashi for sefarim, Ezra SIL for Tanach with
@@ -62,14 +189,21 @@ RUN dnf -y install dnsmasq nftables python3-gobject python3-jsonschema python3-p
     && usermod -aG kosher-spool kosher-mitm \
     && usermod -aG kosher-spool kosher-search
 # sudo is on dnf's protected list; removing it here is the whole point.
-# podman must STAY: bootc (the update mechanism) depends on it in F44+. The
-# skuid firewall contains rootless containers, and SUB_UID_COUNT=0 below
-# denies new users subordinate IDs anyway.
+# (podman stays, and not only for containers: bootc, the update
+# mechanism, depends on it in F44+.)
+# console-login-helper-messages-profile is a CoreOS habit the bootc base
+# carries: every interactive shell opens with "[systemd] Failed Units"
+# and a list. A server console wants that; a family's terminal does not,
+# and a developer opening Console saw it before the first prompt.
+# gnome-tour is what the Shell's "Welcome to GNOME" dialog offers; the
+# dialog is off (see dconf) and KosherOS has its own welcome.
 RUN for p in sudo toolbox gnome-boxes gnome-software PackageKit \
-        PackageKit-command-not-found gnome-initial-setup gnome-classic-session; do \
+        PackageKit-command-not-found gnome-initial-setup gnome-classic-session \
+        gnome-tour console-login-helper-messages-profile; do \
         rpm -q "$p" >/dev/null 2>&1 && dnf -y --setopt=protected_packages= remove "$p"; \
     done; \
-    ! rpm -q sudo && rpm -q bootc
+    ! rpm -q sudo && rpm -q bootc && test -x /usr/bin/docker && test -x /usr/bin/podman-compose \
+    && ! test -e /usr/share/console-login-helper-messages/profile.sh
 
 # Build/branding tooling in one early layer, so the later steps that use it
 # are cheap and local. Layer ORDER in this file is deliberate: the heavy,
@@ -96,6 +230,13 @@ RUN d=/usr/share/gnome-shell/extensions/paperwm@paperwm.github.com \
     && glib-compile-schemas "$d/schemas" \
     && grep -q '"50"' "$d/metadata.json" \
     || echo "WARNING: PaperWM did not install; the tiling layout will be plain GNOME"
+# keyd, from its builder stage above. The keyd group owns its socket and
+# has no members: kosherd, as root, is the only client (keyboard.py).
+COPY --from=keyd-build /out/usr/ /usr/
+RUN getent group keyd >/dev/null || groupadd -r keyd \
+    && test -z "$(getent group keyd | cut -d: -f4)" \
+    && test -x /usr/bin/keyd && ! test -e /usr/bin/keyd-application-mapper \
+    && test -x /usr/libexec/kosher/keyd-application-mapper
 # ArcMenu, from the builder stage above. Its schema lands in the shared
 # schema directory (that is how its Makefile installs system-wide), so the
 # compiled schema cache is refreshed for GNOME Shell to find it.
@@ -106,6 +247,87 @@ RUN if [ -e /tmp/gnome-ext/FAILED ]; then \
         cp -a /tmp/gnome-ext/usr/. /usr/ \
         && glib-compile-schemas /usr/share/glib-2.0/schemas; \
     fi; rm -rf /tmp/gnome-ext
+
+COPY --from=glass-build /out/usr/ /usr/
+
+# The advanced desktop's other two compositors (niri is a Fedora package,
+# installed above). Each brings its own login-screen session.
+#
+# Fedora no longer packages Hyprland, so it comes from the
+# nett00n/hyprland COPR, which builds it for Fedora 44 and signs
+# its packages; dnf checks them against the COPR's key. The repository is
+# used for this install only and then removed, so nothing on the machine
+# points at it. Hyprland's own wallpapers include anime drawings of its
+# mascot, so they are deleted; the advanced desktop shows the KosherOS one.
+# A failed install leaves the image without Hyprland rather than without an
+# image; the Look app offers only the compositors that are installed.
+ARG HYPRLAND_VERSION=0.56
+RUN curl -fsSL -o /etc/yum.repos.d/kosher-hyprland.repo \
+        https://copr.fedorainfracloud.org/coprs/nett00n/hyprland/repo/fedora-44/nett00n-hyprland-fedora-44.repo \
+    && dnf -y --setopt=install_weak_deps=False install "hyprland-${HYPRLAND_VERSION}.*" \
+        xdg-desktop-portal-hyprland hyprland-guiutils hyprshutdown \
+    && dnf clean all \
+    && rm -f /usr/share/hypr/wall*.png \
+    || echo "WARNING: Hyprland did not install; the advanced desktop offers niri and Umbriel"; \
+    rm -f /etc/yum.repos.d/kosher-hyprland.repo
+# Umbriel and its portal, from the builder stage above, with the runtime
+# packages its binaries link against.
+COPY --from=umbriel-build /out/ /tmp/umbriel/
+RUN dnf -y --setopt=install_weak_deps=False install $(cat /tmp/umbriel/NEEDS) \
+    && dnf clean all \
+    && cp -a /tmp/umbriel/usr/. /usr/ \
+    && rm -rf /tmp/umbriel \
+    && test -x /usr/bin/umbriel && test -f /usr/share/wayland-sessions/umbriel.desktop
+
+# --- Developer tooling: Nix, devenv, devbox (issue #34) -----------------------
+# Fedora packages Nix, daemon and all, so it comes in like everything else
+# and its sysusers (nixbld, the build users) are created here at build.
+# nix-legacy is nix-shell, nix-build and nix-env, which every tutorial and
+# half of the tooling still call. The image is read-only, so the store the
+# packages lay out under /nix is only a skeleton: kosher-nix-store.service
+# copies it to /var/lib/nix on first boot and nix.mount binds it back.
+# /etc/nix/nix.conf is ours (files/etc/nix), and who may use the daemon is
+# kosherd's decision (apply.py writes /etc/nix/kosheros-users.conf).
+RUN dnf -y install nix nix-daemon nix-legacy && dnf clean all \
+    && getent group nixbld >/dev/null \
+    && test -f /usr/lib/systemd/system/nix-daemon.socket
+# Tailscale (#30), so a family can reach its own machines over its tailnet:
+# a home server, a Forgejo, the other computer. Fedora does not package it,
+# so it comes from Tailscale's own signed repository. The repo file is
+# written out here rather than downloaded, so the signature checks it asks
+# for are in this file to read, and it is removed after the install: a
+# bootc machine never runs dnf, and the next image brings the next
+# Tailscale. Only kosherd drives it (kosherd/tailnet.py). No operator is
+# ever set, so an account can read its status but only root can change it.
+# The service is left disabled (#220): kosherd starts it once an
+# administrator turns Tailscale on under Advanced.
+RUN printf '%s\n' '[tailscale-stable]' 'name=Tailscale stable' \
+        'baseurl=https://pkgs.tailscale.com/stable/fedora/$basearch' \
+        'enabled=1' 'type=rpm' 'gpgcheck=1' 'repo_gpgcheck=1' \
+        'gpgkey=https://pkgs.tailscale.com/stable/fedora/repo.gpg' \
+        > /etc/yum.repos.d/tailscale.repo \
+    && dnf -y install tailscale && dnf clean all \
+    && rm -f /etc/yum.repos.d/tailscale.repo \
+    && systemctl disable tailscaled.service \
+    && test "$(systemctl is-enabled tailscaled.service)" = disabled
+# devbox is a static Go binary released on GitHub; pinned by hash like the
+# person model. It uses the Nix above (it only installs Nix when none is
+# found) and its package search at search.devbox.sh, which is reachable
+# from every account (DEVELOPER_REGISTRIES). devenv has no RPM and no
+# binary release: /usr/bin/devenv (files/usr/bin) adds it to the account's
+# own Nix profile the first time it is run.
+ARG DEVBOX_VERSION=0.18.4
+RUN case "$(uname -m)" in \
+        x86_64)  arch=amd64; sum=4a466a8788186da73f3c692697917c79452b758f40b454b4761e6d1fcd2acad9 ;; \
+        aarch64) arch=arm64; sum=313ecedab221aa674484a5815006e17a065ba3bfd07ab6de8aeab38fa483db27 ;; \
+        *) echo "no devbox release for $(uname -m)"; exit 1 ;; \
+    esac \
+    && curl -fsSL -o /tmp/devbox.tar.gz \
+        "https://github.com/jetify-com/devbox/releases/download/${DEVBOX_VERSION}/devbox_${DEVBOX_VERSION}_linux_${arch}.tar.gz" \
+    && echo "${sum}  /tmp/devbox.tar.gz" | sha256sum -c - \
+    && tar -xzf /tmp/devbox.tar.gz -C /usr/bin devbox \
+    && chmod 755 /usr/bin/devbox && rm -f /tmp/devbox.tar.gz \
+    && test "$(/usr/bin/devbox version)" = "${DEVBOX_VERSION}"
 
 # mitmproxy is not packaged for Fedora 44, so install it from PyPI (with its
 # dependencies — unlike our own packages, which are --no-deps).
@@ -126,6 +348,8 @@ RUN mkdir -p /usr/share/kosher/models \
     && curl -fsSL -o /usr/share/kosher/models/yolox_nano.onnx \
          https://github.com/Megvii-BaseDetection/YOLOX/releases/download/0.1.1rc0/yolox_nano.onnx \
     && echo "c789161ed43c8269fcd4e67c67eeeb4e80c622da2eb296a20bc6007bd18a0b7d  /usr/share/kosher/models/yolox_nano.onnx" | sha256sum -c -
+# The person segmenter, converted above (kosherd/persons.py, #274).
+COPY --from=segmenter-build /out/selfie_multiclass.onnx /usr/share/kosher/models/selfie_multiclass.onnx
 # PyAV: FFmpeg's libraries as a wheel, with the H.264, VP9 and AV1 decoders
 # that Fedora's own ffmpeg-free leaves out. The proxy samples a few
 # keyframes from a clip and judges them like pictures (kosherd/videocheck).
@@ -155,14 +379,18 @@ RUN git clone --depth 1 --branch "${SEARXNG_REF}" \
     || echo "WARNING: SearXNG did not install; search will be unavailable"
 
 # The category database is built here rather than committed: a family must
-# not have to assemble lists, and the shipped JSON seed is only a fallback
-# for a build with no network. Millions of domains in SQLite cost a few MB
+# not have to assemble lists. Millions of domains in SQLite cost a few MB
 # of page cache to query; the same data in a dict would cost hundreds of MB
 # of RAM on exactly the low-end machine this has to run on.
+#
+# No fallback. This step used to say "|| echo WARNING" and carry on, and
+# when the UT1 site went down two :edge images were built and signed with
+# an adult category of nothing (#202). The script tries UT1 and then its
+# GitHub mirror, and exits non-zero when a category a family can switch on
+# is empty or short; an image is simply not built that day.
 COPY scripts/fetch-categories.py scripts/curated-sites.json /tmp/
 RUN python3 /tmp/fetch-categories.py \
-        --out /usr/share/kosher/categories/categories.sqlite \
-    || echo "WARNING: category import failed; falling back to the seed list"
+        --out /usr/share/kosher/categories/categories.sqlite
 RUN rm -f /tmp/fetch-categories.py /tmp/curated-sites.json
 
 # Third-party sources are enabled outright rather than prompted for: the
@@ -180,6 +408,50 @@ RUN flatpak remote-add --system --if-not-exists \
 # --- Static configuration (units, polkit, dbus, dnsmasq, baseline firewall) --
 COPY os-image/files/ /
 
+# Umbriel ships its own starter config at /usr/share/umbriel/config.toml,
+# headed "Copy this file to ~/.config/umbriel/config.toml": no shell at
+# startup, no help or settings keys, bare Super for the launcher. Copied
+# by hand, it replaced the KosherOS one whole and the desktop came up
+# black. The KosherOS config takes its place, so either copy is ours.
+RUN install -m 0644 /etc/xdg/umbriel/config.toml /usr/share/umbriel/config.toml \
+    && cmp /etc/xdg/umbriel/config.toml /usr/share/umbriel/config.toml
+
+# Nix's own profile script exports NIX_SSL_CERT_FILE for the tools a Nix
+# shell brings (their curl, git, python carry nixpkgs' own cacert), and it
+# looks for the bundle at paths Fedora 44 no longer has — so it would fall
+# back to the shell's OWN cacert, which does not hold the filter's
+# certificate, and every download in a devenv shell on a filtered account
+# would fail with a certificate error. The system bundle goes first in its
+# list. (profile.d/kosher-ca.sh sets the same variable; this keeps nix.sh,
+# which runs after it, from overriding it.)
+RUN sed -i 's|^    if \[ -e /etc/ssl/certs/ca-certificates.crt \]; then|    if [ -e /etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem ]; then # KosherOS: the system bundle, with the filter CA\n        export NIX_SSL_CERT_FILE=/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem\n    elif [ -e /etc/ssl/certs/ca-certificates.crt ]; then|' \
+        /etc/profile.d/nix.sh \
+    && grep -q 'NIX_SSL_CERT_FILE=/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem' /etc/profile.d/nix.sh \
+    && sh -n /etc/profile.d/nix.sh \
+    && chmod 755 /usr/bin/devenv \
+    && grep -q '^!include /etc/nix/kosheros-users.conf' /etc/nix/nix.conf \
+    # Only root and the accounts with developer tools may run Nix (#214).
+    # The daemon's allowed-users is not enough: with a store of its own
+    # under ~ (`nix --store ~/x`), nix needs no daemon, and any account
+    # could build anything from nixpkgs. So the program, the namespace
+    # helper and the libraries (Nix has a C API Python could load) are
+    # root's and kosher-nix's alone; kosherd keeps that group to the
+    # developer accounts (nixdaemon.py). The gid is fixed in sysusers.d so
+    # an updated machine's group owns these files too. The other nix-*
+    # commands are links to /usr/bin/nix.
+    && systemd-sysusers /usr/lib/sysusers.d/kosher-nix.conf \
+    && test "$(getent group kosher-nix | cut -d: -f3)" = 850 \
+    # 1Password's groups (#234): kosherd makes /run/wrappers/bin/op setgid
+    # to onepassword-cli, the group the desktop app trusts. Fixed gids, and
+    # nobody in them.
+    && systemd-sysusers /usr/lib/sysusers.d/kosher-1password.conf \
+    && test "$(getent group onepassword-cli | cut -d: -f3)" = 851 \
+    && test "$(getent group onepassword | cut -d: -f3)" = 852 \
+    && test -z "$(getent group onepassword-cli | cut -d: -f4)" \
+    && chown root:850 /usr/bin/nix /usr/libexec/nix-nswrapper /usr/lib64/libnix*.so.* \
+    && chmod 0750 /usr/bin/nix /usr/libexec/nix-nswrapper /usr/lib64/libnix*.so.* \
+    && test -z "$(find /usr/bin /usr/libexec /usr/lib64 -maxdepth 1 -type f \( -name 'nix*' -o -name 'libnix*' \) -perm /o=rwx)"
+
 # SELinux: dnsmasq needs a netfilter netlink socket to feed the nft whitelist
 # sets (not covered by Fedora's stock dnsmasq policy).
 RUN true && \
@@ -189,9 +461,45 @@ RUN true && \
      semanage port -m -t dns_port_t -p udp 5354) && \
     (semanage port -a -t dns_port_t -p tcp 5354 || \
      semanage port -m -t dns_port_t -p tcp 5354) && \
+    # And the dnsfilter accounts' resolver on 5356, likewise.
+    (semanage port -a -t dns_port_t -p udp 5356 || \
+     semanage port -m -t dns_port_t -p udp 5356) && \
+    (semanage port -a -t dns_port_t -p tcp 5356 || \
+     semanage port -m -t dns_port_t -p tcp 5356) && \
     checkmodule -M -m -o /tmp/kosher-dnsmasq-nftset.mod /usr/share/kosher/selinux/kosher-dnsmasq-nftset.te && \
     semodule_package -o /tmp/kosher-dnsmasq-nftset.pp -m /tmp/kosher-dnsmasq-nftset.mod && \
-    semodule -i /tmp/kosher-dnsmasq-nftset.pp && rm -f /tmp/kosher-dnsmasq-nftset.*
+    semodule -i /tmp/kosher-dnsmasq-nftset.pp && rm -f /tmp/kosher-dnsmasq-nftset.* && \
+    # The Nix store: nothing in Fedora's policy names /nix, so it is
+    # default_t, and systemd labels a new socket from the rule for its
+    # PATH — which is how nix-daemon.socket failed with "Permission
+    # denied" on a booted image: init may not create a default_t socket.
+    # The store is var_lib_t, like the /var/lib it really lives in, and
+    # the daemon's socket directory is var_run_t, where init makes
+    # sockets. Both spellings of that directory, since the first boot
+    # labels it at /var/lib/nix before the bind mount is up. Order
+    # matters: the LAST matching rule wins, so the socket rules follow
+    # the general one. Asserted, because a wrong label here is a daemon
+    # that never starts and no error anywhere a person would look.
+    semanage fcontext -a -t var_lib_t '/nix(/.*)?' && \
+    semanage fcontext -a -t var_run_t '/nix/var/nix/daemon-socket(/.*)?' && \
+    semanage fcontext -a -t var_run_t '/var/lib/nix/var/nix/daemon-socket(/.*)?' && \
+    # Syncthing's binary, which kosherd builds and runs as a system service
+    # per account (#213): init may not execute var_lib_t, so the binary
+    # alone is bin_t, and so that init may load it, the dynamic loader of
+    # the glibc it is linked against is ld_so_t (the kernel opens the
+    # loader before the service's domain changes). kosherd restores the
+    # labels after each build.
+    semanage fcontext -a -t bin_t '/nix/store/[^/]+-syncthing-[0-9][^/]*/bin/syncthing' && \
+    semanage fcontext -a -t bin_t '/var/lib/nix/store/[^/]+-syncthing-[0-9][^/]*/bin/syncthing' && \
+    semanage fcontext -a -t ld_so_t '/nix/store/[^/]+-glibc-[0-9][^/]*/lib/ld-linux[^/]*' && \
+    semanage fcontext -a -t ld_so_t '/var/lib/nix/store/[^/]+-glibc-[0-9][^/]*/lib/ld-linux[^/]*' && \
+    restorecon -R /nix && \
+    test "$(matchpathcon -n /nix/store/abc-syncthing-2.1.3/bin/syncthing)" = system_u:object_r:bin_t:s0 && \
+    test "$(matchpathcon -n /nix/store/abc-syncthing-2.1.3/lib/x)" = system_u:object_r:var_lib_t:s0 && \
+    test "$(matchpathcon -n /nix/store/abc-glibc-2.44-57/lib/ld-linux-x86-64.so.2)" = system_u:object_r:ld_so_t:s0 && \
+    test "$(matchpathcon -n /nix/var/nix/daemon-socket/socket)" = system_u:object_r:var_run_t:s0 && \
+    test "$(matchpathcon -n /nix/store)" = system_u:object_r:var_lib_t:s0 && \
+    test "$(matchpathcon -n /var/lib/nix/var/nix/daemon-socket)" = system_u:object_r:var_run_t:s0
 
 # --- Lockdown ----------------------------------------------------------------
 # Identity: KosherOS, powered by Fedora (Fedora Remix terms). ID stays
@@ -294,18 +602,63 @@ RUN true \
     #
     # Nothing here loads an out-of-tree module (no proprietary drivers ship,
     # and none can be installed), so lockdown costs the family nothing.
-    && printf 'kargs = ["lockdown=integrity", "intel_iommu=on", "mem_sleep_default=s2idle"]\n' \
+    #   rd.shell=0          a failed early boot never lands in a dracut
+    #   rd.emergency=reboot shell: it restarts instead (#129). On a family
+    #                       computer nobody is there to type into one, and
+    #                       a root shell before the filter is up is exactly
+    #                       what the boot-menu password exists to prevent.
+    && printf 'kargs = ["lockdown=integrity", "intel_iommu=on", "mem_sleep_default=s2idle", "rd.shell=0", "rd.emergency=reboot"]\n' \
          > /usr/lib/bootc/kargs.d/20-kosheros-security.toml \
+    # No systemd-gpt-auto-generator (#225). With an EFI partition and no
+    # /boot in fstab it puts boot.automount on /boot, idle timeout 120s,
+    # over ostree's bind mount of /sysroot/boot. Two minutes after the
+    # last touch systemd tries to unmount /boot; during an update download
+    # that fails as busy, and at shutdown ostree-finalize-staged's remount
+    # of /boot lands on the autofs mount, fails with EINVAL, and the
+    # update is never written: the computer starts the old version again.
+    # The root is named on the command line, so nothing else needs it.
+    && printf 'kargs = ["systemd.gpt_auto=0"]\n' \
+         > /usr/lib/bootc/kargs.d/30-kosheros-boot.toml \
+    # A new account has never seen Dash to Panel's version, so upstream
+    # announces an "update" at its first login. Seed the installed version
+    # at build time instead of hard-coding a value that goes stale.
+    && python3 -c 'import json; from pathlib import Path; \
+        metadata = Path("/usr/share/gnome-shell/extensions/dash-to-panel@jderose9.github.com/metadata.json"); \
+        version = int(json.loads(metadata.read_text())["version"]); \
+        Path("/etc/dconf/db/local.d/21-kosheros-panel-version").write_text("[org/gnome/shell/extensions/dash-to-panel]\nextension-version=%d\n" % version)' \
     && dconf update
 
 
 RUN passwd -l root \
     && groupadd -r kosher-admin \
-    && sed -i -e 's/^SUB_UID_COUNT.*/SUB_UID_COUNT 0/' -e 's/^SUB_GID_COUNT.*/SUB_GID_COUNT 0/' /etc/login.defs \
+    # Every new account gets a block of subordinate ids: an image carries
+    # files owned by many uids, and without a block to map them to podman
+    # cannot unpack it. (This used to be 0, as belt to the firewall's
+    # braces; the firewall maps each block to its owner's chain instead —
+    # kosherd/containers.py.) Accounts made before this get theirs from
+    # kosherd.
+    && sed -i -e 's/^SUB_UID_COUNT.*/SUB_UID_COUNT 65536/' -e 's/^SUB_GID_COUNT.*/SUB_GID_COUNT 65536/' /etc/login.defs \
+    && grep -q '^SUB_UID_COUNT 65536' /etc/login.defs \
     && systemctl mask systemd-resolved.service debug-shell.service \
     && systemctl enable sshd.service \
     && systemctl enable kosherd.service kosher-firewall.service kosher-dns.service \
-    && systemctl enable bootc-fetch-apply-updates.timer \
+    # The key remapper is not enabled here: it is a switch under Advanced
+    # (#230), off on a new install, and kosherd enables and starts it when
+    # an administrator turns it on. Even then it remaps nothing until a
+    # person's own file says to, and only while their session is on the
+    # screen.
+    && ! systemctl is-enabled --quiet keyd.service \
+    # Updates are applied by a parent from the admin app (kosherd's path,
+    # which turns signature enforcement on with the first switch), never on
+    # their own: the stock timer would pull the first update before that
+    # switch, unverified (#125), and the docs have said "not on their own"
+    # all along.
+    && systemctl disable bootc-fetch-apply-updates.timer \
+    && ! systemctl is-enabled --quiet bootc-fetch-apply-updates.timer \
+    # Nix: the store on /var, the daemon on its socket, and the graphics
+    # drivers Nix apps look for in /run/opengl-driver.
+    && systemctl enable nix.mount nix-daemon.socket kosher-nix-opengl.service \
+    && systemctl is-enabled nix.mount nix-daemon.socket kosher-nix-opengl.service \
     # An update that boots without the filter puts itself back. greenboot's
     # own [Install] carries Also=greenboot-set-rollback-trigger.service, so
     # enabling the health check arms the rollback too — verified against
@@ -318,9 +671,29 @@ RUN passwd -l root \
     && systemctl is-enabled greenboot-set-rollback-trigger.service \
     && rm -f /etc/flatpak/remotes.d/*.flatpakrepo
 
-# Only images signed for our registry may be switched/updated to.
-# TODO(stage 2): replace with sigstoreSigned policy for the real registry:
-#   /etc/containers/policy.json + /etc/containers/registries.d/kosher.yaml
+# Image trust (#70). /etc/containers/policy.json (files/etc/containers)
+# accepts an image from KosherOS's own repository only with the KosherOS
+# key's signature, which CI puts on every image it publishes; bootc
+# verifies it on every update once a machine's deployment is marked to
+# enforce the policy (kosherd does that with its first update, see
+# updates.py). The public registries developers pull from are accepted
+# as they are: rootless podman reads the same policy, and a devcontainer
+# image from Docker Hub or Microsoft's registry carries no key we hold.
+# Everything else, an unknown registry or a transport not listed, is
+# refused. The key must be there, the policy must parse, and the default
+# must be the refusal, or this is a machine that takes any image.
+RUN python3 -c 'import json; p = json.load(open("/etc/containers/policy.json")); \
+        assert p["default"] == [{"type": "reject"}], p["default"]; \
+        k = p["transports"]["docker"]["ghcr.io/aareman/kosher-linux"][0]; \
+        assert k["type"] == "sigstoreSigned" and k["keyPath"] == "/etc/pki/containers/kosheros-images.pub", k' \
+    && test -s /etc/pki/containers/kosheros-images.pub \
+    && grep -q 'ghcr.io/aareman/kosher-linux' /etc/containers/registries.d/kosheros.yaml
+
+# certutil, so mkcert (which devenv runs for its proxy's https://*.localhost
+# names) can add its local CA to the account's own browser certificate
+# stores, Firefox's profiles and ~/.pki/nssdb, without root. Never the
+# system-wide store: one account's CA is trusted by that account alone.
+RUN dnf -y install nss-tools && dnf clean all && command -v certutil
 
 
 # --- kosherd + apps (last layers: change most often) --------------------------
@@ -330,6 +703,8 @@ COPY admin-app/ /tmp/admin-app/
 COPY store-app/ /tmp/store-app/
 COPY setup-app/ /tmp/setup-app/
 COPY myfilter-app/ /tmp/myfilter-app/
+COPY welcome-app/ /tmp/welcome-app/
+COPY look-app/ /tmp/look-app/
 COPY policy/schema/policy.schema.json /usr/share/kosher/policy.schema.json
 COPY mitm/ /usr/share/kosher/mitm/
 
@@ -344,9 +719,9 @@ RUN SEARXNG_SETTINGS_PATH=/usr/share/kosher/searxng/settings.yml \
     && rm /tmp/check-searxng-settings.py
 RUN python3 -m pip install --prefix=/usr --no-deps \
         /tmp/kosherd/ /tmp/admin-app/ /tmp/store-app/ /tmp/setup-app/ \
-        /tmp/search-app/ /tmp/myfilter-app/ \
+        /tmp/search-app/ /tmp/myfilter-app/ /tmp/welcome-app/ /tmp/look-app/ \
     && rm -rf /tmp/kosherd /tmp/admin-app /tmp/store-app /tmp/setup-app \
-        /tmp/search-app /tmp/myfilter-app \
+        /tmp/search-app /tmp/myfilter-app /tmp/welcome-app /tmp/look-app \
     && chmod 755 /usr/bin/kosher-setup-session \
     && systemctl enable kosher-firstboot.service \
     # Every graphical sign-in applies that account's desktop layout.
@@ -354,27 +729,66 @@ RUN python3 -m pip install --prefix=/usr --no-deps \
     # ...and listens for kosherd's time warnings, so "5 minutes left" is a
     # notification on the person's screen, not a line in a log.
     && systemctl --global enable kosher-time-notify.service \
+    # ...and shows a mark in the panel while a downloaded update waits for
+    # a restart, with one notice when an automatic download finishes.
+    && systemctl --global enable kosher-update-notify.service \
+    # ...and sends the person's own keyd files to kosherd (keyboard.py),
+    # and runs the per-app key mapper for people with an app.conf.
+    && systemctl --global enable kosher-keyboard.service kosher-keyd-apps.service \
+    && chmod 755 /usr/libexec/kosher-keyd-run \
+    # ...and starts Noctalia on niri, Hyprland or Umbriel when a personal
+    # compositor configuration left it out.
+    && systemctl --global enable kosher-shell.service \
+    && chmod 755 /usr/libexec/kosher-shell \
     && systemctl enable kosher-search-secret.service kosher-searxng.service \
         kosher-search.service \
     # Portal sync is inert until the device enrols (the unit and timer
     # both carry ConditionPathExists on the enrolment file).
-    && systemctl enable kosher-sync.timer
+    && systemctl enable kosher-sync.timer \
+    # Automatic updates (#19): a daily tick, and kosherd decides whether a
+    # check is due on the schedule in the policy, downloads the update and
+    # leaves it for the next restart. kosherd stops the timer when the
+    # schedule is off. Not Fedora's own update timer, which restarts the
+    # computer and is disabled above.
+    && systemctl enable kosher-auto-update.timer \
+    && systemctl is-enabled kosher-auto-update.timer
 
 # Time limits at the door. kosherd renders /etc/security/time.conf from
 # the policy (when each account may sign in; an account whose daily time
 # is used up is refused outright); pam_time in the account stack is what
-# reads it. It goes into the login-screen and console services directly —
+# reads it. It goes into the login-screen, console and SSH services directly —
 # password-auth is authselect's, and editing that file breaks `authselect
 # check`. On a refusal, pam_exec notes it in the activity log so the
 # parent sees "sign-in refused, 21:14" beside everything else.
-RUN for f in gdm-password gdm-autologin login; do \
+RUN for f in gdm-password gdm-autologin login sshd; do \
         [ -f "/etc/pam.d/$f" ] && ! grep -q pam_time "/etc/pam.d/$f" && \
         sed -i '0,/^account/{s|^account|account    [success=1 default=bad] pam_time.so\naccount    optional pam_exec.so quiet /usr/bin/kosher-time-refused\n&|}' "/etc/pam.d/$f"; \
     done \
     && grep -q pam_time /etc/pam.d/gdm-password \
     && grep -q kosher-time-refused /etc/pam.d/gdm-password \
+    && grep -q pam_time /etc/pam.d/sshd \
+    # Text consoles are for administrators (F8 in #33, #186). Every getty,
+    # on the screen's Ctrl+Alt+F2 to F6 and on a serial line, signs in
+    # through the `login` service, so that is where the line is drawn: at
+    # a terminal, an account outside kosher-admin is refused, and a
+    # supervised account gets no shell outside the desktop, where its app
+    # list, lock screen and time warnings are. Root stays allowed (it is
+    # locked, so only matters with a key), and an administrator can still
+    # reach a text console when the desktop will not start. A session root
+    # opens through the same service with no terminal at all (systemd-run
+    # with PAMName=login, which the VM tests use for a seat-less session)
+    # is no console and passes. The login screen has its own PAM services
+    # and is not affected.
+    && { grep -q 'ingroup kosher-admin' /etc/pam.d/login || \
+        sed -i '0,/^account/{s|^account|account    [success=2 default=ignore] pam_succeed_if.so quiet uid eq 0\naccount    [success=1 default=ignore] pam_succeed_if.so quiet user ingroup kosher-admin\naccount    required     pam_succeed_if.so quiet tty !~ ?*\n&|}' /etc/pam.d/login; } \
+    && grep -q 'ingroup kosher-admin' /etc/pam.d/login \
     && test -x /usr/bin/kosher-time-refused \
-    && test -x /usr/bin/kosher-time-notify
+    && test -x /usr/bin/kosher-time-notify \
+    && test -x /usr/bin/kosher-update-notify \
+    && test -x /usr/bin/kosher-nix-desktop \
+    && test -x /usr/bin/kosher-syncthing-net \
+    && test -f /usr/lib/systemd/system/syncthing@.service \
+    && test -x /usr/bin/kosher
 
 # The identity has to survive the build, not just be written during it.
 #

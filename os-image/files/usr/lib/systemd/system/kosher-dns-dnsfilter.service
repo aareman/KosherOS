@@ -1,0 +1,12 @@
+[Unit]
+Description=KosherOS DNS for dnsfilter accounts (family DNS plus their category blocks)
+After=kosher-firewall.service network.target
+# Started by kosherd only while some account is in dnsfilter mode, and
+# restarted on every policy change.
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+ExecStart=/usr/sbin/dnsmasq --keep-in-foreground --conf-file=/etc/kosher/dnsmasq-dnsfilter.conf
+Restart=on-failure
+RestartSec=2

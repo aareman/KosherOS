@@ -11,19 +11,28 @@ uid=$(id -u wlkid)
 arch=$(flatpak --default-arch 2>/dev/null || echo x86_64)
 
 section "Allowlist"
-refusal=$(python3 - <<'PY' 2>&1
+# Asked for an approved-only account that may install. Root's own view is
+# an administrator's, which is open to the whole store, so an install as
+# root is not a test of the list.
+refusal=$(python3 - "$uid" <<'PY' 2>&1
+import sys
 from kosherd.client import DaemonClient
+uid = int(sys.argv[1])
 client = DaemonClient()
 client.unlock()
+client.set_user_app_access(uid, "approved")
+client.set_user_can_install(uid, True)
 try:
-    client.install_app("com.spotify.Client")
+    client.install_app_for(uid, "com.spotify.Client")
     print("ACCEPTED")
 except Exception as e:  # noqa: BLE001 - the message is the assertion
     print(e)
+finally:
+    client.set_user_can_install(uid, False)
 PY
 )
 case "$refusal" in
-    *"not on the approved app list"*) ok "unapproved apps are refused" ;;
+    *"not on the approved"*) ok "unapproved apps are refused" ;;
     *) bad "unapproved app was not refused: $(printf '%s' "$refusal" | head -c 100)" ;;
 esac
 check "approved apps exist upstream" 0 kosherctl check-catalog
@@ -98,5 +107,50 @@ client.unlock()
 client.set_user_apps(int(sys.argv[1]), [])
 PY
 fi
+
+section "An app from its developer (Hex)"
+# Hex brings a user service. The helper runs as the account exactly as
+# kosherd runs it (same argv), against that account's own systemd: the
+# install must leave the unit known to it, and removal must disable it.
+# The unit tests stub systemctl out, so this is where it is exercised.
+# Filtered, as a family's account is: it reaches Anomaly through the filter.
+kctl set-mode "$uid" filtered >/dev/null
+wait_for_proxy_as wlkid
+loginctl enable-linger wlkid
+for _ in $(seq 20); do [ -S "/run/user/$uid/systemd/private" ] && break; sleep 0.5; done
+helper() {
+    python3 - "$uid" "$@" <<'PY'
+import subprocess, sys
+from kosherd.upstreamapps import _argv
+sys.exit(subprocess.run(_argv(int(sys.argv[1]), *sys.argv[2:])).returncode)
+PY
+}
+user_systemctl() { systemctl --user -M wlkid@ "$@" 2>/dev/null; }
+if ! helper install hex >/dev/null 2>&1; then
+    bad "Hex did not install for an account (helper install hex)"
+else
+    check_contains "Hex's service is known to the account's systemd" "LoadState=loaded" \
+        user_systemctl show -p LoadState hex.service
+    # Hex enables it itself at onboarding; do the same, then remove.
+    user_systemctl enable hex.service >/dev/null
+    home=$(getent passwd wlkid | cut -d: -f6)
+    as wlkid sh -c 'echo "{}" > ~/.local/share/hex/settings.json'
+    check "Hex is removed for the account" 0 helper remove hex
+    check_contains "removal disables Hex's service" "not-found" \
+        user_systemctl show -p LoadState hex.service
+    if compgen -G "$home/.config/systemd/user/*.wants/hex.service" >/dev/null; then
+        bad "Hex's service is still enabled after removal"
+    else
+        ok "no enable link for Hex's service is left"
+    fi
+    if [ -e "$home/.local/share/hex/settings.json" ] && [ ! -e "$home/.local/bin/hex" ]; then
+        ok "removal takes the program and keeps the account's settings"
+    else
+        bad "removal left the program or took the settings"
+    fi
+    rm -rf "$home/.local/share/hex"
+fi
+loginctl disable-linger wlkid
+kctl set-mode "$uid" whitelist >/dev/null
 
 report

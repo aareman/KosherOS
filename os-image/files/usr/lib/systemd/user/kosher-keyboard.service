@@ -1,0 +1,20 @@
+[Unit]
+Description=KosherOS: apply this account's keyboard remaps
+Documentation=file:///usr/share/doc/kosher/desktop.md
+# Runs for the whole graphical session, as the person signed in. It sends
+# their own keyd file (~/.config/keyd/default.conf) to kosherd at sign-in
+# and each time they save it; kosherd checks it and puts it in force while
+# this session is the one on the screen (see kosherd/keyboard.py). Nobody
+# gets keyd's socket or raw input themselves.
+PartOf=graphical-session.target
+After=graphical-session.target
+ConditionUser=!@system
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/kosher-keyboard --watch
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=graphical-session.target

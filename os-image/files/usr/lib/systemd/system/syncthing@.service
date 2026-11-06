@@ -1,0 +1,61 @@
+# Syncthing for one account, started and stopped by kosherd (syncthing.py,
+# #213). A system unit, not a user one, so the account cannot replace it
+# from ~/.config/systemd/user: the firewall lets Syncthing's direct ports
+# out for THIS unit's cgroup only (nft.py), so what runs in it matters.
+#
+# kosherd's drop-in (/etc/systemd/system/syncthing@<user>.service.d/)
+# supplies ExecStart, naming the Nix store path of the Syncthing kosherd
+# built, and ExecPaths, its closure: nothing else may be executed here.
+# Without the drop-in the unit does not start.
+[Unit]
+Description=Syncthing for %i
+Documentation=https://docs.syncthing.net/
+After=network-online.target kosherd.service
+Wants=network-online.target
+StartLimitIntervalSec=60
+StartLimitBurst=4
+
+[Service]
+User=%i
+Environment=STLOGFORMATTIMESTAMP= STLOGFORMATLEVELSTRING=false STLOGFORMATLEVELSYSLOG=true
+Environment=STNODEFAULTFOLDER=1
+ExecStart=/usr/bin/false
+# As root ("+"), once the process is up: put this unit's cgroup in the
+# firewall sets kosherd says it gets. Never fails the unit ("-").
+ExecStartPost=-+/usr/bin/kosher-syncthing-net %i
+Restart=on-failure
+RestartSec=5
+SuccessExitStatus=3 4
+RestartForceExitStatus=3 4
+
+# Only the drop-in's ExecPaths may be executed: no shell, no other
+# program inside this cgroup (Syncthing's "external" file versioning
+# would otherwise run one with the direct ports).
+NoExecPaths=/
+# A user namespace the account holds no capability in: the account cannot
+# ptrace the service, read its memory or take its sockets, though both
+# run as the same uid.
+PrivateUsers=true
+NoNewPrivileges=true
+CapabilityBoundingSet=
+AmbientCapabilities=
+ProtectSystem=full
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectHostname=true
+ProtectClock=true
+RestrictSUIDSGID=true
+MemoryDenyWriteExecute=true
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_NETLINK AF_UNIX
+LockPersonality=true
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+PrivateTmp=true
+PrivateDevices=true
+ProtectProc=invisible
+UMask=0027

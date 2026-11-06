@@ -60,6 +60,13 @@ CATEGORY_LABELS = {
 # catalogue-internal bucket, never shown as a filter toggle.
 USER_FACING_CATEGORIES = tuple(CATEGORY_LABELS)
 
+# Video-call services (Teams, Skype, Zoom, Meet), filed here by the curated
+# supplement in place of what UT1 says (it puts Teams and Skype under chat,
+# which is social). Not a toggle: calls are a supported use, controlled by
+# the account's video-calls switch, and a meeting link must not open on the
+# block page (#209). Their pages and pictures are still read and judged.
+CALLS = "calls"
+
 # Blocked by default for a newly filtered account. Deliberately narrow:
 # categories that are about danger or immodesty rather than taste, so the
 # default is defensible without an admin having to reason about it.
@@ -185,12 +192,22 @@ class SqliteBundle:
         # per-thread connection removes the sharing entirely; each is
         # read-only (query_only) against the same on-disk file.
         self._local = threading.local()
-        # Metadata and the count are read once, on the constructing thread.
+        # Metadata is read once, on the constructing thread. The count and
+        # the set of categories are written into meta when the catalogue is
+        # built (scripts/fetch-categories.py): each is otherwise a walk over
+        # every row, which on five million of them cost the daemon two
+        # seconds with the file cold — twice at every boot, and again each
+        # time the admin app asked — while every other call waited (#276).
+        # A catalogue built before they were written is counted the old way.
         db = self._connect()
         meta = dict(db.execute("SELECT key, value FROM meta").fetchall())
         self.version = meta.get("version", "0")
         self.source = meta.get("source", "")
-        self._count = db.execute("SELECT count(*) FROM domains").fetchone()[0]
+        count = meta.get("count", "")
+        self._count = int(count) if count.isdigit() else \
+            db.execute("SELECT count(*) FROM domains").fetchone()[0]
+        named = meta.get("categories")
+        self._categories = {c for c in named.split(",") if c} if named is not None else None
 
     def _connect(self) -> sqlite3.Connection:
         db = getattr(self._local, "db", None)
@@ -205,6 +222,8 @@ class SqliteBundle:
 
     @property
     def categories(self) -> set[str]:
+        if self._categories is not None:
+            return set(self._categories)
         return {row[0] for row in
                 self._connect().execute("SELECT DISTINCT category FROM domains")}
 
@@ -238,6 +257,31 @@ class SqliteBundle:
             "ORDER BY domain", chosen)]
 
 
+# The database last opened, by its path and the file's identity: the
+# daemon asks for the catalogue at every policy apply and whenever the
+# admin app lists the categories, and opening it again each time repeated
+# the reading of its meta (and, for an older catalogue, the count). A
+# replaced file — a bundle from the portal — is noticed by its size and
+# modification time and opened afresh. SqliteBundle keeps one connection
+# per thread, so sharing the object is safe.
+_opened: dict[Path, tuple[tuple[int, int], "SqliteBundle"]] = {}
+_opened_lock = threading.Lock()
+
+
+def _open_database(database: Path) -> "SqliteBundle":
+    stat = database.stat()
+    identity = (stat.st_mtime_ns, stat.st_size)
+    with _opened_lock:
+        cached = _opened.get(database)
+        if cached is not None and cached[0] == identity:
+            return cached[1]
+        bundle = SqliteBundle(database)
+        log.info("loaded %d categorised domains (version %s) from %s",
+                 len(bundle), bundle.version, database)
+        _opened[database] = (identity, bundle)
+        return bundle
+
+
 def load_any(*directories: Path):
     """Load the best available bundle: the database if built, else JSON.
 
@@ -249,11 +293,8 @@ def load_any(*directories: Path):
         database = Path(directory) / "categories.sqlite"
         if database.exists():
             try:
-                bundle = SqliteBundle(database)
-                log.info("loaded %d categorised domains (version %s) from %s",
-                         len(bundle), bundle.version, database)
-                return bundle
-            except sqlite3.Error as e:
+                return _open_database(database)
+            except (sqlite3.Error, OSError) as e:
                 log.error("ignoring unusable category database %s: %s",
                           database, e)
     return load(*directories)

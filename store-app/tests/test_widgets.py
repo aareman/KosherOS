@@ -70,9 +70,10 @@ def test_it_opens_on_the_categories(window):
     assert window.stack.get_visible_child_name() == "home"
     assert not window.back.get_visible()
     tiles = [c.key for c in _children(window.tiles)]
-    # Updates first when there are any (the demo has two), Installed next,
-    # everything last.
-    assert tiles[:2] == ["updates", "installed"] and tiles[-1] == "all"
+    # The kinds of app, then everything. Updates and Installed are not
+    # kinds of app: they are in the sidebar, with counts, not here.
+    assert tiles[-1] == "all"
+    assert "updates" not in tiles and "installed" not in tiles and "installing" not in tiles
     assert "internet" in tiles and "games" in tiles
     assert str(len(window.catalog)) in window.home_subtitle.get_label()
 
@@ -141,7 +142,7 @@ def test_the_grid_has_a_card_per_app(window):
     window.show_shelf("all")
     drain()
     cards = _children(window.grid)
-    assert len(cards) == len(window.catalog)
+    assert len(cards) == min(store.PAGE_SIZE, len(window.catalog))
     first = cards[0].get_child()
     assert isinstance(first, store.AppCard)
     assert first.button.get_label() in ("Install", "Remove")
@@ -188,7 +189,7 @@ def test_the_installed_category_shows_what_is_installed(window):
 def test_a_search_with_no_matches_says_so(window):
     type_search(window, "no such app anywhere")
     assert window.results.get_visible_child_name() == "empty"
-    assert window.empty.get_title() == "Nothing matches that"
+    assert window.empty.get_title() == "No matching apps"
 
 
 def test_a_search_can_be_narrowed_to_one_category(window):
@@ -230,7 +231,7 @@ def test_a_store_account_is_told_the_list_is_the_store(window):
     # The demo's developer uid is an administrator, so it sees the store.
     assert window.access == "store"
     assert window.heading.get_label() == "Apps"
-    assert "from the store" in window.home_subtitle.get_label()
+    assert "available for your account" in window.home_subtitle.get_label()
     shown = {a["ref"] for a in window.catalog}
     assert "org.gnucash.GnuCash" in shown, "an unapproved store app is offered"
     assert "com.example.GoreArena" not in shown, "but not one above the ceiling"
@@ -245,7 +246,7 @@ def test_a_store_still_downloading_says_so(monkeypatch):
     monkeypatch.setattr(store, "DaemonClient", NotYet)
     win = store.Window()
     drain()
-    assert "still being downloaded" in win.home_subtitle.get_label()
+    assert "still downloading" in win.home_subtitle.get_label()
 
 
 def test_a_long_shelf_is_drawn_a_page_at_a_time(monkeypatch):
@@ -301,7 +302,7 @@ def test_installing_shows_progress_then_the_app_is_installed(window):
     assert card.button.get_label() == "Install"
     card.button.emit("clicked")
     assert card.state == "working"
-    assert card.progress.get_visible() and not card.button.get_visible()
+    assert card.progress.get_visible() and not card.button.get_sensitive()
     for _ in range(40):          # the demo install ticks over about a second
         drain()
         import time
@@ -314,16 +315,10 @@ def test_installing_shows_progress_then_the_app_is_installed(window):
 
 def test_a_user_who_may_not_install_sees_why(monkeypatch):
     class NoInstalls(DemoClient):
-        def get_policy(self):
-            import os
-
-            policy = super().get_policy()
-            # The account at the keyboard, and only it: the demo family
-            # already uses uid 1000, which is usually the developer's own.
-            policy["users"] = [{"uid": os.getuid(), "username": "kid",
-                                "mode": "filtered", "can_install_apps": False,
-                                "admin": False}]
-            return policy
+        def get_my_settings(self):
+            # The account at the keyboard, as kosherd describes it to itself.
+            return {"managed": True, "username": "kid", "mode": "filtered",
+                    "can_install_apps": False, "admin": False}
 
     monkeypatch.setattr(store, "DaemonClient", NoInstalls)
     win = store.Window()
@@ -350,10 +345,11 @@ def test_the_store_offers_updates_one_by_one_and_all_at_once(window):
     # update all, etc.)". The pretend daemon says two installed apps have a
     # newer build.
     assert len(window.updates) == 2
-    tiles = [c.get_child() for c in _children(window.tiles)]
-    assert tiles[0].key == "updates" if hasattr(tiles[0], "key") else True
-    home_keys = [c.key for c in _children(window.tiles)]
-    assert home_keys[0] == "updates", "an update is the first thing a store says"
+    # The sidebar says so, with the count; the home tiles are the kinds of
+    # app and do not carry Updates.
+    assert ("updates", "Updates") in _sidebar_rows(window)
+    assert window.shelf_counts()["updates"] == 2
+    assert all(c.key != "updates" for c in _children(window.tiles))
     window.show_shelf("updates")
     drain()
     cards = list(window.cards.values())
@@ -377,7 +373,7 @@ def test_the_store_offers_updates_one_by_one_and_all_at_once(window):
         drain()
         import time; time.sleep(0.15)
     assert window.updates == {}
-    assert window.empty.get_title() == "Everything is up to date"
+    assert window.empty.get_title() == "No updates listed"
     assert not window.update_all.get_visible()
 
 
@@ -387,6 +383,34 @@ def test_an_app_with_no_update_keeps_its_ordinary_button(window):
     states = {ref: card.state for ref, card in window.cards.items()}
     assert set(states.values()) == {"update", "installed"}
     assert sum(1 for s in states.values() if s == "update") == 2
+
+
+def test_an_app_with_an_update_can_still_be_removed(window, monkeypatch):
+    # It said only Update, with no way to remove it anywhere.
+    window.show_shelf("installed")
+    drain()
+    waiting = [c for c in window.cards.values() if c.state == "update"]
+    plain = [c for c in window.cards.values() if c.state == "installed"]
+    assert waiting and plain
+    for card in waiting:
+        assert card.button.get_label() == "Update"
+        assert card.remove_shown
+        assert card.remove_button.get_sensitive() == window.is_admin
+    for card in plain:
+        assert not card.remove_shown, "Remove is already the button"
+    asked = []
+    monkeypatch.setattr(window.client, "remove_app", lambda ref: asked.append(ref))
+    monkeypatch.setattr(window.client, "update_app",
+                        lambda ref: pytest.fail("Remove updated the app"))
+    waiting[0].remove_button.emit("clicked")
+    assert waiting[0].state == "working"
+    # Still there, greyed out: a button that goes away reflows the card.
+    assert waiting[0].remove_shown
+    assert not waiting[0].remove_button.get_sensitive()
+    assert not waiting[0].button.get_sensitive()
+    for _ in range(5):
+        drain()
+    assert asked == [waiting[0].ref]
 
 
 # -- what is in hand, and what is installed ---------------------------------------
@@ -418,7 +442,7 @@ def test_an_install_in_hand_survives_a_rebuild_and_cannot_be_asked_for_twice(win
                    if c.get_child().ref == "org.gnome.Chess")
     assert rebuilt is not card
     assert rebuilt.state == "working"
-    assert rebuilt.progress.get_visible() and not rebuilt.button.get_visible()
+    assert rebuilt.progress.get_visible() and not rebuilt.button.get_sensitive()
 
 
 def test_the_installing_shelf_lists_what_is_being_installed(window):
@@ -445,7 +469,30 @@ def test_the_installing_shelf_says_so_when_nothing_is_happening(window):
     window.show_shelf("installing")
     drain()
     assert window.results.get_visible_child_name() == "empty"
-    assert window.empty.get_title() == "Nothing is being installed"
+    assert window.empty.get_title() == "No app changes in progress"
+
+
+def test_opening_the_store_asks_nothing_an_administrator_must_answer(monkeypatch):
+    # #182: on a child's account the Store brought up the administrator's
+    # password prompt, because it read the whole policy and the admin's
+    # list of who installed what. It reads only what any account may.
+    asked = []
+
+    class Watching(DemoClient):
+        def get_policy(self):
+            asked.append("GetPolicy")
+            return super().get_policy()
+
+        def list_installed_details(self):
+            asked.append("ListInstalledDetails")
+            return super().list_installed_details()
+
+    monkeypatch.setattr(store, "DaemonClient", Watching)
+    win = store.Window()
+    drain()
+    win.reload()
+    drain()
+    assert asked == []
 
 
 def test_installed_lists_what_the_machine_has_even_outside_the_catalogue(monkeypatch):
@@ -453,8 +500,8 @@ def test_installed_lists_what_the_machine_has_even_outside_the_catalogue(monkeyp
     # still on the machine. The shelf used to filter the catalogue, so it
     # showed nothing for it.
     class Extra(DemoClient):
-        def list_installed_details(self):
-            return super().list_installed_details() + [
+        def list_my_installed_details(self):
+            return super().list_my_installed_details() + [
                 {"ref": "org.example.Old", "name": "An Older App", "approved": False}]
 
         def list_installed(self):
@@ -478,7 +525,7 @@ def test_installed_says_so_when_nothing_is_installed(monkeypatch):
         def list_installed(self):
             return []
 
-        def list_installed_details(self):
+        def list_my_installed_details(self):
             return []
 
     monkeypatch.setattr(store, "DaemonClient", Nothing)
@@ -487,7 +534,7 @@ def test_installed_says_so_when_nothing_is_installed(monkeypatch):
     win.show_shelf("installed")
     drain()
     assert win.results.get_visible_child_name() == "empty"
-    assert win.empty.get_title() == "Nothing is installed yet"
+    assert win.empty.get_title() == "No apps installed"
 
 
 def test_the_grid_has_a_fixed_number_of_columns_at_any_one_width(window):
@@ -528,10 +575,8 @@ def test_updates_are_always_findable_even_with_nothing_to_update(monkeypatch):
     win = store.Window()
     drain()
     assert ("updates", "Updates") in _sidebar_rows(win)
-    tiles = [c.get_child() for c in _children(win.tiles)]
-    updates_tile = next(t for t in tiles if t.key == "updates")
-    words = [w.get_label() for w in _children(updates_tile) if isinstance(w, Gtk.Label)]
-    assert "Up to date" in words
+    # ...and not among the home tiles, which are the kinds of app.
+    assert all(c.key != "updates" for c in _children(win.tiles))
     win.show_shelf("updates")
     drain()
     assert win.check_button.get_visible(), "and a way to go and look"
@@ -552,3 +597,129 @@ def test_checking_for_updates_asks_the_remote_and_says_what_it_found(window):
     assert window.state_of("org.gnome.Chess") == "update"
     assert [a["ref"] for a in window.shown_apps()] == ["org.gnome.Chess"]
 
+
+
+def test_returning_home_hides_update_actions(window):
+    window.show_shelf("updates")
+    assert window.check_button.get_visible()
+    window.go_home()
+    assert not window.check_button.get_visible()
+    assert not window.update_all.get_visible()
+
+
+def test_empty_installed_list_is_not_reported_as_a_catalog_download(window):
+    window.catalog = []
+    window.installed = set()
+    window.installed_apps = []
+    window.ready = False
+    window.show_shelf("installed")
+    assert window.empty.get_title() == "No apps installed"
+    window.show_shelf("all")
+    assert window.empty.get_title() == "Downloading the app list"
+    window.ready = True
+    window._render()
+    assert window.empty.get_title() == "No apps available"
+
+
+def test_initial_load_failure_has_a_working_retry(monkeypatch):
+    class Broken(DemoClient):
+        fail = True
+
+        def list_installed(self):
+            if self.fail:
+                raise RuntimeError("Service unavailable")
+            return super().list_installed()
+
+    def immediate(work, done, failed):
+        try:
+            result = work()
+        except Exception as error:
+            failed(error)
+        else:
+            done(result)
+
+    monkeypatch.setattr(store, "DaemonClient", Broken)
+    monkeypatch.setattr(store, "_run_async", immediate)
+    win = store.Window()
+    assert win.stack.get_visible_child_name() == "loading"
+    assert win.load_status.get_title() == "Could not load apps"
+    win.client.fail = False
+    win.load_status.get_child().emit("clicked")
+    assert win.stack.get_visible_child_name() == "home"
+    assert win.catalog
+
+
+@pytest.mark.parametrize("shelf", ["home", "all", "installed"])
+def test_typing_from_app_navigation_focuses_and_edits_search(window, shelf):
+    import shutil
+    import subprocess
+    import time
+
+    if not shutil.which("xdotool"):
+        pytest.skip("xdotool is needed to send real key events on the private X display")
+    gi.require_version("GdkX11", "4.0")
+    from gi.repository import GdkX11
+
+    def wait_for(predicate):
+        deadline = time.monotonic() + 2
+        while not predicate() and time.monotonic() < deadline:
+            drain()
+            time.sleep(0.01)
+        assert predicate()
+
+    # conftest starts a private Xvfb; these keys never reach the desktop.
+    window.present()
+    try:
+        wait_for(lambda: window.get_mapped())
+        wait_for(lambda: window.stack.get_visible_child_name() == "home")
+        if shelf == "home":
+            focus = window.tiles.get_first_child()
+        else:
+            window.show_shelf(shelf)
+            focus = window.sidebar.get_selected_row()
+        focus.grab_focus()
+        surface = window.get_surface()
+        assert isinstance(surface, GdkX11.X11Surface)
+        subprocess.run(["xdotool", "windowfocus", str(surface.get_xid())], check=True)
+        subprocess.run(["xdotool", "key", "Right"], check=True)
+        drain()
+        assert window.search.get_text() == ""
+
+        subprocess.run(["xdotool", "type", "--clearmodifiers", "fire"], check=True)
+        wait_for(lambda: window.search.get_text() == "fire"
+                 and window.stack.get_visible_child_name() == "browse")
+        assert window.get_focus().is_ancestor(window.search)
+        assert window.shelf == ("all" if shelf == "home" else shelf)
+
+        subprocess.run(["xdotool", "type", "--clearmodifiers", "fox"], check=True)
+        wait_for(lambda: window.search.get_text() == "firefox")
+        subprocess.run(["xdotool", "key", "BackSpace"], check=True)
+        wait_for(lambda: window.search.get_text() == "firefo")
+        subprocess.run(["xdotool", "key", "ctrl+a"], check=True)
+        subprocess.run(["xdotool", "type", "--clearmodifiers", "gimp"], check=True)
+        wait_for(lambda: window.search.get_text() == "gimp")
+        wait_for(lambda: list(window.cards) == ["org.gimp.GIMP"])
+    finally:
+        window.destroy()
+
+
+def test_a_card_keeps_its_width_while_it_works(window):
+    # "pops width wise a bunch when updating / installing apps": a progress
+    # bar is as wide as its text unless it may cut it, and the buttons came
+    # and went.
+    from gi.repository import Gtk
+
+    window.show_shelf("installed")
+    drain()
+    card = next(c for c in window.cards.values() if c.state == "update")
+
+    def width():
+        return card.measure(Gtk.Orientation.HORIZONTAL, -1)[0]
+
+    before = width()
+    card.set_state("working", 3, "copying path '/nix/store/" + "x" * 200 + "' from 'https://cache.nixos.org'")
+    assert width() == before
+    card.set_state("working", 60, "Queued (3 ahead)")
+    assert width() == before
+    card.set_state("installed")
+    assert width() == before

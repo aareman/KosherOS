@@ -222,3 +222,20 @@ def test_the_guest_is_told_it_is_filtered_not_that_it_is_unmanaged():
 def test_a_guest_that_is_switched_off_is_still_nobody():
     guest = GuestPolicy(enabled=False, uid=1010, mode="filtered")
     assert _settings([PARENT], 1010, guest=guest)["managed"] is False
+
+
+CALM = {"enabled": True, "feed_items": 20, "sites": {"x": {}, "reddit": {"daily_minutes": 30}}}
+
+
+def test_a_filtered_account_is_told_which_sites_are_calmer():
+    # #179: My Filter answers "what applies to me"; the calmer sites do.
+    calmed = UserPolicy(uid=1003, username="calmed", mode="filtered", calm=CALM)
+    assert _settings([calmed], uid=1003)["calm"] == CALM
+    assert "calm" not in _settings([CHILD], uid=1001), "nothing set, nothing said"
+
+
+def test_calmer_sites_are_not_claimed_where_the_proxy_is_not():
+    # They work only through the proxy: a whitelist account's settings
+    # would say they apply when they do not.
+    listed = UserPolicy(uid=1004, username="l", mode="whitelist", calm=CALM)
+    assert "calm" not in _settings([listed], uid=1004)

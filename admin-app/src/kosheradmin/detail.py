@@ -19,6 +19,7 @@ from gi.repository import Adw, GLib, Gtk  # noqa: E402
 
 from kosherd import activity as activity_mod  # noqa: E402
 from kosherd import appaccess, appkinds  # noqa: E402
+from kosherd import calm as calm_mod  # noqa: E402
 from kosherd import profiles as profiles_mod  # noqa: E402
 from kosherd import timelimits  # noqa: E402
 from kosherd.policy import MEDIA_LEVELS, MODES, YOUTUBE_CATEGORIES  # noqa: E402
@@ -27,8 +28,10 @@ from . import labels  # noqa: E402
 from .common import (banner_slot, avatar, chip, clear, confirm, error_text, mode_badge,  # noqa: E402
                      pointer_cursors, run_async, small_button, tag)
 from .dialogs import (ApproveChannelDialog, RulesDialog, SavePresetDialog,  # noqa: E402
-                      WhitelistDialog, allow_menu, confirm_remove_user, request_row)
+                      WhitelistDialog, allow_menu, confirm_remove_user, pictures_menu,
+                      request_row)
 from .feed import fold  # noqa: E402
+from .mediapreview import MediaPreview  # noqa: E402
 from .schedule import ScheduleGrid, legend  # noqa: E402
 
 TABS = (("overview", "Overview", "view-list-symbolic"),
@@ -39,6 +42,9 @@ TABS = (("overview", "Overview", "view-list-symbolic"),
         ("youtube", "YouTube", "video-display-symbolic"),
         ("time", "Time", "alarm-symbolic"),
         ("apps", "Apps", "view-grid-symbolic"),
+        # Things a family turns on for one person, each with its own
+        # settings; the calmer sites are the first (#179).
+        ("extras", "Extras", "starred-symbolic"),
         ("account", "Account", "system-users-symbolic"))
 
 
@@ -55,6 +61,46 @@ def hint_under(group: Adw.PreferencesGroup, text: str) -> Gtk.Label:
     label.add_css_class("caption")
     group.add(label)
     return label
+
+
+def _first_scroller(widget) -> Gtk.ScrolledWindow | None:
+    """The scrolled window inside a tab (an Adw.PreferencesPage has one)."""
+    if isinstance(widget, Gtk.ScrolledWindow):
+        return widget
+    child = widget.get_first_child()
+    while child is not None:
+        found = _first_scroller(child)
+        if found is not None:
+            return found
+        child = child.get_next_sibling()
+    return None
+
+
+def _scroll_when_laid_out(adj: Gtk.Adjustment, value: float) -> None:
+    """Scroll a fresh page to `value` once it is tall enough to be there:
+    a page just built has no height until it is laid out. A page that came
+    back shorter gets as close as it can, and is let go after a moment so
+    a later change in its height never moves it under the person."""
+    state = {"handler": None}
+
+    def let_go() -> bool:
+        if state["handler"] is not None:
+            adj.disconnect(state["handler"])
+            state["handler"] = None
+        return False
+
+    def place(*_args) -> None:
+        reachable = adj.get_upper() - adj.get_page_size()
+        if reachable <= 0:
+            return
+        adj.set_value(min(value, reachable))
+        if reachable >= value:
+            let_go()
+
+    state["handler"] = adj.connect("changed", place)
+    place()
+    if state["handler"] is not None:
+        GLib.timeout_add(2000, let_go)
 
 
 def default_blocks() -> set[str]:
@@ -75,10 +121,28 @@ class UserDetailPage(Adw.NavigationPage):
         self._build(user)
 
     def rebuild(self, user: dict) -> None:
+        """The page again from a fresh policy, on the same tab and at the
+        same place in each tab. Every change reloads the page, and a tab
+        that jumped back to its top after each switch read as being sent
+        somewhere else."""
         selected = self.stack.get_visible_child_name()
+        offsets = {name: adj.get_value() for name, adj in self._tab_scrolls().items()}
         self._build(user)
         if selected:
             self.stack.set_visible_child_name(selected)
+        for name, adj in self._tab_scrolls().items():
+            if offsets.get(name):
+                _scroll_when_laid_out(adj, offsets[name])
+
+    def _tab_scrolls(self) -> dict[str, Gtk.Adjustment]:
+        """Each tab's vertical scroll position, by tab name."""
+        found = {}
+        for name, _title, _icon in TABS:
+            page = self.stack.get_child_by_name(name)
+            scroller = _first_scroller(page) if page is not None else None
+            if scroller is not None:
+                found[name] = scroller.get_vadjustment()
+        return found
 
     # -- frame --------------------------------------------------------------------
 
@@ -89,6 +153,7 @@ class UserDetailPage(Adw.NavigationPage):
         self.stack = Adw.ViewStack()
         builders = {"overview": self._overview_tab, "filtering": self._filtering_tab,
                     "media": self._media_tab, "youtube": self._youtube_tab,
+                    "extras": self._extras_tab,
                     "time": self._time_tab,
                     "apps": self._apps_tab, "account": self._account_tab}
         tabs = TABS
@@ -256,12 +321,43 @@ class UserDetailPage(Adw.NavigationPage):
         self.blocked_group.add(self.blocked_loading)
         groups.append(self.blocked_group)
 
+        groups.append(self._usage_group(user))
+
         self.changes_group = Adw.PreferencesGroup(title="Changes to this account")
         self.changes_loading = Adw.ActionRow(title="Loading…")
         self.changes_group.add(self.changes_loading)
         groups.append(self.changes_group)
         self._load_activity(user)
         return groups
+
+    def _usage_group(self, user: dict) -> Adw.PreferencesGroup:
+        """Today's numbers in three rows; the Usage page has the rest."""
+        from .usage import count, counted, size
+
+        group = Adw.PreferencesGroup(title="Usage today")
+        more = small_button("See more", "flat")
+        more.connect("clicked", lambda _b: self.win.show_usage(user["uid"]))
+        group.set_header_suffix(more)
+        if not counted(user):
+            group.add(Adw.ActionRow(title="Not counted on this internet setting"))
+            return group
+        rows = {}
+        for key, title in (("requests", "Pages and files loaded"),
+                           ("bytes_in", "Downloaded"), ("blocked", "Pages blocked")):
+            row = Adw.ActionRow(title=title)
+            rows[key] = Gtk.Label(label="…", xalign=1)
+            rows[key].add_css_class("numeric")
+            row.add_suffix(rows[key])
+            group.add(row)
+
+        def on_done(data):
+            numbers = (data.get("today", {}).get("people") or {}).get(str(user["uid"])) or {}
+            rows["requests"].set_label(count(numbers.get("requests")))
+            rows["bytes_in"].set_label(size(numbers.get("bytes_in")))
+            rows["blocked"].set_label(count(numbers.get("blocked")))
+
+        run_async(self.win.client.usage, on_done, lambda e: self.win.toast(error_text(e)))
+        return group
 
     def _load_activity(self, user: dict) -> None:
         since = int(time.time()) - 7 * 86400
@@ -278,7 +374,7 @@ class UserDetailPage(Adw.NavigationPage):
             if not blocks:
                 blocked_group.add(Adw.ActionRow(
                     title="Nothing blocked today",
-                    subtitle="What was allowed through is never recorded."))
+                    subtitle="Allowed browsing is not recorded."))
             for event in blocks[:6]:
                 blocked_group.add(self._blocked_row(user, event))
             if len(blocks) > 6:
@@ -287,7 +383,7 @@ class UserDetailPage(Adw.NavigationPage):
             if not changes:
                 changes_group.add(Adw.ActionRow(
                     title="No changes this week",
-                    subtitle="Who changed what will show here."))
+                    subtitle="Settings changes and the administrator who made them appear here."))
             for event in changes[:5]:
                 what, detail = labels.change_sentence(event, self.win.policy)
                 row = Adw.ActionRow(title=what, subtitle=detail, use_markup=False)
@@ -301,7 +397,7 @@ class UserDetailPage(Adw.NavigationPage):
     def _blocked_row(self, user: dict, event: dict) -> Adw.ActionRow:
         kind = event["kind"]
         url = event.get("url", "")
-        why = labels.why_text(event.get("why", ""))
+        why = labels.why_text(event.get("why", ""), event.get("source", ""))
         times = event.get("times", 1)
         again = f" · {times} times" if times > 1 else ""
         clock = Gtk.Label(label=time.strftime("%H:%M", time.localtime(event["t"])))
@@ -318,12 +414,15 @@ class UserDetailPage(Adw.NavigationPage):
                                           on_done=self.win.reload))
         elif kind == activity_mod.PICTURES:
             row.set_title(f"Pictures hidden on {labels.short_url(url)}")
-            row.set_subtitle("the page was shown, its pictures were covered" + again)
+            row.set_subtitle("Page shown with pictures covered" + again)
+            if url:
+                row.add_suffix(pictures_menu(self.win, user["uid"], user["username"], url,
+                                             on_done=self.win.reload))
         elif kind == activity_mod.VIDEO:
-            row.set_title(f"Video refused on {labels.short_url(url) or 'a page'}")
-            row.set_subtitle("after looking at it" + again)
+            row.set_title(f"Blocked video on {labels.short_url(url) or 'a page'}")
+            row.set_subtitle("Blocked by video filtering" + again)
         elif kind == activity_mod.SEARCH:
-            row.set_title(f"Would not search for “{event.get('text', '')}”")
+            row.set_title(f"Blocked search: “{event.get('text', '')}”")
             row.set_subtitle((event.get("why") or "") + again)
         elif kind == activity_mod.TIME:
             row.set_title(labels.time_event_title(event))
@@ -338,9 +437,9 @@ class UserDetailPage(Adw.NavigationPage):
         # there — fifteen toggles that change nothing. The approved list
         # takes their place.
         if user["mode"] == "whitelist":
-            return [self._mode_group(user), self._network_group(user), self._approved_sites_group(user),
+            return [self._mode_group(user), self._network_group(user), self._ssh_group(user), self._approved_sites_group(user),
                     self._pages_group(user)]
-        return [self._mode_group(user), self._network_group(user), self._categories_group(user),
+        return [self._mode_group(user), self._network_group(user), self._ssh_group(user), self._categories_group(user),
                 self._pages_group(user)]
 
     def _approved_sites_group(self, user: dict) -> Adw.PreferencesGroup:
@@ -348,20 +447,19 @@ class UserDetailPage(Adw.NavigationPage):
         the family switches on, plus its own."""
         group = Adw.PreferencesGroup(
             title="Approved sites",
-            description="This account reaches these and nothing else. Switch on a "
-                        "ready-made list rather than typing the thirty hosts a site "
-                        "loads from; more than one can be on at once.")
+            description=("Choose approved site lists or add your own sites. You can enable more than "
+                "one list."))
         chosen = set(user.get("whitelist_bundles") or [])
         self.bundle_rows: dict[str, Adw.SwitchRow] = {}
         self._bundles_building = True
-        loading = Adw.ActionRow(title="Loading the ready-made lists…")
+        loading = Adw.ActionRow(title="Loading site lists…")
         group.add(loading)
 
         domains = user.get("whitelist", [])
         own = Adw.ActionRow(
-            title="This family's own list",
+            title="Custom sites",
             subtitle=(labels.plural(len(domains), "site") + " added here"
-                      if domains else "Nothing added here yet"),
+                      if domains else "No sites added yet"),
             activatable=True)
         own.add_suffix(Gtk.Image(icon_name="go-next-symbolic"))
         own.connect("activated", lambda _r: WhitelistDialog(
@@ -420,11 +518,10 @@ class UserDetailPage(Adw.NavigationPage):
                             or f"This account follows the {profiles_mod.get(current, custom).label} "
                                "group: change the group and it changes too.")
         elif groups:
-            profile_hint = ("Not in a group. Pick one to give this account the group's "
-                            "settings and have it follow the group from then on.")
+            profile_hint = (("Choose a group to apply its settings and receive future changes to that "
+                "group."))
         else:
-            profile_hint = ("No groups yet. Tune this account, then Save as a group… "
-                            "in the header to name its settings and give them to others.")
+            profile_hint = ("To reuse these settings, choose “Save as a group…” at the top of this page.")
 
         def on_profile(combo, _p):
             index = combo.get_selected()
@@ -442,7 +539,7 @@ class UserDetailPage(Adw.NavigationPage):
         group.add(profile_row)
 
         if current:
-            delete_row = Adw.ButtonRow(title="Delete This Group…")
+            delete_row = Adw.ButtonRow(title="Delete group…")
             delete_row.add_css_class("destructive-action")
             delete_row.connect("activated", lambda *_: self._confirm_delete_preset(current))
             group.add(delete_row)
@@ -474,22 +571,19 @@ class UserDetailPage(Adw.NavigationPage):
         neither web nor mail; everything not listed is refused.
         """
         group = Adw.PreferencesGroup(
-            title="Beyond the web",
-            description="Web pages go through the filter whatever port they use. "
-                        "These two are the exceptions.")
+            title="Network access",
+            description="Allow video calls and additional network connections for this account.")
         if user["mode"] not in ("filtered", "dnsfilter"):
             group.add(Adw.ActionRow(
-                title="Not in this mode",
-                subtitle="Whitelist only and No internet allow nothing beyond the "
-                         "approved sites, so there is nothing to set here.",
+                title="Unavailable in this mode",
+                subtitle="These settings apply only to DNS filter and Filtered internet modes.",
                 subtitle_lines=2))
             return group
 
         video = Adw.SwitchRow(
             title="Video calls",
-            subtitle="Zoom, Meet and the like send picture and sound over a channel "
-                     "the filter cannot read. Leave this on for an account that has "
-                     "calls to make; turn it off for one that does not.",
+            subtitle=("Allows calls in apps such as Zoom and Meet. Call audio and video cannot be "
+                "filtered."),
             subtitle_lines=4,
             active=user.get("video_calls", True))
 
@@ -512,7 +606,7 @@ class UserDetailPage(Adw.NavigationPage):
             try:
                 ports = sorted({int(p) for p in text.replace(" ", "").split(",") if p})
             except ValueError:
-                self.win.toast("Ports are numbers separated by commas, like 22, 2222")
+                self.win.toast("Enter port numbers separated by commas, for example: 22, 2222.")
                 return
             self._gated(lambda pw: self.win.client.set_network_access(
                 user["uid"], user.get("video_calls", True), ports, pw),
@@ -521,9 +615,60 @@ class UserDetailPage(Adw.NavigationPage):
 
         ports_row.connect("apply", on_apply)
         group.add(ports_row)
-        hint_under(group, "Ports a program on this account needs that are not web or "
-                          "mail — 22 for ssh, say. Everything not listed is refused. "
-                          "Leave this empty unless something specific stopped working.")
+        hint_under(group, ("Allow additional ports for specific apps. Leave blank unless an app "
+            "needs an extra connection. SSH has its own setting below."))
+        return group
+
+    def _ssh_group(self, user: dict) -> Adw.PreferencesGroup:
+        """SSH to other machines (#257): the listed ones, or anywhere.
+
+        An SSH connection cannot be read, and a tunnel through one reaches
+        anything: the list is the control, and the switch says in words
+        what it opens.
+        """
+        group = Adw.PreferencesGroup(
+            title="SSH to other machines",
+            description="Machines this account may connect to over SSH.")
+        if user["mode"] not in ("filtered", "dnsfilter", "whitelist"):
+            group.add(Adw.ActionRow(
+                title="Unavailable in this mode",
+                subtitle="SSH is open in Unfiltered mode and closed with no internet.",
+                subtitle_lines=2))
+            return group
+
+        hosts_row = Adw.EntryRow(title="These machines", show_apply_button=True,
+                                 text=", ".join(user.get("ssh_hosts", [])))
+
+        def on_apply(row):
+            hosts = [h.strip().lower() for h in row.get_text().split(",") if h.strip()]
+            self._gated(lambda pw: self.win.client.set_ssh(
+                user["uid"], bool(user.get("ssh_anywhere", False)), hosts, pw),
+                f"{user['username']}: SSH machines " + (", ".join(hosts) if hosts else "cleared"))
+
+        hosts_row.connect("apply", on_apply)
+        group.add(hosts_row)
+
+        anywhere = Adw.SwitchRow(
+            title="Anywhere",
+            subtitle=("Opens SSH to every machine. An SSH connection cannot be filtered, and a "
+                      "tunnel through one reaches anything."),
+            subtitle_lines=4,
+            active=bool(user.get("ssh_anywhere", False)))
+
+        def on_anywhere(row, _param):
+            wanted = row.get_active()
+            if wanted == bool(user.get("ssh_anywhere", False)):
+                return
+            self._gated(lambda pw: self.win.client.set_ssh(
+                user["uid"], wanted, list(user.get("ssh_hosts", [])), pw),
+                f"{user['username']}: SSH anywhere {'on' if wanted else 'off'}")
+
+        anywhere.connect("notify::active", on_anywhere)
+        group.add(anywhere)
+        hint_under(group, ("A machine is a name, an address or a range, separated by commas: "
+            "server.example.com, 192.168.1.20, 10.0.0.0/8. The word tailnet means every "
+            "machine on this computer's tailnet. For SSH on a port other than 22, add it "
+            "after a colon: git.example.com:222."))
         return group
 
     def _categories_group(self, user: dict) -> Adw.PreferencesGroup:
@@ -537,9 +682,9 @@ class UserDetailPage(Adw.NavigationPage):
         self._cats_saved = sorted(self.chosen)
         self.checks: dict[str, Gtk.CheckButton] = {}
         self._building = True
-        group = Adw.PreferencesGroup(title="Blocked kinds of sites")
+        group = Adw.PreferencesGroup(title="Blocked site categories")
         if user["mode"] == "unfiltered":
-            group.set_description("An unfiltered account blocks nothing.")
+            group.set_description("Site categories are not blocked in this mode.")
             group.set_sensitive(False)
         elif user["mode"] == "none":
             group.set_description(labels.MODE_NOTHING_APPLIES["none"])
@@ -599,12 +744,15 @@ class UserDetailPage(Adw.NavigationPage):
                 elif name in floor:
                     line.append(tag("on by default"))
                 check.set_child(line)
+                check.add_css_class("blocking")
+                check.set_tooltip_text(f"Block {category['label']}")
                 check.connect("toggled", self._on_category, name)
                 self.checks[name] = check
                 grid.attach(check, index // rows_per_column, index % rows_per_column, 1, 1)
-            group.set_description(
-                f"{info['domains']:,} sites are classified. Sites not on the list are "
-                "judged by the other settings, so this is a floor, not a guarantee.")
+            if user["mode"] not in ("none", "unfiltered"):
+                group.set_description(
+                    f"{info['domains']:,} sites are classified. Select a category to block it. "
+                    "Unlisted sites use the account's other filter settings.")
             self._building = False
             pointer_cursors(grid)
 
@@ -639,7 +787,7 @@ class UserDetailPage(Adw.NavigationPage):
                     f"{labels.plural(len(chosen), 'kind')} of site blocked for {user['username']}")
 
     def _pages_group(self, user: dict) -> Adw.PreferencesGroup:
-        group = Adw.PreferencesGroup(title="Particular pages")
+        group = Adw.PreferencesGroup(title="Page rules")
         rules = user.get("rules", [])
         allows = [r["pattern"] for r in rules if r.get("action") == "allow"]
         blocks = [r["pattern"] for r in rules if r.get("action") == "block"]
@@ -650,7 +798,7 @@ class UserDetailPage(Adw.NavigationPage):
             parts.append("blocks " + ", ".join(blocks[:3]) + ("…" if len(blocks) > 3 else ""))
         summary = (f"{labels.plural(len(rules), 'rule')}, checked top to bottom"
                    + (": " + "; ".join(parts) if parts else "")) if rules else \
-            "No rules. Every page not blocked by the settings above is allowed."
+            "No custom rules. The filter settings above apply."
         rules_row = Adw.ActionRow(title="Page rules", subtitle=summary, subtitle_lines=3,
                                   activatable=True, use_markup=False)
         edit = small_button("Edit")
@@ -664,8 +812,7 @@ class UserDetailPage(Adw.NavigationPage):
         rules_row.connect("activated", open_rules)
         if user["mode"] != "filtered":
             rules_row.set_sensitive(False)
-            rules_row.set_subtitle("Only used in “Filtered internet” mode, the one "
-                                   "mode that can see which page is being asked for.")
+            rules_row.set_subtitle("Page rules apply only in Filtered internet mode.")
         group.add(rules_row)
 
         if user["mode"] != "whitelist":
@@ -673,7 +820,7 @@ class UserDetailPage(Adw.NavigationPage):
             # here, rather than showing an editor that changes nothing.
             wl_row = Adw.ActionRow(
                 title="Approved sites",
-                subtitle="Only a Whitelist only account is limited to a list.")
+                subtitle="Choose Approved sites only mode to limit access to a site list.")
             wl_row.set_sensitive(False)
             group.add(wl_row)
         return group
@@ -683,8 +830,7 @@ class UserDetailPage(Adw.NavigationPage):
     def _media_tab(self, user: dict) -> list[Adw.PreferencesGroup]:
         group = Adw.PreferencesGroup(
             title="Pages and pictures",
-            description="How much of the web's imagery and language this "
-                        "account sees.")
+            description="Choose how pictures and bad language are filtered.")
         media_row = Adw.ComboRow(
             title="Pictures and video", use_subtitle=True,
             model=Gtk.StringList.new([labels.MEDIA_LABELS[m] for m in MEDIA_LEVELS]))
@@ -699,6 +845,11 @@ class UserDetailPage(Adw.NavigationPage):
             self._gated(lambda pw: self.win.client.set_media_level(user["uid"], new_level, pw),
                         f"Pictures: {labels.MEDIA_LABELS[new_level].lower()}")
 
+        # The example pictures follow the choice at once, before it is saved.
+        preview = MediaPreview(level if level in MEDIA_LEVELS else "none",
+                               user.get("cover_style", "frost"))
+        media_row.connect("notify::selected", lambda combo, _p: preview.preview(
+            level=MEDIA_LEVELS[combo.get_selected()]))
         media_row.connect("notify::selected", on_media)
         # NOT greyed out outside filtered mode: this setting also decides
         # whether image search results are shown at all, in every mode.
@@ -709,13 +860,12 @@ class UserDetailPage(Adw.NavigationPage):
             media_row.set_subtitle(labels.MODE_NOTHING_APPLIES[user["mode"]])
             media_hint = ""
         elif user["mode"] != "filtered":
-            media_hint = ("Pictures on pages are not checked in this mode — only "
-                          "“Filtered internet” can see them. This still decides "
-                          "whether image search results are shown.")
+            media_hint = (("In this mode, this setting controls image search results. To check pictures "
+                "on pages, choose Filtered internet."))
         group.add(media_row)
 
         cover_row = Adw.ComboRow(
-            title="Covered pictures look like", use_subtitle=True,
+            title="Picture covering style", use_subtitle=True,
             model=Gtk.StringList.new([labels.COVER_LABELS[k] for k in labels.COVER_ORDER]))
         style = user.get("cover_style", "frost")
         cover_row.set_selected(labels.COVER_ORDER.index(style)
@@ -730,12 +880,13 @@ class UserDetailPage(Adw.NavigationPage):
                 lambda: self.win.client.set_cover_style(user["uid"], new_style),
                 done_msg=f"Covered pictures: {labels.COVER_LABELS[new_style].lower()}")
 
+        cover_row.connect("notify::selected", lambda combo, _p: preview.preview(
+            style=labels.COVER_ORDER[combo.get_selected()]))
         cover_row.connect("notify::selected", on_cover)
         if user["mode"] in ("none", "unfiltered") or level in ("none", "all"):
             cover_row.set_sensitive(False)
             cover_row.set_use_subtitle(False)
-            cover_row.set_subtitle("Only matters when pictures are checked and "
-                                   "partly covered.")
+            cover_row.set_subtitle("Available when picture filtering covers part of an image.")
             cover_hint = ""
         group.add(cover_row)
 
@@ -745,8 +896,7 @@ class UserDetailPage(Adw.NavigationPage):
         setting = user.get("language_filter", "off")
         language_row.set_selected(labels.LANGUAGE_ORDER.index(setting)
                                   if setting in labels.LANGUAGE_ORDER else 0)
-        language_hint = ("Replacing reads better than blocking: a page that reads "
-                         "normally minus the language beats one that refuses to load.")
+        language_hint = ("Replace listed words while keeping the page, or block the whole page.")
 
         def on_language(combo, _p):
             new_setting = labels.LANGUAGE_ORDER[combo.get_selected()]
@@ -762,16 +912,23 @@ class UserDetailPage(Adw.NavigationPage):
             language_row.set_subtitle(labels.MODE_NOTHING_APPLIES[user["mode"]])
             language_hint = ""
         elif user["mode"] != "filtered":
-            language_hint = ("Pages are not rewritten in this mode — only “Filtered "
-                             "internet” can read them. This still blocks searches "
-                             "containing bad language.")
+            language_hint = (("In this mode, this setting blocks searches with bad language. To filter "
+                "words on pages, choose Filtered internet."))
         group.add(language_row)
         for title, hint in (("Pictures and video", media_hint),
                             ("Covered pictures", cover_hint),
                             ("Bad language", language_hint)):
             if hint:
                 hint_under(group, f"{title}: {hint}")
-        return [group]
+        if user["mode"] in ("none", "unfiltered"):
+            return [group]  # pictures are not filtered at all, so nothing to show
+        example = Adw.PreferencesGroup(title="Example")
+        card = Gtk.Box()
+        card.add_css_class("card")
+        card.append(preview)
+        example.add(card)
+        self.media_preview = preview
+        return [group, example]
 
     # -- youtube -------------------------------------------------------------------
 
@@ -794,16 +951,13 @@ class UserDetailPage(Adw.NavigationPage):
 
         general = Adw.PreferencesGroup(
             title="Restricted Mode",
-            description="YouTube's own filter, applied to every request. It "
-                        "is coarse on its own, which is what the settings "
-                        "below are for.")
+            description=("Applies YouTube's Restricted Mode. You can also block categories or limit "
+                "viewing to approved channels below."))
         if user["mode"] != "filtered":
             # Genuinely inert here: nothing outside the proxy can see which
             # video is playing.
             general.set_description(
-                "Only used in “Filtered internet” mode; every other mode is "
-                "enforced at the connection, which cannot see which video "
-                "is playing.")
+                "YouTube settings apply only in Filtered internet mode.")
         restrict_row = Adw.ComboRow(
             title="Restricted Mode",
             model=Gtk.StringList.new(
@@ -821,10 +975,10 @@ class UserDetailPage(Adw.NavigationPage):
 
         channels_group = Adw.PreferencesGroup(
             title="Approved channels",
-            description="If this list has anything in it, only these "
-                        "channels may be watched and every category setting "
-                        "below stops mattering.")
-        add = Gtk.Button(icon_name="list-add-symbolic", valign=Gtk.Align.CENTER)
+            description="When this list has entries, only approved channels can be "
+                        "watched. Category blocks below do not apply.")
+        add = Gtk.Button(icon_name="list-add-symbolic", valign=Gtk.Align.CENTER,
+                         tooltip_text="Approve a channel")
         add.connect("clicked", lambda _b: self._add_channel())
         channels_group.set_header_suffix(add)
         self.channel_list = Gtk.ListBox(selection_mode=Gtk.SelectionMode.NONE)
@@ -834,9 +988,8 @@ class UserDetailPage(Adw.NavigationPage):
         self._rebuild_channels()
 
         categories = Adw.PreferencesGroup(
-            title="Blocked kinds of video",
-            description="Turn one on to block that kind of video for this "
-                        "person. YouTube labels every video with one of these.")
+            title="Blocked video categories",
+            description="Turn on a category to block videos with that YouTube category.")
         bulk = Gtk.Box(spacing=6)
         self.kind_switches: dict[str, Adw.SwitchRow] = {}
         all_btn = small_button("All", "flat")
@@ -849,6 +1002,7 @@ class UserDetailPage(Adw.NavigationPage):
         for code, label in sorted(YOUTUBE_CATEGORIES.items(), key=lambda kv: kv[1]):
             row = Adw.SwitchRow(title=label, active=code in self.yt_blocked,
                                 use_markup=False)
+            row.add_css_class("blocking")
             row.connect("notify::active", self._toggle_kind, code)
             self.kind_switches[code] = row
             categories.add(row)
@@ -938,6 +1092,174 @@ class UserDetailPage(Adw.NavigationPage):
             remove.connect("clicked", lambda _b, r=ref: self._remove_channel(r))
             row.add_suffix(remove)
             self.channel_list.append(row)
+
+    # -- extras ----------------------------------------------------------------------
+
+    def _extras_tab(self, user: dict) -> list[Adw.PreferencesGroup]:
+        """Extras: a checklist of things to turn on for this person, each
+        with a Settings button for its details (#179).
+
+        The calmer sites are the first. X, Reddit, YouTube and Facebook
+        cannot always be blocked (an article links a tweet, a reddit post
+        answers a bug) but their feeds are bottomless. Calmed, a feed ends
+        after a set number of items, a linked post opens on its own, and
+        the ads, sidebars and recommendations are gone; a site may also
+        carry a daily budget. Which sites, how long a feed is and the
+        budgets are in the settings dialog. Every change saves at once.
+        """
+        settings = dict(user.get("calm") or {})
+        self.calm_sites = set(calm_mod.enabled_sites(settings))
+        self.calm_feed = calm_mod.feed_items(settings)
+        self.calm_minutes = {key: calm_mod.daily_minutes(settings, key)
+                             for key in calm_mod.SITE_ORDER}
+        self._calm_saved = self._calm_settings()
+        self._calm_building = True
+
+        extras = Adw.PreferencesGroup(
+            title="Extras",
+            description="Extra help you can turn on for this person.")
+        self.calm_check = Gtk.CheckButton(active=bool(self.calm_sites),
+                                          valign=Gtk.Align.CENTER)
+        self.calm_check.connect("toggled", self._on_calm_check)
+        self.calm_row = Adw.ActionRow(title="Calmer sites", subtitle_lines=3)
+        self.calm_row.add_prefix(self.calm_check)
+        self.calm_row.set_activatable_widget(self.calm_check)
+        self.calm_settings_button = Gtk.Button(icon_name="emblem-system-symbolic",
+                                               tooltip_text="Calmer sites settings",
+                                               valign=Gtk.Align.CENTER)
+        self.calm_settings_button.add_css_class("flat")
+        self.calm_settings_button.connect("clicked", lambda _b: self._open_calm_dialog())
+        self.calm_row.add_suffix(self.calm_settings_button)
+        extras.add(self.calm_row)
+        self._show_calm_row()
+
+        if user["mode"] != "filtered":
+            # Nothing outside the proxy can rewrite a page or count the time
+            # one is on screen, so in other modes this is genuinely inert.
+            extras.set_description("Extras apply only in Filtered internet mode.")
+            extras.set_sensitive(False)
+        self._calm_building = False
+        return [extras]
+
+    def _show_calm_row(self) -> None:
+        on = sorted(self.calm_sites, key=calm_mod.SITE_ORDER.index)
+        if on:
+            sites = ", ".join(calm_mod.label(k) for k in on)
+            summary = f"{sites}. Feeds end after {self.calm_feed} items."
+        else:
+            summary = ", ".join(calm_mod.label(k) for k in calm_mod.SITE_ORDER) + "."
+        self.calm_row.set_subtitle(
+            "Feeds that end, a linked post on its own, and no ads or recommendations. "
+            + summary)
+        self.calm_settings_button.set_sensitive(bool(self.calm_sites))
+
+    def _on_calm_check(self, check) -> None:
+        if self._calm_building:
+            return
+        if check.get_active() and not self.calm_sites:
+            self.calm_sites = set(calm_mod.SITE_ORDER)
+        elif not check.get_active():
+            self.calm_sites = set()
+        self._show_calm_row()
+        self._save_calm()
+
+    def _open_calm_dialog(self) -> None:
+        """Which sites, how long a feed is, and each site's daily budget."""
+        dialog = Adw.Dialog(title="Calmer sites", content_width=480, content_height=640)
+        page = Adw.PreferencesPage()
+
+        sites = Adw.PreferencesGroup(
+            title="Sites",
+            description=("A site that is not ticked is left exactly as it is. Signing in "
+                         "is never touched."))
+        self.calm_site_checks: dict[str, Gtk.CheckButton] = {}
+        self.calm_minute_rows: dict[str, Adw.SpinRow] = {}
+        for key in calm_mod.SITE_ORDER:
+            check = Gtk.CheckButton(active=key in self.calm_sites, valign=Gtk.Align.CENTER)
+            check.connect("toggled", self._on_calm_site, key)
+            row = Adw.ActionRow(title=calm_mod.label(key))
+            row.add_prefix(check)
+            row.set_activatable_widget(check)
+            self.calm_site_checks[key] = check
+            sites.add(row)
+        page.add(sites)
+
+        feed = Adw.PreferencesGroup(title="Feeds")
+        self.calm_feed_row = Adw.SpinRow.new_with_range(calm_mod.MIN_FEED_ITEMS,
+                                                        calm_mod.MAX_FEED_ITEMS, 5)
+        self.calm_feed_row.set_title("Items in a feed")
+        self.calm_feed_row.set_subtitle("Where a feed page ends.")
+        self.calm_feed_row.set_value(self.calm_feed)
+        self.calm_feed_row.connect("notify::value", self._on_calm_feed)
+        feed.add(self.calm_feed_row)
+        page.add(feed)
+
+        budgets = Adw.PreferencesGroup(
+            title="Minutes a day",
+            description=("Counted only while a page of that site is on screen. "
+                         "0 means no limit."))
+        for key in calm_mod.SITE_ORDER:
+            minutes = Adw.SpinRow.new_with_range(0, calm_mod.MAX_DAILY_MINUTES, 15)
+            minutes.set_title(calm_mod.label(key))
+            minutes.set_value(self.calm_minutes[key])
+            minutes.set_sensitive(key in self.calm_sites)
+            minutes.connect("notify::value", self._on_calm_minutes, key)
+            self.calm_minute_rows[key] = minutes
+            budgets.add(minutes)
+        page.add(budgets)
+
+        view = Adw.ToolbarView()
+        view.add_top_bar(Adw.HeaderBar())
+        view.set_content(page)
+        dialog.set_child(view)
+        self.calm_dialog = dialog
+        dialog.present(self.win)
+
+    def _calm_settings(self) -> dict:
+        if not self.calm_sites:
+            return {}
+        settings: dict = {"enabled": True}
+        if self.calm_feed != calm_mod.DEFAULT_FEED_ITEMS:
+            settings["feed_items"] = self.calm_feed
+        settings["sites"] = {
+            key: ({"daily_minutes": self.calm_minutes.get(key, 0)}
+                  if self.calm_minutes.get(key) else {})
+            for key in calm_mod.SITE_ORDER if key in self.calm_sites}
+        return settings
+
+    def _save_calm(self) -> None:
+        if self._calm_building:
+            return
+        user = self.user
+        settings = self._calm_settings()
+        if settings == self._calm_saved:
+            return
+        self._calm_saved = settings
+        self._gated(lambda pw: self.win.client.set_calm(user["uid"], settings, pw),
+                    f"Calmer sites saved for {user['username']}")
+
+    def _on_calm_site(self, check, key: str) -> None:
+        if check.get_active():
+            self.calm_sites.add(key)
+        else:
+            self.calm_sites.discard(key)
+        self.calm_minute_rows[key].set_sensitive(key in self.calm_sites)
+        # Unticking the last site turns the extra off, and the checklist
+        # says so.
+        self._calm_building = True
+        self.calm_check.set_active(bool(self.calm_sites))
+        self._calm_building = False
+        self._show_calm_row()
+        self._save_calm()
+
+    def _on_calm_feed(self, row, _param) -> None:
+        self.calm_feed = int(row.get_value())
+        self._show_calm_row()
+        self._save_calm()
+
+    def _on_calm_minutes(self, row, _param, key: str) -> None:
+        self.calm_minutes[key] = int(row.get_value())
+        self._save_calm()
 
     # -- time --------------------------------------------------------------------
 
@@ -1070,12 +1392,122 @@ class UserDetailPage(Adw.NavigationPage):
 
     # What each choice of app access means, under the row (see hint_under).
     ACCESS_HINTS = {
-        "approved": "Only the apps on the approved list, which is kept under Apps in "
-                    "the sidebar. The strict choice, and what every account starts with.",
-        "store": "Everything on Flathub that is not blocked below. Apps rated for "
-                 "nudity, sexual themes, bad language, gambling, drugs or graphic "
-                 "violence are left out unless an administrator approves them by name.",
+        "approved": "Only apps approved under Apps in the sidebar are available.",
+        "store": ("Available Flathub apps, subject to the blocks below. Apps rated for adult "
+            "content, bad language, gambling, drugs or graphic violence need individual "
+            "approval."),
     }
+
+    def _developer_group(self, user: dict) -> Adw.PreferencesGroup:
+        """One switch (#123). Off, the Store installs catalogue apps and that
+        is all; on, the account can use nix, devbox and devenv itself and
+        reach the package registries and the big git hosts over SSH (#164).
+        The sentence says what "on" opens, and
+        that the account's own web filter still applies to what it fetches."""
+        group = Adw.PreferencesGroup(title="Developer tools")
+        row = Adw.SwitchRow(
+            title="Developer tools",
+            subtitle="Lets this account use Nix, devbox and devenv from a terminal "
+                     "and install anything from nixpkgs, reach the package "
+                     "registries (npm, PyPI, crates.io, GitHub) directly, and use "
+                     "git over SSH with GitHub, GitLab, Codeberg and Bitbucket. Its "
+                     "web filter still applies to everything it downloads. Off, the "
+                     "Store is the only way to install.",
+            subtitle_lines=6,
+            active=bool(user.get("developer_tools", False)))
+
+        def on_toggle(switch, _param):
+            wanted = switch.get_active()
+            if wanted == bool(user.get("developer_tools", False)):
+                return
+            self._gated(lambda pw: self.win.client.set_developer_tools(user["uid"], wanted, pw),
+                        f"{user['username']}: developer tools {'on' if wanted else 'off'}")
+
+        row.connect("notify::active", on_toggle)
+        group.add(row)
+        if user.get("developer_tools"):
+            group.add(self._ssh_in_row(user))
+        return group
+
+    def _ssh_in_row(self, user: dict) -> Adw.SwitchRow:
+        """Signing in to this account from another machine over SSH. Keys
+        only, so the sentence says where the key goes."""
+        row = Adw.SwitchRow(
+            title="Sign in over SSH",
+            subtitle="Lets this account be used from another computer over SSH. "
+                     "Anything brought in that way isn't checked by the filter. "
+                     "Passwords aren't accepted: add the other computer's key to "
+                     "~/.ssh/authorized_keys in this account.",
+            subtitle_lines=5,
+            active=bool(user.get("ssh_in", False)))
+
+        def on_toggle(switch, _param):
+            wanted = switch.get_active()
+            if wanted == bool(user.get("ssh_in", False)):
+                return
+            self._gated(lambda pw: self.win.client.set_ssh_in(user["uid"], wanted, pw),
+                        f"{user['username']}: sign in over SSH {'on' if wanted else 'off'}")
+
+        row.connect("notify::active", on_toggle)
+        return row
+
+    def _syncthing_group(self, user: dict) -> Adw.PreferencesGroup:
+        """Syncthing for this account (#213). A supervised account needs it
+        allowed here, one account at a time, whatever its app access: the
+        dialog says what that means. The home-network switch is for any
+        account."""
+        ref = labels.SYNCTHING_REF
+        group = Adw.PreferencesGroup(
+            title="Syncthing",
+            description="Keeps folders the same on this account's computers and phone.")
+        if appaccess.needs_individual_approval(user):
+            approved = ref in (user.get("approved_apps") or [])
+            allow = Adw.SwitchRow(
+                title="Allow Syncthing",
+                subtitle="Files from paired devices aren't checked by the filter.",
+                subtitle_lines=2, active=approved)
+
+            def set_allowed(wanted: bool):
+                self._gated(lambda pw: self.win.client.set_user_app_approval(
+                    user["uid"], ref, wanted, pw),
+                    f"{user['username']}: Syncthing {'allowed' if wanted else 'no longer allowed'}")
+
+            def on_allow(switch, _param):
+                wanted = switch.get_active()
+                if wanted == (ref in (user.get("approved_apps") or [])):
+                    return
+                if not wanted:
+                    set_allowed(False)
+                    return
+                heading, body = labels.syncthing_approval(user["username"])
+                dialog = confirm(self.win, heading, body, "Allow",
+                                 lambda: set_allowed(True), destructive=False)
+                # Cancelled: the switch goes back to off.
+                dialog.connect("response", lambda _d, r: r != "yes" and switch.set_active(False))
+
+            allow.connect("notify::active", on_allow)
+            group.add(allow)
+        else:
+            group.add(Adw.ActionRow(
+                title="Allowed for this account",
+                subtitle="It can be installed from the Store like any other app.",
+                subtitle_lines=2))
+
+        lan = Adw.SwitchRow(title=labels.SYNCTHING_LAN_TITLE,
+                            subtitle=labels.SYNCTHING_LAN_HINT, subtitle_lines=3,
+                            active=bool(user.get("syncthing_lan", False)))
+
+        def on_lan(switch, _param):
+            wanted = switch.get_active()
+            if wanted == bool(user.get("syncthing_lan", False)):
+                return
+            self._gated(lambda pw: self.win.client.set_syncthing_lan(user["uid"], wanted, pw),
+                        f"{user['username']}: Syncthing "
+                        + ("reachable from this network" if wanted else "connects out only"))
+
+        lan.connect("notify::active", on_lan)
+        group.add(lan)
+        return group
 
     def _apps_tab(self, user: dict) -> list[Adw.PreferencesGroup]:
         """Apps on this computer, from one user's point of view.
@@ -1091,7 +1523,7 @@ class UserDetailPage(Adw.NavigationPage):
         self.blocked_apps: list[str] = sorted(user.get("blocked_apps") or [])
         self._kinds_saved = sorted(self.blocked_kinds)
 
-        installs_group = Adw.PreferencesGroup(title="What this account may install")
+        installs_group = Adw.PreferencesGroup(title="App access")
         installs = Adw.SwitchRow(title="Can install apps",
                                  subtitle="From the KosherOS Store, within the limits below",
                                  active=user.get("can_install_apps", True))
@@ -1101,9 +1533,9 @@ class UserDetailPage(Adw.NavigationPage):
                 done_msg=f"App installs {'enabled' if s.get_active() else 'disabled'} for {user['username']}")))
         installs_group.add(installs)
 
-        access_row = Adw.ComboRow(title="Which apps")
+        access_row = Adw.ComboRow(title="Available apps")
         access_row.set_model(Gtk.StringList.new(
-            [appaccess.APP_ACCESS_LABELS[key] for key in appaccess.APP_ACCESS]))
+            [labels.APP_ACCESS_SHORT[key] for key in appaccess.APP_ACCESS]))
         current = appaccess.access_of(user)
         access_row.set_selected(appaccess.APP_ACCESS.index(current))
         installs_group.add(access_row)
@@ -1116,26 +1548,27 @@ class UserDetailPage(Adw.NavigationPage):
                 return
             user["app_access"] = key
             self._gated(lambda pw: self.win.client.set_user_app_access(user["uid"], key, pw),
-                        f"{user['username']}: {appaccess.APP_ACCESS_LABELS[key].lower()}")
+                        f"{user['username']}: {labels.APP_ACCESS_SHORT[key].lower()}")
 
         access_row.connect("notify::selected", on_access)
 
         kinds_group = Adw.PreferencesGroup(
-            title="Blocked kinds of apps",
-            description="Blocked whichever list is chosen above: not offered in the "
-                        "Store, and hidden from this account if already installed.")
+            title="Blocked app categories",
+            description=("These categories are blocked in both app lists. Installed apps in these "
+                "categories are hidden from this account."))
         self.kind_rows: dict[str, Adw.SwitchRow] = {}
         for key in appkinds.KIND_KEYS:
             row = Adw.SwitchRow(title=appkinds.label(key), active=key in self.blocked_kinds,
                                 use_markup=False)
+            row.add_css_class("blocking")
             row.connect("notify::active", self._on_kind, key)
             self.kind_rows[key] = row
             kinds_group.add(row)
 
         self.blocked_apps_group = Adw.PreferencesGroup(
             title="Blocked apps",
-            description="Single apps this account may not have, whatever else says. "
-                        "Search to block an app that is not installed yet.")
+            description=("These apps are blocked for this account, even if approved elsewhere. Search "
+                "by name to add an app."))
         self.blocked_list = Gtk.ListBox(selection_mode=Gtk.SelectionMode.NONE)
         self.blocked_list.add_css_class("boxed-list")
         self.blocked_apps_group.add(self.blocked_list)
@@ -1152,14 +1585,18 @@ class UserDetailPage(Adw.NavigationPage):
 
         self.apps_group = Adw.PreferencesGroup(
             title="Installed apps",
-            description="Turning an app off blocks it for this account only. "
+            description="Turn on a switch to block an app for this account. "
                         "Uninstalling removes it from the whole computer.")
         self.apps_list = Gtk.ListBox(selection_mode=Gtk.SelectionMode.NONE)
         self.apps_list.add_css_class("boxed-list")
         self.apps_list.append(Adw.ActionRow(title="Loading…"))
         self.apps_group.add(self.apps_list)
         self._load_apps(user)
-        return [installs_group, kinds_group, self.blocked_apps_group, self.apps_group]
+        # Syncthing's group only while the computer has it switched on (#220).
+        syncthing = ([self._syncthing_group(user)]
+                     if (self.win.policy.get("advanced") or {}).get("syncthing") else [])
+        return [installs_group, self._developer_group(user), *syncthing, kinds_group,
+                self.blocked_apps_group, self.apps_group]
 
     # -- kinds --
 
@@ -1182,7 +1619,7 @@ class UserDetailPage(Adw.NavigationPage):
     def _render_blocked(self, user: dict) -> None:
         clear(self.blocked_list)
         if not self.blocked_apps:
-            row = Adw.ActionRow(title="No single apps blocked")
+            row = Adw.ActionRow(title="No individual apps blocked")
             row.set_sensitive(False)
             self.blocked_list.append(row)
         for ref in self.blocked_apps:
@@ -1273,14 +1710,18 @@ class UserDetailPage(Adw.NavigationPage):
         if reason and reason != "blocked":
             row.add_suffix(tag({"kind": f"{appkinds.label(app.get('kind', 'other'))} blocked",
                                 "not-approved": "not approved",
-                                "content": "above the content ceiling",
-                                "circumvention": "gets around the filter",
+                                "needs-approval": "not allowed for this account",
+                                "content": "content rating restricted",
+                                "circumvention": "can bypass filtering",
                                 "unknown": "not in the app list"}.get(reason, reason)))
-        switch = Gtk.Switch(active=reason is None, valign=Gtk.Align.CENTER,
+        switch = Gtk.Switch(active=reason is not None, valign=Gtk.Align.CENTER,
                             sensitive=reason in (None, "blocked"),
-                            tooltip_text="Allow this account to run the app")
+                            tooltip_text="Block this app for this account")
+        switch.add_css_class("blocking")
+        switch.update_property([Gtk.AccessibleProperty.LABEL],
+                               [f"Block {app['name']} for this account"])
         switch.connect("state-set", lambda _s, state, r=app["ref"]:
-                       (self._set_blocked(user, r, not state), False)[1])
+                       (self._set_blocked(user, r, state), False)[1])
         row.add_suffix(switch)
         remove = Gtk.Button(icon_name="user-trash-symbolic", valign=Gtk.Align.CENTER,
                             tooltip_text="Uninstall for everyone")
@@ -1289,7 +1730,7 @@ class UserDetailPage(Adw.NavigationPage):
             self.win, f"Uninstall {a['name']}?",
             "Apps are installed for the whole computer, so this removes "
             f"{a['name']} for every user. To keep it but hide it from "
-            f"{user['username']}, turn it off instead.", "Uninstall",
+            f"{user['username']}, use its Block switch instead.", "Uninstall",
             lambda: (self.win.call(lambda: self.win.client.remove_app(a["ref"]),
                                    refresh=False, done_msg=f"Uninstalling {a['name']}…"),
                      GLib.timeout_add_seconds(3, lambda: (self._load_apps(user), False)[1]))))
@@ -1315,7 +1756,7 @@ class UserDetailPage(Adw.NavigationPage):
             done_msg=f"{user['username']} can sign in to Wi-Fi for 10 minutes"))
         if user["mode"] == "unfiltered":
             captive.set_sensitive(False)
-            captive.set_subtitle("An unfiltered account needs no window.")
+            captive.set_subtitle("This account can already open Wi-Fi sign-in pages.")
         group.add(captive)
 
         # A child who forgets their password is otherwise locked out for
@@ -1323,7 +1764,7 @@ class UserDetailPage(Adw.NavigationPage):
         # hands nobody a password — the login screen asks them for a new
         # one — so the account stays theirs.
         password = Adw.ActionRow(
-            title="Reset the password",
+            title="Reset password",
             subtitle="They choose a new password the next time they sign in. "
                      "Nothing else about the account changes.",
             subtitle_lines=3, activatable=True)
@@ -1351,44 +1792,21 @@ class UserDetailPage(Adw.NavigationPage):
         is_admin.connect("notify::active", on_admin)
         group.add(is_admin)
 
-        desktop = Adw.PreferencesGroup(
-            title="Desktop",
-            description="How this account's desktop looks. Takes effect the "
-                        "next time they sign in; filtering is the same "
-                        "whichever they use.")
-        layout_row = Adw.ComboRow(
-            title="Layout",
-            model=Gtk.StringList.new([labels.LAYOUT_LABELS[k] for k in labels.LAYOUT_ORDER]))
-        current = user.get("layout", "classic")
-        layout_row.set_selected(labels.LAYOUT_ORDER.index(current)
-                                if current in labels.LAYOUT_ORDER else 0)
-
-        def on_layout(combo, _p):
-            new_layout = labels.LAYOUT_ORDER[combo.get_selected()]
-            if new_layout == user.get("layout", "classic"):
-                return
-            self.win.call(
-                lambda: self.win.client.set_layout(user["uid"], new_layout),
-                done_msg=f"{user['username']} → {labels.LAYOUT_LABELS[new_layout]} "
-                         f"at their next sign-in")
-
-        layout_row.connect("notify::selected", on_layout)
-        desktop.add(layout_row)
-        hint_under(desktop, labels.LAYOUT_HINTS.get(current, ""))
-
+        # No desktop row here: which desktop a person uses is theirs to
+        # choose, in the Look app. (kosherctl layout remains for a parent
+        # at a terminal.)
         danger = Adw.PreferencesGroup()
-        remove = Adw.ButtonRow(title="Remove This Account…")
+        remove = Adw.ButtonRow(title="Remove account…")
         remove.add_css_class("destructive-action")
         remove.connect("activated", lambda *_: confirm_remove_user(self.win, user))
         danger.add(remove)
-        return [group, desktop, danger]
+        return [group, danger]
 
     def _confirm_reset_password(self, user: dict):
         return confirm(
             self.win, f"Reset {user['username']}'s password?",
-            "The next time they sign in, the login screen asks them to choose "
-            "a new password. Nobody sees it, and nothing else about the "
-            "account changes.", "Reset",
+            ("They will be asked to choose a new password at their next sign-in. Their "
+                "files and settings will be kept."), "Reset",
             lambda: self.win.call(
                 lambda: self.win.client.reset_password(user["uid"]),
                 done_msg=f"{user['username']} chooses a new password at their "
@@ -1398,9 +1816,8 @@ class UserDetailPage(Adw.NavigationPage):
     def _guest_account_tab(self, user: dict) -> list[Adw.PreferencesGroup]:
         group = Adw.PreferencesGroup(
             title="Guest account",
-            description="Anyone can sign in as the guest without a password. "
-                        "Everything the guest does is erased at sign-out. The "
-                        "filter settings on the other tabs apply to whoever it is.")
+            description=("Guests sign in without a password. Their files and session data are erased "
+                "at sign-out. The filter settings on the other tabs apply to every guest."))
         switch = Adw.SwitchRow(title="Guest account is on", active=True)
 
         def on_toggle(row, _p):
@@ -1420,8 +1837,7 @@ class UserDetailPage(Adw.NavigationPage):
         custom = self.win.policy.get("custom_profiles", [])
         label = profiles_mod.get(key, custom).label
         confirm(self.win, f"Delete the {label} group?",
-                "The accounts in it keep their settings and are simply in no group "
-                "afterwards.",
+                "Accounts in this group will keep their current settings and leave the group.",
                 "Delete",
                 lambda: self._gated(lambda pw: self.win.client.delete_profile(key, pw),
                                     f"Deleted the {label} group"))

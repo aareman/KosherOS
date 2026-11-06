@@ -22,7 +22,8 @@ def test_the_workflow_parses(path):
     assert isinstance(document, dict)
     assert document.get("jobs"), f"{path.name} defines no jobs"
     for name, job in document["jobs"].items():
-        assert "runs-on" in job, f"{path.name}: {name} has no runner"
+        # A job either runs somewhere or calls another workflow that does.
+        assert "runs-on" in job or "uses" in job, f"{path.name}: {name} has no runner"
 
 
 def test_no_run_block_smuggles_a_heredoc():
@@ -40,6 +41,33 @@ def test_ci_publishes_edge_and_never_stable():
     assert "$IMAGE:stable" not in ci, "stable is promoted by hand, never by a push"
     promote = (ROOT / ".github/workflows/release-stable.yml").read_text()
     assert "workflow_dispatch" in promote and "$IMAGE:stable" in promote
+
+
+def test_a_pull_requests_image_is_built_only_on_request_and_never_as_a_channel():
+    """Pull requests build no image unless asked (#90): the `try-image`
+    label builds the branch as :pr-<number>, signed with the key the
+    machines check, and leaves the channels and the versions alone."""
+    path = ROOT / ".github/workflows/try-image.yml"
+    text = path.read_text()
+    document = yaml.safe_load(text)
+    triggers = document.get(True) or document.get("on")
+    assert set(triggers) == {"pull_request"}, "only a pull request event, never a push"
+    job = document["jobs"]["image"]
+    condition = " ".join(job["if"].split())
+    assert "'try-image'" in condition, "the label is the request"
+    assert "head.repo.full_name == github.repository" in condition, \
+        "a fork has no secrets; its build would fail at the push"
+    assert "pr-${{ github.event.pull_request.number }}" in text
+    assert "$IMAGE:edge" not in text and "$IMAGE:stable" not in text
+    assert "scripts/version.py release" in text and "-pr.${PR}" in text
+    assert job["steps"][0]["with"]["fetch-depth"] == 0, "the version is counted from the tags"
+    assert job["steps"][0]["with"]["ref"] == "${{ github.event.pull_request.head.sha }}"
+    assert "COSIGN_PRIVATE_KEY" in text and "cosign sign --yes --key" in text, \
+        "unsigned, no machine could take it"
+    assert document["concurrency"]["cancel-in-progress"] is True
+    # And the main workflow still skips pull requests on its own.
+    ci = (ROOT / ".github/workflows/ci.yml").read_text()
+    assert "a pull request: the image is built from the merge, not here" in ci
 
 
 def test_every_version_that_passes_gets_a_release():
@@ -63,6 +91,27 @@ def test_every_version_that_passes_gets_a_release():
     # A failed image no longer blocks the release: the version is real, its
     # changes are recorded, and the notes say no image exists for it.
     assert "needs.image.result != 'failure'" not in condition
+
+
+def test_what_changed_is_counted_from_the_last_version_tag():
+    """A merge whose run failed got no tag and no build; its image changes
+    are still waiting for the next run. Diffing only the push once built
+    nothing for a shellcheck fix while the developer-tooling stack and a
+    new wallpaper, merged just before with failing runs, sat unbuilt, and
+    that release said "no new image" (#103)."""
+    ci = (ROOT / ".github/workflows/ci.yml").read_text()
+    assert "git describe --tags --abbrev=0 --match 'v*'" in ci
+    assert 'git diff --name-only "$since" "$GITHUB_SHA"' in ci
+    assert 'git diff --name-only "$BASE" "$GITHUB_SHA"' not in ci
+
+
+def test_the_image_push_is_retried():
+    # One 502 from the registry, mid-layer, cost a release its image (#103).
+    ci = (ROOT / ".github/workflows/ci.yml").read_text()
+    assert 'retry podman push "$IMAGE:${SHA::12}"' in ci
+    assert 'retry podman push "$IMAGE:edge"' in ci
+    assert 'retry cosign sign --yes "$IMAGE:edge"' in ci
+    assert ci.count("for n in 1 2 3 4 5; do") == 2
 
 
 def test_the_release_says_when_there_is_no_new_image():
@@ -222,3 +271,188 @@ def test_the_image_carries_its_version_where_bootc_reads_it():
     # the installer and the daemon; an empty one fails the build.
     assert 'test -n "$KOSHER_VERSION"' in containerfile
     assert '"$KOSHER_VERSION" > /usr/share/kosher/VERSION' in containerfile
+
+
+def test_every_pull_request_that_reaches_the_machine_is_tested_in_a_vm():
+    """vm-test.yml runs `just pr-test`, the recipe a developer runs (#173).
+
+    It must stop loudly on a runner without KVM rather than emulate for
+    hours, keep to same-repository pull requests like try-image.yml, upload
+    what it saw whatever the result, and never ask for the GPU mode."""
+    text = (ROOT / ".github/workflows/vm-test.yml").read_text()
+    document = yaml.safe_load(text)
+    triggers = document.get(True) or document.get("on")
+    assert "pull_request" in triggers
+    gate = " ".join(document["jobs"]["changes"]["if"].split())
+    assert "head.repo.full_name == github.repository" in gate
+    build = document["jobs"]["build"]
+    assert build["needs"] == ["changes"]
+    built = "\n".join(step.get("run", "") for step in build["steps"])
+    assert "podman build" in built and "--cache-from" in built, "the layers come from the cache"
+    assert "podman push --digestfile" in built, "the runners switch to the image by digest"
+    assert "skopeo inspect" in built and ":edge" in built, \
+        "a change to nothing in the image tests master's own"
+    # ...only once Checks has built it: a train in the ten minutes after an
+    # image-changing merge once tested new suites against the old image.
+    assert 'git merge-base --is-ancestor "$last" "$built_at"' in built
+    assert "org.opencontainers.image.version" in built
+    assert build["outputs"]["image"]
+    vm = document["jobs"]["vm"]
+    assert vm["needs"] == ["changes", "build"]
+    # Built once, tested side by side: the desktop and each suite group on
+    # a runner of its own, every part reporting even when another fails.
+    assert vm["strategy"]["fail-fast"] is False
+    shards = [part["shard"] for part in vm["strategy"]["matrix"]["include"]]
+    assert "desktop" in shards
+    n = sum(1 for x in shards if x.startswith("suites:"))
+    assert {x for x in shards if x != "desktop"} == {f"suites:{k}/{n}" for k in range(1, n + 1)}
+    runs = "\n".join(step.get("run", "") for step in vm["steps"])
+    assert "just pr-test" in runs
+    assert "--registry-image" in runs and "--shard" in runs, "the runners test the pushed image"
+    assert "--prefer-base" in runs, "master's base when the cache has one, an install otherwise"
+    assert "needs.build.outputs.image" in str(vm["steps"])
+    restores = [s for s in vm["steps"] if s.get("uses", "").startswith("actions/cache/restore")]
+    assert restores and restores[0]["with"]["restore-keys"] == "pr-test-base-", \
+        "the newest base master saved"
+    assert "/dev/kvm" not in "".join(s.get("run", "") for s in build["steps"]), \
+        "the build job makes no VM"
+    assert "/dev/kvm" in runs and "exit 1" in runs, "no KVM is a failure, not a slow run"
+    assert "99-kvm4all.rules" in runs, "the runner's /dev/kvm needs the udev rule"
+    assert "--gl" not in runs and "KOSHER_GL" not in text, "runners have no GPU"
+    uploads = [s for s in vm["steps"] if s.get("uses", "").startswith("actions/upload-artifact")]
+    assert uploads and uploads[0]["if"] == "always()"
+    assert "!build/pr-test/ci/**/*.qcow2" in uploads[0]["with"]["path"]
+    assert "id_ed25519" in uploads[0]["with"]["path"], "the run's private key stays behind"
+    # On the job: a run some other label starts (and skips) must not cancel
+    # the VM test in progress.
+    assert "concurrency" not in document
+    assert vm["concurrency"]["cancel-in-progress"] is True
+    assert "matrix.name" in vm["concurrency"]["group"], "the parts must not cancel each other"
+    assert "matrix.name" in uploads[0]["with"]["name"], "one artifact per part"
+
+
+def test_master_saves_the_base_the_vm_tests_start_from():
+    # ci.yml installs master's image once, after each merge that changes
+    # it, and the runners restore it from the cache (vm-test.yml) instead
+    # of each installing from scratch. Nothing waits for it.
+    ci = yaml.safe_load((ROOT / ".github/workflows/ci.yml").read_text())
+    base = ci["jobs"]["base"]
+    assert base["needs"] == ["image"]
+    assert "needs.image.result == 'success'" in base["if"]
+    runs = "\n".join(step.get("run", "") for step in base["steps"])
+    assert "--base-only" in runs and "--registry-image" in runs
+    assert "${GITHUB_SHA::12}" in runs, "the image this run pushed, not :edge, which may move"
+    saves = [s for s in base["steps"] if s.get("uses", "").startswith("actions/cache/save")]
+    assert saves and saves[0]["with"]["key"] == "pr-test-base-${{ github.sha }}"
+    assert saves[0]["with"]["path"] == "~/.cache/kosher-pr-test"
+    vm = yaml.safe_load((ROOT / ".github/workflows/vm-test.yml").read_text())["jobs"]["vm"]
+    restore = [s for s in vm["steps"] if s.get("uses", "").startswith("actions/cache/restore")][0]
+    assert restore["with"]["path"] == saves[0]["with"]["path"]
+    for job in (ci["jobs"]["release"], ci["jobs"]["docs"]):
+        assert "base" not in job["needs"], "nothing waits for the base"
+
+
+def test_a_pull_request_gets_a_vm_test_only_with_the_label():
+    # The merge train tests batches; one pull request's own VM test is on
+    # request, and adding another label does not start (or cancel) one.
+    document = yaml.safe_load((ROOT / ".github/workflows/vm-test.yml").read_text())
+    triggers = document.get(True) or document.get("on")
+    assert "labeled" in triggers["pull_request"]["types"]
+    assert set(triggers["workflow_call"]["inputs"]) == {"ref", "id"}
+    gate = " ".join(document["jobs"]["changes"]["if"].split())
+    assert "contains(github.event.pull_request.labels.*.name, 'vm-test')" in gate
+    assert "github.event.label.name == 'vm-test'" in gate
+    assert "inputs.ref" in document["jobs"]["vm"]["steps"][0]["with"]["ref"]
+
+
+def _train():
+    return yaml.safe_load((ROOT / ".github/workflows/merge-train.yml").read_text())
+
+
+def test_the_train_tests_a_batch_once_and_lands_it():
+    train = _train()
+    jobs = train["jobs"]
+    # One train at a time, never cancelling the one running.
+    assert "merge-train" in train["concurrency"]["group"]
+    assert train["concurrency"]["cancel-in-progress"] is False
+    # The VM test is the same workflow a pull request would run, and it
+    # runs only once the quick checks passed: a minute's wait on a green
+    # train, ten or more saved on one whose unit tests failed.
+    assert jobs["vm"]["uses"] == "./.github/workflows/vm-test.yml"
+    assert jobs["vm"]["needs"] == ["assemble", "checks"]
+    assert jobs["land"]["needs"] == ["assemble", "checks", "vm"]
+    assert jobs["land"]["if"].startswith("always()"), "a skipped VM test still lands or splits"
+    land = jobs["land"]["steps"][0]["run"]
+    # master takes pull requests only, with a linear history.
+    assert "gh pr merge" in land and "--squash" in land
+    assert 'git push' not in land.split("refs/heads/train")[0], "no push to master"
+    # Its merges start nothing, so it asks for the release.
+    assert "gh workflow run ci.yml" in land and "landed=true" in land
+    # A failed batch is split; a failure on its own is told and dequeued.
+    assert "queued-solo" in land
+    # It starts the next train only after moving the queue on.
+    assert '"$progress" = 1' in land
+
+
+def test_the_train_leaves_out_forks_and_what_does_not_merge():
+    build = _train()["jobs"]["assemble"]["steps"][1]["run"]
+    assert "isCrossRepository | not" in build
+    assert "git merge --abort" in build
+
+
+def test_a_landed_train_is_released_like_a_push():
+    ci = yaml.safe_load((ROOT / ".github/workflows/ci.yml").read_text())
+    triggers = ci.get(True) or ci.get("on")
+    assert triggers["workflow_dispatch"]["inputs"]["landed"]["type"] == "boolean"
+    assert "inputs.landed" in ci["jobs"]["release"]["if"]
+
+
+def test_the_vm_harness_never_needs_sudo():
+    """The recipes `just pr-test` calls, and what they depend on, run no
+    sudo; scripts/check-no-sudo.py is the check, and it must also catch a
+    recipe that does (just vm, through _sudo and _bib)."""
+    import shutil
+    import subprocess
+    import sys
+
+    if shutil.which("just") is None:
+        pytest.skip("just is not installed")
+    check = [sys.executable, str(ROOT / "scripts/check-no-sudo.py")]
+    clean = subprocess.run(check, cwd=ROOT, capture_output=True, text=True)
+    assert clean.returncode == 0, clean.stdout + clean.stderr
+    dirty = subprocess.run(check + ["vm"], cwd=ROOT, capture_output=True, text=True)
+    assert dirty.returncode == 1 and "_sudo" in dirty.stdout
+
+
+def test_the_weekly_release_may_ask_for_the_docs_rebuild():
+    # Its last step dispatches ci.yml for the Releases page; the first run
+    # made the release and then failed there, "Resource not accessible by
+    # integration", for want of this permission.
+    roundup = yaml.safe_load((ROOT / ".github/workflows/roundup.yml").read_text())
+    assert roundup["permissions"]["actions"] == "write"
+    runs = "\n".join(step.get("run", "") for step in roundup["jobs"]["roundup"]["steps"])
+    assert "gh workflow run ci.yml" in runs
+def test_the_train_lands_only_the_commit_it_tested_and_may_carry_a_workflow_change():
+    # A push to a queued pull request after assembly used to land untested
+    # (plain `gh pr merge`); and the workflow's own token cannot push a
+    # workflow file's new content, so a MERGE_TRAIN_TOKEN secret, when
+    # there is one, does the push and the merges instead.
+    train = _train()
+    assemble = train["jobs"]["assemble"]
+    checkout = assemble["steps"][0]
+    assert checkout["with"]["token"] == "${{ secrets.MERGE_TRAIN_TOKEN || github.token }}"
+    build = assemble["steps"][1]["run"]
+    assert 'heads="$heads $n:$(git rev-parse "pr-$n")"' in build
+    assert "heads" in assemble["outputs"]
+    land = train["jobs"]["land"]["steps"][0]
+    assert land["env"]["MERGE_TRAIN_TOKEN"] == "${{ secrets.MERGE_TRAIN_TOKEN }}"
+    run = land["run"]
+    assert '--match-head-commit "$(head_of "$n")"' in run
+    assert 'GH_TOKEN="${MERGE_TRAIN_TOKEN:-$GH_TOKEN}" gh pr merge' in run
+    # Labels and comments stay with the workflow's token: a label by the
+    # train's own token would wake another train.
+    assert 'GH_TOKEN="${MERGE_TRAIN_TOKEN:-$GH_TOKEN}" gh pr edit' not in run
+    # A merge by the token is a push and releases itself; only the
+    # workflow's own merges need the ask.
+    assert '[ "$landed" = 1 ] && [ -z "$MERGE_TRAIN_TOKEN" ]' in run
+    assert "gh workflow run ci.yml" in run and "landed=true" in run

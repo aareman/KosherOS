@@ -14,6 +14,16 @@
 name = "root"
 key = "@SSH_KEY@"
 
+# A developer's VM fills a disk. bootc-image-builder sizes the qcow2 to
+# the image, which is about half of it, and an afternoon of Flatpaks, a
+# Nix store and container images took the rest: the proxy could not write
+# its activity log (so video failed), a Flatpak install refused for want
+# of 500 MB, and no upgrade could be staged. Forty gigabytes, thin: the
+# file grows only as the VM writes.
+[[customizations.filesystem]]
+mountpoint = "/"
+minsize = "40 GiB"
+
 # No services block here: bootc-image-builder did not apply one
 # to disk images, so dev disks had no sshd at all. sshd is enabled in the
 # image and gated on /root/.ssh/authorized_keys existing (see the sshd

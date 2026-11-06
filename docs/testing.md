@@ -13,10 +13,53 @@ new test belongs.
 | **Live checks** | the built image does what the rendered files say: the firewall stops people, the resolver answers as claimed, traffic is diverted, the services run | podman | `just check-all` |
 | **Integration** | the whole stack on a booted system: services, real traffic, polkit, malcontent, TLS interception, the guest session | a dev VM | `just test-vm` |
 | **Boot** | power-on reaches the setup wizard | a disk image, KVM | `just test-boot` |
+| **Pull request** | what a change touches, on a machine running its image, plus a signed-in desktop | KVM | `just pr-test 168` |
 
 CI runs the unit layer with coverage, byte-compiles every app and
 shellchecks every script on every pull request, and builds the image on
-every merge that changes it.
+every merge that changes it. The VM test (`just pr-test` on a runner with
+KVM) runs for the merge train, once for a batch of pull requests, and for
+a single pull request only when it has the `vm-test` label.
+
+## The merge train
+
+A pull request that is ready gets the `queued` label. That is the approval
+to merge it. The train (`.github/workflows/merge-train.yml`) then:
+
+1. merges every queued pull request onto `master` in a scratch branch,
+   `train/<run>`, leaving out (and telling) any that does not merge cleanly;
+2. runs the quick checks and one VM test on the result;
+3. if both pass, squash-merges each pull request into `master` in the same
+   order, which leaves `master` exactly as tested, and starts the release;
+4. if either fails, moves each pull request in the batch to `queued-solo`,
+   and the trains after take those one at a time; one that fails on its own
+   loses its label and is told.
+
+One train runs at a time. Labelling a pull request while one runs puts it
+in the next, which starts when the current one has moved the queue on.
+A batch of five costs one VM test instead of five, and a push to a pull
+request no longer restarts an hour of testing.
+
+## Why a build takes seconds, not twenty minutes
+
+Most of a VM test used to be the image build: every one installed all of
+Fedora Workstation again, because the base image's tag moved about once a
+day and each move changed the cache key of every layer after it. The
+Containerfile now builds from our own copy of Fedora's images
+(`ghcr.io/<owner>/kosher-base-fedora*:44-<date>`), pinned by digest, so
+the layers under a change stay cached until the copy is refreshed on
+purpose: `just bump-base` (`scripts/bump-base.py`) and, every Monday, the
+Bump the base images workflow, whose pull request goes through the train.
+A copy rather than Fedora's own digest, because quay.io deletes a digest
+once its tag moves on, and a build pinned to it could not pull it a day
+later (#242). A one-line
+change to the daemon rebuilds in under a minute.
+
+CI's runners start with nothing, so their builds share layers through a
+cache in the registry (`ghcr.io/<owner>/kosher-linux-cache`): the edge
+build, the test-image builds and the VM test read it and add to it.
+
+Nothing on this page needs sudo. Membership of the `kvm` group is enough.
 
 ## Unit tests
 
@@ -139,11 +182,25 @@ real system state: they create test users, change filter modes and toggle
 the guest account. Never point them at a machine you care about.
 
 ```sh
-just fedora-vm                 # boot the dev VM (once)
-just dev-install               # install the stack into it
-just test-vm                   # every suite
-just test-vm kosher-fedora 50  # one suite, by its number
+just dev-vm                    # boot master's set-up machine (the base just pr-test keeps)
+just deploy                    # this checkout's code into it, in seconds
+just test-vm kosher-dev        # every suite
+just test-vm kosher-dev 50     # one suite, by its number
 ```
+
+`just dev-vm` boots the machine a pull-request run leaves behind — master's
+image, installed and set up by the wizard — as an overlay that keeps its
+state from one boot to the next (`just dev-vm fresh` starts over).
+`just deploy` pushes kosherd, the apps, `os-image/files` and the policy
+schema into it under `bootc usr-overlay` and restarts the daemon and the
+filter: a change is on the machine seconds after it is saved, with no
+image build and no install. The one change a deploy cannot carry is one to
+the Containerfile itself (a package, a build step); `just build && just
+vm-upgrade` updates the machine to the built image for that.
+
+The older stage-1 road still works: `just fedora-vm` boots a plain Fedora
+cloud VM, `just dev-install` installs the stack into it, and
+`just test-vm kosher-fedora 50` runs a suite there.
 
 | Suite | Covers |
 |---|---|
@@ -154,8 +211,7 @@ just test-vm kosher-fedora 50  # one suite, by its number
 | `50-inspect` | TLS interception: the proxy, the CA, rules reaching it, a blocked and an allowed address, uninspected accounts untouched |
 | `60-persistence` | revisions advance, the policy stays root-only, a restarted daemon rebuilds enforcement, sessions do not survive a restart |
 | `70-categories` | the category list is loaded, blocking reaches the right layer for the right accounts, unblocking restores access |
-| `80-hardening` | the protections the red-team review asked for, asserted from a supervised account: every port through the proxy, no browsing by bare address, DoH blocked by shape, the LAN limited, the boot menu and disk protected, consoles closed, images verified. Each line carries its finding number, and a red line is information: the suite is the acceptance test as each fix lands |
-
+| `80-hardening` | the protections the red-team review asked for, asserted from a supervised account: every port through the proxy, no browsing by bare address, DoH blocked by shape, the LAN limited, the boot menu and disk protected, consoles closed, images verified. Each line carries its finding number, and a red line is information: the suite is the acceptance test as each fix lands | The `[N]` lines are the October re-audit's findings (developer tooling, the page filter, image trust), measured the same way |
 ## The boot test
 
 Every other test exercises a system that is already up. `just test-boot`
@@ -164,3 +220,145 @@ serial console, and asserts the machine reaches it. Four shipped bugs lived
 between power-on and the wizard. It runs on a throwaway overlay, so the
 disk image is not modified, and it refuses a disk built from an image older
 than the current build rather than testing last morning's code.
+
+`just vm-rootless` makes the disk it boots. It uses
+[bcvk](https://github.com/bootc-dev/bcvk), which starts the image as a
+small VM inside a rootless container and installs it from there onto a new
+qcow2, so it needs KVM but not root. The disk carries no ssh key: the boot
+recipes give root's key to the machine at each boot as a systemd
+credential. `just vm` makes the same disk with bootc-image-builder and
+needs sudo. The first `just vm-rootless` downloads bcvk at a pinned
+version and builds a static virtiofsd with nix, because the one Ubuntu
+ships is too old for bcvk.
+
+## A whole pull request in a VM
+
+`just pr-test` takes a pull request number, a branch, or `HEAD` for the
+checkout as it is, and runs what a machine can check with nobody at the
+keyboard. It builds the target's image in a temporary worktree, so the
+checkout you are working in is untouched, and then decides from the
+paths the change touches what else to run. The top of the report says
+what it chose and why.
+
+- Documentation, unit tests and other workflows run nothing.
+- A desktop app (Look, the admin app, My Filter, Welcome) runs the
+  signed-in session. The Store runs it too, with the app suites.
+- The filter (`nft`, `dns`, the proxy, the lists, the search service)
+  runs the filtering suites and the block-page checks on the desktop.
+- A suite runs itself.
+- The bootloader, the kernel arguments, first-boot setup, the disk and
+  installer config, the boot splash, and the lines of the Containerfile
+  that deal with booting run a fresh install as well.
+- Anything else in the daemon or the image, the harness itself, or a path
+  no rule knows runs every check.
+
+`--all` runs every check whatever the change touches. `--full` installs
+the change's own image on a fresh disk and runs every check, which is the
+most a run can do.
+
+### The machine
+
+A fresh install takes about fifteen minutes: ten to make the disk and
+three for the first-boot test. So it is done once per master revision.
+The disk is made from master's image as in `just vm-rootless`, and the
+boot test answers the setup wizard. The machine it sets up is kept under
+`~/.cache/kosher-pr-test/` (or `$KOSHER_PR_TEST_CACHE`) and reused for a
+week, or until `--fresh-base`.
+A set-up machine keeps the ssh key it was first booted with, so the base
+records that key's fingerprint, and a run whose cache holds a different
+key says so and sets up a fresh base instead of waiting on ssh.
+Every checkout and worktree on the machine shares that one cache. A run
+holds a lock on it from start to finish, so two runs take turns rather
+than fight over the machine, the registry port or the host's memory.
+
+For a change, that machine is switched to the change's image with
+`bootc switch`, from a registry the harness runs on the host (QEMU's
+10.0.2.2 inside the machine), and rebooted into it. This is the way a
+family's machine takes an update, from a machine that has been set up,
+so only the layers the change made are pulled. The harness takes its
+registry back out of the machine's trust before anything is tested.
+
+When the change can alter power-on to setup, that is not enough. Those
+changes, and `--full`, get a fresh disk from their own image and the
+boot test on it. When the wizard does not finish there, the boot stage
+fails and the machine is set up over ssh instead, with the
+non-interactive `kosherctl setup --username`, so a broken wizard does not
+also hide what the rest would find.
+
+### The checks
+
+Every machine after that is an overlay of the set-up one, and they run
+at the same time. One is the desktop. The suites are split over the
+others by how long each takes, longest first, so they finish together.
+`--vms` (or `KOSHER_PR_TEST_VMS`) says how many suite machines to use,
+three by default, and fewer start when the host is short of memory.
+
+- **desktop**: the machine booted with a screen. Once kosherd answers on
+  D-Bus, a filtered test account is made and signs in at the GDM login
+  screen, with the keys typed through QEMU's control socket. A sign-in
+  that does not start a session is tried once more after GDM restarts,
+  and when the login screen never stays up the stage says the machine
+  has no working graphical session. The session must have a seat, be active and local, and
+  run Wayland, and the account's user services must all start. polkit is
+  asked about the session's own processes: the Store is allowed, and a
+  filter change needs an administrator. Then a real filter change is
+  made from the session. Each password prompt it brings up is found in a
+  screenshot and answered, the change must go through, and it should
+  take one prompt. Look, My Filter and the Store must open and stay open
+  without asking for a password; the admin app on this account must ask
+  for one. Last, the filter is checked the way a browser meets it.
+  Sixteen requests at once to a gambling site must all fail to load it
+  and all get the block page, an ordinary site must load through the
+  proxy, and when Firefox opens the gambling site on the desktop the
+  filter must record the visit. Last, each script in
+  `scripts/vm-tests/desktop/` runs on this machine, as root, with
+  `PR_USER` naming the account at the screen and `PR_GL` saying whether
+  the machine has a GPU: the checks that need someone signed in at a
+  seat, such as whose keyboard files are in force, go there and print
+  PASS, FAIL and SKIP lines like a suite.
+- **suites**: the target's own `scripts/vm-tests`, as root over ssh, each
+  suite timed. A fast run cuts Nix's download retries short; `--full`
+  leaves them alone.
+
+The test account at the login screen is what the in-VM suites cannot be.
+Their accounts have no seat, so polkit never treats them as the person at
+the computer, and they reach kosherd through root paths instead. The
+desktop stage is where the polkit rules, the password prompt and the
+desktop apps are checked as a family meets them.
+
+### Known failures
+
+`scripts/vm-tests/known-failures.txt` lists the checks that fail on
+master today, each with the issue that will fix it. A run passes when
+every failure is on that list and fails on any other. A listed check that
+passes is reported as a warning, and the change that fixed it removes its
+line. The report lists the new failures, the known ones and the fixed
+ones separately.
+
+### What a run leaves
+
+Everything a run produces is in `build/pr-test/<id>/`: `summary.json`
+with every check and the selection, `report.md` for people, a log per
+stage, the serial consoles and the screenshots. The run's machines, its
+worktree, its image tag and any temp disk bcvk made for it in `/var/tmp`
+are removed when the run ends, also when it is stopped with SIGTERM or
+Ctrl-C; `--keep` leaves all of them. The build cache tag
+(`localhost/kosher-linux:pr-test-cache`) stays. Each run starts by
+removing dangling images over a day old that no container uses.
+
+The harness never runs sudo. A `sudo` that fails and records who called
+it is first on the PATH of everything it starts, and before it starts
+`scripts/check-no-sudo.py` reads the recipes it calls and everything they
+depend on.
+
+The desktop stage draws on a plain virtual screen by default.
+`KOSHER_GL=1` (or `--gl`) gives it a virgl GPU through the host's QEMU
+instead, for checks of the compositor, on a machine that has a GPU.
+
+In CI, `.github/workflows/vm-test.yml` runs `just pr-test HEAD` for the
+merge train, and on pull requests from this repository that change
+anything the machine runs and carry the `vm-test` label. A
+runner keeps no cache, so there it makes a disk from the change's own
+image every time and runs the checks the change selects. It fails at
+once on a runner without KVM, never uses the GPU mode, and uploads the
+run's directory, without the disks and the key, as an artifact.

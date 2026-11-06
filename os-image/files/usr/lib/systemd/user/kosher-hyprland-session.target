@@ -1,0 +1,12 @@
+[Unit]
+Description=KosherOS: a Hyprland session
+Documentation=file:///usr/share/doc/kosher/desktop.md
+# niri and Umbriel run as systemd user services and bring up
+# graphical-session.target themselves. Hyprland does not, so the KosherOS
+# Hyprland configuration (/etc/xdg/hypr/hyprland.lua) starts this target
+# once Hyprland is up and stops it on the way out. That is what runs the
+# sign-in helper and the time-limit warnings in a Hyprland session, as they
+# run on every other desktop.
+BindsTo=graphical-session.target
+Wants=graphical-session.target
+After=graphical-session-pre.target

@@ -10,13 +10,27 @@ gi.require_version("Gio", "2.0")
 from gi.repository import Gio, GLib
 
 from . import BUS_NAME, OBJECT_PATH
+from .access import needs_admin_session
+
+
+# The ref the daemon reports the leftover-runtime cleanup under (apps.py
+# says the same; this module stays free of Flatpak).
+CLEANUP_REF = "kosheros.cleanup"
 
 
 class DaemonClient:
-    def __init__(self) -> None:
+    def __init__(self, *, unlock_first: bool = False) -> None:
+        """`unlock_first`: open the administrator session (Unlock) before
+        the first call that would otherwise ask for a password, so a run
+        of such calls is one prompt rather than one per polkit action.
+        kosherctl sets it; the admin app unlocks for itself on opening."""
         self._conn = Gio.bus_get_sync(Gio.BusType.SYSTEM, None)
+        self._unlock_first = unlock_first
 
     def _call(self, iface: str, method: str, signature: str | None = None, *args):
+        if self._unlock_first and needs_admin_session(method):
+            self._unlock_first = False
+            self.unlock()
         params = GLib.Variant(signature, args) if signature else None
         result = self._conn.call_sync(
             BUS_NAME, OBJECT_PATH, f"org.kosherlinux.Daemon1.{iface}", method,
@@ -128,6 +142,17 @@ class DaemonClient:
         self._call("Profiles", "AllowUrl", "(isbs)", uid, url, whole_site,
                    guardian_password)
 
+    def bypass_url(self, uid: int, url: str, whole_site: bool = False,
+                   guardian_password: str = "") -> None:
+        self._call("Profiles", "BypassUrl", "(isbs)", uid, url, whole_site,
+                   guardian_password)
+
+    def grant_url(self, uid: int, url: str, level: str, scope: str,
+                  guardian_password: str = "") -> None:
+        """level: allow, pictures or bypass; scope: page, folder or site."""
+        self._call("Profiles", "GrantUrl", "(issss)", uid, url, level, scope,
+                   guardian_password)
+
     def list_activity(self, since: int = 0, uid: int = -1) -> list[dict]:
         return json.loads(self._call("Profiles", "ListActivity", "(ii)",
                                      since, uid)[0])
@@ -135,6 +160,11 @@ class DaemonClient:
     def activity_summary(self) -> dict:
         """Today's counts, keyed by uid as a string (JSON keys)."""
         return json.loads(self._call("Profiles", "ActivitySummary")[0])
+
+    def usage(self) -> dict:
+        """Traffic, blocks and filter time by range, then by uid as a
+        string (usage.report)."""
+        return json.loads(self._call("Profiles", "Usage")[0])
 
     def set_media_level(self, uid: int, level: str,
                         guardian_password: str = "") -> None:
@@ -149,6 +179,13 @@ class DaemonClient:
     def set_youtube(self, uid: int, settings: dict,
                     guardian_password: str = "") -> None:
         self._call("Profiles", "SetYouTube", "(iss)", uid,
+                   json.dumps(settings), guardian_password)
+
+    def set_calm(self, uid: int, settings: dict,
+                 guardian_password: str = "") -> None:
+        """The calmer addictive sites (#179): {"enabled", "feed_items",
+        "sites": {<site>: {"daily_minutes"}}}, empty to turn it off."""
+        self._call("Profiles", "SetCalm", "(iss)", uid,
                    json.dumps(settings), guardian_password)
 
     def search_youtube_channels(self, query: str) -> list[dict]:
@@ -171,12 +208,46 @@ class DaemonClient:
         """Ads and trackers blocked at the resolvers, for every account."""
         self._call("Profiles", "SetAdBlock", "(bs)", enabled, guardian_password)
 
+    def set_adblock_allowed(self, hosts: list[str], guardian_password: str = "") -> None:
+        """Hosts the ad blocker leaves reachable although the tracker lists
+        carry them (#265), beyond the built-in payment-security set."""
+        self._call("Profiles", "SetAdBlockAllowed", "(ass)", list(hosts), guardian_password)
+
+    def set_developer_tools(self, uid: int, enabled: bool, guardian_password: str = "") -> None:
+        """May the account use the Nix daemon and the package registries
+        itself (nix, devbox, devenv from a shell)?"""
+        self._call("Profiles", "SetDeveloperTools", "(ibs)", uid, bool(enabled), guardian_password)
+
+    def set_ssh_in(self, uid: int, enabled: bool, guardian_password: str = "") -> None:
+        """May the account be signed in to over SSH with a key? Needs
+        developer tools on."""
+        self._call("Profiles", "SetSshIn", "(ibs)", uid, bool(enabled), guardian_password)
+
+    def set_build_sources(self, hosts: list[str], guardian_password: str = "") -> None:
+        """The hosts added to where a Nix build may download from; the
+        built-in ones always apply."""
+        self._call("Profiles", "SetBuildSources", "(ass)", list(hosts), guardian_password)
+
+    def set_boot_menu_password(self, password: str, guardian_password: str = "") -> None:
+        """Password-protect the boot menu (or change the password)."""
+        self._call("Profiles", "SetBootMenuPassword", "(ss)", password, guardian_password)
+
+    def boot_menu_protected(self) -> bool:
+        return self._call("Profiles", "BootMenuProtected")[0]
+
     def set_network_access(self, uid: int, video_calls: bool, extra_ports: list[int],
                            guardian_password: str = "") -> None:
         """Beyond the web: whether UDP to high ports (video calls) is allowed,
         and which extra TCP ports the account may open directly."""
         self._call("Profiles", "SetNetworkAccess", "(ibss)", uid, bool(video_calls),
                    json.dumps([int(p) for p in extra_ports]), guardian_password)
+
+    def set_ssh(self, uid: int, anywhere: bool, hosts: list[str],
+                guardian_password: str = "") -> None:
+        """SSH to other machines (#257): the listed ones (names, addresses,
+        ranges, `tailnet`), or anywhere."""
+        self._call("Profiles", "SetSsh", "(ibss)", uid, bool(anywhere),
+                   json.dumps([str(h) for h in hosts]), guardian_password)
 
     def set_time_limits(self, uid: int, settings: dict,
                         guardian_password: str = "") -> None:
@@ -203,6 +274,18 @@ class DaemonClient:
     def my_layout(self) -> str:
         """The calling user's own desktop layout (any active local user)."""
         return self._call("Profiles", "GetMyLayout")[0]
+
+    def set_my_layout(self, layout: str) -> None:
+        """Choose the calling user's own desktop (any active local user)."""
+        self._call("Profiles", "SetMyLayout", "(s)", layout)
+
+    def my_compositor(self) -> str:
+        """Which compositor the calling user's advanced desktop runs on."""
+        return self._call("Profiles", "GetMyCompositor")[0]
+
+    def set_my_compositor(self, compositor: str) -> None:
+        """Choose the compositor for the calling user's advanced desktop."""
+        self._call("Profiles", "SetMyCompositor", "(s)", compositor)
 
     def apply_profile(self, uid: int, profile: str,
                       guardian_password: str = "") -> None:
@@ -268,11 +351,34 @@ class DaemonClient:
                               guardian_password: str = "") -> None:
         self._call("Apps", "SetUserBlockedApps", "(iass)", uid, refs, guardian_password)
 
+    def set_user_app_approval(self, uid: int, ref: str, approved: bool,
+                              guardian_password: str = "") -> None:
+        """Approve an app for one account (Syncthing: appaccess.INDIVIDUAL_APPROVAL)."""
+        self._call("Apps", "SetUserAppApproval", "(isbs)", uid, ref, bool(approved),
+                   guardian_password)
+
+    def set_syncthing_lan(self, uid: int, enabled: bool, guardian_password: str = "") -> None:
+        """Let devices on the home network connect to this account's Syncthing."""
+        self._call("Apps", "SetSyncthingLan", "(ibs)", uid, bool(enabled), guardian_password)
+
+    def set_syncthing_enabled(self, enabled: bool, guardian_password: str = "") -> None:
+        """Syncthing for the whole computer (#220)."""
+        self._call("Apps", "SetSyncthingEnabled", "(bs)", bool(enabled), guardian_password)
+
+    def set_keyd_enabled(self, enabled: bool, guardian_password: str = "") -> None:
+        """Key remapping (keyd) for the whole computer (#230)."""
+        self._call("Profiles", "SetKeydEnabled", "(bs)", bool(enabled), guardian_password)
+
     def list_installed(self) -> list[str]:
         return self._call("Apps", "ListInstalled")[0]
 
     def list_installed_details(self) -> list[dict]:
         return json.loads(self._call("Apps", "ListInstalledDetails")[0])
+
+    def list_my_installed_details(self) -> list[dict]:
+        """What is installed as the caller sees it: every Flatpak and the
+        caller's own apps, without who installed them. No password."""
+        return json.loads(self._call("Apps", "ListMyInstalledDetails")[0])
 
     def set_user_apps(self, uid: int, refs: list[str]) -> None:
         self._call("Apps", "SetUserApps", "(ias)", uid, refs)
@@ -280,6 +386,11 @@ class DaemonClient:
     def install_app(self, ref: str) -> None:
         """Start an install; watch AppProgress/AppFinished for the outcome."""
         self._call("Apps", "InstallApp", "(s)", ref)
+
+    def install_app_for(self, uid: int, ref: str) -> None:
+        """An administrator installs an app for an account (a nixpkgs app
+        goes into that account's own profile). Same signals as install_app."""
+        self._call("Apps", "InstallAppFor", "(is)", uid, ref)
 
     def remove_app(self, ref: str) -> None:
         self._call("Apps", "RemoveApp", "(s)", ref)
@@ -313,6 +424,15 @@ class DaemonClient:
     def update_all_apps(self) -> int:
         """Queue an update for every app that has one. Returns how many."""
         return self._call("Apps", "UpdateAllApps")[0]
+
+    def list_unused_apps(self) -> list[dict]:
+        """Leftover runtimes no installed app needs: ref, name, size."""
+        return json.loads(self._call("Apps", "ListUnusedApps")[0])
+
+    def remove_unused_apps(self) -> dict:
+        """Queue their removal; watch AppProgress/AppFinished for the ref
+        CLEANUP_REF. Returns {"count", "size"} of what was there."""
+        return json.loads(self._call("Apps", "RemoveUnusedApps")[0])
 
     def connect_app_signals(self, on_progress, on_finished) -> int:
         """Subscribe to install progress. Returns a subscription id."""
@@ -383,16 +503,72 @@ class DaemonClient:
         """Which image is booted, and what a rollback would return to."""
         return json.loads(self._call("System", "DeploymentStatus")[0])
 
-    def rollback(self) -> None:
-        self._call("System", "Rollback")
+    def rollback(self, guardian_password: str = "") -> None:
+        self._call("System", "Rollback", "(s)", guardian_password)
+
+    def try_image(self, what: str, guardian_password: str = "") -> None:
+        """Run a build that is on no channel — a pull request number, or a
+        tag — keeping the deployment the machine came from. Returns at
+        once and reports on the update signals, like set_channel."""
+        self._call("System", "TryImage", "(ss)", what, guardian_password)
+
+    def return_to_kept(self) -> None:
+        """Back to the deployment kept by try_image, at the next restart."""
+        self._call("System", "ReturnToKept")
 
     def reboot(self) -> None:
         """Restart the computer (after an update is staged)."""
         self._call("System", "Reboot")
 
+    # Automatic updates (#19)
+    def set_auto_updates(self, schedule: str, notify: bool) -> None:
+        """off, daily, weekly, biweekly or monthly, and the notice switch."""
+        self._call("System", "SetAutoUpdates", "(sb)", schedule, bool(notify))
+
+    def auto_update_status(self) -> dict:
+        """`schedule`, `notify`, `last_success`, `last_attempt`,
+        `last_error`, `next_due`, `pending`."""
+        return json.loads(self._call("System", "AutoUpdateStatus")[0])
+
+    def run_auto_update(self, now: bool = False) -> dict:
+        """One automatic run (the timer's); `now` skips "not due yet"."""
+        return json.loads(self._call("System", "RunAutoUpdate", "(b)", bool(now))[0])
+
+    def pending_update(self) -> dict:
+        """The update waiting for a restart, {} when none. Any account."""
+        return json.loads(self._call("System", "PendingUpdate")[0])
+
+    def connect_update_ready(self, on_ready) -> int:
+        """Subscribe to UpdateReady(version, digest, announce); an empty
+        digest means nothing waits for a restart any more."""
+
+        def handler(_conn, _sender, _path, _iface, signal, params):
+            if signal == "UpdateReady":
+                on_ready(*params.unpack())
+
+        return self._conn.signal_subscribe(
+            BUS_NAME, "org.kosherlinux.Daemon1.System", "UpdateReady", OBJECT_PATH,
+            None, Gio.DBusSignalFlags.NONE, handler,
+        )
+
     # Network
     def set_captive_mode(self, uid: int, minutes: int) -> None:
         self._call("Network", "SetCaptiveMode", "(ii)", uid, minutes)
+
+    # Tailscale (#30): machine-wide, the administrator's alone.
+    def tailscale_status(self) -> dict:
+        return json.loads(self._call("Network", "TailscaleStatus")[0])
+
+    def tailscale_sign_in(self, guardian_password: str = "") -> str:
+        """Start signing in; the address to open, or "" if none was needed."""
+        return self._call("Network", "TailscaleSignIn", "(s)", guardian_password)[0]
+
+    def tailscale_sign_out(self) -> None:
+        self._call("Network", "TailscaleSignOut")
+
+    def set_tailscale_enabled(self, enabled: bool, guardian_password: str = "") -> None:
+        """Run Tailscale on this computer, or stop it (#220)."""
+        self._call("Network", "SetTailscaleEnabled", "(bs)", bool(enabled), guardian_password)
 
     # Guardian
     def guardian_enabled(self) -> bool:

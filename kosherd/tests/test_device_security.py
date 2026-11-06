@@ -41,13 +41,25 @@ def test_the_quiet_boot_arguments_are_a_separate_file():
     assert "quiet" not in files[KARGS]
 
 
+def test_no_automount_is_put_on_boot():
+    # #225: systemd-gpt-auto-generator's boot.automount (idle 120s) over
+    # ostree's /boot bind mount made ostree-finalize-staged fail, and an
+    # update was lost at the restart. Its own file, like the others.
+    files = kargs_written()
+    boot = files.get("/usr/lib/bootc/kargs.d/30-kosheros-boot.toml")
+    assert boot == ["systemd.gpt_auto=0"]
+    assert all("gpt_auto" not in k for f, ks in files.items()
+               if not f.endswith("30-kosheros-boot.toml") for k in ks)
+
+
 def test_nothing_here_promises_a_green_panel():
     # The firmware and the CPU decide most of that score, and a family that
     # opens the panel should be told so rather than left to conclude the
     # filter is broken.
     doc = (ROOT / "docs/architecture.md").read_text()
     assert "Device Security" in doc
-    for karg in ("lockdown=integrity", "intel_iommu=on", "mem_sleep_default=s2idle"):
+    for karg in ("lockdown=integrity", "intel_iommu=on", "mem_sleep_default=s2idle",
+                 "rd.shell=0", "rd.emergency=reboot"):
         assert karg in doc, karg
     for theirs in ("BootGuard", "Secure Boot", "TPM", "zram"):
         assert theirs in doc, theirs

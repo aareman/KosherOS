@@ -37,7 +37,7 @@ from collections import deque
 from pathlib import Path
 from typing import Callable
 
-from . import appaccess
+from . import accountapps, appaccess, nixapps
 
 try:
     import gi
@@ -468,12 +468,13 @@ def warm_index() -> tuple[int, bool]:
         return 0, False
 
 
-def store_apps(account, approved: list[dict] | None = None) -> dict:
+def store_apps(account, approved: list[dict] | None = None, off=()) -> dict:
     """What the Store shows `account`: {apps, access, ready}.
 
     `ready` says whether the app index has been loaded; a store account on
     a machine that has not downloaded the index yet sees its approved
-    apps and is told the rest is still on its way.
+    apps and is told the rest is still on its way. `off` is what the
+    computer has switched off (Policy.switched_off_apps).
     """
     if approved is None:
         approved = load_catalog().get("apps", [])
@@ -481,7 +482,7 @@ def store_apps(account, approved: list[dict] | None = None) -> dict:
     return {
         "access": appaccess.access_of(account),
         "ready": index is not None,
-        "apps": appaccess.visible(account, index or [], approved),
+        "apps": appaccess.visible(account, index or [], approved, off),
     }
 
 
@@ -561,16 +562,72 @@ def installed_details() -> list[dict]:
             "rating": dict(known.get("rating") or {}),
             "kind": appkinds.kind_of(known) if known else appkinds.OTHER,
         })
+    details += nix_installed_details(catalog, ledger)
     details.sort(key=lambda a: a["name"].lower())
     return details
 
 
-def installed_refs() -> set[str]:
+def installed_details_for(uid: int) -> list[dict]:
+    """What is installed as one account sees it, for the Store.
+
+    installed_details() is the administrator's view: it says which account
+    installed each app and lists every account's own apps. The Store opens
+    on any account without a password, so it gets this instead: every
+    Flatpak (system-wide, as `flatpak list` shows anyone) and only this
+    account's own apps, with nothing about who installed what.
+    """
+    out = []
+    for detail in installed_details():
+        if accountapps.is_account_app(detail["ref"]) \
+                and detail.get("installed_by_uid") != uid:
+            continue
+        out.append({k: v for k, v in detail.items()
+                    if k not in ("installed_by", "installed_by_uid")})
+    return out
+
+
+def nix_installed_details(catalog: dict, ledger: dict) -> list[dict]:
+    """The per-account apps kosherd installed (nixpkgs packages and
+    developers' own builds), each in the home of the account that asked
+    (the ledger says which), still there."""
+    from . import appkinds
+
+    details = []
+    present: dict[int, set[str]] = {}
+    for ref, entry in ledger.items():
+        if not accountapps.is_account_app(ref):
+            continue
+        uid = entry.get("uid", -1)
+        if uid not in present:
+            present[uid] = accountapps.installed(uid) if uid >= 0 else set()
+        if ref not in present[uid]:
+            continue
+        known = catalog.get(ref) or {}
+        details.append({
+            "ref": ref,
+            "name": known.get("name") or accountapps.package(ref),
+            "size": 0,
+            "installed_by": entry.get("username", ""),
+            "installed_by_uid": uid,
+            "approved": ref in catalog,
+            "categories": list(known.get("categories") or []),
+            "rating": {},
+            "kind": appkinds.kind_of(known) if known else appkinds.OTHER,
+        })
+    return details
+
+
+def installed_refs(uid: int | None = None) -> set[str]:
+    """What is installed as far as `uid` is concerned: every Flatpak (they
+    are system-wide) and the per-account apps in that account's own home."""
     installation = Flatpak.Installation.new_system(None)
-    return {
+    refs = {
         r.get_name() for r in installation.list_installed_refs(None)
         if r.get_kind() == Flatpak.RefKind.APP
     }
+    if uid is not None and uid > 0:
+        refs |= accountapps.installed(uid)
+    return refs
 
 
 def installed_ref_string(app_id: str) -> str:
@@ -660,6 +717,29 @@ def available_refs() -> set[str]:
     }
 
 
+# -- leftovers (#115) ---------------------------------------------------------
+#
+# A removed app leaves its runtime behind when no other app needs it, and
+# every Flatpak action on KosherOS belongs to the daemon (polkit refuses
+# `flatpak uninstall --unused` to everyone), so nobody could clear them.
+# The daemon does it: after each removal, and on request from the Store
+# or `kosher clean`. The cleanup is a queue job like an install, so the
+# Store sees its progress; it needs a ref to be reported under.
+CLEANUP_REF = "kosheros.cleanup"
+
+
+def unused_refs(installation=None) -> list[dict]:
+    """Runtimes and extensions no installed app needs any more, with what
+    they take: what `flatpak uninstall --unused` would remove."""
+    if installation is None:
+        installation = Flatpak.Installation.new_system(None)
+    out = []
+    for r in installation.list_unused_refs(None, None):
+        out.append({"ref": r.format_ref(), "name": r.get_name(),
+                    "size": r.get_installed_size()})
+    return out
+
+
 class AppManager:
     """Queues flatpak jobs and reports progress.
 
@@ -684,25 +764,54 @@ class AppManager:
         with self._lock:
             return set(self._pending)
 
-    def install(self, ref: str, *, permit: Callable[[str], str | None] | None = None) -> None:
+    def install(self, ref: str, *, permit: Callable[[str], str | None] | None = None,
+                uid: int | None = None, as_root: bool = False) -> None:
         """Queue an install. `permit(ref)` says why it may not happen, or
         None; without one the approved list decides (what a caller with no
-        account behind it — the CLI as root — gets)."""
+        account behind it — the CLI as root — gets). `uid` is the account
+        a nixpkgs app is installed for (nixapps.py); a Flatpak needs none."""
         if permit is None:
             def permit(r: str) -> str | None:
                 return None if r in allowed_refs() else "not on the approved app list"
         refusal = permit(ref)
         if refusal:
             raise AppError(f"{ref} is {refusal}")
-        self._enqueue(ref, self._do_install)
+        if accountapps.is_account_app(ref):
+            self._enqueue(ref, self._nix_work(accountapps.install, uid, as_root))
+        else:
+            self._enqueue(ref, self._do_install)
 
-    def remove(self, ref: str) -> None:
-        self._enqueue(ref, self._do_remove)
+    def remove(self, ref: str, *, uid: int | None = None, as_root: bool = False) -> None:
+        if accountapps.is_account_app(ref):
+            self._enqueue(ref, self._nix_work(accountapps.remove, uid, as_root))
+        else:
+            self._enqueue(ref, self._do_remove)
 
-    def update(self, ref: str) -> None:
+    def remove_unused(self) -> None:
+        """Queue the removal of every leftover runtime (unused_refs)."""
+        self._enqueue(CLEANUP_REF, self._do_remove_unused)
+
+    def update(self, ref: str, *, uid: int | None = None, as_root: bool = False) -> None:
         """Bring one installed app up to the remote's build. Queued like an
         install, reported on the same signals."""
-        self._enqueue(ref, self._do_update)
+        if accountapps.is_account_app(ref):
+            self._enqueue(ref, self._nix_work(accountapps.upgrade, uid, as_root))
+        else:
+            self._enqueue(ref, self._do_update)
+
+    def _nix_work(self, action, uid: int | None, as_root: bool = False):
+        """A queue job for a per-account app: the action, as the account —
+        or, for a Nix app on an account without developer tools (#123), as
+        root into that account's profile (accountapps passes it on)."""
+        if uid is None or uid == 0:
+            raise AppError("this app is installed for an account, not for the computer")
+
+        def work(ref: str) -> None:
+            try:
+                action(ref, uid, self._on_progress, as_root=as_root)
+            except accountapps.ERRORS as e:
+                raise AppError(str(e)) from e
+        return work
 
     def _enqueue(self, ref: str, work) -> None:
         with self._lock:
@@ -780,3 +889,23 @@ class AppManager:
         transaction.add_uninstall(installed_ref_string(ref))
         self._on_progress(ref, 0, "Removing…")
         transaction.run(None)
+        # And what this app alone was keeping on the disk.
+        self._uninstall_unused(ref, "Removing what it alone needed…")
+
+    def _do_remove_unused(self, ref: str) -> None:
+        if not self._uninstall_unused(ref, "Removing leftover runtimes…"):
+            self._on_progress(ref, 100, "Nothing to remove")
+
+    def _uninstall_unused(self, ref: str, status: str) -> bool:
+        """One transaction for every leftover runtime; False when there is
+        none. Reported under `ref`: the app whose removal left them, or
+        the cleanup itself."""
+        leftovers = unused_refs()
+        if not leftovers:
+            return False
+        transaction = self._transaction(ref)
+        for leftover in leftovers:
+            transaction.add_uninstall(leftover["ref"])
+        self._on_progress(ref, 0, status)
+        transaction.run(None)
+        return True

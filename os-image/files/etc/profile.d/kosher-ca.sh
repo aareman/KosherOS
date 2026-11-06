@@ -26,4 +26,5 @@ export CARGO_HTTP_CAINFO="$KOSHER_CA_BUNDLE"      # cargo
 export DENO_TLS_CA_STORE=system                   # deno: use the system store
 export UV_NATIVE_TLS=1                            # uv: use the system store
 export GIT_SSL_CAINFO="$KOSHER_CA_BUNDLE"         # git, when built against a bundled OpenSSL
+export NIX_SSL_CERT_FILE="$KOSHER_CA_BUNDLE"      # nix, and the tools a Nix or devenv shell brings
 unset KOSHER_CA_BUNDLE

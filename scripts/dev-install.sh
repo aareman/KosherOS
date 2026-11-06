@@ -8,7 +8,8 @@ set -euo pipefail
 repo="$(cd "$(dirname "$0")/.." && pwd)"
 
 echo "== installing packages"
-dnf -y install dnsmasq nftables python3-gobject python3-jsonschema python3-pip malcontent malcontent-tools flatpak checkpolicy policycoreutils policycoreutils-python-utils accountsservice
+# bind-utils: the VM suites use dig, and the Fedora 44 cloud base no longer ships it.
+dnf -y install dnsmasq nftables python3-gobject python3-jsonschema python3-pip malcontent malcontent-tools flatpak checkpolicy policycoreutils policycoreutils-python-utils accountsservice bind-utils
 
 echo "== SELinux module (dnsmasq needs netfilter netlink for nftset)"
 tmpdir="$(mktemp -d)"
@@ -22,6 +23,11 @@ semanage port -a -t dns_port_t -p udp 5354 2>/dev/null || \
     semanage port -m -t dns_port_t -p udp 5354 || true
 semanage port -a -t dns_port_t -p tcp 5354 2>/dev/null || \
     semanage port -m -t dns_port_t -p tcp 5354 || true
+# The dnsfilter accounts' resolver listens on 5356, likewise.
+semanage port -a -t dns_port_t -p udp 5356 2>/dev/null || \
+    semanage port -m -t dns_port_t -p udp 5356 || true
+semanage port -a -t dns_port_t -p tcp 5356 2>/dev/null || \
+    semanage port -m -t dns_port_t -p tcp 5356 || true
 rm -rf "$tmpdir"
 
 echo "== installing mitmproxy (inspect mode)"
@@ -30,6 +36,8 @@ command -v mitmdump >/dev/null 2>&1 || python3 -m pip install --quiet --prefix=/
 id kosher-mitm >/dev/null 2>&1 \
     || useradd -r -s /usr/sbin/nologin -d /var/lib/kosher-mitm kosher-mitm
 install -D -m 0644 "$repo/mitm/kosher_filter.py" /usr/share/kosher/mitm/kosher_filter.py
+install -D -m 0644 "$repo/mitm/kosher_calm.js" /usr/share/kosher/mitm/kosher_calm.js
+install -D -m 0644 "$repo/mitm/kosher_page.js" /usr/share/kosher/mitm/kosher_page.js
 
 echo "== installing kosherd"
 python3 -m pip install --prefix=/usr --no-deps "$repo/kosherd/"
@@ -69,7 +77,12 @@ EOF
 fi
 
 echo "== replacing systemd-resolved with kosher-dns"
-systemctl disable --now systemd-resolved.service || true
+# Masked, not disabled: on the Fedora 44 cloud base something enables
+# resolved again, nsswitch asks it FIRST ([!UNAVAIL=return]), it has no
+# upstream (NetworkManager runs with dns=none), and every program then
+# fails by name while the family resolver answers raw queries fine. The
+# image masks it at build time; the dev VM must match.
+systemctl mask --now systemd-resolved.service || true
 rm -f /etc/resolv.conf
 install -m 0644 "$repo/os-image/files/etc/resolv.conf" /etc/resolv.conf
 

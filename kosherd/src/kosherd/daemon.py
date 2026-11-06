@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import copy
 import errno
+import ipaddress
 import json
 import logging
 import re
@@ -25,12 +26,18 @@ gi.require_version("Gio", "2.0")
 from gi.repository import Gio, GLib
 
 from . import (BUS_NAME, OBJECT_PATH, access, appaccess, appkinds, apps, auth,
-               policy as policy_mod, ytsearch)
+               keyboard, onepassword, policy as policy_mod, syncthing, urlrules, ytsearch,
+               nft)
 from .apply import apply_policy
 from .apps import AppError
 from .guardian import Guardian, GuardianError
 from .policy import INSPECTED_MODES, MODES, Policy, PolicyError, UserPolicy
 from .session import SessionStore
+
+# A machine name for the SSH list: labels of letters, digits and hyphens,
+# with at least one dot (a short name has nothing to resolve it here).
+SSH_NAME_RE = re.compile(r"(?=.{1,253}$)[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?"
+                         r"(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)+")
 from . import timelimits
 from .timekeeper import TICK_SECONDS, Session, Timekeeper
 
@@ -42,6 +49,7 @@ log = logging.getLogger("kosherd")
 # hours because of that is a store that looks broken.
 APP_INDEX_REFRESH_SECONDS = 6 * 3600
 APP_INDEX_RETRY_SECONDS = 120
+USAGE_FOLD_SECONDS = 300
 
 INTROSPECTION_XML = """
 <node>
@@ -105,6 +113,19 @@ INTROSPECTION_XML = """
       <arg direction="in" type="b" name="whole_site"/>
       <arg direction="in" type="s" name="guardian_password"/>
     </method>
+    <method name="BypassUrl">
+      <arg direction="in" type="i" name="uid"/>
+      <arg direction="in" type="s" name="url"/>
+      <arg direction="in" type="b" name="whole_site"/>
+      <arg direction="in" type="s" name="guardian_password"/>
+    </method>
+    <method name="GrantUrl">
+      <arg direction="in" type="i" name="uid"/>
+      <arg direction="in" type="s" name="url"/>
+      <arg direction="in" type="s" name="level"/>
+      <arg direction="in" type="s" name="scope"/>
+      <arg direction="in" type="s" name="guardian_password"/>
+    </method>
     <method name="ListActivity">
       <arg direction="in" type="i" name="since"/>
       <arg direction="in" type="i" name="uid"/>
@@ -112,6 +133,9 @@ INTROSPECTION_XML = """
     </method>
     <method name="ActivitySummary">
       <arg direction="out" type="s" name="summary_json"/>
+    </method>
+    <method name="Usage">
+      <arg direction="out" type="s" name="usage_json"/>
     </method>
     <method name="SetMediaLevel">
       <arg direction="in" type="i" name="uid"/>
@@ -124,6 +148,11 @@ INTROSPECTION_XML = """
       <arg direction="in" type="s" name="guardian_password"/>
     </method>
     <method name="SetYouTube">
+      <arg direction="in" type="i" name="uid"/>
+      <arg direction="in" type="s" name="settings_json"/>
+      <arg direction="in" type="s" name="guardian_password"/>
+    </method>
+    <method name="SetCalm">
       <arg direction="in" type="i" name="uid"/>
       <arg direction="in" type="s" name="settings_json"/>
       <arg direction="in" type="s" name="guardian_password"/>
@@ -149,8 +178,31 @@ INTROSPECTION_XML = """
       <arg direction="in" type="b" name="enabled"/>
       <arg direction="in" type="s" name="guardian_password"/>
     </method>
+    <method name="SetAdBlockAllowed">
+      <arg direction="in" type="as" name="hosts"/>
+      <arg direction="in" type="s" name="guardian_password"/>
+    </method>
     <method name="GetMyLayout">
       <arg direction="out" type="s" name="layout"/>
+    </method>
+    <method name="SetMyLayout">
+      <arg direction="in" type="s" name="layout"/>
+    </method>
+    <method name="GetMyCompositor">
+      <arg direction="out" type="s" name="compositor"/>
+    </method>
+    <method name="SetMyCompositor">
+      <arg direction="in" type="s" name="compositor"/>
+    </method>
+    <method name="SetMyKeyboard">
+      <arg direction="in" type="a{ss}" name="files"/>
+    </method>
+    <method name="SetMyAppKeys">
+      <arg direction="in" type="as" name="bindings"/>
+    </method>
+    <method name="SetKeydEnabled">
+      <arg direction="in" type="b" name="enabled"/>
+      <arg direction="in" type="s" name="guardian_password"/>
     </method>
     <method name="SetTimeLimits">
       <arg direction="in" type="i" name="uid"/>
@@ -160,10 +212,37 @@ INTROSPECTION_XML = """
     <method name="GetTimeUsage">
       <arg direction="out" type="s" name="usage_json"/>
     </method>
+    <method name="SetDeveloperTools">
+      <arg direction="in" type="i" name="uid"/>
+      <arg direction="in" type="b" name="enabled"/>
+      <arg direction="in" type="s" name="guardian_password"/>
+    </method>
+    <method name="SetSshIn">
+      <arg direction="in" type="i" name="uid"/>
+      <arg direction="in" type="b" name="enabled"/>
+      <arg direction="in" type="s" name="guardian_password"/>
+    </method>
+    <method name="SetBuildSources">
+      <arg direction="in" type="as" name="hosts"/>
+      <arg direction="in" type="s" name="guardian_password"/>
+    </method>
+    <method name="SetBootMenuPassword">
+      <arg direction="in" type="s" name="password"/>
+      <arg direction="in" type="s" name="guardian_password"/>
+    </method>
+    <method name="BootMenuProtected">
+      <arg direction="out" type="b" name="protected"/>
+    </method>
     <method name="SetNetworkAccess">
       <arg direction="in" type="i" name="uid"/>
       <arg direction="in" type="b" name="video_calls"/>
       <arg direction="in" type="s" name="extra_ports_json"/>
+      <arg direction="in" type="s" name="guardian_password"/>
+    </method>
+    <method name="SetSsh">
+      <arg direction="in" type="i" name="uid"/>
+      <arg direction="in" type="b" name="anywhere"/>
+      <arg direction="in" type="s" name="hosts_json"/>
       <arg direction="in" type="s" name="guardian_password"/>
     </method>
     <method name="ApplyProfile">
@@ -247,10 +326,28 @@ INTROSPECTION_XML = """
       <arg direction="in" type="as" name="refs"/>
       <arg direction="in" type="s" name="guardian_password"/>
     </method>
+    <method name="SetUserAppApproval">
+      <arg direction="in" type="i" name="uid"/>
+      <arg direction="in" type="s" name="ref"/>
+      <arg direction="in" type="b" name="approved"/>
+      <arg direction="in" type="s" name="guardian_password"/>
+    </method>
+    <method name="SetSyncthingLan">
+      <arg direction="in" type="i" name="uid"/>
+      <arg direction="in" type="b" name="enabled"/>
+      <arg direction="in" type="s" name="guardian_password"/>
+    </method>
+    <method name="SetSyncthingEnabled">
+      <arg direction="in" type="b" name="enabled"/>
+      <arg direction="in" type="s" name="guardian_password"/>
+    </method>
     <method name="ListInstalled">
       <arg direction="out" type="as" name="refs"/>
     </method>
     <method name="ListInstalledDetails">
+      <arg direction="out" type="s" name="details_json"/>
+    </method>
+    <method name="ListMyInstalledDetails">
       <arg direction="out" type="s" name="details_json"/>
     </method>
     <method name="SetUserApps">
@@ -258,6 +355,10 @@ INTROSPECTION_XML = """
       <arg direction="in" type="as" name="refs"/>
     </method>
     <method name="InstallApp">
+      <arg direction="in" type="s" name="ref"/>
+    </method>
+    <method name="InstallAppFor">
+      <arg direction="in" type="i" name="uid"/>
       <arg direction="in" type="s" name="ref"/>
     </method>
     <method name="RemoveApp">
@@ -291,6 +392,12 @@ INTROSPECTION_XML = """
     <method name="UpdateAllApps">
       <arg direction="out" type="i" name="queued"/>
     </method>
+    <method name="ListUnusedApps">
+      <arg direction="out" type="s" name="leftovers_json"/>
+    </method>
+    <method name="RemoveUnusedApps">
+      <arg direction="out" type="s" name="summary_json"/>
+    </method>
     <signal name="AppProgress">
       <arg type="s" name="ref"/>
       <arg type="i" name="percent"/>
@@ -321,8 +428,34 @@ INTROSPECTION_XML = """
     <method name="DeploymentStatus">
       <arg direction="out" type="s" name="status_json"/>
     </method>
-    <method name="Rollback"/>
+    <method name="Rollback">
+      <arg direction="in" type="s" name="guardian_password"/>
+    </method>
+    <method name="TryImage">
+      <arg direction="in" type="s" name="what"/>
+      <arg direction="in" type="s" name="guardian_password"/>
+    </method>
+    <method name="ReturnToKept"/>
     <method name="Reboot"/>
+    <method name="SetAutoUpdates">
+      <arg direction="in" type="s" name="schedule"/>
+      <arg direction="in" type="b" name="notify"/>
+    </method>
+    <method name="AutoUpdateStatus">
+      <arg direction="out" type="s" name="status_json"/>
+    </method>
+    <method name="RunAutoUpdate">
+      <arg direction="in" type="b" name="now"/>
+      <arg direction="out" type="s" name="result_json"/>
+    </method>
+    <method name="PendingUpdate">
+      <arg direction="out" type="s" name="pending_json"/>
+    </method>
+    <signal name="UpdateReady">
+      <arg type="s" name="version"/>
+      <arg type="s" name="digest"/>
+      <arg type="b" name="announce"/>
+    </signal>
     <signal name="UpdateProgress">
       <arg type="i" name="percent"/>
       <arg type="s" name="status"/>
@@ -336,6 +469,18 @@ INTROSPECTION_XML = """
     <method name="SetCaptiveMode">
       <arg direction="in" type="i" name="uid"/>
       <arg direction="in" type="i" name="minutes"/>
+    </method>
+    <method name="TailscaleStatus">
+      <arg direction="out" type="s" name="status_json"/>
+    </method>
+    <method name="TailscaleSignIn">
+      <arg direction="in" type="s" name="guardian_password"/>
+      <arg direction="out" type="s" name="login_url"/>
+    </method>
+    <method name="TailscaleSignOut"/>
+    <method name="SetTailscaleEnabled">
+      <arg direction="in" type="b" name="enabled"/>
+      <arg direction="in" type="s" name="guardian_password"/>
     </method>
   </interface>
   <interface name="org.kosherlinux.Daemon1.Portal">
@@ -419,6 +564,8 @@ INTROSPECTION_XML = """
 # without a D-Bus bus; see tests/test_access.py.
 ACTIONS = access.ACTIONS
 UID_AWARE = access.UID_AWARE
+# keyd's unit on systemd's bus (the name escaped as systemd does: "." is _2e).
+KEYD_UNIT_PATH = "/org/freedesktop/systemd1/unit/keyd_2eservice"
 
 # Methods that run `bootc`, answered from a worker thread instead of the
 # main loop. Every bootc command waits for the one sysroot lock, and an
@@ -430,8 +577,14 @@ UID_AWARE = access.UID_AWARE
 # to finish off the main loop.
 # A YouTube channel search waits on YouTube instead, which is as good a
 # reason: the main loop must not stop for the network.
+# Tailscale's calls wait on its control server the same way.
 IN_BACKGROUND = frozenset({"CheckUpdate", "DeploymentStatus", "ListChannels",
-                           "SetChannel", "Rollback", "SearchYouTubeChannels"})
+                           "SetChannel", "Rollback", "TryImage", "ReturnToKept",
+                           "RunAutoUpdate",
+                           "SearchYouTubeChannels",
+                           "TailscaleStatus", "TailscaleSignIn", "TailscaleSignOut"})
+# SetTailscaleEnabled is not here although it waits on systemctl: it
+# changes the policy, which only the main loop may do.
 
 # Seconds to wait on each short bootc command before saying so. A check
 # goes to the registry, so it gets longer than reading local status. A pull
@@ -567,6 +720,10 @@ def _url_pattern(url: str) -> str:
     return f"{host}{path.rstrip('/') or '/'}"
 
 
+# How much of a site a grant from the activity log covers.
+GRANT_SCOPES = ("page", "folder", "site")
+
+
 # Where ostree keeps each deployment's tree. A deployment's own
 # /usr/share/kosher/VERSION says which KosherOS it is, whatever its image
 # label says (see _deployment_version).
@@ -632,6 +789,34 @@ class Daemon:
             lambda: self.policy, self._logind_sessions, timelimits.UsageStore(),
             warn=self._emit_time_warning, lock=self._lock_uid,
             terminate=self._terminate_uid)
+        # Whose keyd config is in force: the active session's (keyboard.py).
+        self.keyboards = keyboard.Keyboards()
+        # A Syncthing install re-renders the ruleset before its service
+        # starts, so the new GUI port is closed to other accounts (#213).
+        syncthing.firewall_refresh = self._refresh_firewall_from_worker
+
+    def _refresh_firewall_from_worker(self) -> None:
+        """apply_policy on the main loop, waited for from a worker thread."""
+        if threading.current_thread() is threading.main_thread():
+            apply_policy(self.policy)
+            return
+        done = threading.Event()
+        failed: list[Exception] = []
+
+        def work():
+            try:
+                apply_policy(self.policy)
+            except Exception as e:  # noqa: BLE001 - handed back to the worker
+                failed.append(e)
+            finally:
+                done.set()
+            return False
+
+        GLib.idle_add(work)
+        if not done.wait(180):
+            raise syncthing.SyncthingError("the firewall was not refreshed in time")
+        if failed:
+            raise syncthing.SyncthingError(f"the firewall could not be refreshed: {failed[0]}")
 
     # ---- lifecycle -------------------------------------------------------
 
@@ -646,6 +831,11 @@ class Daemon:
             None,
             lambda conn, name: (log.error("lost bus name %s", name), loop.quit()),
         )
+        self._settle_advanced()
+        # 1Password's op (#234): at start, then every ten minutes for an
+        # install made with `nix profile` rather than the Store.
+        self._refresh_onepassword()
+        GLib.timeout_add_seconds(600, self._refresh_onepassword)
         try:
             apply_policy(self.policy)
         except Exception:
@@ -658,9 +848,32 @@ class Daemon:
         except Exception:
             log.exception("could not apply the flatpak remote filter")
         self._warm_app_index()
+        # The automatic-update timer follows the policy's schedule, and
+        # what waits for a restart is read once now that one has happened.
+        try:
+            self._apply_auto_timer(self.policy.auto_updates)
+        except PolicyError:
+            log.exception("could not set the automatic update timer")
+        threading.Thread(target=self._sync_pending, name="pending-update",
+                         daemon=True).start()
+        # The tailnet forward follows tailscaled, not the policy, so it is
+        # checked once tailscaled has had time to come up after a boot.
+        # So do the names every account may reach while it is set up
+        # (#211), which go into enforcement through a fresh apply.
+        from . import tailnet
+        tailnet.on_allowed_change = self._tailnet_allowed_changed
+        if self.policy.tailscale:
+            tailnet.refresh_dns_later()
+        else:
+            # Switched off: no forward left behind from when it ran.
+            threading.Thread(target=tailnet.forget, name="tailscale-dns",
+                             daemon=True).start()
         GLib.timeout_add_seconds(APP_INDEX_REFRESH_SECONDS,
                                  lambda: (self._warm_app_index(), True)[1])
         GLib.timeout_add_seconds(TICK_SECONDS, self._time_tick)
+        # The spool is capped (usage.MAX_SPOOL_BYTES); folding every few
+        # minutes keeps it far below the cap and the counts current.
+        GLib.timeout_add_seconds(USAGE_FOLD_SECONDS, self._fold_usage)
         try:
             loop.run()
         finally:
@@ -676,6 +889,49 @@ class Daemon:
         # it also renders the sign-in schedule, so a reboot does not leave
         # /etc/security/time.conf a minute behind the policy.
         self._time_tick()
+        # Keyboard remaps follow the session on the screen: a switch to
+        # another person or to the login screen, and a sign-out, each put
+        # the right keyd config in force (keyboard.py).
+        for path, iface, member in (
+                ("/org/freedesktop/login1/seat/seat0", "org.freedesktop.DBus.Properties",
+                 "PropertiesChanged"),
+                ("/org/freedesktop/login1", "org.freedesktop.login1.Manager", "SessionNew"),
+                ("/org/freedesktop/login1", "org.freedesktop.login1.Manager", "SessionRemoved")):
+            connection.signal_subscribe(
+                "org.freedesktop.login1", iface, member, path, None,
+                Gio.DBusSignalFlags.NONE, lambda *_a: self._refresh_keyboard(), None)
+        # keyd starts from the computer's own config alone (its unit's
+        # ExecStartPre empties /run/keyd), so a start that lands after a
+        # person signed in, or a restart after its panic keys, dropped their
+        # files until the next session change asked for them again (#276).
+        # systemd says when the unit comes up; the right set goes back then.
+        try:
+            connection.call_sync(
+                "org.freedesktop.systemd1", "/org/freedesktop/systemd1",
+                "org.freedesktop.systemd1.Manager", "Subscribe", None, None,
+                Gio.DBusCallFlags.NONE, 5000, None)
+        except GLib.Error as e:
+            log.warning("keyboard: could not ask systemd for keyd's state: %s", e.message)
+        connection.signal_subscribe(
+            "org.freedesktop.systemd1", "org.freedesktop.DBus.Properties",
+            "PropertiesChanged", KEYD_UNIT_PATH, None,
+            Gio.DBusSignalFlags.NONE, self._keyd_unit_changed, None)
+        self._refresh_keyboard()
+
+    def _keyd_unit_changed(self, _conn, _sender, _path, _iface, _signal, params, _data) -> None:
+        """keyd's unit changed state. Up again means its config directory
+        holds the computer's file alone: put the person's back. Once now,
+        and again a moment later, because the unit is active the instant
+        keyd's process starts, a beat before it answers a reload."""
+        try:
+            changed = params.unpack()[1]
+        except (IndexError, TypeError, ValueError):
+            return
+        if changed.get("ActiveState") != "active":
+            return
+        self._refresh_keyboard()
+        for delay in (1000, 3000):
+            GLib.timeout_add(delay, lambda: (self._refresh_keyboard(), False)[1])
 
     # ---- time limits: the minute tick and logind -------------------------
 
@@ -712,6 +968,40 @@ class Daemon:
                                  active=bool(props.get("Active", True)),
                                  idle=bool(props.get("IdleHint", False))))
         return found
+
+    def _active_seat_uid(self) -> int | None:
+        """Whose session is on the screen: the uid of seat0's active
+        session if it is a person's, None for the login screen or none."""
+        if self.connection is None:
+            return None
+        try:
+            session_id, path = self.connection.call_sync(
+                "org.freedesktop.login1", "/org/freedesktop/login1/seat/seat0",
+                "org.freedesktop.DBus.Properties", "Get",
+                GLib.Variant("(ss)", ("org.freedesktop.login1.Seat", "ActiveSession")),
+                GLib.VariantType("(v)"), Gio.DBusCallFlags.NONE, 5000, None,
+            ).unpack()[0]
+            if not session_id:
+                return None
+            props = self.connection.call_sync(
+                "org.freedesktop.login1", path,
+                "org.freedesktop.DBus.Properties", "GetAll",
+                GLib.Variant("(s)", ("org.freedesktop.login1.Session",)),
+                GLib.VariantType("(a{sv})"), Gio.DBusCallFlags.NONE, 5000, None,
+            ).unpack()[0]
+        except GLib.Error as e:
+            log.warning("keyboard: could not ask logind whose session is active: %s", e.message)
+            return None
+        if props.get("Class") != "user":
+            return None
+        return int(props["User"][0])
+
+    def _refresh_keyboard(self) -> None:
+        try:
+            self.keyboards.forget_all_but({s.uid for s in self._logind_sessions()})
+            self.keyboards.refresh(self._active_seat_uid())
+        except Exception:  # noqa: BLE001 - a keymap must never take the daemon down
+            log.exception("keyboard: could not put the right config in force")
 
     def _lock_uid(self, uid: int) -> None:
         if self.connection is None:
@@ -1073,8 +1363,9 @@ class Daemon:
                 "a list that needs more than that is not finished, and "
                 "should be fixed for everybody rather than here")
         lists.save_delta(list_name, add=add, remove=list(remove))
-        # The proxy and the search service reload on their own, but the
-        # resolver's category blocks are rendered from the policy.
+        # The proxy and the search service load the lists when they start;
+        # apply restarts them because the lists changed (apply.py,
+        # _restart_if_changed), and renders the resolver's category blocks.
         self._save_and_apply()
         log.info("edited %s: +%s -%s", list_name, len(add), len(remove))
         return None
@@ -1187,10 +1478,53 @@ class Daemon:
         log.info("allowed uid %d to %s from the activity log", uid, host)
         return None
 
-    def _grant(self, user, url: str, whole_site: bool) -> str:
-        """Open one page or one site for an account, in the terms of its
-        mode: a whitelist entry, or an allow rule ahead of the rest."""
+    def impl_BypassUrl(self, uid: int, url: str, whole_site: bool,
+                       _guardian_pw: str):
+        """Let a page, or a whole site, through with nothing on it filtered
+        (#273): the level above allowing, for a site the administrator
+        trusts outright. Only a filtered account reads pages, so only there
+        is there anything to bypass."""
+        user = self.policy.account(uid)
+        if user is None:
+            raise PolicyError(f"uid {uid} is not managed")
+        if user.mode != "filtered":
+            raise PolicyError("only a filtered account's pages are read; "
+                              "there is nothing to bypass in this mode")
+        host = self._grant(user, url, whole_site, action="bypass")
+        log.info("uid %d now reaches %s with nothing filtered", uid, host)
+        return None
+
+    def impl_GrantUrl(self, uid: int, url: str, level: str, scope: str,
+                      _guardian_pw: str):
+        """From the activity log: one page, its folder or the whole site,
+        allowed, with its pictures shown, or bypassed. Pictures and bypass
+        are levels of what the proxy reads, so only a filtered account has
+        them; allowing works in any mode, as AllowUrl does."""
+        if level not in ("allow", "pictures", "bypass"):
+            raise PolicyError(f"unknown level {level!r}")
+        if scope not in GRANT_SCOPES:
+            raise PolicyError(f"unknown scope {scope!r}")
+        user = self.policy.account(uid)
+        if user is None:
+            raise PolicyError(f"uid {uid} is not managed")
+        if level != "allow" and user.mode != "filtered":
+            raise PolicyError("only a filtered account's pages are read; "
+                              "allowing is all there is in this mode")
+        host = self._grant(user, url, scope, action=level)
+        log.info("uid %d: %s %s (%s) from the activity log", uid, level, host, scope)
+        return None
+
+    def _grant(self, user, url: str, scope, action: str = "allow") -> str:
+        """Open one page, its folder or one site for an account, in the
+        terms of its mode: a whitelist entry, or a rule ahead of the rest.
+        A rule the account already has for the same pattern is replaced, so
+        allowing and then bypassing a site leaves one rule, not two. scope
+        is "page", "folder" or "site"; True and False are the whole site
+        and the page, as AllowUrl and BypassUrl pass it."""
         from urllib.parse import urlsplit
+
+        if isinstance(scope, bool):
+            scope = "site" if scope else "page"
 
         parts = urlsplit(url)
         host = (parts.hostname or "").lower().strip(".")
@@ -1201,13 +1535,14 @@ class Daemon:
             if host not in user.whitelist:
                 user.whitelist = sorted({*user.whitelist, host})
         else:
-            pattern = host if whole_site else _url_pattern(url)
-            if not any(r.get("pattern") == pattern and r.get("action") == "allow"
+            pattern = {"site": host, "page": _url_pattern(url),
+                       "folder": urlrules.folder_of(url) or host}[scope]
+            if not any(r.get("pattern") == pattern and r.get("action") == action
                        for r in user.rules):
                 # Ahead of the existing rules: a rule added after the one
                 # that blocked the page would never be reached.
-                user.rules = [{"action": "allow", "pattern": pattern},
-                              *user.rules]
+                user.rules = [{"action": action, "pattern": pattern},
+                              *[r for r in user.rules if r.get("pattern") != pattern]]
         self._save_and_apply()
         return host
 
@@ -1242,6 +1577,25 @@ class Daemon:
         counts = {str(uid): entry
                   for uid, entry in activity.summary(found).items()}
         return GLib.Variant("(s)", (json.dumps(counts),))
+
+    def impl_Usage(self):
+        """Traffic, blocks and filter time per account, for today, the
+        past week, the past month and all time (usage.py). Folds what the
+        proxy and the search service have written first, so the page is
+        never more than a minute behind."""
+        from . import usage
+
+        self._fold_usage()
+        return GLib.Variant("(s)", (json.dumps(usage.report(usage.load())),))
+
+    def _fold_usage(self) -> bool:
+        from . import usage
+
+        try:
+            usage.fold()
+        except Exception:  # noqa: BLE001 - a bad fold must not stop the timer
+            log.exception("usage: could not fold the spool")
+        return True  # keep the timeout
 
     _activity_trimmed_at = 0.0
 
@@ -1302,6 +1656,23 @@ class Daemon:
         if unknown:
             raise PolicyError(f"unknown YouTube categories: {sorted(unknown)}")
         self._managed(uid).youtube = settings
+        self._save_and_apply()
+        return None
+
+    def impl_SetCalm(self, uid: int, settings_json: str, _guardian_pw: str):
+        """The calmer addictive sites (#179): which of them an account
+        gets calmed, the feed-item cap, and each site's daily budget."""
+        from . import calm as calm_mod
+
+        try:
+            settings = json.loads(settings_json or "{}")
+        except ValueError as e:
+            raise PolicyError(f"not valid JSON: {e}") from None
+        try:
+            settings = calm_mod.normalize(settings)
+        except ValueError as e:
+            raise PolicyError(str(e)) from None
+        self._managed(uid).calm = settings
         self._save_and_apply()
         return None
 
@@ -1366,6 +1737,27 @@ class Daemon:
         self._save_and_apply()
         return None
 
+    def impl_SetAdBlockAllowed(self, hosts: list[str], _guardian_pw: str):
+        """Hosts the ad blocker leaves reachable although the tracker lists
+        carry them (#265), replacing the previous additions. The built-in
+        payment-security set is not part of this and cannot be shortened
+        here. The proxy's category step steps aside for them too.
+
+        Guardian-gated: each entry is a host every account can then reach.
+        Every entry is checked before anything changes, so a bad one
+        leaves the list as it was.
+        """
+        from . import paymentsecurity
+
+        try:
+            extra = [paymentsecurity.normalize(h) for h in hosts]
+        except ValueError as e:
+            raise PolicyError(str(e)) from None
+        self.policy.adblock_allowed = sorted(
+            {h for h in extra if not paymentsecurity.is_builtin(h)})
+        self._save_and_apply()
+        return None
+
     def impl_SetTimeLimits(self, uid: int, settings_json: str, _guardian_pw: str):
         """How long, and when, an account may be signed in.
 
@@ -1385,6 +1777,92 @@ class Daemon:
         user.time = settings
         self._save_and_apply()
         return None
+
+    def impl_SetDeveloperTools(self, uid: int, enabled: bool, _guardian_pw: str):
+        """May this account use the Nix daemon and reach the package
+        registries itself (#123)?
+
+        Guardian-gated like a filter change: on, the account can build
+        anything in nixpkgs and its builds fetch through the builders'
+        proxy identity rather than the account's own. Off is the default
+        and the Store still installs catalogue apps for it, as root into
+        its profile. Turning it on hands the account its own profile
+        directory, which kosherd may have been writing as root until now.
+        """
+        import pwd
+        import shutil
+
+        user = self._managed(uid)
+        user.developer_tools = bool(enabled)
+        # Signing in over SSH is part of developer tools: it goes with them,
+        # and does not come back on its own when they are turned on again.
+        if not enabled:
+            user.ssh_in = False
+        if enabled:
+            try:
+                home = Path(pwd.getpwuid(uid).pw_dir)
+                state = home / ".local/state/nix"
+                if state.exists():
+                    for path in [state, *state.rglob("*")]:
+                        shutil.chown(path, uid, pwd.getpwuid(uid).pw_gid)
+            except (KeyError, OSError) as e:
+                log.warning("could not hand uid %d its nix profile: %s", uid, e)
+        self._save_and_apply()
+        return None
+
+    def impl_SetSshIn(self, uid: int, enabled: bool, _guardian_pw: str):
+        """May this account be signed in to from another machine over SSH,
+        with a key in its own ~/.ssh/authorized_keys (sshin.py)?
+
+        Guardian-gated: whatever arrives over the connection is not read
+        by the filter. Only for an account with developer tools on; apply
+        writes sshd's list and starts or stops it.
+        """
+        user = self._managed(uid)
+        if enabled and not user.developer_tools:
+            raise PolicyError("turn developer tools on for this account first")
+        user.ssh_in = bool(enabled)
+        self._save_and_apply()
+        return None
+
+    def impl_SetBuildSources(self, hosts: list[str], _guardian_pw: str):
+        """The hosts an administrator adds to where a Nix build may
+        download from (#199), replacing the previous additions. The
+        built-in list is not part of this and cannot be shortened here.
+
+        Guardian-gated: another host is more of the web a build reaches.
+        Every entry is checked before anything changes, so a bad one
+        leaves the list as it was.
+        """
+        from . import buildsources
+
+        try:
+            extra = [buildsources.normalize(h) for h in hosts]
+        except ValueError as e:
+            raise PolicyError(str(e)) from None
+        builtin = set(buildsources.DEFAULT_BUILD_SOURCES)
+        self.policy.build_sources_extra = sorted(
+            {h for h in extra if h not in builtin})
+        self._save_and_apply()
+        return None
+
+    def impl_SetBootMenuPassword(self, password: str, _guardian_pw: str):
+        """Password-protect the boot menu on a machine installed before the
+        wizard did it by default (#129), or change the password. Guardian-
+        gated: the menu is the way round every other protection."""
+        if len(password or "") < 6:
+            raise PolicyError("the boot menu password needs at least 6 characters")
+        self._set_grub_password(password)
+        return None
+
+    def impl_BootMenuProtected(self):
+        """Is a boot-menu password set on this machine? Read from user.cfg,
+        which GRUB reads at every start."""
+        try:
+            text = GRUB_USER_CFG.read_text()
+        except OSError:
+            text = ""
+        return GLib.Variant("(b)", ("GRUB2_PASSWORD=grub.pbkdf2." in text,))
 
     def impl_SetNetworkAccess(self, uid: int, video_calls: bool, extra_ports_json: str,
                               _guardian_pw: str):
@@ -1410,9 +1888,53 @@ class Daemon:
                 raise PolicyError(f"{port} is not a port")
             if port in (53, 80, 443):
                 raise PolicyError(f"port {port} is the filter's own and cannot be opened directly")
+            if port in syncthing.OUT_TCP:
+                raise PolicyError(f"port {port} is only for Syncthing; allow Syncthing "
+                                  "for this account instead")
         user = self._managed(uid)
         user.video_calls = bool(video_calls)
         user.extra_ports = sorted(set(ports))
+        self._save_and_apply()
+
+    def impl_SetSsh(self, uid: int, anywhere: bool, hosts_json: str, _guardian_pw: str):
+        """SSH to other machines (#257): the listed ones, or anywhere. An
+        entry may name its port (`git.example.org:222`); 22 otherwise.
+
+        Guardian-gated like every widening of what an account reaches. An
+        SSH connection cannot be read, and a tunnel through one reaches
+        anything, so the list is the control: a name, an address, a range
+        or `tailnet`. Anywhere is the administrator's call, in words.
+        """
+        try:
+            hosts = json.loads(hosts_json or "[]")
+        except ValueError:
+            raise PolicyError("SSH machines must be a JSON list of strings") from None
+        if not isinstance(hosts, list) or not all(isinstance(h, str) for h in hosts):
+            raise PolicyError("SSH machines must be a JSON list of strings")
+        hosts = list(dict.fromkeys(h.strip().lower() for h in hosts if h.strip()))
+        if len(hosts) > 50:
+            raise PolicyError("at most 50 SSH machines")
+        for h in hosts:
+            try:
+                host, port = nft.ssh_entry(h)
+            except ValueError as e:
+                raise PolicyError(str(e)) from None
+            if port in nft.SSH_PORTS_REFUSED:
+                raise PolicyError(f"{h!r}: port {port} is the web or DNS, which the filter reads; "
+                                  "it cannot be opened to a machine")
+            kind = nft.ssh_entry_kind(host)
+            if kind == "name":
+                if not SSH_NAME_RE.fullmatch(host):
+                    raise PolicyError(f"{h!r} is not a machine name, an address, a range or 'tailnet'")
+            elif kind in ("v4", "v6"):
+                net = ipaddress.ip_network(host, strict=False)
+                if net.prefixlen == 0:
+                    raise PolicyError("every address is the Anywhere switch, not a machine")
+                if net.is_loopback:
+                    raise PolicyError("this computer is not another machine")
+        user = self._managed(uid)
+        user.ssh_anywhere = bool(anywhere)
+        user.ssh_hosts = hosts
         self._save_and_apply()
         return None
 
@@ -1452,6 +1974,70 @@ class Daemon:
         user = self.policy.user(_uid)
         layout = user.layout if user is not None else DEFAULT_LAYOUT
         return GLib.Variant("(s)", (layout,))
+
+    def impl_SetMyLayout(self, layout: str, _uid: int):
+        """The caller chooses their own desktop, from the Look app.
+
+        The same preference an admin sets with SetLayout, open to any active
+        local user for their own account: which shell draws the windows
+        says nothing about how they are filtered. The uid comes from the
+        bus, never from an argument, so nobody picks for anybody else.
+        """
+        return self.impl_SetLayout(_uid, layout)
+
+    def impl_GetMyCompositor(self, _uid: int):
+        """Which compositor the caller's advanced desktop runs on, for the
+        Look app. An unmanaged account gets the default."""
+        from .policy import DEFAULT_COMPOSITOR
+
+        user = self.policy.user(_uid)
+        compositor = user.compositor if user is not None else DEFAULT_COMPOSITOR
+        return GLib.Variant("(s)", (compositor,))
+
+    def impl_SetMyCompositor(self, compositor: str, _uid: int):
+        """The caller picks the compositor their advanced desktop runs on.
+
+        Like the layout, a preference and the caller's own: the uid comes
+        from the bus. When the layout is advanced, the login screen is
+        pointed at the new compositor's session; otherwise the choice waits
+        until the person chooses advanced.
+        """
+        from .policy import COMPOSITORS
+
+        if compositor not in COMPOSITORS:
+            raise PolicyError(f"unknown compositor {compositor!r}")
+        user = self._managed(_uid)
+        previous = user.compositor
+        user.compositor = compositor
+        try:
+            self._save_only()
+        except Exception:
+            user.compositor = previous
+            raise
+        if user.layout == "advanced":
+            self._accounts_set_session(_uid, user.layout)
+        log.info("uid %d advanced desktop compositor -> %s", _uid, compositor)
+        return None
+
+    def impl_SetMyKeyboard(self, files: dict, _uid: int):
+        """The caller's own keyd files (~/.config/keyd/*.conf by name, not
+        app.conf), sent by kosher-keyboard at sign-in and on every save.
+        None at all means no remaps.
+
+        Any active local user, for themselves only: the uid comes from the
+        bus. The files are checked before keyd sees them (keyboard.py: a
+        command() key runs as the person, never as root), and are in force
+        only while that person's session is the one on the screen.
+        """
+        self.keyboards.set(_uid, dict(files), self._active_seat_uid())
+        return None
+
+    def impl_SetMyAppKeys(self, bindings: list, _uid: int):
+        """keyd-application-mapper's bindings for the window in front, from
+        the caller's own app.conf (through kosher-keyd-bind). Refused
+        unless the caller's session is the one on the screen."""
+        self.keyboards.bind(_uid, list(bindings), self._active_seat_uid())
+        return None
 
     def impl_GetMySettings(self, _uid: int):
         """What applies to the CALLER's own account, read-only.
@@ -1504,6 +2090,10 @@ class Daemon:
         if user.mode in INSPECTED_MODES:
             settings["media_level"] = user.media_level
             settings["youtube"] = user.youtube
+        if user.mode == "filtered" and user.calm:
+            # The calmer sites (#179) work only through the proxy, so only
+            # a filtered account is told about them.
+            settings["calm"] = user.calm
         if user.mode == "whitelist":
             # The whitelist is already deliberately discoverable through
             # KosherOS Search, so listing it here reveals nothing new and
@@ -1829,6 +2419,12 @@ class Daemon:
             raise PolicyError(
                 "this is the only administrator; the computer would have "
                 "nobody who could change anything")
+        # Its Syncthing service runs as the account: stopped, and its unit
+        # and launcher taken away, before the account goes.
+        try:
+            syncthing.forget(user.username)
+        except syncthing.SyncthingError as e:
+            raise PolicyError(f"could not stop {user.username}'s Syncthing: {e}") from e
         self._accounts_delete_user(uid)
         self.policy.users.remove(user)
         self._save_and_apply()
@@ -1909,8 +2505,19 @@ class Daemon:
 
     # Which login-screen session each layout lives in. The classic and
     # tiling layouts are both GNOME (the difference is applied inside the
-    # session by kosher-layout); the advanced layout is its own session.
+    # session by kosher-layout); the advanced layout is its own session,
+    # one per compositor, named after its wayland-sessions file. The
+    # advanced entry is the default compositor's.
     LAYOUT_SESSIONS = {"classic": "gnome", "tiling": "gnome", "advanced": "niri"}
+    COMPOSITOR_SESSIONS = {"niri": "niri", "hyprland": "hyprland", "umbriel": "umbriel"}
+
+    def _session_for(self, uid: int, layout: str) -> str:
+        if layout == "advanced":
+            user = self.policy.user(uid)
+            if user is not None:
+                return self.COMPOSITOR_SESSIONS.get(user.compositor,
+                                                    self.LAYOUT_SESSIONS[layout])
+        return self.LAYOUT_SESSIONS[layout]
 
     def _accounts_set_session(self, uid: int, layout: str) -> None:
         """Make the login screen default this account to the right session.
@@ -1921,7 +2528,7 @@ class Daemon:
         A failure here is logged, not raised: the layout is saved already
         and the session can still be picked by hand.
         """
-        session = self.LAYOUT_SESSIONS[layout]
+        session = self._session_for(uid, layout)
         if self.connection is None:
             return
         try:
@@ -1948,11 +2555,18 @@ class Daemon:
     def impl_ListCatalog(self):
         return GLib.Variant("(s)", (json.dumps(apps.load_catalog()),))
 
-    def impl_ListInstalled(self):
-        return GLib.Variant("(as)", (sorted(apps.installed_refs()),))
+    def impl_ListInstalled(self, *, _uid: int):
+        # For the uid on the connection: a nixpkgs app lives in one
+        # account's profile and is installed for nobody else.
+        return GLib.Variant("(as)", (sorted(apps.installed_refs(_uid)),))
 
     def impl_ListInstalledDetails(self):
         return GLib.Variant("(s)", (json.dumps(apps.installed_details()),))
+
+    def impl_ListMyInstalledDetails(self, *, _uid: int):
+        # The Store's Installed shelf, for the uid on the connection: no
+        # names of who installed what, and no other account's own apps.
+        return GLib.Variant("(s)", (json.dumps(apps.installed_details_for(_uid)),))
 
     def impl_SetUserApps(self, uid: int, refs: list[str]):
         """Restrict which installed apps a user may run (empty = all)."""
@@ -1967,7 +2581,8 @@ class Daemon:
         """What the Store shows the caller — decided here, for the uid on
         the connection, so an account sees exactly what kosherd would
         install for it and nothing it would refuse."""
-        store = apps.store_apps(self._account_for(_uid))
+        store = apps.store_apps(self._account_for(_uid),
+                                off=self.policy.switched_off_apps())
         if not store["ready"]:
             # Somebody has the Store open and there is nothing to show
             # them yet: go and look now rather than at the next tick.
@@ -2004,36 +2619,108 @@ class Daemon:
         return None
 
     def impl_InstallApp(self, ref: str, *, _uid: int):
-        import pwd
-
         account = self._account_for(_uid)
         if _uid != 0 and not account.can_install_apps:
             raise PolicyError("app installation is turned off for this user")
+        self._install_for(account, _uid, ref)
+        return None
+
+    def impl_InstallAppFor(self, uid: int, ref: str):
+        """An administrator installs an app for an account: the same rule
+        as the account asking for itself, judged for that account. What
+        makes it worth having: a nixpkgs app goes into one account's own
+        profile, so there is no other way to put a tool on a child's
+        account from the admin's chair — and no way to do it at all from
+        a shell or a test, since the Store's own action is answered only
+        for the person at the keyboard."""
+        account = self.policy.user(uid)
+        if account is None:
+            raise PolicyError(f"uid {uid} is not managed")
+        # The account's own limits hold whoever asks (#124): an install
+        # "for" an account that may not install is still an install on it.
+        if not account.can_install_apps:
+            raise PolicyError(f"{account.username} may not have apps installed; "
+                              "switch 'Can install apps' on first")
+        self._install_for(account, uid, ref)
+        return None
+
+    def _install_for(self, account, uid: int, ref: str) -> None:
+        import pwd
+
         approved = apps.load_catalog().get("apps", [])
         approved_refs = {a["ref"] for a in approved}
 
         def permit(r: str) -> str | None:
-            reason = appaccess.decide(account, self._app_entry(r, approved), approved_refs)
+            reason = appaccess.decide(account, self._app_entry(r, approved), approved_refs,
+                                      self.policy.switched_off_apps())
             return None if reason is None else appaccess.REASONS[reason]
 
-        self.app_manager.install(ref, permit=permit)
+        self.app_manager.install(ref, permit=permit, uid=uid,
+                                 as_root=not getattr(account, "developer_tools", False))
         try:
-            username = pwd.getpwuid(_uid).pw_name
+            username = pwd.getpwuid(uid).pw_name
         except KeyError:
-            username = str(_uid)
-        apps.record_install(ref, _uid, username)
-        return None
+            username = str(uid)
+        apps.record_install(ref, uid, username)
 
-    def impl_ListAppUpdates(self):
+    def _developer(self, uid: int) -> bool:
+        """Has this account developer tools (#123)? Decides whether a nixpkgs
+        action runs as the account or as root into its profile."""
+        account = self.policy.user(uid)
+        return bool(getattr(account, "developer_tools", False)) if account else False
+
+    def _nix_owner(self, ref: str, _uid: int, *, others: bool = False) -> int:
+        """Whose profile a nixpkgs app is acted on in: the caller's when it
+        is there. Only an administrator's remove (`others`) may fall back
+        to the account the ledger says asked for it — an update is open to
+        every account and must never land in another account's profile
+        (#124)."""
+        if _uid > 0 and ref in apps.accountapps.installed(_uid):
+            return _uid
+        if _uid > 0 and not others:
+            raise PolicyError(f"{ref} is not installed for your account")
+        owner = apps._load_ledger().get(ref, {}).get("uid", -1)
+        if owner is None or owner < 0:
+            raise PolicyError(f"{ref} is not installed for any account")
+        return owner
+
+    def _nix_updates_known(self) -> dict[int, list[dict]]:
+        """What the last check found for each account's nixpkgs apps.
+        Finding out means evaluating nixpkgs, seconds of work and the
+        channel's news from the network, so only CheckAppUpdates does it;
+        ListAppUpdates, which the Store reads when it opens, answers from
+        here."""
+        return self.__dict__.setdefault("_nix_updates", {})
+
+    def _check_nix_updates(self, uid: int) -> list[dict]:
+        """The Store's nixpkgs apps in the caller's own profile that the
+        channel has a newer build of (nixapps.updates): kept for
+        ListAppUpdates and UpdateAllApps until the next check."""
+        if uid <= 0:
+            return []
+        refs = {r for r in apps.accountapps.installed(uid) if apps.nixapps.is_nix(r)}
+        names = {a["ref"]: a.get("name") or "" for a in apps.load_catalog().get("apps", [])}
+        found = apps.nixapps.updates(uid, refs, names, as_root=not self._developer(uid))
+        self._nix_updates_known()[uid] = found
+        return found
+
+    def _forget_nix_update(self, uid: int, ref: str) -> None:
+        known = self._nix_updates_known().get(uid)
+        if known:
+            known[:] = [u for u in known if u["ref"] != ref]
+
+    def impl_ListAppUpdates(self, *, _uid: int):
         try:
             found = apps.available_updates()
         except Exception as e:  # noqa: BLE001 - "could not look" is an empty list, said
             log.warning("could not list app updates: %s", e)
             found = []
+        found += self._nix_updates_known().get(_uid, [])
         return GLib.Variant("(s)", (json.dumps(found),))
 
-    def impl_CheckAppUpdates(self):
-        """Fetch the remote's news first, then list what can be updated.
+    def impl_CheckAppUpdates(self, *, _uid: int):
+        """Fetch the remote's news first, then list what can be updated:
+        Flathub's for every Flatpak, nixpkgs' for the caller's own apps.
 
         Slower than ListAppUpdates — it goes to the network — which is why
         it is what a person asks for by pressing a button, and the cheap
@@ -2044,16 +2731,27 @@ class Daemon:
         except Exception as e:  # noqa: BLE001 - "could not look" is an empty list, said
             log.warning("could not check for app updates: %s", e)
             found = []
+        try:
+            found += self._check_nix_updates(_uid)
+        except Exception as e:  # noqa: BLE001 - nix could not say; the Flatpaks still can
+            log.warning("could not check nixpkgs apps of uid %d for updates: %s", _uid, e)
         return GLib.Variant("(s)", (json.dumps(found),))
 
-    def impl_UpdateApp(self, ref: str):
+    def impl_UpdateApp(self, ref: str, *, _uid: int):
         """Update one installed app. Not gated on can_install_apps: an
         update widens nothing, and a newer build of an approved app is the
         safer one to be running."""
-        self.app_manager.update(ref)
+        if apps.accountapps.is_account_app(ref):
+            owner = self._nix_owner(ref, _uid)
+            self.app_manager.update(ref, uid=owner, as_root=not self._developer(owner))
+            self._forget_nix_update(owner, ref)
+        else:
+            self.app_manager.update(ref)
         return None
 
-    def impl_UpdateAllApps(self):
+    def impl_UpdateAllApps(self, *, _uid: int):
+        """Every Flatpak with a newer build, and the caller's own nixpkgs
+        apps the last check found newer builds of."""
         queued = 0
         pending = self.app_manager.pending
         for entry in apps.available_updates():
@@ -2064,10 +2762,39 @@ class Daemon:
                 queued += 1
             except apps.AppError as e:
                 log.warning("could not queue %s: %s", entry["ref"], e)
+        for entry in list(self._nix_updates_known().get(_uid, [])):
+            if entry["ref"] in pending:
+                continue
+            try:
+                self.app_manager.update(entry["ref"], uid=_uid, as_root=not self._developer(_uid))
+                self._forget_nix_update(_uid, entry["ref"])
+                queued += 1
+            except apps.AppError as e:
+                log.warning("could not queue %s: %s", entry["ref"], e)
         return GLib.Variant("(i)", (queued,))
 
-    def impl_RemoveApp(self, ref: str):
-        self.app_manager.remove(ref)
+    def impl_ListUnusedApps(self):
+        """Runtimes no installed app needs any more, and what they take:
+        what the Store offers to free (#115)."""
+        return GLib.Variant("(s)", (json.dumps(apps.unused_refs()),))
+
+    def impl_RemoveUnusedApps(self):
+        """Remove them, as a queued job the Store watches under
+        apps.CLEANUP_REF. Answers what was there to remove: a count and
+        the bytes, so the caller can say "freeing 1.2 GB" or "nothing to
+        remove" at once."""
+        leftovers = apps.unused_refs()
+        if leftovers:
+            self.app_manager.remove_unused()
+        summary = {"count": len(leftovers), "size": sum(r["size"] for r in leftovers)}
+        return GLib.Variant("(s)", (json.dumps(summary),))
+
+    def impl_RemoveApp(self, ref: str, *, _uid: int):
+        if apps.accountapps.is_account_app(ref):
+            owner = self._nix_owner(ref, _uid, others=True)
+            self.app_manager.remove(ref, uid=owner, as_root=not self._developer(owner))
+        else:
+            self.app_manager.remove(ref)
         apps.forget_install(ref)
         return None
 
@@ -2080,6 +2807,49 @@ class Daemon:
 
     def impl_UnapproveApp(self, ref: str):
         apps.unapprove(ref)
+        return None
+
+    def impl_SetUserAppApproval(self, uid: int, ref: str, approved: bool, _guardian_pw: str):
+        """Approve an app for one account (#213): the apps in
+        appaccess.INDIVIDUAL_APPROVAL, which a supervised account may have
+        only this way. Guardian-gated like a filter change: Syncthing
+        approved is files from paired devices that never pass the filter,
+        and ports let out for its service. Taking the approval away stops
+        the service (apply) and closes the ports; the app and its folders
+        stay until someone removes it."""
+        if ref not in appaccess.INDIVIDUAL_APPROVAL:
+            raise PolicyError(f"{ref} is approved for the whole computer, not per account")
+        user = self.policy.user(uid)
+        if user is None:
+            raise PolicyError(f"uid {uid} is not managed")
+        if approved and ref in self.policy.switched_off_apps():
+            raise PolicyError("Syncthing is switched off on this computer; turn it on "
+                              "under Advanced first")
+        refs = set(user.approved_apps)
+        (refs.add if approved else refs.discard)(ref)
+        user.approved_apps = sorted(refs)
+        self._save_and_apply()
+        return None
+
+    def impl_SetSyncthingLan(self, uid: int, enabled: bool, _guardian_pw: str):
+        """May devices on the home network connect to this account's
+        Syncthing directly? Off by default. On, the firewall accepts
+        Syncthing's ports from the LAN ranges, into its service only."""
+        user = self.policy.user(uid)
+        if user is None:
+            raise PolicyError(f"uid {uid} is not managed")
+        user.syncthing_lan = bool(enabled)
+        self._save_and_apply()
+        return None
+
+    def impl_SetSyncthingEnabled(self, enabled: bool, _guardian_pw: str):
+        """Syncthing for the whole computer (#220). Off, the Store does not
+        offer it, nobody can be allowed it, and apply stops every account's
+        service and closes its ports. The installs, the approvals and the
+        accounts' folders stay, so switching it on again starts them where
+        they were."""
+        self.policy.syncthing = bool(enabled)
+        self._save_and_apply()
         return None
 
     def impl_SetUserCanInstall(self, uid: int, can_install: bool):
@@ -2109,7 +2879,29 @@ class Daemon:
     def _on_app_finished(self, ref: str, ok: bool, error: str) -> None:
         if ok:
             GLib.idle_add(lambda: (self._apply_mct(), False)[1])
+            if ref in onepassword.REFS:
+                # Installed, updated or removed: the copies follow (#234).
+                self._refresh_onepassword(force=True)
         self._emit_app_signal("AppFinished", "(sbs)", (ref, ok, error))
+
+    def _refresh_onepassword(self, force: bool = False) -> bool:
+        """Keep 1Password's setgid copies in /run/wrappers/bin (op, and the
+        browser helper) in step with who has 1Password (#234), in a thread:
+        building them may fetch them. Without `force`, copies already as
+        they should be are left alone, so the periodic check costs a look
+        at the profiles and nothing more. Returns True to stay on a GLib
+        timer."""
+        def work() -> None:
+            try:
+                by_uid = onepassword.accounts_installed()
+                if not force and onepassword.in_step(by_uid):
+                    return
+                onepassword.refresh(by_uid)
+            except Exception:  # noqa: BLE001 - never worth the daemon
+                log.exception("1password: could not put the wrappers in step")
+
+        threading.Thread(target=work, name="1password-op", daemon=True).start()
+        return True
 
     # ---- System ----------------------------------------------------------
 
@@ -2139,8 +2931,14 @@ class Daemon:
         from . import updates
 
         res = self._bootc("upgrade", "--check")
-        info = updates.parse_check(res.stdout or res.stderr)
-        info["ok"] = res.returncode == 0
+        # bootc says "no changes" for an image it already holds, which after
+        # a rollback is the newest one (#112): judge against what is
+        # running, and say where an already-downloaded newest version sits.
+        deployment = self._deployment()
+        image = ((deployment.get("staged") or {}).get("image")
+                 or (deployment.get("booted") or {}).get("image"))
+        info = updates.judge_check(res.returncode, res.stdout, res.stderr, deployment,
+                                   updates.inspect_registry(image))
         return GLib.Variant("(s)", (json.dumps(info),))
 
     def impl_ApplyUpdate(self):
@@ -2156,8 +2954,15 @@ class Daemon:
         from . import updates
 
         self._refuse_if_updating()
+        # A deployment installed without signature verification (the
+        # installer's doing) is switched onto its own image with the
+        # policy enforced: this update and every later one is verified.
+        booted = self._deployment().get("booted") or {}
+        argv = updates.upgrade_argv(booted.get("image"), bool(booted.get("verified")))
+        if argv[1] == "switch":
+            log.info("first verified update: %s", " ".join(argv))
         self._update_thread = updates.run_upgrade(self._on_update_progress,
-                                                  self._on_update_finished)
+                                                  self._on_update_finished, argv=argv)
         return None
 
     def impl_ListChannels(self):
@@ -2206,7 +3011,10 @@ class Daemon:
         """Is a download holding bootc's lock: an update or channel switch
         this daemon started, or Fedora's timer doing its own?"""
         thread = getattr(self, "_update_thread", None)
-        if thread is not None and thread.is_alive():
+        # The download's own thread, once bootc has finished, reads the
+        # status to see what it staged; it is not waiting on itself.
+        if (thread is not None and thread.is_alive()
+                and thread is not threading.current_thread()):
             return True
         try:
             res = subprocess.run(["systemctl", "is-active", BOOTC_TIMER_SERVICE],
@@ -2248,9 +3056,265 @@ class Daemon:
         self._emit_system_signal("UpdateProgress", "(is)", (int(percent), str(status)))
 
     def _on_update_finished(self, ok: bool, error: str) -> None:
+        trying, self._trying = getattr(self, "_trying", False), False
         if not ok:
             log.error("update failed: %s", error)
+        elif trying:
+            # A build somebody asked to try: they are waiting for it, so it
+            # gets the pop-up as well as the mark, notices on or not.
+            self._sync_pending(announce=True, always=True)
+        else:
+            # Downloaded by hand (or a channel switch): the mark in the
+            # panel shows for everyone, without the pop-up.
+            self._sync_pending()
         self._emit_system_signal("UpdateFinished", "(bs)", (bool(ok), str(error)))
+
+    # ---- automatic updates (#19, updates.py) -----------------------------
+
+    def impl_SetAutoUpdates(self, schedule: str, notify: bool):
+        """How often this computer fetches updates on its own, and whether
+        the people signed in get a notice when one is ready.
+
+        The timer is changed first and the policy saved after; a save that
+        fails puts the timer back, so a refused change leaves nothing
+        behind (the dispatcher puts the in-memory policy back)."""
+        from .policy import AUTO_UPDATE_SCHEDULES
+
+        schedule = str(schedule or "").strip().lower()
+        if schedule == "every-2-weeks":
+            schedule = "biweekly"
+        if schedule not in AUTO_UPDATE_SCHEDULES:
+            raise PolicyError(f"unknown schedule: {schedule!r} (one of "
+                              f"{', '.join(AUTO_UPDATE_SCHEDULES)})")
+        before = self.policy.auto_updates
+        self._apply_auto_timer(schedule)
+        self.policy.auto_updates = schedule
+        self.policy.update_notify = bool(notify)
+        try:
+            policy_mod.save(self.policy)
+        except Exception:
+            try:
+                self._apply_auto_timer(before)
+            except PolicyError:
+                log.exception("could not put the automatic update timer back")
+            raise
+        if self.connection:
+            self.connection.emit_signal(
+                None, OBJECT_PATH, "org.kosherlinux.Daemon1.Profiles", "PolicyChanged",
+                GLib.Variant("(i)", (self.policy.revision,)))
+        log.info("automatic updates: %s, notices %s", schedule, "on" if notify else "off")
+        return None
+
+    def _apply_auto_timer(self, schedule: str) -> None:
+        """Start or stop kosher-auto-update.timer to match the schedule."""
+        from . import updates
+
+        on = schedule in updates.SCHEDULE_DAYS
+        argv = ["systemctl", "enable" if on else "disable", "--now", updates.AUTO_TIMER]
+        try:
+            res = subprocess.run(argv, capture_output=True, text=True, timeout=60)
+        except (OSError, subprocess.SubprocessError) as e:
+            raise PolicyError(f"could not {argv[1]} the update timer: {e}") from e
+        if res.returncode != 0:
+            raise PolicyError(f"could not {argv[1]} the update timer: "
+                              f"{(res.stderr or res.stdout).strip()}")
+
+    def impl_AutoUpdateStatus(self):
+        """The schedule, the notice switch, and how the last automatic run
+        went: `last_success`, `last_attempt`, `last_error`, `next_due`."""
+        from . import updates
+
+        state = updates.load_state()
+        schedule = self.policy.auto_updates
+        return GLib.Variant("(s)", (json.dumps({
+            "schedule": schedule,
+            "notify": self.policy.update_notify,
+            "last_success": state.get("last_success"),
+            "last_attempt": state.get("last_attempt"),
+            "last_error": state.get("last_error"),
+            "next_due": updates.next_due(schedule, state.get("last_success")),
+            "pending": (updates.pending_update(state, updates.boot_id())
+                        if updates.staged_on_disk() else None),
+        }),))
+
+    def impl_PendingUpdate(self):
+        """The update waiting for a restart, for the mark in every
+        person's panel: {"version", "digest", "announce"} or {}. Any
+        account may ask; it is answered from kosherd's own note, so nobody
+        runs bootc for it."""
+        from . import updates
+
+        state = updates.load_state()
+        pending = updates.pending_update(state, updates.boot_id())
+        # The note can outlive the update when something other than kosherd
+        # discarded it; ostree's own marker for a staged deployment says,
+        # without running anything.
+        if pending and not updates.staged_on_disk():
+            updates.clear_staged(state)
+            updates.save_state(state)
+            self._emit_system_signal("UpdateReady", "(ssb)", ("", "", False))
+            pending = None
+        return GLib.Variant("(s)", (json.dumps(pending or {}),))
+
+    def impl_RunAutoUpdate(self, now: bool = False):
+        """One automatic run, what the timer starts: check when due, and
+        when there is a newer version, start downloading it and return.
+        `now` skips only "not due yet". Never restarts the computer."""
+        import time as _time
+
+        return GLib.Variant("(s)", (json.dumps(self._auto_update(_time.time(), bool(now))),))
+
+    def _auto_update(self, now: float, force: bool = False) -> dict:
+        from . import updates
+
+        state = updates.load_state()
+        on_battery, battery = self._power()
+        skip = updates.skip_reason(self.policy.auto_updates, state, now, force=force,
+                                   metered=updates.is_metered(self._metered()),
+                                   on_battery=on_battery, battery=battery,
+                                   busy=self._updating())
+        if skip:
+            log.info("automatic update: skipped, %s", skip)
+            return {"result": "skipped", "reason": skip}
+        state["last_attempt"] = now
+        try:
+            deployment = self._deployment()
+            if deployment.get("error"):
+                raise PolicyError(deployment["error"])
+            if deployment.get("kept"):
+                log.info("automatic update: skipped, a test build is being tried")
+                return {"result": "skipped", "reason": "a test build is being tried"}
+            res = self._bootc("upgrade", "--check")
+        except PolicyError as e:
+            return self._auto_failed(state, str(e))
+        image = ((deployment.get("staged") or {}).get("image")
+                 or (deployment.get("booted") or {}).get("image"))
+        # The same judgement as the Check button's (#207): a check that
+        # could not reach the registry is "couldn't check", never up to date.
+        info = updates.judge_check(res.returncode, res.stdout, res.stderr, deployment,
+                                   updates.inspect_registry(image))
+        if not info.get("ok"):
+            return self._auto_failed(state, info.get("error") or "the update check failed")
+        action = updates.after_check(info)
+        if action != "download":
+            state["last_success"] = now
+            state.pop("last_error", None)
+            updates.save_state(state)
+            if action == "staged":
+                self._sync_pending(announce=True)
+            log.info("automatic update: %s", {
+                "none": "up to date", "staged": "already downloaded",
+                "left": "the newest is the version this computer went back from"}[action])
+            return {"result": action, "version": info.get("version")}
+
+        booted = deployment.get("booted") or {}
+        argv = updates.upgrade_argv(booted.get("image"), bool(booted.get("verified")))
+        try:
+            before = updates.deployments(self._bootc_status())
+        except PolicyError as e:
+            return self._auto_failed(state, str(e))
+        updates.save_state(state)
+        log.info("automatic update: downloading %s (%s)", info.get("version") or "a new version",
+                 " ".join(argv))
+
+        def finished(ok: bool, error: str) -> None:
+            self._auto_finished(ok, error, before, now)
+
+        self._update_thread = updates.run_upgrade(self._on_update_progress, finished,
+                                                  argv=argv)
+        return {"result": "downloading", "version": info.get("version")}
+
+    def _auto_failed(self, state: dict, error: str) -> dict:
+        """A check or download that did not work: logged, kept for the
+        admin app, and tried again at the next run. The time of the last
+        check that worked stays as it was, which is what makes it due."""
+        from . import updates
+
+        log.warning("automatic update failed, trying again at the next run: %s", error)
+        state["last_error"] = error
+        try:
+            updates.save_state(state)
+        except OSError:
+            log.exception("could not note the failed update")
+        return {"result": "failed", "error": error}
+
+    def _auto_finished(self, ok: bool, error: str, before: list, started: float) -> None:
+        """The automatic download ended: on success, tell people once; on
+        failure, take away anything it staged and note the error."""
+        from . import updates
+
+        self._emit_system_signal("UpdateFinished", "(bs)", (bool(ok), str(error)))
+        state = updates.load_state()
+        if not ok:
+            try:
+                key = updates.staged_to_discard(before, updates.deployments(self._bootc_status()))
+                if key:
+                    log.warning("automatic update: removing what the failed download staged")
+                    self._undeploy([key])
+            except PolicyError:
+                log.exception("could not check what the failed download left")
+            self._auto_failed(state, error or "the download did not finish")
+            return
+        state["last_success"] = started
+        state.pop("last_error", None)
+        updates.save_state(state)
+        self._sync_pending(announce=True)
+
+    def _sync_pending(self, announce: bool = False, always: bool = False) -> None:
+        """Note what waits for the next restart, from bootc's status, and
+        tell the sessions: UpdateReady(version, digest, announce) with an
+        empty digest when nothing waits any more. `announce` asks for the
+        pop-up; it is given once per version, and only with notices on."""
+        from . import updates
+
+        try:
+            deployment = self._deployment()
+            if deployment.get("error"):
+                return
+            staged = deployment.get("staged") or {}
+            state = updates.load_state()
+            if staged:
+                digest = staged.get("digest") or staged.get("version") or staged.get("image") or "staged"
+                pop = updates.record_staged(state, staged.get("version"), digest,
+                                            updates.boot_id(),
+                                            announce=announce and (always or self.policy.update_notify))
+                updates.save_state(state)
+                self._emit_system_signal("UpdateReady", "(ssb)",
+                                         (staged.get("version") or "", digest, pop))
+            elif updates.clear_staged(state):
+                updates.save_state(state)
+                self._emit_system_signal("UpdateReady", "(ssb)", ("", "", False))
+        except Exception:  # noqa: BLE001 - the panel mark is not worth failing an update over
+            log.exception("could not note the update waiting for a restart")
+
+    def _metered(self):
+        """NetworkManager's Metered value, or None when it cannot say."""
+        return self._system_property("org.freedesktop.NetworkManager",
+                                     "/org/freedesktop/NetworkManager",
+                                     "org.freedesktop.NetworkManager", "Metered")
+
+    def _power(self) -> tuple[bool, float | None]:
+        """(on battery, percent) from UPower; (False, None) without it."""
+        on_battery = self._system_property("org.freedesktop.UPower", "/org/freedesktop/UPower",
+                                           "org.freedesktop.UPower", "OnBattery")
+        if not on_battery:
+            return False, None
+        percent = self._system_property("org.freedesktop.UPower",
+                                        "/org/freedesktop/UPower/devices/DisplayDevice",
+                                        "org.freedesktop.UPower.Device", "Percentage")
+        return True, percent
+
+    def _system_property(self, name: str, path: str, iface: str, prop: str):
+        if getattr(self, "connection", None) is None:
+            return None
+        try:
+            result = self.connection.call_sync(
+                name, path, "org.freedesktop.DBus.Properties", "Get",
+                GLib.Variant("(ss)", (iface, prop)), GLib.VariantType("(v)"),
+                Gio.DBusCallFlags.NONE, 5000, None)
+            return result.unpack()[0]
+        except GLib.Error:
+            return None
 
     def impl_Reboot(self):
         """Restart the computer, for the Restart button after an update.
@@ -2278,14 +3342,11 @@ class Daemon:
         somebody needs this screen is when the machine is already unwell.
         """
         status: dict = {"booted": None, "rollback": None,
-                        "rollback_queued": False, "staged": None}
+                        "rollback_queued": False, "staged": None, "kept": None}
         try:
-            res = self._bootc("status", "--json")
+            doc = self._bootc_status()
         except PolicyError as e:
             status["error"] = str(e)
-            return status
-        if res.returncode != 0:
-            status["error"] = (res.stderr or res.stdout).strip()
             return status
 
         def describe(entry) -> dict | None:
@@ -2303,36 +3364,164 @@ class Daemon:
             # when the tree cannot be read (it was Fedora's date on older
             # builds, and ours from 0.1.0-pre.058 on).
             version = _deployment_version(entry) or label
+            # bootc verifies the image policy only for a deployment whose
+            # reference says so; "containerPolicy" is that (updates.py).
+            verified = isinstance(image, dict) and image.get("signature") == "containerPolicy"
+            digest = outer.get("imageDigest") if isinstance(outer, dict) else None
             return {"image": ref, "version": version, "timestamp": stamp,
-                    "channel": updates._channel(ref) if ref else None}
-
-        try:
-            doc = json.loads(res.stdout)["status"]
-        except (ValueError, KeyError, TypeError) as e:
-            status["error"] = f"could not read bootc status: {e}"
-            return status
+                    "channel": updates._channel(ref) if ref else None,
+                    "verified": verified, "digest": digest,
+                    "pinned": bool(entry.get("pinned"))}
 
         status["booted"] = describe(doc.get("booted"))
         status["rollback"] = describe(doc.get("rollback"))
         status["staged"] = describe(doc.get("staged"))
         status["rollback_queued"] = bool(doc.get("rollbackQueued", False))
+        # The deployment kept while a build is tried (TryImage): pinned, so
+        # ostree never drops it, wherever bootc lists it.
+        others = doc.get("otherDeployments") if isinstance(doc.get("otherDeployments"), list) else []
+        status["kept"] = next((describe(e) for e in [doc.get("booted"), doc.get("rollback"), *others]
+                               if isinstance(e, dict) and e.get("pinned")), None)
         return status
 
-    def impl_Rollback(self):
+    def _bootc_status(self) -> dict:
+        """`bootc status --json`'s `status` document, or a PolicyError that
+        says in words why there is none."""
+        res = self._bootc("status", "--json")
+        if res.returncode != 0:
+            raise PolicyError((res.stderr or res.stdout).strip())
+        try:
+            doc = json.loads(res.stdout)["status"]
+        except (ValueError, KeyError, TypeError) as e:
+            raise PolicyError(f"could not read bootc status: {e}") from e
+        if not isinstance(doc, dict):
+            raise PolicyError("could not read bootc status: no status object")
+        return doc
+
+    # ---- trying a build (#90) ---------------------------------------------
+
+    def _ostree_admin(self, *args: str) -> None:
+        """One `ostree admin` command (pin, undeploy); its failure is the
+        caller's error, in ostree's words."""
+        argv = ["ostree", "admin", *args]
+        try:
+            res = subprocess.run(argv, capture_output=True, text=True, timeout=120)
+        except (OSError, subprocess.SubprocessError) as e:
+            raise PolicyError(f"{' '.join(argv)} failed: {e}") from e
+        if res.returncode != 0:
+            raise PolicyError(f"{' '.join(argv)} failed: {(res.stderr or res.stdout).strip()}")
+
+    def _ostree_index_of(self) -> dict[str, int]:
+        """Each deployment's index as `ostree admin pin` and `undeploy`
+        count them, by the `checksum.serial` key bootc's status also
+        carries."""
+        from . import updates
+
+        try:
+            res = subprocess.run(["ostree", "admin", "status"], capture_output=True,
+                                 text=True, timeout=60)
+        except (OSError, subprocess.SubprocessError) as e:
+            raise PolicyError(f"ostree admin status failed: {e}") from e
+        if res.returncode != 0:
+            raise PolicyError(f"ostree admin status failed: {(res.stderr or res.stdout).strip()}")
+        return {d["key"]: d["index"] for d in updates.parse_ostree_status(res.stdout)}
+
+    def _undeploy(self, keys: list[str]) -> None:
+        """Remove deployments by key, highest index first, since each
+        removal renumbers the ones after it."""
+        if not keys:
+            return
+        index_of = self._ostree_index_of()
+        indices = sorted((index_of[k] for k in keys if k in index_of), reverse=True)
+        for index in indices:
+            self._ostree_admin("undeploy", str(index))
+
+    def impl_TryImage(self, what: str, _guardian_pw: str = ""):
+        """Run a build that is not on any channel — a pull request's, a
+        version's — while keeping the deployment this machine came from.
+
+        The first try pins the booted deployment, so ostree keeps it
+        however many builds follow; every try removes the test builds no
+        longer booted; then the same pull and staged restart as an update,
+        on the same signals (see updates.trial_plan). Guardian-gated like a
+        channel switch: it puts the computer on a build nobody has tested.
+        """
+        from . import updates
+
+        self._refuse_if_updating()
+        deps = updates.deployments(self._bootc_status())
+        booted = next((d for d in deps if d["place"] == "booted"), {})
+        try:
+            target = updates.trial_target(booted.get("image") or "", what)
+            plan = updates.trial_plan(deps, target)
+        except ValueError as e:
+            raise PolicyError(str(e)) from e
+        if plan["pin"]:
+            index = self._ostree_index_of().get(plan["pin"])
+            if index is None:
+                raise PolicyError("ostree does not list the booted deployment, "
+                                  "so it cannot be kept")
+            self._ostree_admin("pin", str(index))
+            log.info("kept the booted deployment (%s) while builds are tried",
+                     booted.get("image"))
+        self._undeploy(plan["undeploy"])
+        log.info("trying %s: %s", target, " ".join(plan["argv"]))
+        self._trying = True
+        self._update_thread = updates.run_upgrade(
+            self._on_update_progress, self._on_update_finished, argv=plan["argv"])
+        return None
+
+    def impl_ReturnToKept(self):
+        """Back to the deployment kept by TryImage, with no download: the
+        test builds in between are removed so the kept one is next in
+        line, `bootc rollback` queues it (and discards a staged build),
+        and the pin comes off. Not guardian-gated: the kept image is the
+        one this machine ran before the guardian let a test build on, so
+        this only undoes a change the guardian already agreed to."""
+        from . import updates
+
+        try:
+            plan = updates.return_plan(updates.deployments(self._bootc_status()))
+        except ValueError as e:
+            raise PolicyError(str(e)) from e
+        self._undeploy(plan["undeploy"])
+        if plan["rollback"]:
+            after = updates.deployments(self._bootc_status())
+            rollback = next((d for d in after if d["place"] == "rollback"), None)
+            if rollback is None or rollback.get("key") != plan["kept"].get("key"):
+                raise PolicyError("the kept version is not the one a restart would "
+                                  "go back to; 'kosherctl system status' shows what is "
+                                  "on the disk")
+            res = self._bootc("rollback")
+            if res.returncode != 0:
+                raise PolicyError(f"bootc rollback failed: {res.stderr.strip()}")
+        index = self._ostree_index_of().get(plan["unpin"])
+        if index is not None:
+            self._ostree_admin("pin", "--unpin", str(index))
+        log.info("back to the kept deployment %s", plan["kept"].get("image"))
+        self._sync_pending()
+        return None
+
+    def impl_Rollback(self, _guardian_pw: str = ""):
         """Go back to the deployment this machine booted before.
 
-        Deliberately NOT guardian-gated, unlike the calls that weaken the
-        filter. Two reasons. The image being returned to is one this
-        machine already ran and already trusted, so this is not a way to
-        reach anything new. And greenboot has to be able to do this with no
-        password at all when a new image fails to bring the filter up — so
-        gating the manual path would buy very little while risking the
-        thing this exists to prevent: a family with a broken computer and
-        nobody home who can fix it.
+        Guardian-gated like the calls that weaken the filter (the
+        dispatcher checks the password before this runs). The image gone
+        back to carries the filter it was built with, which can be older
+        and weaker than the one running now, so an administrator alone
+        must not be able to choose it (F11 on #33).
+
+        The automatic return does not come through here. When a new image
+        fails to bring the filter up, greenboot's boot counter takes the
+        machine back to the last good deployment with nobody present and
+        no password, so a family is never left with a broken computer
+        waiting on the guardian.
         """
         res = self._bootc("rollback")
         if res.returncode != 0:
             raise PolicyError(f"bootc rollback failed: {res.stderr.strip()}")
+        # A rollback discards a staged update; the mark in the panel goes.
+        self._sync_pending()
         # The dispatcher writes the activity entry, because Rollback is in
         # access.CHANGES — "who put this machine back?" deserves an answer
         # in the same log as every other change.
@@ -2353,6 +3542,205 @@ class Daemon:
         return None
 
     # ---- First-boot setup ------------------------------------------------
+
+    # ---- Tailscale (tailnet.py) ------------------------------------------
+
+    def _tailnet_allowed_changed(self) -> None:
+        """Tailscale's sites and the tailnet's names were allowed or taken
+        away (#211): apply the policy again, on the main loop like every
+        other apply. The nft reload empties the address sets, so a name
+        allowed a moment ago stops opening anything at once. From a
+        worker thread this waits, so a sign-in returns its address only
+        once a filtered account can open it."""
+        done = threading.Event()
+
+        def work():
+            try:
+                apply_policy(self.policy)
+            except Exception:  # noqa: BLE001 - the last good rules stay loaded
+                log.exception("could not apply the Tailscale names")
+            finally:
+                done.set()
+            return False
+
+        GLib.idle_add(work)
+        if threading.current_thread() is not threading.main_thread():
+            done.wait(120)
+
+    def impl_TailscaleStatus(self):
+        """Who this computer is signed in to Tailscale as, and whether it is
+        connected. Reading it also brings the resolvers' tailnet forward in
+        line, so a sign-in finished in the browser takes effect at the
+        admin app's next look even if the daemon missed the moment."""
+        from . import tailnet
+
+        if not self.policy.tailscale:
+            # tailscaled is not running; asking it would only say so.
+            return GLib.Variant("(s)", (json.dumps({
+                "enabled": False, "installed": tailnet.installed(), "state": "Off",
+                "signed_in": False, "connected": False}),))
+        try:
+            now = tailnet.refresh_dns() or tailnet.status()
+        except tailnet.TailnetError as e:
+            raise PolicyError(str(e)) from None
+        return GLib.Variant("(s)", (json.dumps({**now, "enabled": True}),))
+
+    def impl_TailscaleSignIn(self, _guardian_pw: str):
+        """Start signing in; return the address the administrator opens.
+
+        Guardian-gated: joining a tailnet puts the family's computer on a
+        network with other people's machines, and every account can then
+        reach them by name (through its own filter). The address is for a
+        browser on any device; the sign-in finishes there.
+        """
+        from . import tailnet
+
+        def finished(ok: bool) -> None:
+            # Either way: a sign-in that gave up takes Tailscale's sites
+            # away again (#211).
+            tailnet.refresh_dns()
+
+        if not self.policy.tailscale:
+            raise PolicyError("Tailscale is switched off on this computer; turn it on "
+                              "under Advanced first")
+        try:
+            url = tailnet.sign_in(on_finished=finished)
+        except tailnet.TailnetError as e:
+            tailnet.refresh_dns()
+            raise PolicyError(str(e)) from None
+        # The sign-in page must open for whoever is at the computer.
+        tailnet.refresh_dns()
+        return GLib.Variant("(s)", (url,))
+
+    def impl_TailscaleSignOut(self):
+        """Not guardian-gated: leaving the tailnet takes a way out of the
+        house away and opens nothing, like a rollback onto an image this
+        machine already ran."""
+        from . import tailnet
+
+        try:
+            tailnet.sign_out()
+        except tailnet.TailnetError as e:
+            raise PolicyError(str(e)) from None
+        finally:
+            tailnet.forget()
+        return None
+
+    def impl_SetTailscaleEnabled(self, enabled: bool, _guardian_pw: str):
+        """Run tailscaled, or stop it (#220). The service changes first and
+        the policy is saved after; a save that fails puts the service back.
+
+        Off keeps the sign-in: the computer drops off the tailnet and its
+        names stop resolving, and switching it on again reconnects without
+        a new sign-in. Signing out is its own button."""
+        from . import tailnet
+
+        on = bool(enabled)
+        before = bool(self.policy.tailscale)
+        if on and not tailnet.installed():
+            raise PolicyError("Tailscale is not installed on this computer")
+        try:
+            tailnet.set_running(on)
+        except tailnet.TailnetError as e:
+            raise PolicyError(str(e)) from None
+        self.policy.tailscale = on
+        try:
+            policy_mod.save(self.policy)
+        except Exception:
+            try:
+                tailnet.set_running(before)
+            except tailnet.TailnetError:
+                log.exception("could not put Tailscale back")
+            raise
+        if on:
+            tailnet.refresh_dns_later(delay=3)
+        else:
+            tailnet.forget()
+        if self.connection:
+            self.connection.emit_signal(
+                None, OBJECT_PATH, "org.kosherlinux.Daemon1.Profiles", "PolicyChanged",
+                GLib.Variant("(i)", (self.policy.revision,)))
+        log.info("tailscale: switched %s", "on" if on else "off")
+        return None
+
+    def impl_SetKeydEnabled(self, enabled: bool, _guardian_pw: str):
+        """Key remapping for the whole computer (#230). keyd.service changes
+        first and the policy is saved after; a save that fails puts the
+        service back.
+
+        Off stops keyd and forgets every person's set, so nobody's keys
+        are remapped; their files stay in their homes. On starts it, and
+        each session's kosher-keyboard sends its files again when it sees
+        PolicyChanged, so the person at the screen has their keys at once."""
+        on = bool(enabled)
+        before = bool(self.policy.keyd)
+        try:
+            keyboard.set_running(on)
+        except keyboard.KeymapError as e:
+            raise PolicyError(str(e)) from None
+        self.policy.keyd = on
+        try:
+            policy_mod.save(self.policy)
+        except Exception:
+            self.policy.keyd = before
+            try:
+                keyboard.set_running(before)
+            except keyboard.KeymapError:
+                log.exception("could not put keyd back")
+            raise
+        self.keyboards.set_enabled(on)
+        if self.connection:
+            self.connection.emit_signal(
+                None, OBJECT_PATH, "org.kosherlinux.Daemon1.Profiles", "PolicyChanged",
+                GLib.Variant("(i)", (self.policy.revision,)))
+        log.info("keyd: switched %s", "on" if on else "off")
+        return None
+
+    @staticmethod
+    def _account_homes() -> list[str]:
+        """The people's home folders: every account in the range useradd
+        gives people, managed or not."""
+        import pwd
+
+        return [p.pw_dir for p in pwd.getpwall() if 1000 <= p.pw_uid < 60000]
+
+    def _settle_advanced(self) -> None:
+        """At start: decide the Advanced switches for a computer that had
+        Tailscale, Syncthing or keyd before there were switches (#220,
+        #230) — each stays on if it was in use — then put tailscaled and
+        keyd in step."""
+        from . import tailnet
+
+        settled = False
+        if self.policy.tailscale is None:
+            self.policy.tailscale = tailnet.signed_in_before()
+            settled = True
+        if self.policy.syncthing is None:
+            self.policy.syncthing = bool(syncthing.load_registry()) or any(
+                syncthing.REF in u.approved_apps for u in self.policy.users)
+            settled = True
+        if self.policy.keyd is None:
+            self.policy.keyd = keyboard.used_before(self._account_homes())
+            settled = True
+        if settled:
+            log.info("advanced: tailscale %s, syncthing %s, keyd %s",
+                     "on" if self.policy.tailscale else "off",
+                     "on" if self.policy.syncthing else "off",
+                     "on" if self.policy.keyd else "off")
+            try:
+                policy_mod.save(self.policy)
+            except Exception:  # noqa: BLE001 - decided again at the next start
+                log.exception("could not save the Advanced switches")
+        if tailnet.installed():
+            try:
+                tailnet.set_running(self.policy.tailscale, wait=False)
+            except tailnet.TailnetError:
+                log.exception("could not put tailscaled in step with the policy")
+        self.keyboards.set_enabled(bool(self.policy.keyd))
+        try:
+            keyboard.set_running(bool(self.policy.keyd), wait=False)
+        except keyboard.KeymapError:
+            log.exception("could not put keyd in step with the policy")
 
     def setup_complete(self) -> bool:
         """Setup is finished only when FinishSetup has stamped it.

@@ -1,0 +1,23 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "kosherwelcome"
+version = "0.1.0"
+description = "Welcome — what this computer is and where things are, once per account"
+readme = "README.md"
+requires-python = ">=3.11"
+license = "AGPL-3.0-or-later"
+dependencies = ["kosherd"]
+
+[project.scripts]
+kosher-welcome = "kosherwelcome.app:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/kosherwelcome"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# So `pytest` works from this directory as it does from `just test`.
+pythonpath = ["src", "../kosherd/src"]

@@ -222,3 +222,44 @@ def test_each_thread_gets_its_own_connection(tmp_path):
     t.start()
     t.join()
     assert seen and seen[0] != main_conn, "a worker thread reused the main connection"
+
+
+def test_the_count_and_categories_come_from_meta_when_the_build_wrote_them(tmp_path):
+    # Counting five million rows cost the daemon two seconds at every start
+    # and every listing (#276); the build writes both into meta. An older
+    # catalogue without them is still counted.
+    import sqlite3
+
+    from kosherd.categories import SqliteBundle
+
+    path = build_db(tmp_path / "categories.sqlite",
+                    [("bad.com", "adult"), ("chat.com", "social")])
+    assert len(SqliteBundle(path)) == 2
+    assert SqliteBundle(path).categories == {"adult", "social"}
+
+    db = sqlite3.connect(path)
+    db.execute("INSERT INTO meta VALUES ('count', '7')")
+    db.execute("INSERT INTO meta VALUES ('categories', 'adult,social,video')")
+    db.commit(); db.close()
+    bundle = SqliteBundle(path)
+    assert len(bundle) == 7
+    assert bundle.categories == {"adult", "social", "video"}
+
+
+def test_the_database_is_opened_once_until_the_file_changes(tmp_path):
+    import os
+
+    from kosherd import categories
+
+    path = build_db(tmp_path / "categories.sqlite", [("bad.com", "adult")])
+    first = categories.load_any(tmp_path)
+    assert categories.load_any(tmp_path) is first
+
+    # A replaced catalogue (a newer bundle from the portal) is noticed.
+    build_db(tmp_path / "fresh.sqlite", [("bad.com", "adult"), ("x.com", "video")],
+             version="newer")
+    os.replace(tmp_path / "fresh.sqlite", path)
+    os.utime(path, ns=(os.stat(path).st_mtime_ns + 2_000_000_000,) * 2)
+    again = categories.load_any(tmp_path)
+    assert again is not first
+    assert again.version == "newer"

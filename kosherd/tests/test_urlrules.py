@@ -91,3 +91,15 @@ def test_parse_rules_roundtrip():
     raw = [{"action": "block", "pattern": "a.com"}, {"action": "allow", "pattern": "b.com/x"}]
     parsed = parse_rules(raw)
     assert [r.to_dict() for r in parsed] == raw
+
+
+def test_a_bypass_rule_is_a_third_level_and_wins_where_it_is_first():
+    # #273: block refuses, allow opens but still filters the page's
+    # pictures, video and words; bypass filters nothing. First match wins
+    # among all three, as before.
+    from kosherd.urlrules import BYPASS
+
+    r = rules((BYPASS, "trusted.example"), (BLOCK, "*"))
+    assert decide(r, "https://www.trusted.example/any/page")[0] == BYPASS
+    assert decide(r, "https://other.example/")[0] == BLOCK
+    assert parse_rules([{"action": "bypass", "pattern": "t.example"}])[0].action == BYPASS

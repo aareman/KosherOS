@@ -3,8 +3,7 @@
 A custom drawing rather than 168 check buttons, so it reads as one shape —
 "afternoons and evenings" — and is painted the way Windows Family Safety
 and Screen Time are painted: press on a cell and drag a rectangle. Amber
-is allowed and blue is not, the same language as the chips (blue is the
-filter holding something, amber is open). The grid is Monday-first in the
+is allowed and red is blocked, matching the blocking controls. The grid is Monday-first in the
 policy and shown Sunday-first, because that is the week a family keeps.
 
 Keyboard: the grid takes focus, the arrows move a cursor cell, Space or
@@ -39,7 +38,7 @@ PALETTE = {
         "ink": (0.235, 0.192, 0.161),
         "line": (0.235, 0.192, 0.161, 0.14),
         "allowed": (0.933, 0.769, 0.522),   # amber: open
-        "blocked": (0.612, 0.690, 0.820),   # blue: held (soft, most of the week is blue)
+        "blocked": (0.87, 0.49, 0.47),     # muted red: blocked
         "focus": (0.235, 0.192, 0.161),
     },
     "dark": {
@@ -47,7 +46,7 @@ PALETTE = {
         "ink": (0.91, 0.88, 0.83),
         "line": (0.91, 0.88, 0.83, 0.16),
         "allowed": (0.80, 0.58, 0.30),
-        "blocked": (0.28, 0.35, 0.47),
+        "blocked": (0.55, 0.24, 0.23),
         "focus": (0.91, 0.88, 0.83),
     },
 }

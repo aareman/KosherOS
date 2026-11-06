@@ -31,7 +31,8 @@ class WhitelistDialog(Adw.Dialog):
         save.connect("clicked", lambda _b: (on_save(self.domains), self.close()))
         header.pack_end(save)
 
-        self.entry = Gtk.Entry(placeholder_text="example.com  (includes subdomains)",
+        self.entry = Gtk.Entry(placeholder_text="example.com",
+                               tooltip_text="Enter a domain. Subdomains are included.",
                                hexpand=True)
         self.entry.connect("activate", lambda _e: self._add())
         add_btn = Gtk.Button(icon_name="list-add-symbolic", tooltip_text="Add domain")
@@ -95,8 +96,22 @@ class WhitelistDialog(Adw.Dialog):
             self.list_box.append(row)
 
 
+# A rule's three levels (#273), in the order a person steps a page up:
+# the word on its drop-down, what the row says under the pattern, its
+# icon, the icon's colour. The drop-down's word stays short: a sentence
+# there took the row's width and wrapped the pattern a letter a line.
+RULE_LEVELS = {
+    "block": ("Blocked", "Blocked", "action-unavailable-symbolic", "error"),
+    "allow": ("Allowed", "Allowed · pictures, video and words still filtered",
+              "emblem-ok-symbolic", "success"),
+    "pictures": ("Pictures", "Pictures shown · video and words still filtered",
+                 "image-x-generic-symbolic", "success"),
+    "bypass": ("Bypassed", "Bypassed · nothing filtered", "security-low-symbolic", "warning"),
+}
+
+
 class RulesDialog(Adw.Dialog):
-    """Ordered URL allow/block rules.
+    """Ordered URL rules: block, allow, pictures or bypass.
 
     The first matching rule wins, so order is meaningful and rows can be
     moved up and down. Rules only do anything in inspect mode, which is
@@ -104,7 +119,7 @@ class RulesDialog(Adw.Dialog):
     """
 
     def __init__(self, win, title: str, rules: list[dict], on_save):
-        super().__init__(title=title, content_width=580, content_height=660)
+        super().__init__(title=title, content_width=860, content_height=760)
         self.win = win
         self.rules = [dict(r) for r in rules]
 
@@ -121,20 +136,27 @@ class RulesDialog(Adw.Dialog):
         block_btn = Gtk.Button(label="Block", tooltip_text="Add a block rule")
         block_btn.add_css_class("destructive-action")
         block_btn.connect("clicked", lambda _b: self._add("block"))
-        allow_btn = Gtk.Button(label="Allow", tooltip_text="Add an allow rule")
+        allow_btn = Gtk.Button(
+            label="Allow", tooltip_text="The page opens; its pictures, video and words "
+                                        "are still filtered")
         allow_btn.add_css_class("suggested-action")
         allow_btn.connect("clicked", lambda _b: self._add("allow"))
+        bypass_btn = Gtk.Button(label="Bypass",
+                                tooltip_text="Nothing on the page is filtered")
+        bypass_btn.connect("clicked", lambda _b: self._add("bypass"))
 
         add_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6,
                           margin_start=12, margin_end=12, margin_top=12, margin_bottom=4)
         add_box.append(self.entry)
         add_box.append(allow_btn)
+        add_box.append(bypass_btn)
         add_box.append(block_btn)
 
         hint = Gtk.Label(
-            label="Checked from top to bottom; the first rule that matches wins. "
-                  "Anything not matched is allowed — end with a “block *” rule to "
-                  "allow only what is listed above it.",
+            label=("Rules are checked from top to bottom. The first match applies. Other pages "
+                "use the normal filter settings. An allowed page still has its pictures, "
+                "video and words filtered; a bypassed page has nothing filtered. "
+                "Add “block *” last to block all other pages."),
             wrap=True, xalign=0, margin_start=14, margin_end=14, margin_bottom=8)
         hint.add_css_class("dim-label")
         hint.add_css_class("caption")
@@ -165,6 +187,11 @@ class RulesDialog(Adw.Dialog):
         self.entry.set_text("")
         self._rebuild()
 
+    def _set_level(self, index: int, action: str) -> None:
+        if 0 <= index < len(self.rules) and self.rules[index]["action"] != action:
+            self.rules[index]["action"] = action
+            self._rebuild()
+
     def _move(self, index: int, delta: int) -> None:
         target = index + delta
         if 0 <= target < len(self.rules):
@@ -175,19 +202,29 @@ class RulesDialog(Adw.Dialog):
         clear(self.list_box)
         if not self.rules:
             row = Adw.ActionRow(title="No rules yet",
-                                subtitle="Every page is allowed (behind the DNS filter)")
+                                subtitle="No custom rules. The account’s filter settings apply.")
             row.set_sensitive(False)
             self.list_box.append(row)
             return
         for index, rule in enumerate(self.rules):
-            blocked = rule["action"] == "block"
-            row = Adw.ActionRow(title=rule["pattern"],
-                                subtitle="Blocked" if blocked else "Allowed",
+            _word, subtitle, icon_name, style = RULE_LEVELS.get(
+                rule["action"], RULE_LEVELS["allow"])
+            row = Adw.ActionRow(title=rule["pattern"], subtitle=subtitle,
                                 use_markup=False)
-            icon = Gtk.Image(icon_name="action-unavailable-symbolic" if blocked
-                             else "emblem-ok-symbolic")
-            icon.add_css_class("error" if blocked else "success")
+            icon = Gtk.Image(icon_name=icon_name)
+            icon.add_css_class(style)
             row.add_prefix(icon)
+            # The level, changeable in place: blocked, allowed, bypassed.
+            level = Gtk.DropDown.new_from_strings([lv[0] for lv in RULE_LEVELS.values()])
+            level.set_valign(Gtk.Align.CENTER)
+            # One width for all three, so the arrows line up down the list.
+            level.set_size_request(130, -1)
+            level.set_tooltip_text("What this rule does")
+            level.set_selected(list(RULE_LEVELS).index(
+                rule["action"] if rule["action"] in RULE_LEVELS else "allow"))
+            level.connect("notify::selected", lambda dd, _p, i=index: self._set_level(
+                i, list(RULE_LEVELS)[dd.get_selected()]))
+            row.add_suffix(level)
 
             up = Gtk.Button(icon_name="go-up-symbolic", valign=Gtk.Align.CENTER,
                             tooltip_text="Check earlier", sensitive=index > 0)
@@ -246,8 +283,7 @@ class ListEditDialog(Adw.Dialog):
 
         self.removed_group = Adw.PreferencesGroup(
             title="Removed here",
-            description="Entries that ship with KosherOS but are switched "
-                        "off on this computer.")
+            description="Built-in entries disabled on this computer.")
         minus = Gtk.Button(icon_name="list-add-symbolic",
                            valign=Gtk.Align.CENTER)
         minus.connect("clicked", lambda _b: self._remove_dialog())
@@ -311,7 +347,7 @@ class ListEditDialog(Adw.Dialog):
         self.summary.set_title(" · ".join(parts))
 
         _fill(self.added_list, added,
-              "Nothing added. The shipped list covers the common cases.",
+              "No custom entries. The built-in list is still active.",
               self._drop_added)
         _fill(self.removed_list, self.remove,
               "Nothing removed.", self._restore_removed)
@@ -346,7 +382,7 @@ class ListEditDialog(Adw.Dialog):
             group.add(replacement)
         elif self.name == "content-terms.json":
             level = Adw.ComboRow(
-                title="How bad is it",
+                title="Content level",
                 model=Gtk.StringList.new([label for _k, label, _w in labels.CONTENT_LEVELS]))
             level.set_subtitle("No single word blocks a page on its own.")
             group.add(level)
@@ -389,8 +425,7 @@ class ListEditDialog(Adw.Dialog):
     def _remove_dialog(self) -> None:
         dialog = Adw.AlertDialog(
             heading=f"Switch off a shipped {self.noun}",
-            body="Type it exactly as it appears. It stays in the shipped "
-                 "list; this computer simply stops using it.")
+            body="Enter the exact text to disable this entry on this computer.")
         entry = Gtk.Entry(placeholder_text=self.noun)
         dialog.set_extra_child(entry)
         dialog.add_response("cancel", "Cancel")
@@ -444,12 +479,9 @@ class SavePresetDialog(Adw.Dialog):
 
         page = Adw.PreferencesPage()
         group = Adw.PreferencesGroup(
-            description="Everything on this account — filter mode, blocked "
-                        "content, pictures, language, YouTube, app installs — "
-                        "becomes a group. Put other accounts in it and they get "
-                        "these settings; change the group later and they all "
-                        "change. Saving an existing group's name updates that "
-                        "group for everyone in it.")
+            description=("Save this account’s settings as a group to apply them to other accounts. "
+                "Using an existing group name replaces its settings for everyone in that "
+                "group."))
         self.name = Adw.EntryRow(title="Group name")
         self.description = Adw.EntryRow(title="Description (optional)")
         group.add(self.name)
@@ -491,14 +523,14 @@ class RequestsDialog(Adw.Dialog):
     """
 
     def __init__(self, win, requests: list[dict]):
-        super().__init__(title="Waiting for you", content_width=680,
+        super().__init__(title="Access requests", content_width=680,
                          content_height=560)
         self.win = win
         self.requests = list(requests)
         header = Adw.HeaderBar()
         self.group = Adw.PreferencesGroup(
-            description="Pages someone on this computer has asked for. "
-                        "Nothing has changed until you allow one.")
+            description=("Review requests to open blocked pages. Pages stay blocked until you approve "
+                "them."))
         page = Adw.PreferencesPage()
         page.add(self.group)
         page.set_vexpand(True)
@@ -515,7 +547,7 @@ class RequestsDialog(Adw.Dialog):
             self.group.remove(row)
         self.rows = []
         if not self.requests:
-            row = Adw.ActionRow(title="Nothing is waiting",
+            row = Adw.ActionRow(title="No pending requests",
                                 subtitle="Every request has been answered.")
             self.group.add(row)
             self.rows.append(row)
@@ -580,7 +612,7 @@ class RequestRow(Adw.PreferencesRow):
 
         def refuse():
             win.call(lambda: win.client.dismiss_request(request["id"]),
-                     done_msg=None, on_done=lambda: done("Request turned down"))
+                     done_msg=None, on_done=lambda: done("Request declined"))
 
         buttons = Gtk.Box(spacing=6, margin_top=6)
         if request.get("mode") == "whitelist":
@@ -592,13 +624,13 @@ class RequestRow(Adw.PreferencesRow):
             allow.connect("clicked", lambda _b: grant(True))
             buttons.append(allow)
         else:
-            page = small_button("Just this page", "suggested-action")
+            page = small_button("Allow this page", "suggested-action")
             page.connect("clicked", lambda _b: grant(False))
-            site = small_button(f"All of {host}")
+            site = small_button(f"Allow {host}")
             site.connect("clicked", lambda _b: grant(True))
             buttons.append(page)
             buttons.append(site)
-        no = small_button("No", "flat")
+        no = small_button("Decline", "flat")
         no.connect("clicked", lambda _b: refuse())
         buttons.append(no)
         body.append(buttons)
@@ -640,8 +672,7 @@ class ApproveChannelDialog(Adw.AlertDialog):
     def __init__(self, win, approved: list[str], on_pick):
         super().__init__(
             heading="Approve a channel",
-            body="Search for it by name, or paste its handle (@example), "
-                 "its ID (UC…) or the address of its page.")
+            body="Search by channel name, or paste a channel link, @handle or ID.")
         self.win = win
         self.approved = set(approved)
         self.on_pick = on_pick
@@ -777,7 +808,7 @@ class HealthDialog(Adw.Dialog):
     """Everything the filter status has to say, in full sentences."""
 
     def __init__(self, win, rows: list[tuple[str, str, bool]]):
-        super().__init__(title="Is the filter working?", content_width=560,
+        super().__init__(title="Filter status", content_width=560,
                          content_height=480)
         header = Adw.HeaderBar()
         group = Adw.PreferencesGroup()
@@ -802,8 +833,8 @@ def guardian_dialog(win) -> Adw.AlertDialog:
     enabled = win.policy["guardian"]["enabled"]
     dialog = Adw.AlertDialog(
         heading="Guardian password",
-        body="A second password (e.g. the other spouse's) required for any "
-             "filter change.")
+        body=("An additional password required to reduce filtering restrictions. It is "
+            "requested once per session."))
     box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
     old = Gtk.PasswordEntry(show_peek_icon=True)
     new = Gtk.PasswordEntry(show_peek_icon=True)
@@ -815,9 +846,9 @@ def guardian_dialog(win) -> Adw.AlertDialog:
     dialog.set_extra_child(box)
     dialog.add_response("cancel", "Cancel")
     if enabled:
-        dialog.add_response("disable", "Disable Guardian")
+        dialog.add_response("disable", "Disable guardian password")
         dialog.set_response_appearance("disable", Adw.ResponseAppearance.DESTRUCTIVE)
-    dialog.add_response("ok", "Set Password")
+    dialog.add_response("ok", "Set password")
     dialog.set_response_appearance("ok", Adw.ResponseAppearance.SUGGESTED)
     dialog.set_default_response("ok")
     dialog.set_close_response("cancel")
@@ -838,6 +869,46 @@ def guardian_dialog(win) -> Adw.AlertDialog:
     return dialog
 
 
+def boot_menu_dialog(win) -> Adw.AlertDialog:
+    """Set (or change) the boot menu password (#129). The wizard sets it to
+    the administrator's password on a fresh install; this is for a machine
+    installed before that, or for choosing another."""
+    dialog = Adw.AlertDialog(
+        heading="Boot menu password",
+        body=("Asked for only when someone tries to edit the boot menu or open its "
+              "command line — the way round every other protection. Starting the "
+              "computer normally never asks."))
+    box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+    new = Gtk.PasswordEntry(show_peek_icon=True)
+    again = Gtk.PasswordEntry(show_peek_icon=True)
+    box.append(Gtk.Label(label="Password", xalign=0))
+    box.append(new)
+    box.append(Gtk.Label(label="Confirm", xalign=0))
+    box.append(again)
+    dialog.set_extra_child(box)
+    dialog.add_response("cancel", "Cancel")
+    dialog.add_response("ok", "Set password")
+    dialog.set_response_appearance("ok", Adw.ResponseAppearance.SUGGESTED)
+    dialog.set_default_response("ok")
+    dialog.set_close_response("cancel")
+    submit_on_enter(dialog, "ok", new, again)
+
+    def on_response(_d, response):
+        if response != "ok":
+            return
+        if len(new.get_text()) < 6 or new.get_text() != again.get_text():
+            win.toast("Boot passwords must match and be 6+ characters")
+            return
+        win.with_guardian(lambda pw: win.call(
+            lambda: win.client.set_boot_menu_password(new.get_text(), pw),
+            done_msg="Boot menu password set"))
+
+    dialog.connect("response", on_response)
+    dialog.present(win)
+    new.grab_focus()
+    return dialog
+
+
 def unmanaged_users(policy: dict) -> list[str]:
     import pwd
 
@@ -853,7 +924,7 @@ def unmanaged_users(policy: dict) -> list[str]:
 
 def add_person_dialog(win, adopt_mode: bool) -> Adw.AlertDialog | None:
     """Create an account, or bring an existing one under management."""
-    title = "Adopt Existing User" if adopt_mode else "Create User Account"
+    title = "Manage existing account" if adopt_mode else "Create account"
     dialog = Adw.AlertDialog(heading=title)
     box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
     group = Adw.PreferencesGroup()
@@ -882,6 +953,12 @@ def add_person_dialog(win, adopt_mode: bool) -> Adw.AlertDialog | None:
                 name.set_text(suggest_username(full.get_text()))
 
         def on_name(_e):
+            if name.get_text() != name.get_text().lower():
+                # Always lowercase, as it is typed.
+                position = name.get_position()
+                name.set_text(name.get_text().lower())
+                name.set_position(position)
+                return
             state["typed"] = bool(name.get_text().strip()) and \
                 name.get_text() != suggest_username(full.get_text())
             valid = username_ok(name.get_text())
@@ -918,7 +995,7 @@ def add_person_dialog(win, adopt_mode: bool) -> Adw.AlertDialog | None:
     box.append(group)
     dialog.set_extra_child(box)
     dialog.add_response("cancel", "Cancel")
-    dialog.add_response("ok", title.split()[0])
+    dialog.add_response("ok", "Manage" if adopt_mode else "Create")
     dialog.set_response_appearance("ok", Adw.ResponseAppearance.SUGGESTED)
     dialog.set_default_response("ok")
     dialog.set_close_response("cancel")
@@ -933,7 +1010,7 @@ def add_person_dialog(win, adopt_mode: bool) -> Adw.AlertDialog | None:
         if adopt_mode:
             username = candidates[name_row.get_selected()]
             win.call(lambda: win.client.adopt_user(username, m),
-                     done_msg=f"Adopted {username}")
+                     done_msg=f"Now managing {username}")
         else:
             username = name.get_text().strip()
             win.call(
@@ -955,27 +1032,18 @@ def username_ok(text: str) -> bool:
 
 
 def suggest_username(full_name: str) -> str:
-    """'Elisha Ben-David' -> 'elisha': the first name, lowercased, letters
-    and digits only. Short and memorable, which is what a login name is
-    for; the person can type something else."""
-    import re
-    import unicodedata
+    """'John Doe' -> 'jdoe', 'John' -> 'john': the same rule as the
+    first-run wizard (kosherd.usernames)."""
+    from kosherd import usernames
 
-    first = (full_name or "").strip().split()
-    if not first:
-        return ""
-    plain = unicodedata.normalize("NFKD", first[0]).encode("ascii", "ignore").decode()
-    slug = re.sub(r"[^A-Za-z0-9]", "", plain).lower()
-    if slug and not slug[0].isalpha():
-        slug = "u" + slug
-    return slug
+    return usernames.suggest(full_name)
 
 
 def confirm_remove_user(win, user: dict) -> None:
     dialog = Adw.AlertDialog(
         heading=f"Remove {user['username']}?",
-        body="Their account and everything in their home folder is "
-             "deleted. This cannot be undone.")
+        body=("This permanently deletes the account and all files in its home folder. This "
+            "cannot be undone."))
     dialog.add_response("cancel", "Cancel")
     dialog.add_response("remove", "Remove")
     dialog.set_response_appearance("remove", Adw.ResponseAppearance.DESTRUCTIVE)
@@ -989,34 +1057,75 @@ def confirm_remove_user(win, user: dict) -> None:
     dialog.present(win)
 
 
-def allow_menu(win, uid: int, username: str, url: str, on_done=None) -> Gtk.MenuButton:
-    """The Allow button on a blocked entry: this page, or the whole site."""
-    host = labels.host_of(url)
-    button = Gtk.MenuButton(label="Allow", valign=Gtk.Align.CENTER)
+def _folder_label(url: str) -> str | None:
+    """The folder a page is in, as a person reads it: "/library/article/"
+    for example.com/library/article/123. None at the top of a site."""
+    from kosherd.urlrules import folder_of
+
+    folder = folder_of(url)
+    if not folder:
+        return None
+    return "/" + folder.split("/", 1)[1].removesuffix("*")
+
+
+def _grant_menu(win, uid: int, username: str, url: str, label: str,
+                choices: list[tuple[str, str, str, str]], on_done=None) -> Gtk.MenuButton:
+    """A button on an activity entry whose menu grants a level to this
+    page, its folder or the whole site. choices: (button label, level,
+    scope, what the toast says), in the order shown."""
+    button = Gtk.MenuButton(label=label, valign=Gtk.Align.CENTER)
     button.add_css_class("flat")
     popover = Gtk.Popover()
     box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
 
-    def grant(whole: bool):
+    def grant(level: str, scope: str, said: str):
         popover.popdown()
         win.with_guardian(lambda pw: win.call(
-            lambda: win.client.allow_url(uid, url, whole, pw),
-            done_msg=f"Allowed {'all of ' if whole else ''}{host} for {username}",
-            on_done=on_done))
+            lambda: win.client.grant_url(uid, url, level, scope, pw),
+            done_msg=f"{said} for {username}", on_done=on_done))
 
-    page = Gtk.Button(label="Just this page")
-    page.add_css_class("flat")
-    page.connect("clicked", lambda _b: grant(False))
-    site = Gtk.Button(label=f"All of {host}")
-    site.add_css_class("flat")
-    site.connect("clicked", lambda _b: grant(True))
-    box.append(page)
-    box.append(site)
+    for text, level, scope, said in choices:
+        item = Gtk.Button(label=text)
+        item.add_css_class("flat")
+        item.get_child().set_xalign(0)
+        item.connect("clicked", lambda _b, lv=level, sc=scope, sd=said: grant(lv, sc, sd))
+        box.append(item)
     popover.set_child(box)
     button.set_popover(popover)
     return button
 
 
+def allow_menu(win, uid: int, username: str, url: str, on_done=None) -> Gtk.MenuButton:
+    """The Allow button on a blocked entry: this page, its folder or the
+    whole site; or, the level above, the site with nothing filtered."""
+    host = labels.host_of(url)
+    folder = _folder_label(url)
+    choices = [("Allow this page", "allow", "page", f"Allowed that page on {host}")]
+    if folder:
+        choices.append((f"Allow everything in {folder}", "allow", "folder",
+                        f"Allowed {host}{folder}"))
+    choices += [(f"Allow all of {host}", "allow", "site", f"Allowed all of {host}"),
+                (f"Bypass the filter on {host}", "bypass", "site",
+                 f"Nothing on all of {host} is filtered")]
+    return _grant_menu(win, uid, username, url, "Allow", choices, on_done)
+
+
+def pictures_menu(win, uid: int, username: str, url: str, on_done=None) -> Gtk.MenuButton:
+    """Allow pictures, on an entry saying pictures were hidden: shown as
+    they are on this page, its folder or the whole site. Video and words
+    are still filtered there."""
+    host = labels.host_of(url)
+    folder = _folder_label(url)
+    choices = [("Show pictures on this page", "pictures", "page",
+                f"Pictures are shown on that page of {host}")]
+    if folder:
+        choices.append((f"Show pictures everywhere in {folder}", "pictures", "folder",
+                        f"Pictures are shown in {host}{folder}"))
+    choices.append((f"Show pictures on all of {host}", "pictures", "site",
+                    f"Pictures are shown on all of {host}"))
+    return _grant_menu(win, uid, username, url, "Allow pictures", choices, on_done)
+
+
 __all__ = ["WhitelistDialog", "RulesDialog", "ListEditDialog", "SavePresetDialog",
            "RequestsDialog", "RequestRow", "HealthDialog", "guardian_dialog", "add_person_dialog",
-           "confirm_remove_user", "request_row", "allow_menu", "tag"]
+           "confirm_remove_user", "request_row", "allow_menu", "pictures_menu", "tag"]

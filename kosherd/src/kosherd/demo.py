@@ -121,7 +121,7 @@ def _user(uid, name, key, admin=False, **kw):
     u = {"uid": uid, "username": name, "mode": p.mode, "admin": admin, "whitelist": [],
          "rules": [], "apps": [], "blocked_categories": list(p.blocked_categories),
          "media_level": p.media_level, "language_filter": p.language_filter,
-         "youtube": dict(p.youtube), "can_install_apps": p.can_install_apps,
+         "youtube": dict(p.youtube), "calm": {}, "can_install_apps": p.can_install_apps,
          "app_access": p.app_access, "blocked_app_kinds": list(p.blocked_app_kinds),
          "blocked_apps": list(p.blocked_apps),
          "layout": "classic", "cover_style": "frost", "time": {},
@@ -136,6 +136,9 @@ class DemoClient:
     def __init__(self):
         self.policy = {
             "revision": 3, "guardian": {"enabled": True}, "adblock": {"enabled": True},
+            # On in the demo so every page has something to show; a new
+            # install has both off.
+            "advanced": {"tailscale": True, "syncthing": True, "keyd": True},
             "custom_profiles": [profiles.to_dict(g) for g in DEMO_GROUPS],
             "users": [
                 _user(1000, "avi", "grown-up", admin=True),
@@ -303,6 +306,10 @@ class DemoClient:
         self._user(uid)["youtube"] = dict(settings)
         self._change(uid, "SetYouTube", [uid])
 
+    def set_calm(self, uid, settings, pw=""):
+        self._user(uid)["calm"] = dict(settings)
+        self._change(uid, "SetCalm", [uid])
+
     def search_youtube_channels(self, query):
         """Made-up channels shaped like the real answer; the demo never
         goes to YouTube."""
@@ -328,7 +335,22 @@ class DemoClient:
         self.policy["adblock"]["enabled"] = enabled
         self._change(None, "SetAdBlock", [enabled])
 
-    def my_layout(self): return "classic"
+    def set_adblock_allowed(self, hosts, pw=""):
+        self.policy["adblock"]["allowed"] = sorted(set(hosts))
+        self._change(None, "SetAdBlockAllowed", [list(hosts)])
+
+    def my_layout(self): return self._user(1002).get("layout", "classic")
+
+    def set_my_layout(self, layout):
+        """The Look app's choice for the person at the keyboard: in the demo, yosef."""
+        self.set_layout(1002, layout)
+
+    def my_compositor(self): return self._user(1002).get("compositor", "niri")
+
+    def set_my_compositor(self, compositor):
+        """What the advanced desktop runs on, for yosef. Not logged: the
+        person's own choice, like SetMyLayout."""
+        self._user(1002)["compositor"] = compositor
 
     def get_my_settings(self):
         """What My Filter shows the person at the keyboard: in the demo, yosef."""
@@ -351,11 +373,80 @@ class DemoClient:
     def _time_state(self, u):
         return timelimits.status(u.get("time"), self.used_today.get(u["uid"], 0))
 
+    def set_developer_tools(self, uid, enabled, pw=""):
+        self._user(uid)["developer_tools"] = bool(enabled)
+        if not enabled:
+            self._user(uid).pop("ssh_in", None)
+        self._change(uid, "SetDeveloperTools", [uid, bool(enabled)])
+
+    def set_ssh_in(self, uid, enabled, pw=""):
+        self._user(uid)["ssh_in"] = bool(enabled)
+        self._change(uid, "SetSshIn", [uid, bool(enabled)])
+
+    def set_build_sources(self, hosts, pw=""):
+        self.policy.setdefault("developer", {})["build_sources_extra"] = sorted(set(hosts))
+        self._change(None, "SetBuildSources", [list(hosts)])
+
+    def set_boot_menu_password(self, password, pw=""):
+        self._boot_menu = True
+        self._change(None, "SetBootMenuPassword", [])
+
+    def boot_menu_protected(self):
+        return getattr(self, "_boot_menu", True)
+
+    # Tailscale: signed out to begin with; signing in "finishes in the
+    # browser" on the second look at the status.
+    def tailscale_status(self):
+        if not self.policy["advanced"].get("tailscale"):
+            return {"enabled": False, "installed": True, "state": "Off",
+                    "signed_in": False, "connected": False}
+        looks = getattr(self, "_tailscale_looks", None)
+        if looks is not None:
+            self._tailscale_looks = looks + 1
+            if looks >= 1:
+                self._tailscale_looks = None
+                self._tailscale = True
+        if not getattr(self, "_tailscale", False):
+            return {"installed": True, "state": "NeedsLogin", "signed_in": False,
+                    "connected": False}
+        return {"installed": True, "state": "Running", "signed_in": True,
+                "connected": True, "user": "parent@example.com",
+                "tailnet": "parent@example.com", "dns_suffix": "tail1234.ts.net",
+                "name": "kosheros.tail1234.ts.net",
+                "addresses": ["100.101.102.103", "fd7a:115c:a1e0::1"]}
+
+    def tailscale_sign_in(self, pw=""):
+        self._tailscale_looks = 0
+        self._change(None, "TailscaleSignIn", [])
+        return "https://login.tailscale.com/a/demo"
+
+    def tailscale_sign_out(self):
+        self._tailscale = False
+        self._change(None, "TailscaleSignOut", [])
+
+    def set_tailscale_enabled(self, enabled, guardian_password=""):
+        self.policy["advanced"]["tailscale"] = bool(enabled)
+        self._change(None, "SetTailscaleEnabled", [bool(enabled)])
+
+    def set_syncthing_enabled(self, enabled, guardian_password=""):
+        self.policy["advanced"]["syncthing"] = bool(enabled)
+        self._change(None, "SetSyncthingEnabled", [bool(enabled)])
+
+    def set_keyd_enabled(self, enabled, guardian_password=""):
+        self.policy["advanced"]["keyd"] = bool(enabled)
+        self._change(None, "SetKeydEnabled", [bool(enabled)])
+
     def set_network_access(self, uid, video_calls, extra_ports, pw=""):
         u = self._user(uid)
         u["video_calls"] = bool(video_calls)
         u["extra_ports"] = sorted(set(int(p) for p in extra_ports))
         self._change(uid, "SetNetworkAccess", [uid, bool(video_calls), u["extra_ports"]])
+
+    def set_ssh(self, uid, anywhere, hosts, pw=""):
+        u = self._user(uid)
+        u["ssh_anywhere"] = bool(anywhere)
+        u["ssh_hosts"] = [str(h) for h in hosts]
+        self._change(uid, "SetSsh", [uid, bool(anywhere), u["ssh_hosts"]])
 
     def set_time_limits(self, uid, settings, pw=""):
         self._user(uid)["time"] = timelimits.parse(settings)
@@ -486,6 +577,12 @@ class DemoClient:
     def allow_url(self, uid, url, whole_site=False, pw=""):
         self._change(uid, "AllowUrl", [uid, url, whole_site])
 
+    def bypass_url(self, uid, url, whole_site=False, pw=""):
+        self._change(uid, "BypassUrl", [uid, url, whole_site])
+
+    def grant_url(self, uid, url, level, scope, pw=""):
+        self._change(uid, "GrantUrl", [uid, url, level, scope])
+
     def list_activity(self, since=0, uid=-1):
         return [e for e in self.events if e["t"] >= since and (uid < 0 or e["uid"] == uid)]
 
@@ -495,6 +592,35 @@ class DemoClient:
         today = activity.day_start()
         return {str(u): c for u, c in activity.summary(
             [e for e in self.events if e["t"] >= today]).items()}
+
+    def usage(self):
+        """Ninety days of made-up but plausible numbers: a few hundred
+        requests an hour of browsing, a block now and then, most requests
+        through the filter in under 25 ms."""
+        from kosherd import usage
+
+        store = {"days": {}, "total": {}}
+        today = time.time()
+        # uid: (requests a day, share blocked, pictures a day)
+        people = {1000: (2600, 0.002, 4), 1001: (1900, 0.001, 2),
+                  1002: (3400, 0.006, 22), 1003: (2200, 0.004, 9)}
+        for back in range(90):
+            day = usage.day_key(today - back * 86400)
+            wobble = 0.6 + ((back * 37) % 9) / 10
+            for uid, (requests, blocked, pictures) in people.items():
+                n = int(requests * wobble)
+                entry = usage.empty()
+                entry.update(requests=n, bytes_in=n * 61_000, bytes_out=n * 1_900,
+                             blocked=int(n * blocked), pictures=int(pictures * wobble),
+                             videos=int(blocked * 300), searches=int(blocked * 1000))
+                entry["lat"] = [int(n * f) for f in
+                                (.22, .18, .2, .14, .12, .07, .04, .02, .008, .001, 0, 0, 0)]
+                entry["lat_ms"] = n * 9
+                if back < usage.KEEP_DAYS:
+                    store["days"].setdefault(day, {})[str(uid)] = entry
+                usage.merge(store["total"].setdefault(str(uid), usage.empty()), entry)
+                store["since"] = day
+        return usage.report(store)
 
     # -- apps ----------------------------------------------------------------------
 
@@ -514,7 +640,9 @@ class DemoClient:
             account = next(u for u in self.policy["users"] if u.get("admin"))
         index = [*self.catalog, *DEMO_STORE_APPS]
         return {"access": appaccess.access_of(account), "ready": True,
-                "apps": appaccess.visible(account, index, self.catalog)}
+                "apps": appaccess.visible(account, index, self.catalog,
+                                          () if self.policy["advanced"].get("syncthing")
+                                          else ("nixpkgs#syncthing",))}
 
     def set_user_app_access(self, uid, access, guardian_password=""):
         self._user(uid)["app_access"] = access
@@ -528,10 +656,32 @@ class DemoClient:
         self._user(uid)["blocked_apps"] = sorted(refs)
         self._change(uid, "SetUserBlockedApps", [uid, sorted(refs)])
 
+    def set_user_app_approval(self, uid, ref, approved, guardian_password=""):
+        u = self._user(uid)
+        refs = set(u.get("approved_apps") or [])
+        (refs.add if approved else refs.discard)(ref)
+        u["approved_apps"] = sorted(refs)
+        self._change(uid, "SetUserAppApproval", [uid, ref, bool(approved)])
+
+    def set_syncthing_lan(self, uid, enabled, guardian_password=""):
+        self._user(uid)["syncthing_lan"] = bool(enabled)
+        self._change(uid, "SetSyncthingLan", [uid, bool(enabled)])
+
     def list_installed(self): return [a["ref"] for a in self.installed]
     def list_installed_details(self): return list(self.installed)
+    def list_my_installed_details(self):
+        return [{k: v for k, v in a.items() if k not in ("installed_by", "installed_by_uid")}
+                for a in self.installed]
     def set_user_apps(self, uid, refs): self._user(uid)["apps"] = list(refs)
     def install_app(self, ref):
+        self._install_app(ref)
+
+    def install_app_for(self, uid: int, ref: str) -> None:
+        """Simulate an administrator installing for the selected account."""
+        account = self._user(uid)
+        self._install_app(ref, installed_by=account["username"], installed_by_uid=uid)
+
+    def _install_app(self, ref, installed_by="you", installed_by_uid=None):
         """Pretend to install: progress over a second, then finished."""
         from gi.repository import GLib
 
@@ -545,8 +695,11 @@ class DemoClient:
                 GLib.timeout_add(250, tick, i + 1)
             else:
                 name = next((a["name"] for a in self.catalog if a["ref"] == ref), ref)
-                self.installed.append({"ref": ref, "name": name, "installed_by": "you",
-                                       "approved": True})
+                entry = {"ref": ref, "name": name, "installed_by": installed_by,
+                         "approved": True}
+                if installed_by_uid is not None:
+                    entry["installed_by_uid"] = installed_by_uid
+                self.installed.append(entry)
                 if self._on_finished:
                     self._on_finished(ref, True, "")
             return False
@@ -693,6 +846,26 @@ class DemoClient:
     def reboot(self):
         self._change(None, "Reboot", [])
 
+    def set_auto_updates(self, schedule, notify):
+        self.policy["updates"] = {"auto": schedule, "notify": bool(notify)}
+        self._change(None, "SetAutoUpdates", [schedule, bool(notify)])
+
+    def auto_update_status(self):
+        updates = self.policy.get("updates") or {}
+        return {"schedule": updates.get("auto", "weekly"),
+                "notify": updates.get("notify", True),
+                "last_success": now - 2 * 86400, "last_attempt": now - 2 * 86400,
+                "last_error": None, "next_due": now + 5 * 86400, "pending": None}
+
+    def run_auto_update(self, now=False):
+        return {"result": "none"}
+
+    def pending_update(self):
+        return {}
+
+    def connect_update_ready(self, on_ready):
+        return 3
+
     def deployment_status(self):
         channel = getattr(self, "_demo_channel", "edge")
         image = f"ghcr.io/aareman/kosher-linux:{channel}"
@@ -702,7 +875,18 @@ class DemoClient:
                              "version": "0.1.0-pre.9", "timestamp": now - 90000},
                 "staged": None, "rollback_queued": False}
 
-    def rollback(self): self._change(None, "Rollback", [])
+    def rollback(self, guardian_password=""): self._change(None, "Rollback", [])
+
+    def list_unused_apps(self): return []
+
+    def remove_unused_apps(self): return {"count": 0, "size": 0}
+
+    def try_image(self, what, pw=""):
+        """Pretend to try a build: the same pull as an update."""
+        self._change(None, "TryImage", [what])
+        self._pretend_pull()
+
+    def return_to_kept(self): self._change(None, "ReturnToKept", [])
 
     # -- portal ------------------------------------------------------------------------
 

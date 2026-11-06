@@ -41,13 +41,30 @@ page served on 8080 meets the same rules as one on 443. Loopback is never
 redirected. Anything that reaches the proxy and is not HTTP, or TLS carrying
 HTTP, is refused rather than passed through.
 
+SSH, FTP, SMTP, POP3 and IMAP (ports 22, 21, 25, 110 and 143) are the
+exception. In these the server speaks first, so the proxy would have nothing
+to read and the program would wait forever. They are not sent to the proxy
+and are refused at once, so the program says the connection was refused.
+On any other port, the proxy closes a connection if the program has sent
+nothing after ten seconds.
+
 Three things do not go through the proxy, because they are not web and the
 proxy could not read them:
 
 - **Mail.** IMAPS, SMTPS and submission are allowed directly.
 - **Extra ports** an administrator grants one account, under *Beyond the
   web* on the account's page, for a program that is neither web nor mail.
-  The filter's own ports can never be granted this way. Empty by default.
+  The filter's own ports, and Syncthing's (see [Syncthing](#syncthing)), can
+  never be granted this way. Empty by default.
+- **SSH to other machines**, under that heading on the account's page: the
+  machines an account may connect to over SSH — a name, an address, a
+  range, or `tailnet` for every machine on this computer's tailnet — and
+  nothing else. Port 22 is otherwise closed, because an SSH tunnel reaches
+  anything. A server whose SSH listens on another port takes the port after a
+  colon, `git.example.com:222` (an IPv6 address in brackets, `[fd00::5]:222`).
+  That port is opened to that machine only; there's no need to open it to
+  every server under *Extra ports*. The web's and DNS's ports can't be named. *Anywhere* opens it to every machine, for an account an
+  administrator trusts with that, and the switch says so.
 - **Video calls.** Zoom, Meet and school calls send picture and sound over
   UDP to high ports, which cannot be inspected. That is allowed by default
   so calls work without a visit to the admin app. The switch on the
@@ -57,6 +74,123 @@ proxy could not read them:
 A *Basic protection* account has no proxy, so for it the web is ports 80
 and 443 to anywhere, plus the same named protocols. *Approved sites only*
 and *No internet* allow nothing beyond the approved sites.
+
+The package registries developer tools fetch from are reachable from every
+account, and the image points each tool at the filter's certificate;
+[what works](supported.md#developer-tools) has the table.
+
+### Developer tools
+
+Nix, devbox and devenv are on every KosherOS machine, but an account may use
+them itself only when an administrator switches **Developer tools** on for it
+(the account's Apps tab; guardian-gated). Off — the default — the Store is the
+only way to install: kosherd runs catalogue installs as root into the account's
+own profile, and the account cannot run Nix at all. The `nix` program and its
+libraries can be read only by root and the group `kosher-nix`, which kosherd
+keeps to the accounts with the switch on. The Nix daemon refuses everyone
+else too, but that alone is not enough: Nix can download and build into a
+store in the account's home without the daemon. Turning the switch on or off
+reaches a terminal the next time the person signs in. On, the account
+can build anything from nixpkgs from a terminal and reaches the package
+registries (npm, PyPI, crates.io, GitHub and the rest) through its own filter
+mode. Those registries are no longer in the set every account reaches: a
+whitelist-only account without the switch sees exactly its list.
+
+The switch also lets the account use git over SSH with GitHub, GitLab,
+Codeberg and Bitbucket, so `git clone git@github.com:...` and `gh repo clone`
+work. Port 22 is open to those four hosts only, and SSH to any other server is
+refused, because an SSH connection can carry a tunnel around the filter. For a
+git server of the family's own, an administrator can add port 22 under *Extra
+ports*, which opens SSH to every server for that account.
+
+With developer tools on, a second switch appears: **Sign in over SSH**. On,
+the account can be used from another computer with `ssh`. Only keys are
+accepted, never a password, so the person adds the other computer's public
+key to `~/.ssh/authorized_keys` in this account, at this computer:
+
+```
+mkdir -p ~/.ssh
+curl -s https://github.com/NAME.keys >> ~/.ssh/authorized_keys
+```
+
+or by pasting the line from the other computer's `~/.ssh/id_ed25519.pub`.
+The SSH server runs only while at least one account has the switch on, and
+lets in only those accounts. It keeps the account's time limits. Anything the
+account does here over SSH goes through its own filter, and `ssh -L` works.
+`ssh -R` and tunnels are refused, because a listener here would reach out
+from the other computer unfiltered. Files copied in over the connection are
+not checked, which is why the switch is guardian-gated. Turning developer
+tools off turns this off too. From a terminal it's
+`kosherctl ssh-in UID on`.
+
+What the switch cannot stop is a copy of Nix the account downloads itself.
+nix-portable, for one, is a single file on GitHub that brings its own Nix
+and needs no user namespaces, and the binary cache it fetches from
+(cache.nixos.org and its mirrors) is an ordinary site to the filter. That is
+the same as any other program downloaded and run from the home folder, which
+KosherOS does not prevent today. Everything such a program fetches still goes
+through the account's own filter.
+
+A build's own downloads — `fetchurl`, `fetchFromGitHub` — run as the Nix build
+users, which belong to no account. Their web goes through the proxy on a
+listener of their own, with bare addresses and encrypted-DNS tricks refused and
+no picture scoring (a build fetches tarballs, not pages). Everything else of
+theirs is refused, including loopback, so a build can never be a relay for the
+account that started it. The daemon's own fetches from the binary cache run as
+root, from caches only root can name.
+
+What a build may download is the strictest filter among the accounts that have
+developer tools on, since only they can start one. Every one of their own
+rules and blocked categories applies, so on a machine with one developer
+account a build gets exactly that account's filter, and any site that filter
+allows is fine. If no account has developer tools on, a build downloads
+nothing; the Store's own installs come from the binary cache.
+
+If one of the developer accounts is on approved sites only, a build may
+download only from known source hosts: GitHub and its download hosts, GitLab,
+Codeberg, Bitbucket and SourceHut, the SourceForge, GNU and kernel.org mirrors,
+the project download servers nixpkgs names in its mirror list, the language
+registries (PyPI, crates.io, npm, Go's module proxy, RubyGems, Hackage, Maven
+Central), NixOS's own servers, and that account's own approved sites. An
+administrator can add a host to this list with `kosherctl build-sources add
+HOST` (guardian-gated), and `kosherctl build-sources` shows it. The list is
+used only in this case. The built-in part is in `kosherd/buildsources.py`.
+
+When the proxy refuses a build's download, the build log names the host and
+the account whose setting refused it.
+
+### Syncthing
+
+Syncthing keeps folders the same on a person's computers and phone. The filter
+cannot read what it sends: paired devices talk to each other over encrypted
+connections that only they can open, so files that arrive from a paired device
+are not checked by the filter at all. What can be controlled is who has it and
+where it may connect.
+
+Syncthing is off on a new computer, and the Store does not offer it. An
+administrator turns it on for the computer in **Admin → Advanced**. Turning it
+off again stops Syncthing for every account. Each account's install and synced
+folders are kept, and its Syncthing starts again if it is turned back on.
+
+An administrator's account and an unfiltered one can install Syncthing from the
+Store like any other app. Any other account needs an administrator to allow it
+for that account, on the account's Apps tab, even when the account may use the
+whole store. Once it is allowed, Syncthing runs for that account in the
+background, and the Syncthing icon opens its page in the browser.
+
+Only Syncthing itself gets its ports. It runs as a system service for the
+account, and the firewall lets ports 22000 and 22067 (and UDP 22000 and 21027)
+out only for that service. Any other program on the account, including a copy
+of Syncthing started from a terminal, is refused on those ports. To find the
+person's other devices, the service also reaches Syncthing's discovery servers
+and relay list directly. Taking the permission away stops the service and
+closes the ports; the synced folders stay where they are.
+
+Devices on the same home network cannot connect to it unless an administrator
+switches on **Let devices on this network connect directly** for the account.
+With it on, the computer accepts Syncthing's connections from addresses on the
+local network only, never from the internet. Approving Syncthing, taking it
+away, and that switch are all recorded in the activity log.
 
 ## The category database
 
@@ -79,17 +213,44 @@ come back clean, while the adult, dating, gambling and VPN sites in the
 check must be caught. A list that blocked chinuch.org would be worse than no
 list.
 
+Video-call services are in no category a parent can switch off. The Toulouse
+lists file Microsoft Teams and Skype as chat, which would make a meeting link
+open on the block page for any account that blocks social networks. Teams,
+Skype, Zoom and Google Meet are listed as calls instead, so a meeting link
+opens for a filtered account. Their pages and pictures are still read and
+judged like any other site's.
+
 ## Page rules
 
 A page rule is the one thing a parent writes by hand, and most families
-never need to. Rules are an ordered allow and block list, first match wins,
-matched without regard to case, scheme or a leading `www`. A bare host
-covers the whole site, `*.host` includes subdomains, and `host/dir/*` covers
-a directory. An unmatched request is allowed, so a trailing `block *` makes
-an account deny-by-default.
+never need to. Rules are an ordered list, first match wins, matched without
+regard to case, scheme or a leading `www`. A bare host covers the whole
+site, `*.host` includes subdomains, and `host/dir/*` covers a directory. An
+unmatched request is allowed, so a trailing `block *` makes an account
+deny-by-default.
 
-Rules are edited on the person's page in the admin app, or with
-`kosherctl rules`.
+A rule does one of four things. *Block* refuses the page. *Allow* opens it
+whatever the category lists and the content scorer say, but the page is
+still a page: its pictures and video are judged, and its words are cleaned,
+like any other. *Pictures* is allow with the page's pictures shown as they
+are, wherever they're served from; its video and words are still filtered.
+*Bypass* is the level above that, for a site the administrator trusts
+outright: nothing on it is filtered, and the proxy passes it through as it
+came. A bypassed page's own pictures and scripts are left alone with it
+wherever they are served from, because the browser names the page they came
+from. Safe search is still forced on a bypassed search engine.
+
+A browser tells another site only which site a page is on, not which page,
+so a page with a *Pictures* rule is told to send its full address with the
+pictures it asks for. That's what lets a rule for one page or one folder
+reach pictures served from a CDN. It happens only on the pages a rule names.
+
+Rules are edited on the person's page in the admin app, where a rule's
+level can be changed in place, or with `kosherctl rules`. In the activity
+view, a blocked page has an *Allow* button: this page, everything in its
+folder, the whole site, or bypass the filter on the site. A page where
+pictures were hidden has an *Allow pictures* button with the same three
+choices: this page, its folder, or the whole site.
 
 ## Judging a page by its words
 
@@ -105,6 +266,32 @@ Blocking those works against the family that installed the filter.
 
 The same scorer judges search results, and the block page's reason names
 the verdict so a parent can see why.
+
+### What the page shows after it arrived
+
+A chat message, a feed item, a search result fetched as JSON and drawn by
+script never passes through the proxy as text. So every page the proxy
+lets through carries a small script of the proxy's own, served on a
+reserved address on the page's own origin (`/__kosheros__/filter.js`,
+cached for a day) and answered by the proxy, never forwarded. In the page
+it does two things. The language filter: the same word list, as the same
+patterns, over every text node the page adds or changes, replaced in
+place, or in block mode the proxy's block page. And the content scorer:
+the words the page adds are gathered and sent back to be judged with the
+same tolerance that judged the page itself, so a page that renders what
+the filter would have blocked is blocked a moment later. What a person
+types is theirs and is left alone; code on the page is not prose and is
+skipped. A page whose Content-Security-Policy names a script nonce gets
+the nonce on the tag; one that forbids every script, its own included,
+keeps the proxy's judgement of the HTML and nothing more.
+
+The tag carries a token for that one page, signed for the account and the
+site, and the script sends it back with every call. The proxy answers the
+word list and the judge only to a call that carries it, refuses a block
+reported under another site's address, and allows a page so many calls a
+minute. A block the script reported is marked in the activity log as what
+the page showed after it loaded, so a parent can tell it from a page the
+proxy refused on the way in.
 
 ## Bad language
 
@@ -191,6 +378,35 @@ At the modesty picture levels YouTube's thumbnails are treated like image
 search thumbnails: hidden whenever a person is in them, because they are
 small pictures of the whole web from a host the family cannot curate.
 
+## Calmer sites
+
+X, Reddit, YouTube and Facebook cannot always be blocked wholesale — an
+article links a tweet you need to read, a reddit post answers a question
+about a bug — but their feeds are built to be bottomless. An account can
+be given a calmer version of a site instead. A feed page ends after a set
+number of items; a post opened by a link is shown on its own, without the
+comments, the related videos or the rails back into the site; and the
+ads, sidebars and recommendations are never drawn. Signing in is never
+touched, so a flow that needs the site's own login still works.
+
+The pages are single-page applications, so the stripping happens in the
+page: the proxy injects a script of its own (`/__kosheros__/calm.js`),
+and the script re-reads the address on every soft navigation, because a
+click inside these apps does not load a new page. The rules for which
+page is a post and which a feed live in one place and are handed to the
+script, so the two cannot drift.
+
+A site may also carry a daily budget. The page sends a heartbeat while
+it is visible; the proxy keeps the seconds, writes them out so a proxy
+restart (every policy change restarts it) does not hand the time back,
+and answers the page with what is left. A budget that is spent closes
+that site for the rest of the day with the proxy's own page; another
+calmed site is unaffected. The count is a nudge rather than a wall — a
+page could misreport its own seconds — the wall is the category block.
+
+The calmer sites are set on the person's Calm tab, and apply in Filtered
+internet mode, the only mode where the proxy sees the page.
+
 ## Ad blocking, for everyone
 
 The machine already forces every account's DNS through its own resolvers,
@@ -214,6 +430,26 @@ sits on the Protection page under "Applies to everyone", because one
 resolver cannot answer differently per account. It does not do cosmetic
 filtering, first-party ads served from the site's own domain, or ads inside
 YouTube's player, which the YouTube limits handle.
+
+### What it never blocks: a checkout's fraud check
+
+A shop does not approve a card on the number alone. Before the order is
+accepted, a script from a fraud service (ThreatMetrix, Signifyd, Forter,
+Riskified and the like) fingerprints the browser, the payment processor
+loads its own fraud signals, and the card's bank may open a "confirm it is
+you" frame. Those scripts look exactly like trackers, so every tracker
+list carries them. Refused, the order fails after the cart has been
+consumed, with nothing on the page to say why.
+
+So the ad blocker leaves those hosts resolvable, and the proxy's category
+lists step aside for them for every filtered account. Only the category
+lists: a page from one of them is still read and scored, and a page rule
+can still block it. `kosherctl adblock allowed` shows the built-in set.
+For the next one, `kosherctl adblock allow HOST` adds a host (or
+`*.host` for everything under it) for every account; it takes the guardian
+password, like switching the blocker off, and `kosherctl adblock disallow`
+takes it back. The built-in entries cannot be removed; a family that must
+block one does it with a page rule on the account.
 
 ## Asking for a page, and the activity log
 
@@ -251,6 +487,26 @@ the proxy answers itself and never forwards, because a browser refuses to
 submit a plain-HTTP form from a page it considers secure. Requests are
 individual files in a spool that the two unprivileged services may write
 to but not list or read, and the daemon is the only reader.
+
+## Usage
+
+The admin app's Usage page shows how much went through the filter and how
+much it stopped, as numbers: pages and files loaded, data downloaded and
+uploaded, pages, pictures, videos and searches blocked, and how long the
+filter held each request (the average, the time half of all requests
+finished within, and the time 95 in 100 finished within). It covers today,
+this week, this month or all time, for everyone or for one person, and
+each person's overview shows today's figures. Only accounts on filtered
+internet are counted, because on the other settings the filter never sees
+the pages.
+
+Only totals are kept, never an address. The proxy adds up in memory and
+writes its totals once a minute, the search service writes a line for each
+search it refuses, and kosherd folds both into a file of daily totals. Days
+are kept for sixty days and then dropped, after they have been added to
+an all-time total, so the file stays under a megabyte however long
+the computer runs. A writer stops writing if kosherd stops collecting, and
+keeps counting in memory until it can.
 
 ## Saying when the filter is not filtering
 
@@ -296,7 +552,7 @@ protected against replay the same way, because rolling a family back to
 last year's word list is an attack rather than a downgrade. The bundle is
 the same for every enrolled device, and it replaces the shipped copy. Only
 four file names are accepted. A portal that does not offer lists is treated
-as "nothing new". `just publish-lists https://portal.example` sends this
+as "nothing new". `python3 scripts/publish-lists.py https://portal.example` sends this
 repository's lists to a portal.
 
 **The category database** is too large to ride inside a signed document,
@@ -338,18 +594,6 @@ merged with them. `kosherctl site-lists` shows the bundles and switches
 them on. In the admin app an approved-sites account is not asked which
 kinds of site to block, since it reaches its list and nothing else; the
 bundles take that tab's place.
-
-## Developer tools on a filtered machine
-
-Browsers, curl, git and Go trust the filter's certificate through the
-system store. The language package managers carry their own certificate
-bundles and would refuse every download, which to a student looks like a
-broken internet. So the image sets, for every account, the environment
-variable each tool honours, pointing at the system bundle, in login shells
-and in the desktop session. The registries those tools fetch from are
-reachable from every account, including approved-sites ones, because they
-hold code rather than pages. [What works](supported.md#developer-tools)
-has the table.
 
 ## Who is connecting: one port per user
 

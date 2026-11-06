@@ -73,7 +73,9 @@ def test_system_uids_unrestricted():
 def test_established_accepted_before_uid_dispatch():
     out = rendered()
     chain = out.split("chain output")[1].split("chain")[0]
-    assert chain.index("ct state established,related accept") < chain.index("meta skuid")
+    # The dispatch, specifically: per-account rules that must precede the
+    # loopback accepts (the plain resolver's guard, #127) also say skuid.
+    assert chain.index("ct state established,related accept") < chain.index("meta skuid vmap")
 
 
 def test_input_chain_drops_new_inbound():
@@ -106,7 +108,7 @@ def test_inspect_mode_redirects_web_to_mitmproxy():
     # who is connecting.
     ports = nft.mitm_ports(pol)
     for uid in inspected:
-        assert f"meta skuid {uid} tcp dport != {{ 53, 465, 587, 993 }} redirect to :{ports[uid]}" in out
+        assert f"meta skuid {uid} tcp dport != {{ 21, 22, 25, 53, 110, 143, 465, 587, 993, 22000, 22067 }} redirect to :{ports[uid]}" in out
     assert len(set(ports.values())) == len(inspected), "ports must be distinct"
     # inspected users still get the filtered egress policy and evasion block
     for uid in inspected:
@@ -147,7 +149,7 @@ def test_only_filtered_traffic_is_decrypted():
     out = nft.render(policy_of("dnsfilter", "filtered", "unfiltered"),
                      dns_uid=989, mitm_uid=988)
     # uid 1001 is the filtered one; nobody else is redirected to the proxy.
-    assert "meta skuid 1001 tcp dport != { 53, 465, 587, 993 } redirect to :30000" in out
+    assert "meta skuid 1001 tcp dport != { 21, 22, 25, 53, 110, 143, 465, 587, 993, 22000, 22067 } redirect to :30000" in out
 
 
 def test_unfiltered_users_get_the_plain_resolver():
@@ -196,4 +198,312 @@ def test_user_ports_are_deterministic_and_shared_by_every_renderer():
     assert nft.mitm_ports(pol) == ports
     out = nft.render(pol, dns_uid=989, mitm_uid=988)
     for uid, port in ports.items():
-        assert f"meta skuid {uid} tcp dport != {{ 53, 465, 587, 993 }} redirect to :{port}" in out
+        assert f"meta skuid {uid} tcp dport != {{ 21, 22, 25, 53, 110, 143, 465, 587, 993, 22000, 22067 }} redirect to :{port}" in out
+
+
+# -- protocols where the server speaks first (#164) ----------------------------
+
+def _dev_policy(*modes: str, developer=True) -> Policy:
+    from kosherd.policy import UserPolicy
+
+    return Policy(users=[UserPolicy(uid=1000 + i, username=f"u{i}", mode=m,
+                                    developer_tools=developer)
+                         for i, m in enumerate(modes)])
+
+
+def test_ssh_is_not_sent_into_the_proxy():
+    # In the proxy an SSH connection hangs for good: mitmproxy waits for the
+    # client's first bytes, the client waits for the server's banner.
+    out = nft.render(policy_of("filtered"), dns_uid=989, mitm_uid=988)
+    redirect = [line for line in out.splitlines() if "redirect to :30000" in line]
+    assert len(redirect) == 1
+    assert 22 in nft.SERVER_FIRST_TCP_PORTS
+    excluded = redirect[0].split("!= {")[1].split("}")[0]
+    assert {int(p) for p in excluded.split(",")} >= set(nft.SERVER_FIRST_TCP_PORTS)
+
+
+def test_ssh_without_developer_tools_is_refused_not_accepted():
+    out = nft.render(policy_of("filtered", "dnsfilter"), dns_uid=989, mitm_uid=988)
+    output = out.split("chain output")[1].split("chain input")[0]
+    # nothing lets 22 out, so the mode chain's reject answers it at once
+    assert "dport 22" not in output and "@git4" not in output
+    filtered = out.split("chain mode_filtered {")[1].split("\n    }")[0]
+    rules = [l.strip() for l in filtered.splitlines() if l.strip() and not l.strip().startswith("#")]
+    assert rules[-1] == "reject"
+    assert not any("22" in r for r in rules)
+
+
+def test_a_developer_account_reaches_the_git_hosts_over_ssh_only():
+    out = nft.render(_dev_policy("filtered", "dnsfilter", "whitelist", "unfiltered"),
+                     dns_uid=989, mitm_uid=988)
+    output = out.split("chain output")[1].split("chain input")[0]
+    v4 = "meta skuid { 1000, 1001, 1002 } ip daddr @git4 tcp dport 22 accept"
+    v6 = "meta skuid { 1000, 1001, 1002 } ip6 daddr @git6 tcp dport 22 accept"
+    assert v4 in output and v6 in output
+    # before the mode dispatch, whose chains would refuse it
+    assert output.index(v4) < output.index("meta skuid vmap")
+    # the sets exist, and port 22 is not opened to any other address
+    assert "set git4 {" in out and "set git6 {" in out
+    assert "tcp dport 22 accept" not in output.replace(v4, "").replace(v6, "")
+
+
+def test_developer_tools_off_means_no_git_ssh():
+    out = nft.render(_dev_policy("filtered", developer=False), dns_uid=989, mitm_uid=988)
+    assert "@git4 tcp dport 22" not in out
+
+
+@pytest.mark.skipif(shutil.which("nft") is None, reason="nft binary not installed")
+def test_the_git_ssh_ruleset_passes_nft_check(tmp_path):
+    f = tmp_path / "kosher.nft"
+    f.write_text(nft.render(_dev_policy("filtered", "dnsfilter"), dns_uid=989, mitm_uid=988))
+    res = subprocess.run(
+        ["unshare", "-rn", "nft", "--check", "-f", str(f)], capture_output=True, text=True
+    )
+    if "unshare" in res.stderr and res.returncode != 0:
+        pytest.skip(f"cannot create user/net namespace here: {res.stderr.strip()}")
+    assert res.returncode == 0, res.stderr
+
+
+# -- the dnsfilter accounts' own resolver (#183) and addresses (#189, #192) --
+
+def test_dnsfilter_accounts_get_their_own_resolver():
+    out = nft.render(policy_of("dnsfilter", "filtered"), dns_uid=989, mitm_uid=988)
+    chain = out[out.index("chain dns_redirect"):out.index("chain output")]
+    for proto in ("udp", "tcp"):
+        rule = f"meta skuid {{ 1000 }} {proto} dport 53 redirect to :{nft.DNSFILTER_DNS_PORT}"
+        assert rule in chain
+        # Ahead of the loopback return: asking 127.0.0.1:53 by hand must
+        # not reach the family resolver, which holds no category blocks.
+        assert chain.index(rule) < chain.index('oif "lo" return')
+    # The filtered account is not sent there: the proxy decides its
+    # categories, and needs the real address to show the block page.
+    assert "meta skuid { 1001 }" not in chain.split("oif")[0]
+
+
+def test_no_dnsfilter_resolver_redirect_without_a_dnsfilter_account():
+    out = nft.render(policy_of("filtered", "whitelist"), dns_uid=989, mitm_uid=988)
+    assert f"redirect to :{nft.DNSFILTER_DNS_PORT}" not in out
+
+
+def test_a_dnsfilter_accounts_container_uses_the_same_resolver():
+    out = nft.render(policy_of("dnsfilter"), dns_uid=989,
+                     subids={1000: [(524288, 589823)]})
+    assert (f"meta skuid {{ 1000, 524288-589823 }} udp dport 53 redirect to "
+            f":{nft.DNSFILTER_DNS_PORT}") in out
+
+
+def _mode_chain(out: str, name: str) -> list[str]:
+    body = out[out.index(f"chain {name} {{"):]
+    body = body[:body.index("\n    }")]
+    return [l.strip() for l in body.splitlines()[1:]
+            if l.strip() and not l.strip().startswith("#")]
+
+
+def test_dnsfilter_connects_only_to_addresses_its_resolver_handed_out():
+    rules = _mode_chain(nft.render(policy_of("dnsfilter"), dns_uid=989), "mode_dnsfilter")
+    accepts = [r for r in rules if "tcp dport" in r and r.endswith("accept")]
+    assert accepts, rules
+    # Every TCP accept names a set dnsmasq fills: a bare address nobody
+    # looked up matches none of them and falls to the final reject.
+    for rule in accepts:
+        assert any(f"daddr @{s}" in rule for s in
+                   ("dns4", "dns6", "wl4", "wl6", "sys4", "sys6", "git4", "git6",
+                    "st4", "st6")), rule
+    # dnsmasq feeds a name's most specific nftset= line only, so a name on
+    # another list lands in that list's set and not in dns4: github.com
+    # over HTTPS must still open for the account (#168 put it in git4).
+    for s in ("wl4", "sys4", "git4"):
+        assert any(f"ip daddr @{s} tcp dport" in r for r in accepts), s
+    assert rules[-1] == "reject"
+
+
+def test_the_safe_search_addresses_are_in_the_dns_set():
+    # dnsmasq answers those from its own host-records and adds nothing to a
+    # set for them; without this, safe search would break Google outright.
+    from kosherd.dns import SAFESEARCH_ADDRESSES
+
+    out = nft.render(policy_of("dnsfilter"), dns_uid=989)
+    block = out[out.index("set dns4 {"):]
+    block = block[:block.index("}\n")]
+    for address in SAFESEARCH_ADDRESSES.values():
+        assert address in block
+
+
+def test_dnsfilter_never_reaches_the_home_network():
+    rules = _mode_chain(nft.render(policy_of("dnsfilter"), dns_uid=989), "mode_dnsfilter")
+    lan = rules.index("ip daddr @lan4 reject")
+    lan6 = next(i for i, r in enumerate(rules) if r.startswith("ip6 daddr { fc00::/7"))
+    first_tcp = next(i for i, r in enumerate(rules) if "tcp dport" in r)
+    assert lan < first_tcp and lan6 < first_tcp
+    # The local services every mode keeps are let through before the mode
+    # chain, so printing and mDNS still work.
+    out = nft.render(policy_of("dnsfilter"), dns_uid=989)
+    output = out[out.index("chain output {"):]
+    assert output.index("jump local_services") < output.index("meta skuid vmap")
+
+
+def test_a_nix_build_may_ask_the_family_resolver():
+    # #190: the builders' loopback was refused whole, the resolver with it,
+    # so no build resolved a name and none reached the proxy.
+    out = nft.render(policy_of("filtered"), dns_uid=989, mitm_uid=988, build_gid=999)
+    output = out[out.index("chain output {"):]
+    for proto in ("udp", "tcp"):
+        rule = f"meta skgid 999 ip daddr 127.0.0.1 {proto} dport 53 accept"
+        assert rule in output
+        assert output.index(rule) < output.index('meta skgid 999 oif "lo" reject')
+    # ...and only that resolver: the plain one stays out of reach.
+    assert f"meta skgid 999 ip daddr 127.0.0.1 udp dport {nft.OPEN_DNS_PORT}" not in out
+
+
+@pytest.mark.skipif(shutil.which("nft") is None, reason="nft binary not installed")
+def test_a_ruleset_with_every_mode_and_nix_passes_nft_check(tmp_path):
+    from kosherd.policy import MODES
+
+    f = tmp_path / "kosher.nft"
+    f.write_text(nft.render(policy_of(*MODES), dns_uid=989, mitm_uid=988,
+                            search_uid=987, build_gid=999,
+                            subids={1002: [(524288, 589823)]}))
+    res = subprocess.run(
+        ["unshare", "-rn", "nft", "--check", "-f", str(f)], capture_output=True, text=True
+    )
+    if "unshare" in res.stderr and res.returncode != 0:
+        pytest.skip(f"cannot create user/net namespace here: {res.stderr.strip()}")
+    assert res.returncode == 0, res.stderr
+
+
+# -- SSH to other machines (#257) ---------------------------------------------------
+
+def _ssh_policy(mode="filtered", hosts=(), anywhere=False, uid=1000) -> Policy:
+    from kosherd.policy import UserPolicy
+
+    return Policy(users=[UserPolicy(uid=uid, username="u", mode=mode, ssh_hosts=list(hosts),
+                                    ssh_anywhere=anywhere)])
+
+
+def test_listed_ssh_machines_get_the_accounts_own_sets_and_nothing_else():
+    out = nft.render(_ssh_policy(hosts=["nas.example.org", "192.168.1.20", "10.0.0.0/8", "tailnet"]),
+                     dns_uid=989, mitm_uid=988)
+    output = out.split("chain output")[1].split("chain input")[0]
+    v4 = "meta skuid 1000 ip daddr @ssh4_1000 tcp dport 22 accept"
+    v6 = "meta skuid 1000 ip6 daddr @ssh6_1000 tcp dport 22 accept"
+    assert v4 in output and v6 in output
+    # before the mode dispatch, whose chains would refuse it
+    assert output.index(v4) < output.index("meta skuid vmap")
+    assert "tcp dport 22 accept" not in output.replace(v4, "").replace(v6, "")
+    s4 = out.split("set ssh4_1000 {")[1].split("}")[0]
+    assert "flags interval" in s4
+    for element in ("192.168.1.20/32", "10.0.0.0/8", "100.64.0.0/10"):
+        assert element in s4, element
+    s6 = out.split("set ssh6_1000 {")[1].split("}")[0]
+    assert "fd7a:115c:a1e0::/48" in s6
+    assert "nas.example.org" not in out, "a name is dnsmasq's to resolve into the set"
+
+
+def test_ssh_anywhere_opens_port_22_plainly():
+    out = nft.render(_ssh_policy(anywhere=True, hosts=["nas.example.org"]), dns_uid=989, mitm_uid=988)
+    output = out.split("chain output")[1].split("chain input")[0]
+    assert "meta skuid 1000 tcp dport 22 accept" in output
+    assert "ssh4_1000" not in out
+
+
+def test_no_ssh_machines_means_port_22_stays_closed():
+    out = nft.render(_ssh_policy(), dns_uid=989, mitm_uid=988)
+    output = out.split("chain output")[1].split("chain input")[0]
+    assert "dport 22" not in output and "ssh4_1000" not in out
+
+
+def test_ssh_machines_of_an_unfiltered_or_offline_account_render_nothing():
+    for mode in ("unfiltered", "none"):
+        out = nft.render(_ssh_policy(mode=mode, hosts=["10.0.0.5"], anywhere=False),
+                         dns_uid=989, mitm_uid=988)
+        assert "ssh4_1000" not in out and "meta skuid 1000 tcp dport 22 accept" not in out
+
+
+def test_ssh_entries_are_told_apart():
+    assert nft.ssh_entry_kind("nas.example.org") == "name"
+    assert nft.ssh_entry_kind(" Tailnet ") == "tailnet"
+    assert nft.ssh_entry_kind("192.168.1.20") == "v4"
+    assert nft.ssh_entry_kind("10.0.0.0/8") == "v4"
+    assert nft.ssh_entry_kind("fd00::1") == "v6"
+    assert nft.ssh_set_elements(["tailnet", "tailnet", "10.1.2.3/24"]) == \
+        (("100.64.0.0/10", "10.1.2.0/24"), ("fd7a:115c:a1e0::/48",))
+
+
+def test_an_ssh_entry_may_name_its_port():
+    assert nft.ssh_entry("git.example.org") == ("git.example.org", 22)
+    assert nft.ssh_entry(" Git.Example.org:222 ") == ("git.example.org", 222)
+    assert nft.ssh_entry("10.0.0.7:2222") == ("10.0.0.7", 2222)
+    assert nft.ssh_entry("tailnet:2222") == ("tailnet", 2222)
+    # IPv6 takes a port only in brackets; bare, its colons are the address.
+    assert nft.ssh_entry("fd00::5") == ("fd00::5", 22)
+    assert nft.ssh_entry("[fd00::5]:222") == ("fd00::5", 222)
+    assert nft.ssh_entry("[fd00::5]") == ("fd00::5", 22)
+    for bad in ("git.example.org:", "git.example.org:ssh", "git.example.org:0",
+                "git.example.org:65536", "[fd00::5]222"):
+        with pytest.raises(ValueError):
+            nft.ssh_entry(bad)
+    assert nft.ssh_entry_kind("git.example.org:222") == "name"
+    assert nft.ssh_entry_kind("[fd00::5]:222") == "v6"
+    assert nft.ssh_ports(["a.example.org:2222", "b.example.org", "c.example.org:222"]) == [22, 222, 2222]
+
+
+def test_a_named_port_opens_that_machine_on_it_and_nothing_more():
+    out = nft.render(_ssh_policy(hosts=["nas.example.org", "git.example.org:222", "10.0.0.7:222"]),
+                     dns_uid=989, mitm_uid=988)
+    output = out.split("chain output")[1].split("chain input")[0]
+    # Port 22 keeps its sets and names, as before ports could be named.
+    assert "meta skuid 1000 ip daddr @ssh4_1000 tcp dport 22 accept" in output
+    v4 = "meta skuid 1000 ip daddr @ssh4_1000_222 tcp dport 222 accept"
+    v6 = "meta skuid 1000 ip6 daddr @ssh6_1000_222 tcp dport 222 accept"
+    assert v4 in output and v6 in output
+    assert output.index(v4) < output.index("meta skuid vmap")
+    s22 = out.split("set ssh4_1000 {")[1].split("}")[0]
+    s222 = out.split("set ssh4_1000_222 {")[1].split("}")[0]
+    assert "10.0.0.7/32" in s222 and "10.0.0.7" not in s22
+    # Past the proxy for that machine's port only: 222 elsewhere still goes
+    # into the proxy, and 22's machines need nothing (22 is never redirected).
+    nat = out.split("chain dns_redirect")[1].split("chain output")[0]
+    assert v4 in nat and v6 in nat
+    redirect = next(l for l in nat.splitlines() if "redirect to :" in l and "dport !=" in l)
+    assert nat.index(v4) < nat.index(redirect)
+    assert "@ssh4_1000 " not in nat
+    assert "222" not in redirect
+
+
+def test_without_a_named_port_the_nat_chain_is_untouched():
+    out = nft.render(_ssh_policy(hosts=["nas.example.org"]), dns_uid=989, mitm_uid=988)
+    nat = out.split("chain dns_redirect")[1].split("chain output")[0]
+    assert "ssh4_" not in nat
+
+
+@pytest.mark.skipif(shutil.which("nft") is None, reason="nft binary not installed")
+def test_the_ssh_ruleset_passes_nft_check(tmp_path):
+    f = tmp_path / "kosher.nft"
+    f.write_text(nft.render(_ssh_policy(hosts=["nas.example.org", "192.168.1.20", "10.0.0.0/8",
+                                               "tailnet", "fd00::5", "git.example.org:222",
+                                               "10.0.0.7:2222", "[fd00::6]:222"]),
+                            dns_uid=989, mitm_uid=988))
+    res = subprocess.run(
+        ["unshare", "-rn", "nft", "--check", "-f", str(f)], capture_output=True, text=True
+    )
+    if "unshare" in res.stderr and res.returncode != 0:
+        pytest.skip(f"cannot create user/net namespace here: {res.stderr.strip()}")
+    assert res.returncode == 0, res.stderr
+
+
+def test_the_daemon_takes_a_port_but_never_the_webs_or_dnss(monkeypatch):
+    import json
+
+    from kosherd.daemon import Daemon
+    from kosherd.policy import PolicyError
+
+    daemon = Daemon.__new__(Daemon)
+    daemon.policy = _ssh_policy()
+    monkeypatch.setattr(Daemon, "_save_and_apply", lambda self: None)
+    daemon.impl_SetSsh(1000, False, json.dumps(["Git.Example.org:222", "[fd00::5]:2222"]), "")
+    assert daemon.policy.user(1000).ssh_hosts == ["git.example.org:222", "[fd00::5]:2222"]
+    for bad in ("git.example.org:443", "git.example.org:80", "10.0.0.5:53",
+                "git.example.org:99999", "127.0.0.1:222", "short:222"):
+        with pytest.raises(PolicyError):
+            daemon.impl_SetSsh(1000, False, json.dumps([bad]), "")
+    assert daemon.policy.user(1000).ssh_hosts == ["git.example.org:222", "[fd00::5]:2222"]

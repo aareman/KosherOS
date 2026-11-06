@@ -170,3 +170,82 @@ def test_the_sampler_is_only_exercised_when_pyav_is_present():
     # A container with no video stream yields no frames rather than raising
     # through to the caller.
     assert videocheck.sample_frames(b"\x00" * 64) == [] or True
+
+
+
+# -- the sampler's second pass runs on a fresh decoder (#271) ------------------------
+
+class _Frame:
+    def __init__(self, pts, key=True):
+        self.pts = pts
+        self.key_frame = key
+
+    def to_image(self):
+        from PIL import Image
+
+        return Image.new("RGB", (64, 48), "white")
+
+
+class _Codec:
+    skip_frame = None
+
+
+class _Stream:
+    """A transport-stream segment as PyAV shows it: four seconds, one
+    keyframe at the start, no frame count."""
+    type = "video"
+    duration = 360000
+    time_base = 1
+    start_time = 900000
+    frames = 0
+    thread_type = None
+    codec_context = _Codec()
+
+
+class _Container:
+    """Every seek lands past the one keyframe: the decode after it finds
+    nothing and runs the demuxer out, and from then on the drained
+    decoder answers EOF to every packet — unless the walk opens afresh."""
+    opened = 0
+
+    def __init__(self):
+        _Container.opened += 1
+        self.streams = [_Stream()]
+        self.drained = False
+        self.sought = False
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a):
+        return False
+
+    def seek(self, *a, **k):
+        self.sought = True
+
+    def decode(self, stream):
+        if self.drained:
+            raise EOFError("[Errno 541478725] End of file: 'avcodec_send_packet()'")
+        if self.sought:
+            self.drained = True
+            return iter(())
+        self.drained = True
+        return iter([_Frame(1), _Frame(2), _Frame(3)])
+
+    def demux(self, stream):
+        class _Packet:
+            size = 188
+        return iter([_Packet()])
+
+
+def test_the_walk_after_fruitless_seeks_decodes_on_a_fresh_container(monkeypatch):
+    import sys
+    import types
+
+    fake_av = types.ModuleType("av")
+    fake_av.open = lambda *a, **k: _Container()
+    monkeypatch.setitem(sys.modules, "av", fake_av)
+    _Container.opened = 0
+    frames = videocheck.sample_frames(b"\x47" * 188 * 10, max_frames=4)
+    assert frames, "the segment is readable: the drained first decoder was the problem"
+    assert _Container.opened == 2, "the walk opened the clip afresh"

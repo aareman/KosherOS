@@ -16,12 +16,28 @@ polkit_agent = true
 telemetry_enabled = false
 
 [theme]
-# Light, to match the login screen and the classic desktop.
+# Light, to match the login screen and the classic desktop, and the
+# KosherOS colours: Noctalia takes its palette from the wallpaper (the
+# sand, amber and olive of the artwork), so the advanced desktop looks
+# like this machine rather than like Noctalia's own dark default. The
+# bundled palettes (Catppuccin, Nord, Gruvbox and the rest) stay a click
+# away in the shell's settings; a choice made there is written to
+# ~/.local/state/noctalia/settings.toml and wins over this seed.
 mode = "light"
+shell_mode = "follow"
+source = "wallpaper"
+wallpaper_scheme = "m3-tonal-spot"
+pure_black_dark = false
 
 [wallpaper]
 enabled = true
 directory = "/usr/share/backgrounds/kosheros"
+fill_mode = "crop"
+
+# The wallpaper every output starts with, which is also what the palette
+# above is generated from. rasters.py writes this file at image build.
+[wallpaper.default]
+path = "/usr/share/backgrounds/kosheros/kosheros.png"
 
 [lockscreen]
 enabled = true

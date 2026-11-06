@@ -10,8 +10,15 @@ on:
   pull_request:
   # "Rebuild and publish edge now", for when the last commits touched
   # nothing in the image and a fresh one is wanted anyway — before
-  # promoting a version to stable, for instance.
+  # promoting a version to stable, for instance. The merge train
+  # (merge-train.yml) also starts it with `landed`: its merges are the
+  # workflow's own and start no push run, so this releases them instead.
   workflow_dispatch:
+    inputs:
+      landed:
+        description: release what the merge train just landed, as a push would
+        type: boolean
+        default: false
 
 concurrency:
   # One Pages deployment at a time; a second push while one is publishing
@@ -106,8 +113,11 @@ jobs:
     # several open at once that was an eleven-minute build per push per
     # branch for an image nobody would run — the load was judged crazy.
     # The tests, the compile check and shellcheck still run on every PR;
-    # the image is built once, from the merge. A first push or a rewritten
-    # history still builds, because the diff cannot be trusted there.
+    # the image is built once, from the merge. A pull request worth a real
+    # machine is built on request instead: the `try-image` label
+    # (try-image.yml) publishes it as :pr-<number>. A first push or a
+    # rewritten history still builds, because the diff cannot be trusted
+    # there.
     runs-on: ubuntu-latest
     outputs:
       image: ${{ steps.filter.outputs.image }}
@@ -118,8 +128,9 @@ jobs:
       - id: filter
         env:
           BASE: ${{ github.event.before }}
+          LANDED: ${{ inputs.landed }}
         run: |
-          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then
+          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ] && [ "$LANDED" != "true" ]; then
             echo "image=true" >> "$GITHUB_OUTPUT"
             echo "asked for by hand: building"
             exit 0
@@ -129,17 +140,29 @@ jobs:
             echo "a pull request: the image is built from the merge, not here"
             exit 0
           fi
-          if [ "$GITHUB_EVENT_NAME" != "push" ] || [ -z "$BASE" ] \
+          if [ "$LANDED" = "true" ]; then
+            # The train's merges: what changed since the last version tag
+            # decides, as for a push.
+            BASE="$(git describe --tags --abbrev=0 --match 'v*' "$GITHUB_SHA" 2>/dev/null || true)"
+          elif [ "$GITHUB_EVENT_NAME" != "push" ] || [ -z "$BASE" ] \
              || [ "$BASE" = "0000000000000000000000000000000000000000" ] \
              || ! git cat-file -e "$BASE" 2>/dev/null; then
             echo "image=true" >> "$GITHUB_OUTPUT"
             echo "not an ordinary push: building"
             exit 0
           fi
-          changed="$(git diff --name-only "$BASE" "$GITHUB_SHA")"
+          # From the last version tag, not from the previous push: a merge
+          # whose run failed got no tag and no build, and its image
+          # changes are still waiting. Diffing only this push once built
+          # nothing for a shellcheck fix while the developer-tooling stack
+          # and a new wallpaper, merged just before it with failing runs,
+          # sat unbuilt — and that release said "no new image" (#103).
+          since="$(git describe --tags --abbrev=0 --match 'v*' "$GITHUB_SHA~1" 2>/dev/null || echo "$BASE")"
+          echo "changes since $since"
+          changed="$(git diff --name-only "$since" "$GITHUB_SHA")"
           echo "$changed"
           if echo "$changed" | grep -E -q \
-               '^(os-image/|kosherd/src/|kosherd/pyproject|admin-app/src/|store-app/src/|setup-app/src/|myfilter-app/src/|search-app/kosher_search/|mitm/|branding/|policy/|scripts/fetch-categories\.py|scripts/curated-sites\.json|scripts/check-searxng-settings\.py|scripts/version\.py)'; then
+               '^(os-image/|(kosherd|admin-app|store-app|setup-app|myfilter-app|welcome-app|look-app)/(src/|pyproject)|search-app/(kosher_search/|pyproject)|mitm/|branding/|policy/|scripts/fetch-categories\.py|scripts/curated-sites\.json|scripts/check-searxng-settings\.py|scripts/version\.py)'; then
             echo "image=true" >> "$GITHUB_OUTPUT"
             echo "the image changes: building"
           else
@@ -179,23 +202,197 @@ jobs:
         run: |
           version="$(python3 scripts/version.py release)"
           echo "this build is $version"
+          # Layers come from (and go to) the build cache in the registry:
+          # a runner starts empty, and without it every build installed all
+          # of Fedora Workstation again, twenty minutes, to change a line
+          # of Python. The base is pinned by digest (scripts/bump-base.py),
+          # so the cache holds until the base is bumped on purpose.
+          podman login ghcr.io -u "$GITHUB_ACTOR" -p "${{ secrets.GITHUB_TOKEN }}"
           podman build --build-arg "KOSHER_VERSION=$version" \
+            --layers --cache-from "$IMAGE-cache" --cache-to "$IMAGE-cache" \
             -t "$IMAGE:${SHA::12}" -t "$IMAGE:edge" -f os-image/Containerfile .
 
-      - name: Push
-        run: |
-          podman login ghcr.io -u "$GITHUB_ACTOR" -p "${{ secrets.GITHUB_TOKEN }}"
-          podman push "$IMAGE:${SHA::12}"
-          podman push "$IMAGE:edge"
+      - name: The category lists are complete
+        # Reads the catalogue back out of the built image and holds every
+        # category a family can switch on to its floor. The build step
+        # refuses to produce a short catalogue already; this is the check
+        # that does not depend on the script having behaved, so an image
+        # that only looks filtered is never pushed (#202). A container is
+        # created and one file copied out: seconds.
+        run: python3 scripts/fetch-categories.py --check-image "$IMAGE:edge"
 
-      - name: Sign (cosign keyless)
+      - name: Push
+        # Retried: the registry answered a 502 once, in the middle of a
+        # layer, and that one answer cost a release its image — the
+        # version was spent and :edge stayed a build behind until the next
+        # image-building merge (#103). A transient error gets five tries
+        # over a few minutes before the job fails.
+        run: |
+          retry() {
+            local n
+            for n in 1 2 3 4 5; do
+              "$@" && return 0
+              echo "attempt $n of 5 failed: $*; waiting $((n * 30))s"
+              sleep $((n * 30))
+            done
+            return 1
+          }
+          podman login ghcr.io -u "$GITHUB_ACTOR" -p "${{ secrets.GITHUB_TOKEN }}"
+          retry podman push "$IMAGE:${SHA::12}"
+          retry podman push "$IMAGE:edge"
+
+      - name: "Sign (cosign: the KosherOS key, and keyless)"
         uses: sigstore/cosign-installer@v3
-      - run: |
+      - env:
+          COSIGN_PRIVATE_KEY: ${{ secrets.COSIGN_PRIVATE_KEY }}
+          COSIGN_PASSWORD: ${{ secrets.COSIGN_PASSWORD }}
+        run: |
+          # Two signatures on every image. The KosherOS key's is the one
+          # every installed machine checks: /etc/containers/policy.json
+          # accepts an image from this repository only with it, and bootc
+          # verifies it on every update (#70). The keyless one records the
+          # build in the public transparency log and is what the stable
+          # promotion verifies. A missing key is a failed build, never an
+          # unsigned image: an unsigned edge is one no machine can take.
+          if [ -z "$COSIGN_PRIVATE_KEY" ]; then
+            echo "COSIGN_PRIVATE_KEY is not set; the image cannot be signed for the machines" >&2
+            exit 1
+          fi
           # cosign reads Docker's credential store, not podman's auth.json,
-          # so it needs its own login to push signatures to ghcr.
+          # so it needs its own login to push signatures to ghcr. Retried
+          # like the push: a signature is pushed to the same registry.
+          retry() {
+            local n
+            for n in 1 2 3 4 5; do
+              "$@" && return 0
+              echo "attempt $n of 5 failed: $*; waiting $((n * 30))s"
+              sleep $((n * 30))
+            done
+            return 1
+          }
           cosign login ghcr.io -u "$GITHUB_ACTOR" -p "${{ secrets.GITHUB_TOKEN }}"
-          cosign sign --yes "$IMAGE:${SHA::12}"
-          cosign sign --yes "$IMAGE:edge"
+          # podman, skopeo and bootc read the "<digest>.sig" tag. cosign 2
+          # writes that; cosign 3 writes OCI referrers unless told
+          # --new-bundle-format=false, a flag cosign 2 does not know. So
+          # the flag goes in only where it exists (#118). cosign 3 keeps it
+          # out of --help, so the version decides.
+          major=$(cosign version --json 2>/dev/null | python3 -c 'import json, sys; print(json.load(sys.stdin)["gitVersion"].lstrip("v").split(".")[0])')
+          legacy=""
+          [ "${major:-0}" -ge 3 ] && legacy=--new-bundle-format=false
+          echo "cosign major version ${major:-unknown}${legacy:+, signing with $legacy}"
+          retry cosign sign --yes --key env://COSIGN_PRIVATE_KEY $legacy "$IMAGE:${SHA::12}"
+          retry cosign sign --yes --key env://COSIGN_PRIVATE_KEY $legacy "$IMAGE:edge"
+          retry cosign sign --yes "$IMAGE:${SHA::12}"
+          retry cosign sign --yes "$IMAGE:edge"
+
+  base:
+    name: The VM test's base disk
+    # Master's image installed and set up once, for every VM test after
+    # it: the runners restore this from the Actions cache and switch it to
+    # the change's image (vm-test.yml), instead of installing from scratch
+    # — twenty minutes on a runner — for every part of every run. Nothing
+    # waits for it: a VM test before it is saved takes the previous base,
+    # or installs. A merge that changed nothing in the image (the image
+    # job skipped) leaves master's image as it was, and a base for it is
+    # still good; only when the cache holds none is one made, from :edge.
+    needs: [image]
+    if: >-
+      always() && github.event_name != 'pull_request'
+      && (needs.image.result == 'success' || needs.image.result == 'skipped')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    permissions:
+      contents: read
+    env:
+      IMAGE: ghcr.io/${{ github.repository_owner }}/kosher-linux
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Is there a base already
+        id: have
+        if: needs.image.result == 'skipped'
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/.cache/kosher-pr-test
+          key: pr-test-base-${{ github.sha }}
+          restore-keys: pr-test-base-
+          lookup-only: true
+
+      - name: Is one needed
+        id: need
+        env:
+          BUILT: ${{ needs.image.result == 'success' }}
+          HAVE: ${{ steps.have.outputs.cache-matched-key }}
+        run: |
+          if [ "$BUILT" = true ]; then
+            echo "the image was built: a base from it"
+            echo "tag=${GITHUB_SHA::12}" >> "$GITHUB_OUTPUT"
+            echo "needed=true" >> "$GITHUB_OUTPUT"
+          elif [ -z "$HAVE" ]; then
+            echo "no base in the cache: one from :edge, which this merge did not change"
+            echo "tag=edge" >> "$GITHUB_OUTPUT"
+            echo "needed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "a base is cached ($HAVE) and the image did not change: nothing to do"
+            echo "needed=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: KVM
+        # As vm-test.yml opens it: the harness installs the image in a VM.
+        if: steps.need.outputs.needed == 'true'
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+            | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+          sudo udevadm settle --timeout=30 || true
+          if [ ! -e /dev/kvm ] || [ ! -w /dev/kvm ]; then
+            echo "::error::This runner has no usable /dev/kvm."
+            exit 1
+          fi
+
+      - uses: cachix/install-nix-action@v31
+        if: steps.need.outputs.needed == 'true'
+
+      - name: The static virtiofsd bcvk needs
+        if: steps.need.outputs.needed == 'true'
+        uses: actions/cache@v4
+        with:
+          path: /var/tmp/kosher-harness-1001
+          key: virtiofsd-${{ hashFiles('devenv.lock') }}
+
+      - name: Set up the runner
+        if: steps.need.outputs.needed == 'true'
+        run: |
+          (sudo apt-get update && sudo apt-get install -y qemu-system-x86 qemu-utils uidmap \
+             && sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0) > apt.log 2>&1 &
+          apt=$!
+          (nix profile install nixpkgs#devenv && devenv shell -- true) > devenv.log 2>&1 &
+          dev=$!
+          failed=0
+          wait "$apt" || { failed=1; cat apt.log; }
+          wait "$dev" || { failed=1; cat devenv.log; }
+          exit "$failed"
+
+      - name: just pr-test --base-only
+        # The image by digest; the base's meta records it, so a VM test of
+        # a change that alters nothing in the image runs the base as it
+        # is, with no switch.
+        if: steps.need.outputs.needed == 'true'
+        env:
+          TAG: ${{ steps.need.outputs.tag }}
+        run: |
+          digest="$(skopeo inspect --format '{{.Digest}}' "docker://$IMAGE:$TAG")"
+          devenv shell -- just pr-test HEAD --id master-base --base-only \
+            --registry-image "$IMAGE:$TAG@$digest"
+
+      - uses: actions/cache/save@v4
+        if: steps.need.outputs.needed == 'true'
+        with:
+          path: ~/.cache/kosher-pr-test
+          key: pr-test-base-${{ github.sha }}
 
   release:
     name: Release this version
@@ -206,7 +403,7 @@ jobs:
     # since the previous tag.
     needs: [unit, compile, shell, changes, image]
     if: |
-      always() && github.event_name == 'push'
+      always() && (github.event_name == 'push' || inputs.landed)
       && needs.unit.result == 'success'
       && needs.compile.result == 'success'
       && needs.shell.result == 'success'
@@ -246,13 +443,17 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           GITHUB_TOKEN: ${{ github.token }}
+          COSIGN_PRIVATE_KEY: ${{ secrets.COSIGN_PRIVATE_KEY }}
+          COSIGN_PASSWORD: ${{ secrets.COSIGN_PASSWORD }}
         run: |
           sudo apt-get update && sudo apt-get install -y skopeo
           skopeo login ghcr.io -u "$GITHUB_ACTOR" -p "$GITHUB_TOKEN"
           cosign login ghcr.io -u "$GITHUB_ACTOR" -p "$GITHUB_TOKEN"
           failed=""
           [ "${{ needs.image.result }}" = "failure" ] && failed=--image-failed
-          python3 scripts/publish-releases.py --sha "$GITHUB_SHA" --image "$IMAGE" $failed
+          # Tag and sign only: the GitHub release, with notes worth reading,
+          # is cut once a week for the newest version (roundup.yml).
+          python3 scripts/publish-releases.py --sha "$GITHUB_SHA" --image "$IMAGE" $failed --no-release
 
   docs:
     name: Docs site

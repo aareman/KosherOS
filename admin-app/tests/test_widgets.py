@@ -78,6 +78,9 @@ class FakeClient:
     def activity_summary(self):
         return self._overrides.get("summary", {})
 
+    def usage(self):
+        return self._overrides.get("usage", {})
+
     def list_catalog(self):
         return {"apps": self._overrides.get("catalog", [])}
 
@@ -118,6 +121,44 @@ class FakeClient:
     def set_network_access(self, uid, video_calls, extra_ports, guardian_password=""):
         self.calls.append(("set_network_access", uid, video_calls, list(extra_ports)))
 
+    def set_ssh(self, uid, anywhere, hosts, guardian_password=""):
+        self.calls.append(("set_ssh", uid, anywhere, list(hosts)))
+
+    def grant_url(self, uid, url, level, scope, guardian_password=""):
+        self.calls.append(("grant_url", uid, url, level, scope))
+
+    def set_developer_tools(self, uid, enabled, guardian_password=""):
+        self.calls.append(("set_developer_tools", uid, enabled))
+
+    def set_ssh_in(self, uid, enabled, guardian_password=""):
+        self.calls.append(("set_ssh_in", uid, enabled))
+
+    def boot_menu_protected(self):
+        return self._overrides.get("boot_menu", True)
+
+    def set_boot_menu_password(self, password, guardian_password=""):
+        self.calls.append(("set_boot_menu_password", password))
+
+    def tailscale_status(self):
+        return self._overrides.get("tailscale", {"installed": True, "state": "NeedsLogin",
+                                                 "signed_in": False, "connected": False})
+
+    def set_tailscale_enabled(self, enabled, guardian_password=""):
+        self.calls.append(("set_tailscale_enabled", enabled))
+
+    def set_syncthing_enabled(self, enabled, guardian_password=""):
+        self.calls.append(("set_syncthing_enabled", enabled))
+
+    def set_keyd_enabled(self, enabled, guardian_password=""):
+        self.calls.append(("set_keyd_enabled", enabled))
+
+    def tailscale_sign_in(self, guardian_password=""):
+        self.calls.append(("tailscale_sign_in", guardian_password))
+        return self._overrides.get("login_url", "https://login.tailscale.com/a/abc123")
+
+    def tailscale_sign_out(self):
+        self.calls.append(("tailscale_sign_out",))
+
     def connect_update_signals(self, on_progress, on_finished):
         self.on_update_progress, self.on_update_finished = on_progress, on_finished
         return 7
@@ -126,6 +167,16 @@ class FakeClient:
 
     def reboot(self):
         self.rebooted += 1
+
+    def auto_update_status(self):
+        return self._overrides.get("auto_status", {
+            "schedule": "weekly", "notify": True, "last_success": time.time() - 86400 * 3,
+            "last_attempt": time.time() - 86400 * 3, "last_error": None})
+
+    def set_auto_updates(self, schedule, notify):
+        if self._overrides.get("auto_refuse"):
+            raise RuntimeError(self._overrides["auto_refuse"])
+        self.calls.append(("set_auto_updates", schedule, notify))
 
     def disconnect_signals(self, subscription):
         self.disconnected = subscription
@@ -165,7 +216,7 @@ class FakeWindow(Gtk.Window):
         if after_reload:
             after_reload()
 
-    def with_guardian(self, then):
+    def with_guardian(self, then, on_cancel=None):
         then("")
 
     def reload(self):
@@ -320,6 +371,23 @@ def test_the_rules_dialog_builds_with_rules():
     assert len(dialog.rules) == 2
 
 
+def test_a_rules_level_drop_down_says_one_word_and_the_row_says_the_rest():
+    # A sentence on the drop-down took the row's width and wrapped the
+    # pattern one letter a line.
+    win = FakeWindow()
+    rules = [{"action": "allow", "pattern": "youtube.com/watch*"},
+             {"action": "bypass", "pattern": "docs.python.org"}]
+    dialog = dialogs.RulesDialog(win, "Page rules", rules, lambda new: None)
+    drain()
+    drop = next(w for w in _walk(dialog.get_child()) if isinstance(w, Gtk.DropDown))
+    model = drop.get_model()
+    words = [model.get_string(i) for i in range(model.get_n_items())]
+    assert words == ["Blocked", "Allowed", "Pictures", "Bypassed"]
+    row = _row_named(dialog.get_child(), "youtube.com/watch*")
+    assert row.get_subtitle() == "Allowed · pictures, video and words still filtered"
+    assert dialog.get_content_width() >= 800
+
+
 def test_the_save_preset_dialog_needs_a_name():
     win = FakeWindow()
     dialog = dialogs.SavePresetDialog(win, a_user())
@@ -352,7 +420,7 @@ def test_the_mode_is_a_badge_on_the_persons_page():
     assert open_badge.has_css_class("open")
 
 
-def test_what_is_blocked_reads_blue_and_what_is_open_reads_amber():
+def test_what_is_blocked_reads_red_and_what_is_open_reads_amber():
     page, _w, _u = _detail(mode="filtered", media_level="none",
                            youtube={"restrict": "none"})
     chips = [w for w in _walk(page) if w.has_css_class("chip")]
@@ -400,7 +468,7 @@ def test_the_requests_dialog_shows_why_and_answers_inline():
     assert "“for school”" in row.get_subtitle()
     buttons = [w for w in _buttons(row)]
     labels_ = [b.get_label() for b in buttons]
-    assert labels_ == ["Just this page", "All of youtube.com", "No"]
+    assert labels_ == ["Allow this page", "Allow youtube.com", "Decline"]
     buttons[1].emit("clicked")
     drain()
     assert granted == {"id": "a" * 32, "whole_site": True}
@@ -423,7 +491,7 @@ def test_a_whitelist_request_offers_only_the_whole_site():
     request = {"id": "b" * 32, "uid": 1001, "username": "shmuli", "mode": "whitelist",
                "url": "https://chinuch.org/x", "asked": 0}
     row = dialogs.request_row(win, request)
-    assert [b.get_label() for b in _buttons(row)] == ["Allow chinuch.org", "No"]
+    assert [b.get_label() for b in _buttons(row)] == ["Allow chinuch.org", "Decline"]
 
 
 def test_every_reportable_problem_produces_a_row():
@@ -467,9 +535,9 @@ def test_the_sidebar_holds_the_people_themselves_between_the_two_fixed_groups():
                                   "asked": 0}])
     keys = [row.key for row in _rail_rows(rail)]
     assert keys == ["add", "user-1001", "user-1002", "guest",
-                    "activity", "protection", "apps", "updates"]
+                    "activity", "usage", "protection", "apps", "updates", "advanced"]
     sections = [row.section for row in _rail_rows(rail)]
-    assert sections == ["Family"] * 4 + ["Administration"] * 4
+    assert sections == ["Family"] * 4 + ["Administration"] * 6
     assert rail.rows["add"].title.get_label() == "Add a person…", "words, not a bare plus"
     # A row says one thing. A person's row is the name, plus a count when
     # somebody is waiting on an answer; the preset is on their page.
@@ -553,7 +621,7 @@ def test_protection_is_one_page_with_the_health_the_ads_and_the_guardian():
     for _n, list_title, _d, _u in labels.EDITABLE_LISTS:  # the word lists, inline
         assert list_title in titles
     guardian = _row_named(page, "Guardian password")
-    assert guardian.get_subtitle().startswith("On.")
+    assert guardian.get_subtitle().startswith("Enabled.")
 
 
 def test_switching_ad_blocking_off_goes_through_the_guardian():
@@ -589,7 +657,7 @@ def test_a_supervised_account_can_be_let_back_in_after_a_forgotten_password():
     page = detail.UserDetailPage(win, user)
     drain()
     page.stack.set_visible_child_name("account")
-    row = _row_named(page, "Reset the password")
+    row = _row_named(page, "Reset password")
     assert row.get_sensitive()
     dialog = page._confirm_reset_password(user)
     dialog.emit("response", "yes")
@@ -605,7 +673,7 @@ def test_an_administrators_password_is_not_reset_from_here():
     page = detail.UserDetailPage(win, user)
     drain()
     page.stack.set_visible_child_name("account")
-    row = _row_named(page, "Reset the password")
+    row = _row_named(page, "Reset password")
     assert not row.get_sensitive()
     assert "Settings" in row.get_subtitle()
 
@@ -624,11 +692,11 @@ def test_the_guest_is_set_up_by_kind_of_internet_not_preset():
     win.policy = {"revision": 1, "users": [], "guardian": {"enabled": False},
                   "guest": {"enabled": True, "mode": "whitelist", "whitelist": []}}
     page = family.GuestPage(win)
-    combo = _row_named(page, "Start the guest off with")
+    combo = _row_named(page, "Guest filter mode")
     options = [combo.get_model().get_string(i) for i in range(combo.get_model().get_n_items())]
     assert options == [labels.MODE_LABELS[m] for m in ("none", "whitelist", "dnsfilter",
                                                         "filtered", "unfiltered")]
-    assert options[combo.get_selected()] == "Whitelist only"
+    assert options[combo.get_selected()] == "Approved sites only"
     combo.set_selected(options.index("Filtered internet"))
     drain()
     assert sent == {"enabled": True, "mode": "filtered"}
@@ -646,10 +714,11 @@ def test_an_enabled_guest_opens_the_same_page_as_anyone_without_an_apps_tab():
     drain()
     names = [page.stack.get_pages().get_item(i).get_name()
              for i in range(page.stack.get_pages().get_n_items())]
-    assert names == ["overview", "filtering", "media", "youtube", "time", "account"]
+    assert names == ["overview", "filtering", "media", "youtube", "time", "extras",
+                     "account"]
     titles = {r.get_title() for r in _rows(page)}
     assert "Guest account is on" in titles
-    assert "Administrator" not in titles and "Remove This Account…" not in titles
+    assert "Administrator" not in titles and "Remove account…" not in titles
     # Every filter setting is there to change.
     for title in ("Filter mode", "Pictures and video", "Bad language", "Restricted Mode",
                   "Page rules"):
@@ -657,10 +726,13 @@ def test_an_enabled_guest_opens_the_same_page_as_anyone_without_an_apps_tab():
 
 
 def test_a_username_is_suggested_from_the_full_name_and_checked():
-    assert dialogs.suggest_username("Elisha Ben-David") == "elisha"
-    assert dialogs.suggest_username("  Chaya   Sara ") == "chaya"
+    # The wizard's rule: first initial and last name, or the one name.
+    assert dialogs.suggest_username("John Doe") == "jdoe"
+    assert dialogs.suggest_username("John") == "john"
+    assert dialogs.suggest_username("Elisha Ben-David") == "ebendavid"
+    assert dialogs.suggest_username("  Chaya   Sara ") == "csara"
     assert dialogs.suggest_username("Élodie") == "elodie"
-    assert dialogs.suggest_username("123") == "u123"
+    assert dialogs.suggest_username("123") == ""
     assert dialogs.suggest_username("") == ""
     assert dialogs.username_ok("Elisha") and dialogs.username_ok("elisha.b")
     assert not dialogs.username_ok("eli sha") and not dialogs.username_ok("9lives")
@@ -746,8 +818,8 @@ def test_every_kind_of_event_renders():
     titles = [r.get_title() for r in _rows(page.feed)]
     assert titles == ["Blocked roblox.com/games",
                       "Hid pictures on shop.example/dress",
-                      "Refused a video on tube.example/v",
-                      "Would not search for “bad words”",
+                      "Blocked video on tube.example/v",
+                      "Blocked search: “bad words”",
                       "yosef: filter mode → DNS filter"]
     change = _rows(page.feed)[-1]
     assert change.get_subtitle().startswith("avi, ")
@@ -798,13 +870,43 @@ def _detail(mode="filtered", users=None, **kw):
     return page, win, user
 
 
-def test_the_detail_page_has_seven_tabs_and_starts_on_the_overview():
+# -- a change reloads the page where the person was -----------------------------------
+
+def test_a_rebuild_keeps_the_tab_and_asks_each_tab_back_to_its_place(monkeypatch):
+    page, _win, user = _detail()
+    page.stack.set_visible_child_name("filtering")
+    placed = []
+    monkeypatch.setattr(detail, "_scroll_when_laid_out",
+                        lambda adj, value: placed.append((adj, value)))
+    adj = page._tab_scrolls()["filtering"]
+    adj.configure(400, 0, 2000, 10, 100, 500)
+    page.rebuild(dict(user, media_level="all"))
+    assert page.stack.get_visible_child_name() == "filtering"
+    assert [v for _a, v in placed] == [400]
+    assert placed[0][0] == page._tab_scrolls()["filtering"], "the new tab's, not the old"
+
+
+def test_a_fresh_tab_is_scrolled_once_it_is_tall_enough():
+    adj = Gtk.Adjustment(value=0, lower=0, upper=0, step_increment=10,
+                         page_increment=100, page_size=500)
+    detail._scroll_when_laid_out(adj, 400)
+    assert adj.get_value() == 0, "nothing laid out yet"
+    adj.configure(0, 0, 600, 10, 100, 500)   # partly laid out: as far as it goes
+    assert adj.get_value() == 100
+    adj.configure(adj.get_value(), 0, 2000, 10, 100, 500)
+    assert adj.get_value() == 400
+    adj.configure(0, 0, 3000, 10, 100, 500)  # later growth is left alone
+    assert adj.get_value() == 0
+
+
+def test_the_detail_page_has_eight_tabs_and_starts_on_the_overview():
     page, _w, _u = _detail()
     names = []
     stack_pages = page.stack.get_pages()
     for i in range(stack_pages.get_n_items()):
         names.append(stack_pages.get_item(i).get_name())
-    assert names == ["overview", "filtering", "media", "youtube", "time", "apps", "account"]
+    assert names == ["overview", "filtering", "media", "youtube", "time", "apps",
+                     "extras", "account"]
     assert page.stack.get_visible_child_name() == "overview"
 
 
@@ -813,8 +915,8 @@ def test_every_setting_made_the_move():
     titles = {r.get_title() for r in _rows(page)}
     for title in ("Group", "Filter mode", "Approved sites", "Page rules",
                   "Pictures and video", "Bad language", "Restricted Mode",
-                  "Can install apps", "Which apps", "Allow Wi-Fi sign-in",
-                  "Administrator", "Layout", "Remove This Account…"):
+                  "Can install apps", "Available apps", "Allow Wi-Fi sign-in",
+                  "Administrator", "Remove account…"):
         assert title in titles, f"{title} was lost in the move"
 
 
@@ -908,12 +1010,12 @@ def _apps_tab(**kw):
 
 def test_the_apps_tab_offers_the_approved_list_or_the_whole_store():
     page, _w, _u = _apps_tab()
-    combo = _row_named(page, "Which apps")
+    combo = _row_named(page, "Available apps")
     model = combo.get_model()
     assert [model.get_string(i) for i in range(model.get_n_items())] == [
-        "Approved apps only", "The whole store, minus what is blocked"]
+        "Approved apps only", "All available apps"]
     assert combo.get_selected() == 0, "an account starts on the approved list"
-    assert any("strict choice" in t for t in _texts(page))
+    assert any("Only apps approved" in t for t in _texts(page))
 
 
 def test_opening_the_store_goes_through_the_guardian_and_says_what_it_means():
@@ -930,11 +1032,11 @@ def test_opening_the_store_goes_through_the_guardian_and_says_what_it_means():
     page = detail.UserDetailPage(win, user)
     page.stack.set_visible_child_name("apps")
     drain()
-    combo = _row_named(page, "Which apps")
+    combo = _row_named(page, "Available apps")
     combo.set_selected(1)
     drain()
     assert ("set_user_app_access", 1001, "store") in win.client.calls
-    assert any("nudity" in t and "approves them by name" in t for t in _texts(page))
+    assert any("adult content" in t and "individual approval" in t for t in _texts(page))
 
 
 def test_every_kind_of_app_has_a_switch_and_blocking_one_is_saved():
@@ -1014,8 +1116,8 @@ def test_an_installed_app_says_why_this_account_cannot_run_it():
     assert "not approved" in texts
     switches = {r.get_title(): [c for c in _suffixes(r) if isinstance(c, Gtk.Switch)][0]
                 for r in _rows(page.apps_list)}
-    assert not switches["Firefox"].get_active() and switches["Firefox"].get_sensitive()
-    assert not switches["Chess"].get_active() and not switches["Chess"].get_sensitive()
+    assert switches["Firefox"].get_active() and switches["Firefox"].get_sensitive()
+    assert switches["Chess"].get_active() and not switches["Chess"].get_sensitive()
 
 
 def _suffixes(row, found=None):
@@ -1033,11 +1135,11 @@ def test_the_apps_chip_names_the_list_and_the_blocks():
     assert labels.apps_line(a_user(can_install_apps=True)) == (
         "Approved apps only, can install", True)
     assert labels.apps_line(a_user(app_access="store", can_install_apps=True)) == (
-        "The whole store, can install", False)
+        "All available apps, can install", False)
     assert labels.apps_line(a_user(app_access="store", blocked_app_kinds=["games", "internet"],
                                    can_install_apps=True)) == (
-        "The whole store, 2 kinds blocked, can install", True)
-    assert labels.apps_line({"uid": 1, "admin": True}) == ("The whole store, can install", False)
+        "All available apps, 2 kinds blocked, can install", True)
+    assert labels.apps_line({"uid": 1, "admin": True}) == ("All available apps, can install", False)
 
 
 def test_drift_names_app_changes_in_words():
@@ -1046,7 +1148,7 @@ def test_drift_names_app_changes_in_words():
         {"field": "blocked_app_kinds", "added": ["games"], "removed": ["music"]},
         {"field": "blocked_apps", "added": ["a", "b"], "removed": []},
     ])
-    assert lines == ["The whole store", "Games apps also blocked", "Music apps not blocked",
+    assert lines == ["All available apps", "Games apps also blocked", "Music apps not blocked",
                      "2 more apps blocked"]
 
 
@@ -1054,8 +1156,8 @@ def test_the_overview_shows_what_was_blocked_today_with_allow():
     allowed = {}
 
     class Recording(FakeClient):
-        def allow_url(self, uid, url, whole, pw):
-            allowed.update(uid=uid, url=url, whole=whole)
+        def grant_url(self, uid, url, level, scope, pw):
+            allowed.update(uid=uid, url=url, level=level, scope=scope)
 
     now = int(time.time())
     events = [an_event(t=now - 5), an_event(t=now - 8, kind="pictures",
@@ -1069,12 +1171,47 @@ def test_the_overview_shows_what_was_blocked_today_with_allow():
     titles = [r.get_title() for r in _rows(page.blocked_group)]
     assert titles == ["roblox.com/games", "Pictures hidden on shop.example/d"]
     menus = _menu_buttons(page.blocked_group)
-    assert len(menus) == 1
+    assert [m.get_label() for m in menus] == ["Allow", "Allow pictures"]
     page_btn = next(b for b in _buttons(menus[0].get_popover())
-                    if b.get_label() == "Just this page")
+                    if b.get_label() == "Allow this page")
     page_btn.emit("clicked")
     drain()
-    assert allowed == {"uid": 1001, "url": "https://roblox.com/games", "whole": False}
+    assert allowed == {"uid": 1001, "url": "https://roblox.com/games",
+                       "level": "allow", "scope": "page"}
+
+
+def test_allow_pictures_offers_the_page_its_folder_and_the_site():
+    granted = []
+
+    class Recording(FakeClient):
+        def grant_url(self, uid, url, level, scope, pw):
+            granted.append((uid, url, level, scope))
+
+    now = int(time.time())
+    url = "https://shop.example/library/article/123"
+    win = FakeWindow(Recording(activity=[an_event(t=now - 8, kind="pictures", url=url, why="")]))
+    user = a_user()
+    win.policy = {"revision": 1, "users": [user], "guardian": {"enabled": False},
+                  "guest": {"enabled": False}, "adblock": {"enabled": True}}
+    page = detail.UserDetailPage(win, user)
+    drain()
+    menu = next(m for m in _menu_buttons(page.blocked_group) if m.get_label() == "Allow pictures")
+    labels_ = [b.get_label() for b in _buttons(menu.get_popover())]
+    assert labels_ == ["Show pictures on this page",
+                       "Show pictures everywhere in /library/article/",
+                       "Show pictures on all of shop.example"]
+    for b in _buttons(menu.get_popover()):
+        b.emit("clicked")
+        drain()
+    assert [g[2:] for g in granted] == [("pictures", "page"), ("pictures", "folder"),
+                                        ("pictures", "site")]
+
+
+def test_a_page_at_the_top_of_its_site_has_no_folder_to_offer():
+    from kosheradmin import dialogs as dialogs_
+    assert dialogs_._folder_label("https://shop.example/d") is None
+    assert dialogs_._folder_label("https://shop.example/") is None
+    assert dialogs_._folder_label("https://shop.example/a/b") == "/a/"
 
 
 def test_the_overview_says_when_nothing_was_blocked():
@@ -1193,8 +1330,8 @@ def test_a_greyed_out_row_says_why():
     page, _w, _u = _detail(mode="unfiltered")
     for title in ("Pictures and video", "Bad language"):
         row = _row_named(page, title)
-        assert "enforces nothing" in row.get_subtitle(), title
-    assert "Whitelist only" in _row_named(page, "Approved sites").get_subtitle()
+        assert "Content filtering is off" in row.get_subtitle(), title
+    assert "Approved sites only" in _row_named(page, "Approved sites").get_subtitle()
 
 
 # -- the youtube tab saves as you go --------------------------------------------
@@ -1501,7 +1638,7 @@ def test_the_detail_page_offers_the_familys_groups_and_no_group():
                for i in range(combo.get_model().get_n_items())]
     assert labels_ == ["Mine", "Kids", "No group"], "the family's groups, nothing shipped"
     assert labels_[combo.get_selected()] == "Mine"
-    assert "Delete This Group…" in {r.get_title() for r in _rows(page)}
+    assert "Delete group…" in {r.get_title() for r in _rows(page)}
     assert "In the Mine group" in _texts(page)
 
 
@@ -1535,6 +1672,9 @@ def test_block_reasons_read_in_the_familys_words():
     assert labels.why_text("ai:content") == "an AI answer that did not pass the filter"
     assert labels.why_text("ai:language") == "an AI answer with bad language"
     assert labels.why_text("youtube:channel") == "not an approved channel"
+    # A block the page's own script reported says so, and an empty reason stays empty.
+    assert labels.why_text("content:nsfw", "page") == "the page reads as explicit (shown after it loaded)"
+    assert labels.why_text("", "page") == ""
     assert labels.why_text("") == ""
 
 
@@ -1562,6 +1702,24 @@ def test_the_updates_page_names_the_version_it_would_go_back_to():
     assert not hasattr(page, "version_row"), "the OS row already names the version"
     assert "Would return to version 2026.09.03" in page.back_row.get_subtitle()
     assert page.back_button.get_sensitive()
+
+
+def test_the_updates_page_keeps_its_width_while_an_update_runs():
+    # "same thing happens in kosheradmin update": a progress bar is as wide
+    # as its text unless it may cut it, and bootc's lines are long.
+    win = FakeWindow()
+    win.policy = {"revision": 1, "users": [], "guardian": {"enabled": False},
+                  "guest": {"enabled": False}}
+    page = computer.UpdatesPage(win)
+    drain()
+
+    def width():
+        return page.measure(Gtk.Orientation.HORIZONTAL, -1)[0]
+
+    page.on_progress(5, "Starting…")
+    before = width()
+    page.on_progress(40, "Fetching layer sha256:" + "f" * 64 + " (812 MB of 2.1 GB)")
+    assert width() == before
 
 
 def test_the_deployment_words_name_the_version_and_the_channel_not_the_image_reference():
@@ -1629,7 +1787,7 @@ def test_update_now_shows_a_bar_that_follows_the_daemon_and_says_when_to_restart
     assert page.progress.get_text() == "Updating…"
     win.client.on_update_finished(True, "")
     assert not page.progress.get_visible() and page.apply_button.get_sensitive()
-    assert "Restart the computer" in page.status_row.get_subtitle()
+    assert "Restart to apply" in page.status_row.get_subtitle()
     assert any("Update ready" in t for t in win.toasts)
 
 
@@ -1700,6 +1858,16 @@ def test_an_answer_the_daemon_could_not_read_is_shown_as_it_came():
     sentence, short = computer.check_words({"available": None, "raw": "error: no network\nmore"},
                                            "0.1.0-pre.054")
     assert sentence == "error: no network" and short == "error: no network"
+
+
+def test_a_check_that_could_not_reach_the_server_never_says_up_to_date():
+    # #207: offline, bootc fails and the registry cannot be asked.
+    sentence, short = computer.check_words(
+        {"ok": False, "available": None, "error": "error: Upgrading: Fetching manifest: no such host",
+         "raw": "error: Upgrading: Fetching manifest: no such host"}, "0.1.0-pre.054")
+    assert short == "Couldn't check"
+    assert sentence.startswith("Couldn't check for updates.")
+    assert "Up to date" not in sentence
 
 
 def test_once_an_update_is_ready_restart_is_one_click_away():
@@ -1884,6 +2052,31 @@ def test_going_back_asks_first_and_then_calls_the_daemon():
     assert called == []
 
 
+def test_going_back_takes_the_guardian_password(monkeypatch):
+    # F11 (#187): the older version brings its own, possibly weaker,
+    # filter, so Go back is asked for the guardian password and passes it.
+    called, asked = [], []
+
+    class Recording(FakeClient):
+        def rollback(self, guardian_password=""):
+            called.append(guardian_password)
+
+    class Guarded(FakeWindow):
+        def with_guardian(self, then):
+            asked.append(True)
+            then("the guardian's")
+
+    monkeypatch.setattr(computer, "confirm",
+                        lambda _win, _title, _body, _label, action, **_kw: action())
+    win = Guarded(Recording())
+    page = computer.UpdatesPage(win)
+    drain()
+    page._confirm_rollback()
+    drain()
+    assert asked == [True]
+    assert called == ["the guardian's"]
+
+
 # -- the demo mode ------------------------------------------------------------------
 
 def test_the_demo_client_answers_everything_the_real_client_does():
@@ -1899,6 +2092,48 @@ def test_the_demo_client_answers_everything_the_real_client_does():
     demo = {n for n, _ in inspect.getmembers(DemoClient, inspect.isfunction)
             if not n.startswith("_")}
     assert real <= demo, real - demo
+
+
+def test_demo_installs_preserve_each_target_and_emit_progress(monkeypatch):
+    from collections import deque
+
+    from gi.repository import GLib
+    from kosherd.demo import DemoClient
+
+    # Run the simulated timers without waiting, interleaving the installs.
+    pending = deque()
+    monkeypatch.setattr(GLib, "timeout_add",
+                        lambda _ms, callback, *args: pending.append((callback, args)))
+    client = DemoClient()
+    progress, finished = [], []
+    client.connect_app_signals(lambda *args: progress.append(args),
+                               lambda *args: finished.append(args))
+    targets = client.policy["users"][:2]
+    refs = ["nixpkgs#demo-one", "nixpkgs#demo-two", "org.example.Demo"]
+    client.catalog = [{"ref": ref, "name": f"Demo {i}"} for i, ref in enumerate(refs)]
+    for account, ref in zip(targets, refs):
+        client.install_app_for(account["uid"], ref)
+    client.install_app(refs[-1])
+    assert not set(refs) & set(client.list_installed())
+
+    while pending:
+        callback, args = pending.popleft()
+        callback(*args)
+
+    installed = {entry["ref"]: entry for entry in client.list_installed_details()}
+    for account, ref in zip(targets, refs):
+        assert installed[ref]["installed_by"] == account["username"]
+        assert installed[ref]["installed_by_uid"] == account["uid"]
+    assert installed[refs[-1]]["installed_by"] == "you"
+    for i, ref in enumerate(refs):
+        assert installed[ref]["name"] == f"Demo {i}"
+        assert [percent for app_ref, percent, _status in progress if app_ref == ref] == \
+            [20, 60, 90, 100]
+        assert finished.count((ref, True, "")) == 1
+
+    with pytest.raises(ValueError, match="not managed"):
+        client.install_app_for(-1, "org.example.Unknown")
+    assert not pending
 
 
 def test_the_demo_family_drives_every_screen():
@@ -1918,7 +2153,7 @@ def test_the_demo_family_drives_every_screen():
     for user in win.policy["users"]:
         page = detail.UserDetailPage(win, user)
         drain()
-        assert page.stack.get_pages().get_n_items() == 7, user["username"]
+        assert page.stack.get_pages().get_n_items() == 8, user["username"]
     activity = feed.ActivityPage(win)
     activity.refresh()
     drain()
@@ -2283,17 +2518,17 @@ def test_a_whitelist_account_is_not_asked_which_kinds_of_site_to_block():
     page, _w, _u = _detail(mode="whitelist")
     drain()
     titles = {r.get_title() for r in _rows(page)}
-    assert "Blocked kinds of sites" not in {g.get_title() for g in _groups(page)}
+    assert "Blocked site categories" not in {g.get_title() for g in _groups(page)}
     assert "Approved sites" in {g.get_title() for g in _groups(page)}
     assert "Torah study" in titles and "Email and files" in titles
-    assert "This family's own list" in titles
+    assert "Custom sites" in titles
 
 
 def test_a_filtered_account_still_gets_the_category_grid():
     page, _w, _u = _detail(mode="filtered")
     drain()
     groups = {g.get_title() for g in _groups(page)}
-    assert "Blocked kinds of sites" in groups
+    assert "Blocked site categories" in groups
     assert "Approved sites" not in groups
 
 
@@ -2367,7 +2602,7 @@ def test_the_time_tab_has_the_limit_the_presets_and_the_calendar():
     combo = _row_named(page, "Daily limit")
     options = [combo.get_model().get_string(i) for i in range(combo.get_model().get_n_items())]
     assert options == ["No daily limit", "30 minutes a day", "1 hour a day", "2 hours a day",
-                       "3 hours a day", "A different amount…"]
+                       "3 hours a day", "Custom limit…"]
     assert options[combo.get_selected()] == "No daily limit", "nothing is set until you set it"
     assert not _row_named(page, "Minutes a day").get_visible()
     labels_ = [b.get_label() for b in _buttons(page) if b.get_label()]
@@ -2463,7 +2698,7 @@ def test_an_administrator_cannot_be_limited_and_the_tab_says_so():
     page, _s, _u = _time_page(admin=True)
     titles = {r.get_title() for r in _rows(page)}
     assert "Daily limit" not in titles and "Administrator" in titles
-    assert any("never limited" in (r.get_subtitle() or "") for r in _rows(page)
+    assert any("Time limits do not apply" in (r.get_subtitle() or "") for r in _rows(page)
                if isinstance(r, Adw.ActionRow))
     assert not hasattr(page, "schedule_grid")
 
@@ -2500,8 +2735,8 @@ def test_the_calendar_draws_allowed_and_blocked_hours_in_two_colours():
     allowed = pixel(x, schedule.HEADER + 10 * schedule.CELL_HEIGHT + 8)   # 10:00
     blocked = pixel(x, schedule.HEADER + 23 * schedule.CELL_HEIGHT + 8)   # 23:00
     assert allowed != blocked
-    # BGRA: the allowed (amber) cell is redder than blue; the blocked one bluer.
-    assert allowed[2] > allowed[0] and blocked[0] > blocked[2]
+    # BGRA: the allowed (amber) cell is redder than blue; the blocked cell is red.
+    assert allowed[2] > allowed[0] and blocked[2] > blocked[0] and blocked[2] > blocked[1]
 
 
 def test_dragging_paints_a_rectangle_and_saves_once():
@@ -2583,7 +2818,7 @@ def test_a_filtered_account_gets_the_video_calls_switch_and_the_extra_ports_row(
     row = _row_named(page, "Video calls")
     assert row.get_active(), "on by default: school calls must work unconfigured"
     # The sentence says what "on" costs, in words a parent can read.
-    assert "cannot read" in row.get_subtitle()
+    assert "cannot be filtered" in row.get_subtitle()
     _row_named(page, "Extra ports (advanced)")
 
 
@@ -2601,6 +2836,731 @@ def test_turning_video_calls_off_calls_the_daemon_with_the_ports_kept():
 
 def test_a_whitelist_account_is_told_there_is_nothing_to_set():
     _win, page = _detail_for(a_user(mode="whitelist"))
-    _row_named(page, "Not in this mode")
+    _row_named(page, "Unavailable in this mode")
     with pytest.raises(AssertionError):
         _row_named(page, "Video calls")
+
+
+def test_installed_app_switch_on_blocks_and_off_unblocks():
+    class Recording(FakeClient):
+        def set_user_blocked_apps(self, uid, refs, pw=""):
+            self.calls.append(("set_user_blocked_apps", uid, list(refs)))
+
+    client = Recording()
+    win = FakeWindow(client)
+    user = a_user()
+    win.policy = {"users": [user], "guardian": {"enabled": False}}
+    page = detail.UserDetailPage(win, user)
+    entry = {"ref": "org.gnome.Chess", "name": "Chess", "approved": True,
+             "categories": ["Game"], "kind": "games", "rating": {}}
+    row = page._app_row(user, entry)
+    switch = next(w for w in _suffixes(row) if isinstance(w, Gtk.Switch))
+    assert not switch.get_active()
+    assert switch.has_css_class("blocking")
+    switch.set_active(True)
+    drain()
+    assert client.calls[-1] == ("set_user_blocked_apps", user["uid"], [entry["ref"]])
+    switch.set_active(False)
+    drain()
+    assert client.calls[-1] == ("set_user_blocked_apps", user["uid"], [])
+
+
+def test_blocking_style_is_limited_to_blocking_controls():
+    page, _win, _user = _detail()
+    drain()
+    assert all(row.has_css_class("blocking") for row in page.kind_rows.values())
+    assert all(row.has_css_class("blocking") for row in page.kind_switches.values())
+    assert all(check.has_css_class("blocking") for check in page.checks.values())
+    assert not _row_named(page, "Video calls").has_css_class("blocking")
+    assert not _row_named(page, "Can install apps").has_css_class("blocking")
+
+
+def test_the_updates_row_says_when_the_newest_version_is_already_on_the_computer():
+    from kosheradmin import computer
+
+    sentence, short = computer.check_words(
+        {"available": True, "version": "0.13.0", "channel": "edge", "on_disk": "rollback"}, "0.12.0")
+    assert sentence.startswith("Version 0.13.0 is the newest on the edge channel")
+    assert "went back from" in sentence and "0.13.0" in short
+    sentence, short = computer.check_words(
+        {"available": True, "version": "0.13.1", "channel": "edge", "on_disk": "staged"}, "0.12.0")
+    assert sentence == "Version 0.13.1 is downloaded. Restart to start using it."
+    assert short == "Update ready"
+    sentence, _ = computer.check_words({"available": True, "version": "0.13.1", "channel": "edge"}, "0.12.0")
+    assert sentence == "Version 0.13.1 is available — you are on 0.12.0 (edge channel)."
+
+
+# -- developer tools: one switch on the Apps tab (#123) ---------------------------
+
+def test_developer_tools_are_a_switch_that_is_off_by_default():
+    win, page = _detail_for(a_user(mode="filtered"))
+    row = _row_named(page, "Developer tools")
+    assert not row.get_active()
+    assert "Store is the only way" in row.get_subtitle()
+
+
+def test_switching_developer_tools_on_calls_the_daemon():
+    win, page = _detail_for(a_user(mode="filtered"))
+    _row_named(page, "Developer tools").set_active(True)
+    drain()
+    assert ("set_developer_tools", 1001, True) in win.client.calls
+
+
+def test_sign_in_over_ssh_is_offered_only_with_developer_tools_on():
+    _win, page = _detail_for(a_user(mode="filtered"))
+    with pytest.raises(AssertionError):
+        _row_named(page, "Sign in over SSH")
+    _win, page = _detail_for(a_user(mode="filtered", developer_tools=True))
+    row = _row_named(page, "Sign in over SSH")
+    assert not row.get_active()
+    assert "~/.ssh/authorized_keys" in row.get_subtitle()
+
+
+def test_switching_sign_in_over_ssh_on_calls_the_daemon():
+    win, page = _detail_for(a_user(mode="filtered", developer_tools=True))
+    _row_named(page, "Sign in over SSH").set_active(True)
+    drain()
+    assert ("set_ssh_in", 1001, True) in win.client.calls
+
+
+# -- the boot menu password row (#129) ------------------------------------------
+
+def test_the_protection_page_says_whether_the_boot_menu_has_a_password():
+    win = FakeWindow(FakeClient(boot_menu=False))
+    page = computer.ProtectionPage(win)
+    drain()
+    assert "Not set" in _row_named(page, "Boot menu password").get_subtitle()
+    win = FakeWindow(FakeClient(boot_menu=True))
+    page = computer.ProtectionPage(win)
+    drain()
+    assert _row_named(page, "Boot menu password").get_subtitle().startswith("Set.")
+
+
+# -- Tailscale (#30) -------------------------------------------------------------
+
+def _until(check, seconds=5):
+    """Run the main loop until `check()` holds: these loads go through a thread."""
+    from gi.repository import GLib
+
+    context = GLib.MainContext.default()
+    deadline = time.time() + seconds
+    while time.time() < deadline:
+        while context.pending():
+            context.iteration(False)
+        if check():
+            return True
+        time.sleep(0.01)
+    return check()
+
+
+def _titles(widget):
+    return [r.get_title() for r in _rows(widget)]
+
+
+SIGNED_IN = {"installed": True, "state": "Running", "signed_in": True, "connected": True,
+             "user": "avi@example.com", "tailnet": "avi@example.com",
+             "dns_suffix": "tail230de1.ts.net", "name": "kosheros.tail230de1.ts.net",
+             "addresses": ["100.101.102.103"]}
+
+
+def _advanced(win, tailscale=True, syncthing=False, keyd=False):
+    """The Advanced page, with the switches as given (#220, #230)."""
+    win.policy["advanced"] = {"tailscale": tailscale, "syncthing": syncthing, "keyd": keyd}
+    return computer.AdvancedPage(win)
+
+
+def test_a_computer_not_on_a_tailnet_offers_to_sign_in():
+    win = FakeWindow(FakeClient())
+    group = _advanced(win).tailscale
+    assert _until(lambda: "Not signed in" in _titles(group))
+    assert group.action.get_visible() and group.action.get_label() == "Sign In…"
+    assert "suggested-action" in group.action.get_css_classes()
+
+
+def test_a_signed_in_computer_shows_who_where_and_its_address():
+    win = FakeWindow(FakeClient(tailscale=SIGNED_IN))
+    group = _advanced(win).tailscale
+    assert _until(lambda: "Signed in as" in _titles(group))
+    assert _row_named(group, "Signed in as").get_subtitle() == "avi@example.com"
+    assert "100.101.102.103" in _row_named(group, "This computer").get_subtitle()
+    assert _row_named(group, "Connection").get_subtitle() == "Connected"
+    assert group.action.get_label() == "Sign Out"
+    assert "destructive-action" in group.action.get_css_classes()
+
+
+def test_signing_in_goes_through_the_guardian_and_shows_the_address_to_open():
+    guarded = []
+
+    class Guarded(FakeWindow):
+        def with_guardian(self, then):
+            guarded.append(True)
+            then("")
+
+    win = Guarded(FakeClient())
+    group = _advanced(win).tailscale
+    assert _until(lambda: "Not signed in" in _titles(group))
+    group.action.emit("clicked")
+    assert _until(lambda: "Open the sign-in page" in _titles(group))
+    assert guarded == [True]
+    assert ("tailscale_sign_in", "") in win.client.calls
+    row = _row_named(group, "Open the sign-in page")
+    assert "https://login.tailscale.com/a/abc123" in row.get_subtitle()
+    labels_shown = [t for t in _texts(row)]
+    assert "Open" in labels_shown and "Copy" in labels_shown
+    assert "Waiting for you to sign in…" in _titles(group)
+    # A reload while waiting must not throw the address away.
+    group.refresh()
+    assert "Open the sign-in page" in _titles(group)
+
+
+def test_the_page_notices_when_the_sign_in_is_finished_in_the_browser():
+    client = FakeClient()
+    win = FakeWindow(client)
+    group = _advanced(win).tailscale
+    assert _until(lambda: "Not signed in" in _titles(group))
+    group._sign_in("")
+    assert _until(lambda: group.login_url is not None)
+    client._overrides["tailscale"] = SIGNED_IN
+    group._poll()
+    assert _until(lambda: "Signed in as" in _titles(group))
+    assert group.login_url is None
+    assert "This computer is on your tailnet" in win.toasts
+
+
+def test_copying_the_address_does_not_throw():
+    win = FakeWindow(FakeClient())
+    group = _advanced(win).tailscale
+    group._copy("https://login.tailscale.com/a/abc123")
+    assert win.toasts[-1] == "Address copied"
+
+
+def test_signing_out_asks_first_then_calls_the_daemon():
+    win = FakeWindow(FakeClient(tailscale=SIGNED_IN))
+    group = _advanced(win).tailscale
+    assert _until(lambda: "Signed in as" in _titles(group))
+    asked = []
+    original = computer.confirm
+    computer.confirm = lambda parent, heading, body, verb, on_yes, **kw: (
+        asked.append(heading), on_yes())
+    try:
+        group.action.emit("clicked")
+    finally:
+        computer.confirm = original
+    assert asked == ["Sign out of Tailscale?"]
+    assert _until(lambda: ("tailscale_sign_out",) in win.client.calls)
+    assert _until(lambda: "Signed out of Tailscale" in win.toasts)
+
+
+def test_tailscale_that_is_not_running_says_so_and_can_be_checked_again():
+    win = FakeWindow(FakeClient(tailscale={"installed": True, "state": "Unavailable",
+                                           "signed_in": False, "connected": False,
+                                           "error": "failed to connect to local tailscaled"}))
+    group = _advanced(win).tailscale
+    assert _until(lambda: "Tailscale is not running" in _titles(group))
+    assert group.action.get_label() == "Check Again"
+
+
+# -- usage ---------------------------------------------------------------------
+
+def _values(group) -> dict[str, str]:
+    """{row title: the number on its right} for a group on the Usage page."""
+    out = {}
+    for row in _descendants(group):
+        if isinstance(row, Adw.ActionRow) and hasattr(row, "value"):
+            out[row.get_title()] = row.value.get_label()
+    return out
+
+
+def _descendants(widget):
+    child = widget.get_first_child()
+    while child is not None:
+        yield child
+        yield from _descendants(child)
+        child = child.get_next_sibling()
+
+
+def test_usage_is_numbers_for_everyone_by_range():
+    from kosheradmin import usage
+
+    win, restore = _real_window()
+    try:
+        win.go_to("usage")
+        drain()
+        page = win.nav.get_visible_page()
+        assert isinstance(page, usage.UsagePage)
+        assert win.sidebar.rows["usage"].section == "Administration"
+        titles = [g.get_title() for g in page._groups]
+        assert titles == ["Internet", "Blocked", "Filter speed", "By person"]
+        today = _values(page._groups[0])["Pages and files loaded"]
+        assert today.replace(",", "").isdigit() and today != "0"
+        assert _values(page._groups[2])["Average"].endswith(" ms")
+
+        # All time is more than today, and says since when.
+        page.ranges.get_last_child().set_active(True)
+        drain()
+        assert win.usage_range == "all"
+        all_time = _values(page._groups[0])["Pages and files loaded"]
+        assert int(all_time.replace(",", "")) > int(today.replace(",", ""))
+        assert page._groups[-1].get_description().startswith("Counted since ")
+
+        # Each person is a row that narrows the page to them.
+        people = [r for r in _descendants(page._groups[3]) if isinstance(r, Adw.ActionRow)]
+        assert {r.get_title() for r in people} >= {"avi", "yosef", "shmuli"}
+        next(r for r in people if r.get_title() == "yosef").activate()
+        drain()
+        assert page.uid == win.usage_uid == 1002
+        assert page.who.get_label() == "yosef"
+        assert "By person" not in [g.get_title() for g in page._groups]
+
+        # Coming back keeps the range and the person.
+        win.go_to("activity")
+        win.go_to("usage")
+        drain()
+        again = win.nav.get_visible_page()
+        assert (again.range, again.uid) == ("all", 1002)
+    finally:
+        restore()
+
+
+def test_an_account_the_filter_never_sees_says_why_there_is_nothing_to_count():
+    from kosheradmin import usage
+
+    win, restore = _real_window()
+    try:
+        shmuli = next(u for u in win.policy["users"] if u["username"] == "shmuli")
+        assert shmuli["mode"] == "whitelist"
+        win.show_usage(shmuli["uid"])
+        drain()
+        page = win.nav.get_visible_page()
+        status = [w for g in page._groups for w in _descendants(g)
+                  if isinstance(w, Adw.StatusPage)]
+        assert status and status[0].get_title() == "Nothing to count"
+        assert "Approved sites only" in status[0].get_description()
+        assert usage.not_counted_why({"mode": "none"}) == "This account has no internet access."
+    finally:
+        restore()
+
+
+def test_a_persons_overview_has_todays_usage_and_a_way_to_the_rest():
+    win, restore = _real_window()
+    try:
+        win.go_to("user-1002")
+        drain()
+        page = win.nav.get_visible_page()
+        groups = [w for w in _descendants(page) if isinstance(w, Adw.PreferencesGroup)
+                  and w.get_title() == "Usage today"]
+        assert len(groups) == 1
+        labels_ = [w.get_label() for w in _descendants(groups[0])
+                   if isinstance(w, Gtk.Label) and "numeric" in w.get_css_classes()]
+        assert len(labels_) == 3 and "…" not in labels_
+        more = next(w for w in _descendants(groups[0])
+                    if isinstance(w, Gtk.Button) and w.get_label() == "See more")
+        more.emit("clicked")
+        drain()
+        assert win.destination == "usage" and win.usage_uid == 1002
+    finally:
+        restore()
+
+
+def test_usage_numbers_read_as_people_write_them():
+    from kosheradmin import usage
+
+    assert usage.count(1234567) == "1,234,567"
+    assert usage.count(None) == "0"
+    assert usage.millis(None) == "—"
+    assert usage.millis(25) == "25 ms"
+    assert usage.millis(2500) == "2.5 s"
+    assert usage.millis(usage.usage_mod.SLOWEST_MS) == "over 5 s"
+
+
+# -- Syncthing, one account at a time (#213) ------------------------------------------
+
+class SyncthingClient(FakeClient):
+    def set_user_app_approval(self, uid, ref, approved, pw=""):
+        self.calls.append(("approve", uid, ref, approved))
+
+    def set_syncthing_lan(self, uid, enabled, pw=""):
+        self.calls.append(("lan", uid, enabled))
+
+
+def _syncthing_page(user, on=True):
+    win = FakeWindow(SyncthingClient())
+    win.policy = {"revision": 1, "users": [user], "custom_profiles": [],
+                  "guardian": {"enabled": False}, "guest": {"enabled": False},
+                  "advanced": {"syncthing": on}}
+    page = detail.UserDetailPage(win, user)
+    page.stack.set_visible_child_name("apps")
+    drain()
+    return page, win
+
+
+def test_the_syncthing_dialog_says_plainly_that_its_files_are_not_filtered():
+    heading, body = labels.syncthing_approval("yosef")
+    assert heading == "Allow Syncthing for yosef?"
+    assert "aren't checked by the filter" in body
+    # One or two sentences, nothing more.
+    assert body.count(". ") + 1 <= 2 and body.endswith(".")
+
+
+def test_allowing_syncthing_asks_first_and_only_then_approves(monkeypatch):
+    shown = []
+
+    def fake_confirm(parent, heading, body, verb, on_yes, destructive=True):
+        dialog = Adw.AlertDialog(heading=heading, body=body)
+        shown.append((heading, body, verb, on_yes, dialog))
+        return dialog
+
+    monkeypatch.setattr(detail, "confirm", fake_confirm)
+    page, win = _syncthing_page(a_user())
+    row = _row_named(page, "Allow Syncthing")
+    assert not row.get_active()
+    row.set_active(True)
+    drain()
+    assert len(shown) == 1 and shown[0][0] == "Allow Syncthing for yosef?"
+    assert not [c for c in win.client.calls if c[0] == "approve"], "nothing before the answer"
+    # Cancelled: nothing approved, and the switch goes back.
+    shown[0][4].emit("response", "cancel")
+    drain()
+    assert not row.get_active()
+    assert not [c for c in win.client.calls if c[0] == "approve"]
+    # Allowed.
+    row.set_active(True)
+    drain()
+    shown[-1][3]()
+    drain()
+    assert ("approve", 1001, "nixpkgs#syncthing", True) in win.client.calls
+
+
+def test_the_home_network_switch_is_off_by_default_and_saved():
+    page, win = _syncthing_page(a_user(approved_apps=["nixpkgs#syncthing"]))
+    lan = _row_named(page, labels.SYNCTHING_LAN_TITLE)
+    assert not lan.get_active()
+    lan.set_active(True)
+    drain()
+    assert ("lan", 1001, True) in win.client.calls
+
+
+def test_an_administrator_needs_no_approval_for_syncthing():
+    page, _win = _syncthing_page(a_user(admin=True, mode="unfiltered"))
+    titles = {r.get_title() for r in _rows(page)}
+    assert "Allow Syncthing" not in titles
+    assert "Allowed for this account" in titles
+
+
+def test_with_syncthing_off_the_apps_tab_says_nothing_about_it():
+    page, _win = _syncthing_page(a_user(), on=False)
+    titles = {r.get_title() for r in _rows(page)}
+    assert "Allow Syncthing" not in titles
+    assert labels.SYNCTHING_LAN_TITLE not in titles
+
+
+# -- the Advanced page (#220) ------------------------------------------------------
+
+def test_the_switches_show_what_the_policy_says():
+    page = _advanced(FakeWindow(), tailscale=False, syncthing=True, keyd=True)
+    assert not page.tailscale_row.get_active()
+    assert page.syncthing_row.get_active()
+    assert page.keyd_row.get_active()
+    assert not _advanced(FakeWindow(), keyd=False).keyd_row.get_active()
+
+
+def test_tailscales_sign_in_shows_only_while_it_is_on():
+    win = FakeWindow()
+    assert not _advanced(win, tailscale=False).tailscale.get_visible()
+    assert _advanced(win, tailscale=True).tailscale.get_visible()
+
+
+def test_the_protection_page_no_longer_carries_tailscale():
+    page = computer.ProtectionPage(FakeWindow())
+    assert not hasattr(page, "tailscale")
+
+
+def test_turning_a_feature_on_calls_the_daemon_without_asking():
+    win = FakeWindow()
+    page = _advanced(win, tailscale=False, syncthing=False, keyd=False)
+    page.tailscale_row.set_active(True)
+    page.syncthing_row.set_active(True)
+    page.keyd_row.set_active(True)
+    assert _until(lambda: ("set_keyd_enabled", True) in win.client.calls)
+    assert _until(lambda: ("set_syncthing_enabled", True) in win.client.calls)
+    assert ("set_tailscale_enabled", True) in win.client.calls
+
+
+@pytest.mark.parametrize("row, heading, call", [
+    ("tailscale_row", "Turn off Tailscale?", "set_tailscale_enabled"),
+    ("syncthing_row", "Turn off Syncthing?", "set_syncthing_enabled"),
+    ("keyd_row", "Turn off key remapping?", "set_keyd_enabled"),
+])
+def test_turning_a_feature_off_asks_first(monkeypatch, row, heading, call):
+    shown = []
+
+    def fake_confirm(parent, heading, body, verb, on_yes, **kw):
+        dialog = Adw.AlertDialog(heading=heading, body=body)
+        shown.append((heading, on_yes, dialog))
+        return dialog
+
+    monkeypatch.setattr(computer, "confirm", fake_confirm)
+    win = FakeWindow()
+    page = _advanced(win, tailscale=True, syncthing=True, keyd=True)
+    getattr(page, row).set_active(False)
+    assert [s[0] for s in shown] == [heading]
+    assert not [c for c in win.client.calls if c[0] == call]
+    # Cancelled: the switch goes back on and nothing is called.
+    shown[0][2].emit("response", "cancel")
+    assert getattr(page, row).get_active()
+    getattr(page, row).set_active(False)
+    shown[-1][1]()
+    assert _until(lambda: (call, False) in win.client.calls)
+
+
+def test_a_cancelled_guardian_prompt_puts_the_switch_back():
+    class Cancelled(FakeWindow):
+        def with_guardian(self, then, on_cancel=None):
+            on_cancel()
+
+    win = Cancelled()
+    page = _advanced(win, tailscale=False, syncthing=False)
+    page.syncthing_row.set_active(True)
+    assert not page.syncthing_row.get_active()
+    assert not win.client.calls or ("set_syncthing_enabled", True) not in win.client.calls
+
+
+# -- automatic updates (#19) -------------------------------------------------------
+
+def test_the_updates_page_shows_the_schedule_and_the_notice_from_the_policy():
+    win = FakeWindow()
+    win.policy["updates"] = {"auto": "biweekly", "notify": False}
+    page = computer.UpdatesPage(win)
+    drain()
+    group = page.auto_group
+    assert group.get_title() == "Automatic updates"
+    assert "never restarts on its own" in group.get_description()
+    assert computer.AUTO_SCHEDULES[group.schedule_row.get_selected()] == "biweekly"
+    assert not group.notify_row.get_active()
+    assert group.schedule_row.get_subtitle() == "Last checked 3 days ago."
+
+
+def test_a_policy_without_the_setting_shows_weekly_with_the_notice_on():
+    page = computer.UpdatesPage(FakeWindow())
+    drain()
+    group = page.auto_group
+    assert computer.AUTO_SCHEDULES[group.schedule_row.get_selected()] == "weekly"
+    assert group.notify_row.get_active()
+
+
+def test_picking_a_schedule_saves_it_and_keeps_the_notice():
+    win = FakeWindow()
+    page = computer.UpdatesPage(win)
+    drain()
+    group = page.auto_group
+    group.schedule_row.set_selected(computer.AUTO_SCHEDULES.index("off"))
+    drain()
+    assert ("set_auto_updates", "off", True) in win.client.calls
+    assert win.policy["updates"] == {"auto": "off", "notify": True}
+    assert group.schedule_row.get_subtitle() == "Only when you press Check above."
+    assert "Automatic updates are off" in win.toasts
+    group.notify_row.set_active(False)
+    drain()
+    assert ("set_auto_updates", "off", False) in win.client.calls
+
+
+def test_a_refused_change_puts_the_rows_back_and_says_why():
+    win = FakeWindow(FakeClient(auto_refuse="not authorized"))
+    page = computer.UpdatesPage(win)
+    drain()
+    group = page.auto_group
+    group.schedule_row.set_selected(computer.AUTO_SCHEDULES.index("daily"))
+    drain()
+    assert computer.AUTO_SCHEDULES[group.schedule_row.get_selected()] == "weekly"
+    assert group.schedule_row.get_sensitive()
+    assert any("not authorized" in t for t in win.toasts)
+
+
+def test_a_failed_check_is_never_shown_as_up_to_date():
+    now = 1_800_000_000
+    words = computer.auto_words
+    assert words({"schedule": "weekly", "last_success": now - 86400 * 9,
+                  "last_attempt": now - 3600, "last_error": "no such host"}, now) == \
+        "The last check did not work. It tries again tomorrow."
+    assert words({"schedule": "weekly", "last_success": now - 3600,
+                  "last_attempt": now - 3600}, now) == "Last checked today."
+    assert words({"schedule": "daily", "last_success": now - 86400 - 60}, now) == \
+        "Last checked yesterday."
+    assert words({"schedule": "monthly"}, now).startswith("Has not checked yet")
+    assert words({"schedule": "off", "last_error": "x"}, now) == \
+        "Only when you press Check above."
+
+
+# -- Extras: the calmer sites (#179) -----------------------------------------------
+
+class CalmSaving(FakeClient):
+    def __init__(self, **kw):
+        super().__init__(**kw)
+        self.saved = []
+
+    def set_calm(self, uid, settings, guardian_password=""):
+        self.saved.append(settings)
+
+
+def _extras(calm=None, mode="filtered"):
+    win = FakeWindow(CalmSaving())
+    user = a_user(mode=mode, **({"calm": calm} if calm is not None else {}))
+    win.policy = {"revision": 1, "users": [user], "guardian": {"enabled": False},
+                  "guest": {"enabled": False}, "custom_profiles": []}
+    page = detail.UserDetailPage(win, user)
+    drain()
+    return page, win
+
+
+ALL_CALM = {"enabled": True, "sites": {"x": {}, "reddit": {}, "youtube": {}, "facebook": {}}}
+
+
+def test_extras_is_a_checklist_with_the_calmer_sites():
+    page, _win = _extras()
+    assert page.calm_row.get_title() == "Calmer sites"
+    assert not page.calm_check.get_active()
+    assert not page.calm_settings_button.get_sensitive(), "nothing to set while it is off"
+
+
+def test_ticking_calmer_sites_calms_every_site():
+    page, win = _extras()
+    page.calm_check.set_active(True)
+    assert win.client.saved == [ALL_CALM]
+    assert page.calm_settings_button.get_sensitive()
+    assert "Feeds end after 30 items" in page.calm_row.get_subtitle()
+
+
+def test_unticking_turns_it_off():
+    page, win = _extras(calm=ALL_CALM)
+    assert page.calm_check.get_active()
+    page.calm_check.set_active(False)
+    assert win.client.saved == [{}]
+
+
+def test_the_settings_dialog_unticks_a_site_and_sets_a_budget():
+    page, win = _extras(calm=ALL_CALM)
+    page._open_calm_dialog()
+    page.calm_site_checks["facebook"].set_active(False)
+    assert not page.calm_minute_rows["facebook"].get_sensitive()
+    page.calm_minute_rows["youtube"].set_value(45)
+    page.calm_feed_row.set_value(50)
+    assert win.client.saved[-1] == {"enabled": True, "feed_items": 50,
+                                    "sites": {"x": {}, "reddit": {}, "youtube": {"daily_minutes": 45}}}
+    assert "Facebook" not in page.calm_row.get_subtitle()
+    page.calm_dialog.force_close()
+
+
+def test_unticking_the_last_site_in_the_dialog_turns_the_extra_off():
+    page, win = _extras(calm={"enabled": True, "sites": {"x": {}}})
+    page._open_calm_dialog()
+    page.calm_site_checks["x"].set_active(False)
+    assert win.client.saved[-1] == {}
+    assert not page.calm_check.get_active()
+    page.calm_dialog.force_close()
+
+
+def test_extras_are_inert_outside_filtered_internet():
+    page, _win = _extras(mode="dnsfilter")
+    group = page.calm_row.get_ancestor(Adw.PreferencesGroup)
+    assert not group.get_sensitive()
+    assert "Filtered internet" in group.get_description()
+
+
+# -- SSH to other machines (#257) ---------------------------------------------------
+
+def test_a_filtered_account_gets_the_ssh_machines_row_and_the_anywhere_switch():
+    _win, page = _detail_for(a_user(mode="filtered", ssh_hosts=["nas.example.org"]))
+    assert _row_named(page, "These machines").get_text() == "nas.example.org"
+    row = _row_named(page, "Anywhere")
+    assert not row.get_active()
+    assert "cannot be filtered" in row.get_subtitle()
+
+
+def test_ssh_anywhere_on_calls_the_daemon_with_the_machines_kept():
+    win, page = _detail_for(a_user(mode="filtered", ssh_hosts=["nas.example.org"]))
+    _row_named(page, "Anywhere").set_active(True)
+    drain()
+    assert ("set_ssh", 1001, True, ["nas.example.org"]) in win.client.calls
+
+
+def test_applying_the_ssh_machines_calls_the_daemon_with_them_tidied():
+    win, page = _detail_for(a_user(mode="filtered"))
+    row = _row_named(page, "These machines")
+    row.set_text("NAS.example.org, 10.0.0.0/8 , tailnet")
+    row.emit("apply")
+    drain()
+    assert ("set_ssh", 1001, False, ["nas.example.org", "10.0.0.0/8", "tailnet"]) in win.client.calls
+
+
+def test_an_unfiltered_account_is_told_ssh_is_already_open():
+    _win, page = _detail_for(a_user(mode="unfiltered"))
+    with pytest.raises(AssertionError):
+        _row_named(page, "These machines")
+
+
+# -- the example pictures under the Pictures settings -------------------------------
+
+def _media_preview(**kw):
+    from kosheradmin.mediapreview import MediaPreview
+
+    page, win, user = _detail(**kw)
+    previews = [w for w in _walk(page) if isinstance(w, MediaPreview)]
+    return page, win, (previews[0] if previews else None)
+
+
+def test_the_pictures_tab_shows_the_example_pictures_for_the_saved_choice():
+    _page, _w, preview = _media_preview(media_level="immodest", cover_style="skin")
+    assert preview is not None
+    assert len(preview.tiles) == 4
+    assert preview.states == ("shown", "shown", "covered", "hidden")
+    assert preview.cover_style == "skin"
+    assert all(t.picture.get_paintable() is not None for t in preview.tiles)
+
+
+def test_the_example_pictures_follow_the_level_as_it_is_chosen():
+    page, win, preview = _media_preview(media_level="none")
+    win.client.set_media_level = lambda *a: None
+    row = _row_named(page, "Pictures and video")
+    from kosherd.policy import MEDIA_LEVELS
+
+    seen = {}
+    for level in MEDIA_LEVELS:
+        row.set_selected(MEDIA_LEVELS.index(level))
+        seen[level] = preview.states
+    assert seen["none"] == ("shown",) * 4
+    assert seen["nsfw"] == ("shown", "shown", "shown", "hidden")
+    assert seen["immodest"] == ("shown", "shown", "covered", "hidden")
+    # A person with nothing to cover is hidden whole; scenery stays.
+    assert seen["people"] == ("shown", "hidden", "covered", "hidden")
+    assert seen["all"] == ("hidden",) * 4
+    assert preview.caption.get_label() == "Every picture from the web is replaced with a grey box."
+
+
+def test_the_covering_style_changes_how_the_covered_picture_is_drawn():
+    page, win, preview = _media_preview(media_level="immodest", cover_style="frost")
+    win.client.set_cover_style = lambda *a: None
+    assert "frosted over" in preview.caption.get_label()
+    _row_named(page, "Picture covering style").set_selected(labels.COVER_ORDER.index("skin"))
+    assert preview.cover_style == "skin"
+    assert "skin painted grey" in preview.caption.get_label()
+    assert preview.states[2] == "covered"
+
+
+def test_skin_paints_only_the_skin_and_frost_covers_the_whole_figure():
+    from kosheradmin import mediapreview as mp
+
+    plain = mp.svg_for("short-sleeves", mp.SHOWN)
+    skin = mp.svg_for("short-sleeves", mp.COVERED, "skin")
+    frost = mp.svg_for("short-sleeves", mp.COVERED, "frost")
+    assert mp.SKIN in plain and mp.SKIN_FILL not in plain
+    # Every skin shape is painted grey; the t-shirt keeps its colour.
+    assert mp.SKIN not in skin and skin.count(mp.SKIN_FILL) >= 5
+    assert "#f59e0b" in skin
+    assert "frost-area" in frost and mp.SKIN_FILL not in frost
+    assert mp.svg_for("explicit", mp.HIDDEN) == mp.svg_for("scenery", mp.HIDDEN)
+    assert mp.HIDDEN_GREY in mp.svg_for("scenery", mp.HIDDEN)
+
+
+def test_no_example_pictures_where_pictures_are_not_filtered():
+    _page, _w, preview = _media_preview(mode="unfiltered")
+    assert preview is None

@@ -34,6 +34,14 @@ fi
 
 [ "$(id -u)" = 0 ] || { echo "run me as root inside the test VM" >&2; exit 2; }
 
+# Right after a boot the stack may still be coming up: a suite's
+# preconditions (kosherd active, a name resolving) once ran on a fresh
+# machine a moment too early and failed on that alone.
+for _ in $(seq 60); do
+    systemctl is-active --quiet kosherd && getent hosts example.com >/dev/null 2>&1 && break
+    sleep 2
+done
+
 failed=()
 started=$(date +%s)
 for suite in "${suites[@]}"; do

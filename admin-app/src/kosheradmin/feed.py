@@ -22,7 +22,7 @@ from kosherd import activity as activity_mod  # noqa: E402
 
 from . import labels  # noqa: E402
 from .common import avatar, clear, error_text, pointer_cursors, run_async, tag  # noqa: E402
-from .dialogs import allow_menu  # noqa: E402
+from .dialogs import allow_menu, pictures_menu  # noqa: E402
 
 EVERYONE = -1
 WEEK = 7 * 86400
@@ -204,7 +204,7 @@ class ActivityPage(Gtk.Box):
         kind = event["kind"]
         name = event.get("username", "?")
         url = event.get("url", "")
-        why = labels.why_text(event.get("why", ""))
+        why = labels.why_text(event.get("why", ""), event.get("source", ""))
         times = event.get("times", 1)
         again = f" · {times} times" if times > 1 else ""
         row = Adw.ActionRow(subtitle_lines=2, use_markup=False)
@@ -231,12 +231,15 @@ class ActivityPage(Gtk.Box):
                                           on_done=self.refresh))
         elif kind == activity_mod.PICTURES:
             row.set_title(f"Hid pictures on {labels.short_url(url)}")
-            row.set_subtitle(f"{name} · the page was shown, its pictures were covered{again}")
+            row.set_subtitle(f"{name} · Page shown with pictures covered{again}")
+            if event.get("username", "?") != "?" and url:
+                row.add_suffix(pictures_menu(self.win, event["uid"], name, url,
+                                             on_done=self.refresh))
         elif kind == activity_mod.VIDEO:
-            row.set_title(f"Refused a video on {labels.short_url(url) or 'a page'}")
-            row.set_subtitle(f"{name} · after looking at it{again}")
+            row.set_title(f"Blocked video on {labels.short_url(url) or 'a page'}")
+            row.set_subtitle(f"{name} · Blocked by video filtering{again}")
         elif kind == activity_mod.SEARCH:
-            row.set_title(f"Would not search for “{event.get('text', '')}”")
+            row.set_title(f"Blocked search: “{event.get('text', '')}”")
             row.set_subtitle(" · ".join(p for p in (name, event.get("why", ""), again.strip(" ·")) if p))
         elif kind == activity_mod.TIME:
             row.set_title(labels.time_event_title(event))

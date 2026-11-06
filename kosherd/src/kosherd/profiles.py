@@ -40,6 +40,8 @@ class Profile:
     media_level: str = "none"
     language_filter: str = "off"
     youtube: dict = field(default_factory=dict)
+    # Calmer versions of the addictive sites (calm.py, #179).
+    calm: dict = field(default_factory=dict)
     can_install_apps: bool = True
     # What the Store offers (appaccess.py) and what is blocked from it.
     app_access: str = "approved"
@@ -122,8 +124,8 @@ CUSTOM_PREFIX = "custom-"
 
 # The settings a group fixes, in the order a parent reads them.
 DIFF_FIELDS = ("blocked_categories", "media_level", "language_filter",
-               "youtube", "can_install_apps", "app_access", "blocked_app_kinds",
-               "blocked_apps")
+               "youtube", "calm", "can_install_apps", "app_access",
+               "blocked_app_kinds", "blocked_apps")
 
 
 def slug(label: str) -> str:
@@ -139,6 +141,7 @@ def to_dict(profile: Profile) -> dict:
             "media_level": profile.media_level,
             "language_filter": profile.language_filter,
             "youtube": dict(profile.youtube),
+            "calm": dict(profile.calm),
             "can_install_apps": profile.can_install_apps,
             "app_access": profile.app_access,
             "blocked_app_kinds": list(profile.blocked_app_kinds),
@@ -154,6 +157,7 @@ def from_dict(doc: dict) -> Profile:
         media_level=str(doc.get("media_level") or "none"),
         language_filter=str(doc.get("language_filter") or "off"),
         youtube=dict(doc.get("youtube") or {}),
+        calm=dict(doc.get("calm") or {}),
         can_install_apps=bool(doc.get("can_install_apps", True)),
         app_access=str(doc.get("app_access") or "approved"),
         blocked_app_kinds=tuple(sorted(doc.get("blocked_app_kinds") or [])),
@@ -180,6 +184,7 @@ def from_user(user, label: str, description: str = "") -> Profile:
         media_level=str(_field(user, "media_level", "none") or "none"),
         language_filter=str(_field(user, "language_filter", "off") or "off"),
         youtube=dict(_field(user, "youtube", {}) or {}),
+        calm=dict(_field(user, "calm", {}) or {}),
         can_install_apps=bool(_field(user, "can_install_apps", True)),
         app_access=_access_of(user),
         blocked_app_kinds=tuple(sorted(_field(user, "blocked_app_kinds", []) or [])),
@@ -206,7 +211,8 @@ def apply(user, profile: Profile) -> None:
               "blocked_categories": list(profile.blocked_categories),
               "media_level": profile.media_level,
               "language_filter": profile.language_filter,
-              "youtube": dict(profile.youtube)}
+              "youtube": dict(profile.youtube),
+              "calm": dict(profile.calm)}
     app_values = {"can_install_apps": profile.can_install_apps,
                   "app_access": profile.app_access,
                   "blocked_app_kinds": list(profile.blocked_app_kinds),
@@ -291,6 +297,10 @@ def _changes(user, profile: Profile) -> list[dict]:
     theirs = dict(_field(user, "youtube", {}) or {})
     if theirs != dict(profile.youtube):
         changes.append({"field": "youtube", "from": dict(profile.youtube),
+                        "to": theirs})
+    theirs = dict(_field(user, "calm", {}) or {})
+    if theirs != dict(profile.calm):
+        changes.append({"field": "calm", "from": dict(profile.calm),
                         "to": theirs})
     if _access_of(user) != profile.app_access:
         changes.append({"field": "app_access", "from": profile.app_access,

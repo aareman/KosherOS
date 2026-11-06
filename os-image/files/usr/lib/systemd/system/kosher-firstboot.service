@@ -20,14 +20,28 @@ Conflicts=plymouth-quit-wait.service
 # target, so each console getty has to be named.
 Before=getty.target getty@tty1.service serial-getty@ttyS0.service serial-getty@hvc0.service
 Conflicts=getty@tty1.service serial-getty@ttyS0.service serial-getty@hvc0.service
-Requires=kosherd.service
+# Wants, not Requires: the wizard needs the daemon up (After= sees to the
+# order), but a daemon restart must not take the wizard down with it.
+Wants=kosherd.service
 ConditionPathExists=!/var/lib/kosher/setup-complete
 
 [Service]
 # oneshot, so GDM (ordered After= this unit) waits for setup to finish
-# instead of racing it.
+# instead of racing it. NOT RemainAfterExit: that kept this unit "active"
+# for the rest of the first boot, so a kosherd restart (a crash, or a dev
+# push with `just deploy-kosherd`) stopped it through Requires=, its stop
+# hook below started the tty1 getty, and GDM — which conflicts with that
+# getty — went down with the person's whole desktop session. Once the
+# wizard has run there is nothing here to keep active: the condition
+# above keeps it from running again.
 Type=oneshot
-RemainAfterExit=yes
+# A serial console reports a size of 0x0, and systemd then asks the
+# terminal for its size with escape sequences and reads the answer from
+# the same line, so whatever the person had typed into the text wizard
+# went with it: the password arrived empty and setup never finished. A
+# console with a size is not asked. A real screen already has one and is
+# left alone.
+ExecStartPre=-/bin/sh -c '[ "$$(stty -F /dev/console size 2>/dev/null)" != "0 0" ] || stty -F /dev/console rows 24 cols 80'
 ExecStart=/usr/bin/kosher-setup-session
 # Generous, because a person is typing into the wizard — but NOT infinite:
 # GDM is ordered after this unit, so a wizard that wedges (no usable display,
@@ -59,7 +73,14 @@ TTYVTDisallocate=yes
 # Give the console back. Conflicts= stops the getty and nothing restarts
 # it on its own, which would leave a serial or headless machine with no
 # way to log in after setup finished.
-ExecStopPost=-/usr/bin/systemctl --no-block start getty.target
+# ...the SERIAL consoles, that is, the ones a headless or test machine
+# logs in on. Not getty.target: that pulls in the getty on tty1, which
+# the login screen conflicts with, and once this unit stopped staying
+# active after the wizard (a daemon restart used to take it down, and
+# the login screen with it) the hook ran the moment the wizard finished,
+# started that getty, and GDM lost the console — a fresh machine ended
+# its first boot at a black text login.
+ExecStopPost=-/bin/sh -c 'for c in ttyS0 hvc0; do [ -e "/dev/$c" ] && systemctl --no-block start "serial-getty@$c.service"; done; true'
 
 [Install]
 WantedBy=graphical.target

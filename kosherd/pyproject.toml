@@ -20,14 +20,37 @@ dependencies = [
 [project.scripts]
 kosherd = "kosherd.daemon:main"
 kosherctl = "kosherd.cli:main"
+# The Store from a terminal, in the words apt and dnf taught: kosher
+# install, remove, search, list, update, upgrade, info.
+kosher = "kosherd.storecli:main"
 # Runs as the person signing in (a systemd user unit), not as root.
 kosher-layout = "kosherd.layout:main"
 # Also in the person's session: turns the daemon's TimeWarning signal into
 # a desktop notification before their time runs out.
 kosher-time-notify = "kosherd.timenotify:main"
+# And shows that a downloaded update waits for a restart: a mark in the
+# panel, and one notice when an automatic download finishes.
+kosher-update-notify = "kosherd.updatenotify:main"
+# In the person's session too: sends their own keyd file
+# (~/.config/keyd/default.conf) to kosherd at sign-in and on every save.
+kosher-keyboard = "kosherd.keyboard:main"
+# keyd-application-mapper's KEYD_BIN: hands its `bind` calls to kosherd,
+# since nobody has keyd's socket.
+kosher-keyd-bind = "kosherd.keyboard:bind_main"
+# Starts keyd-application-mapper that way (kosher-keyd-apps.service).
+kosher-keyd-apps = "kosherd.keyboard:apps_main"
 # Run by pam_exec after pam_time refuses a sign-in, so the refusal shows in
 # the activity log.
 kosher-time-refused = "kosherd.timelimits:refused_login_main"
+# Run as the account after a nixpkgs app is installed or removed: links
+# the profile's desktop files and icons into ~/.local/share.
+kosher-nix-desktop = "kosherd.nixdesktop:main"
+# Run as the account to fetch, check and unpack a developer's own signed
+# build (kitty) into its home: kosherd/upstreamapps.py.
+kosher-upstream-app = "kosherd.upstreamapps:main"
+# Run as root by syncthing@<user>.service once Syncthing is up: puts the
+# unit's cgroup in the firewall sets that let its ports out (syncthing.py).
+kosher-syncthing-net = "kosherd.syncthing:net_main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/kosherd"]

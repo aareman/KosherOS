@@ -2,11 +2,11 @@
 
 The window: unlocked by the admin's own sign-in, then a sidebar down the left with
 everywhere the app goes — the family, each on a full page of their own,
-then the activity feed and this computer's protection, apps and updates —
+then the activity feed, usage, and this computer's protection, apps and updates —
 and the page itself beside it. Under each page's header, the one banner that speaks only when it must: requests waiting. A problem with the filter is the amber badge on Protection and the first group on that page.
 
 The label tables the daemon's tests read live in labels.py; the sidebar in
-sidebar.py; the pages in family.py, feed.py, computer.py and detail.py;
+sidebar.py; the pages in family.py, feed.py, usage.py, computer.py and detail.py;
 the dialogs in dialogs.py.
 """
 
@@ -22,11 +22,12 @@ from kosherd.client import DaemonClient  # noqa: E402
 
 from . import labels  # noqa: E402
 from .common import banner_slot, error_text, load_css, run_async, submit_on_enter  # noqa: E402
-from .computer import AppsPage, ProtectionPage, UpdatesPage, health_rows  # noqa: E402
+from .computer import AdvancedPage, AppsPage, ProtectionPage, UpdatesPage, health_rows  # noqa: E402
 from .detail import UserDetailPage  # noqa: E402
 from .dialogs import RequestsDialog, add_person_dialog  # noqa: E402
 from .feed import ActivityPage  # noqa: E402
 from .sidebar import Sidebar  # noqa: E402
+from .usage import EVERYONE, UsagePage  # noqa: E402
 
 APP_ID = "org.kosherlinux.Admin"
 
@@ -36,8 +37,8 @@ EDITABLE_LISTS = labels.EDITABLE_LISTS
 
 class Window(Adw.ApplicationWindow):
     def __init__(self, **kwargs):
-        super().__init__(**kwargs, title="KosherOS Admin", default_width=1120,
-                         default_height=740)
+        super().__init__(**kwargs, title="KosherOS Admin", default_width=1280,
+                         default_height=840)
         load_css()
         self.client = DaemonClient()
         self.policy: dict = {"users": [], "guardian": {"enabled": False}}
@@ -51,6 +52,10 @@ class Window(Adw.ApplicationWindow):
         self.guardian_ok = False
         self.destination = "activity"
         self._landed = False
+        # The Usage page is built fresh on every visit; what it was showing
+        # is kept here so coming back does not reset it.
+        self.usage_range = "today"
+        self.usage_uid = EVERYONE
 
         self.toasts = Adw.ToastOverlay()
         self.set_content(self.toasts)
@@ -66,7 +71,7 @@ class Window(Adw.ApplicationWindow):
         # (An amber health banner used to stack under it; two bars
         # shouting before the title was the crowding. Health is now the
         # amber badge on Protection and the first group on that page.)
-        self.requests_banner = Adw.Banner(button_label="Deal with them")
+        self.requests_banner = Adw.Banner(button_label="Review requests")
         self.requests_banner.add_css_class("requests-banner")
         self.requests_banner.connect("button-clicked", lambda _b: self.show_requests())
 
@@ -199,8 +204,11 @@ class Window(Adw.ApplicationWindow):
             return self._activity_nav_page
         if key == "guest" or key.startswith("user-"):
             return self._person_page(key)
+        if key == "usage":
+            page = self.open_computer_page = UsagePage(self)
+            return page
         page = {"protection": ProtectionPage, "apps": AppsPage,
-                "updates": UpdatesPage}[key](self)
+                "updates": UpdatesPage, "advanced": AdvancedPage}[key](self)
         self.open_computer_page = page
         return page
 
@@ -258,6 +266,11 @@ class Window(Adw.ApplicationWindow):
         """Jump to the activity page, narrowed to one person."""
         self.go_to("activity")
         self.activity_page.show_user(uid)
+
+    def show_usage(self, uid: int) -> None:
+        """Jump to the Usage page, narrowed to one person."""
+        self.usage_uid = uid
+        self.go_to("usage")
 
     def refresh_open_detail(self) -> None:
         """After a policy reload, rebuild the detail page being viewed so it
@@ -333,8 +346,9 @@ class Window(Adw.ApplicationWindow):
 
         run_async(load, on_done, lambda e: self.toast(error_text(e)))
 
-    def with_guardian(self, then) -> None:
-        """Ask for the guardian password once per session, then call `then(pw)`."""
+    def with_guardian(self, then, on_cancel=None) -> None:
+        """Ask for the guardian password once per session, then call `then(pw)`.
+        `on_cancel` runs if the prompt is closed or the password is wrong."""
         if not self.policy["guardian"]["enabled"] or self.guardian_ok:
             then("")
             return
@@ -344,12 +358,16 @@ class Window(Adw.ApplicationWindow):
                 self.guardian_ok = True
                 then("")
 
-            run_async(lambda: self.client.verify_guardian(pw), on_verified,
-                      lambda e: self.toast(error_text(e)))
+            def refused(e):
+                self.toast(error_text(e))
+                if on_cancel:
+                    on_cancel()
+
+            run_async(lambda: self.client.verify_guardian(pw), on_verified, refused)
 
         dialog = Adw.AlertDialog(
             heading="Guardian password",
-            body="Required once per session to change filter settings.")
+            body="Required once per session to reduce filtering restrictions.")
         entry = Gtk.PasswordEntry(show_peek_icon=True, hexpand=True)
         dialog.set_extra_child(entry)
         dialog.add_response("cancel", "Cancel")
@@ -362,6 +380,8 @@ class Window(Adw.ApplicationWindow):
         def on_response(_d, response):
             if response == "ok":
                 proceed(entry.get_text())
+            elif on_cancel:
+                on_cancel()
 
         dialog.connect("response", on_response)
         dialog.present(self)

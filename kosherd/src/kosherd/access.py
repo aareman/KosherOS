@@ -24,6 +24,11 @@ ACTION_USE_STORE = "org.kosherlinux.use-store"
 # says nothing about how you are filtered (today: the desktop layout, which
 # the sign-in helper applies).
 ACTION_READ_OWN = "org.kosherlinux.read-own-settings"
+# Granted to every active local user: changing a setting about YOURSELF
+# that is a preference, not a protection (today: your own desktop layout,
+# from the Look app). The filter is per-uid at the network layer whatever
+# draws the windows, so nothing here loosens it.
+ACTION_SET_OWN = "org.kosherlinux.set-own-desktop"
 ACTION_MANAGE_USERS = "org.kosherlinux.manage-users"
 ACTION_MANAGE_FILTER = "org.kosherlinux.manage-filter"
 ACTION_INSTALL_APPS = "org.kosherlinux.install-apps"
@@ -79,6 +84,19 @@ ACTIONS = {
     # per-uid at the network layer whatever draws the windows.
     "SetLayout": ACTION_MANAGE_USERS,
     "GetMyLayout": ACTION_READ_OWN,
+    # The same choice, made by the person for themselves in the Look app.
+    "SetMyLayout": ACTION_SET_OWN,
+    # And which compositor their advanced desktop runs on.
+    "GetMyCompositor": ACTION_READ_OWN,
+    "SetMyCompositor": ACTION_SET_OWN,
+    # Your own key remaps (keyd), from your own file. A preference about
+    # your own keyboard: it is in force only while your session is on the
+    # screen, and a command() key runs as you, never as root (kosherd
+    # never hands keyd your text). See keyboard.py.
+    "SetMyKeyboard": ACTION_SET_OWN,
+    # Per-application keys from your own app.conf, the same way: checked
+    # like your files, and only while your session is on the screen.
+    "SetMyAppKeys": ACTION_SET_OWN,
     # Your own filter settings, read-only, no password: what applies to
     # THIS account and nothing about any other. A filtered account should
     # not be a mystery to the person using it — someone who can see the
@@ -97,6 +115,8 @@ ACTIONS = {
     # Machine-wide ad and tracker blocking at the resolvers. Turning it off
     # weakens what reaches the screen, so it is guardian-gated.
     "SetAdBlock": ACTION_MANAGE_FILTER,
+    # A host the ad blocker leaves reachable, for every account (#265).
+    "SetAdBlockAllowed": ACTION_MANAGE_FILTER,
     # How long and when an account may be signed in. Loosening a limit
     # weakens the protection like any other filter change, so it takes
     # the same road: a filter action, guardian-gated.
@@ -105,17 +125,40 @@ ACTIONS = {
     # Beyond the web: video calls (UDP the filter cannot read) and extra
     # ports. Opening either widens what the account reaches.
     "SetNetworkAccess": ACTION_MANAGE_FILTER,
+    # SSH to other machines (#257): a tunnel the filter cannot read, to
+    # the listed machines or anywhere. Widens what the account reaches.
+    "SetSsh": ACTION_MANAGE_FILTER,
+    # Developer tools: the Nix daemon and the registries, directly. On
+    # widens what the account reaches, so dual-controlled like a filter.
+    "SetDeveloperTools": ACTION_MANAGE_FILTER,
+    # Signing in to the account over SSH from another machine: what comes
+    # in over the connection is not read by the filter.
+    "SetSshIn": ACTION_MANAGE_FILTER,
+    # Where a Nix build may download from, beyond the built-in hosts.
+    "SetBuildSources": ACTION_MANAGE_FILTER,
+    # The boot menu: the way round every other protection, so setting its
+    # password is dual-controlled like a filter change; reading whether one
+    # is set is a read.
+    "SetBootMenuPassword": ACTION_MANAGE_FILTER,
+    "BootMenuProtected": ACTION_READ_CONFIG,
     "ApproveRequest": ACTION_MANAGE_FILTER,
     "DismissRequest": ACTION_MANAGE_USERS,
     "ListRequests": ACTION_READ_CONFIG,
     # Allowing a blocked page from the activity view is the same grant as
     # approving a request for it.
     "AllowUrl": ACTION_MANAGE_FILTER,
+    "BypassUrl": ACTION_MANAGE_FILTER,
+    # The activity log's grants: a page, its folder or its site, allowed,
+    # with pictures shown, or bypassed. Each opens more of the web.
+    "GrantUrl": ACTION_MANAGE_FILTER,
     "ListActivity": ACTION_READ_CONFIG,
     "ActivitySummary": ACTION_READ_CONFIG,
+    "Usage": ACTION_READ_CONFIG,
     "SetMediaLevel": ACTION_MANAGE_FILTER,
     "SetLanguageFilter": ACTION_MANAGE_FILTER,
     "SetYouTube": ACTION_MANAGE_FILTER,
+    # The calmer addictive sites (#179): a filter setting like any other.
+    "SetCalm": ACTION_MANAGE_FILTER,
     # Finding a channel to approve reads nothing of the machine's and
     # changes nothing; approving it is SetYouTube, which is gated.
     "SearchYouTubeChannels": ACTION_READ_CONFIG,
@@ -143,7 +186,16 @@ ACTIONS = {
     "ListStoreApps": ACTION_USE_STORE,
     "ListInstalled": ACTION_USE_STORE,
     "InstallApp": ACTION_USE_STORE,
+    # An administrator installing for an account: an admin's action, not
+    # the store's, which is open to the account alone.
+    "InstallAppFor": ACTION_INSTALL_APPS,
     "ListInstalledDetails": ACTION_READ_CONFIG,
+    # The same list as the Store shows it to the CALLER: every Flatpak
+    # (system-wide, which `flatpak list` already shows anyone) and the
+    # caller's own nixpkgs apps, with nothing about who installed what.
+    # ListInstalledDetails stays an admin read because it names the
+    # accounts and lists every account's own apps.
+    "ListMyInstalledDetails": ACTION_USE_STORE,
     # Updating an installed, approved app is for everyone the store is for:
     # it widens nothing, and the newer build is the safer one to be on.
     "ListAppUpdates": ACTION_USE_STORE,
@@ -151,6 +203,10 @@ ACTIONS = {
     "UpdateApp": ACTION_USE_STORE,
     "UpdateAllApps": ACTION_USE_STORE,
     "RemoveApp": ACTION_INSTALL_APPS,
+    # Leftover runtimes: anyone the store is for may see what they take;
+    # removing is an administrator's action like removing an app.
+    "ListUnusedApps": ACTION_USE_STORE,
+    "RemoveUnusedApps": ACTION_INSTALL_APPS,
     "SetUserApps": ACTION_INSTALL_APPS,
     "SetUserCanInstall": ACTION_INSTALL_APPS,
     # Opening an account to the whole store, or lifting a block, widens
@@ -158,6 +214,19 @@ ACTIONS = {
     "SetUserAppAccess": ACTION_INSTALL_APPS,
     "SetUserBlockedAppKinds": ACTION_INSTALL_APPS,
     "SetUserBlockedApps": ACTION_INSTALL_APPS,
+    # Syncthing for one account (#213): files from its paired devices
+    # never pass the filter, and its ports go out directly. Approving it,
+    # and letting the home network reach it, are guardian-gated.
+    "SetUserAppApproval": ACTION_INSTALL_APPS,
+    "SetSyncthingLan": ACTION_MANAGE_FILTER,
+    # Syncthing for the whole computer (#220): off, nobody has it and the
+    # Store does not offer it. On, an administrator's account and an
+    # unfiltered one may install it with no approval, so it is gated.
+    "SetSyncthingEnabled": ACTION_MANAGE_FILTER,
+    # Key remapping for the whole computer (#230): keyd is a root daemon
+    # that reads every keyboard, and a remapped key can run a command in
+    # the person's session. Gated like the other Advanced switches.
+    "SetKeydEnabled": ACTION_MANAGE_FILTER,
     "SearchApps": ACTION_READ_CONFIG,
     "ApproveApp": ACTION_INSTALL_APPS,
     "UnapproveApp": ACTION_INSTALL_APPS,
@@ -170,16 +239,48 @@ ACTIONS = {
     # the family computer onto edge puts it on builds nobody has tried
     # yet, and that is a decision for whoever holds the second password.
     "SetChannel": ACTION_APPLY_UPDATES,
-    # Going back to the previously booted image. Not guardian-gated: the
-    # image is one this machine already ran, and greenboot must be able to
-    # do the same thing with no password when a new image fails to bring
-    # the filter up. Gating it would mainly risk a broken machine nobody
-    # present can repair. See impl_Rollback.
+    # Going back to the previously booted image. Guardian-gated: the image
+    # gone back to carries the filter it was built with, which can be older
+    # and weaker than the one running now, so going back is a filter change
+    # like any other (F11 on #33). The automatic return is not held up by
+    # this: greenboot never calls kosherd, the boot counter takes a machine
+    # whose filter did not come up back to the last good deployment by
+    # itself. See impl_Rollback.
     "Rollback": ACTION_APPLY_UPDATES,
+    # Trying a build that is on no channel (a pull request's) while
+    # keeping the one the machine came from, and going back to it. The
+    # first is gated like a channel switch, for the same reason; the
+    # second is a rollback onto an image this machine already ran.
+    "TryImage": ACTION_APPLY_UPDATES,
+    "ReturnToKept": ACTION_APPLY_UPDATES,
     # The Restart button after an update. Same action as applying it: a
     # restart is the second half of the same job.
     "Reboot": ACTION_APPLY_UPDATES,
+    # Automatic updates (#19). The schedule is a system setting like the
+    # channel, but not guardian-gated: it only decides when updates the
+    # administrator could fetch anyway are fetched, and "off" leaves the
+    # Check button working. The run is the timer's (root) or an
+    # administrator's "check now".
+    "SetAutoUpdates": ACTION_APPLY_UPDATES,
+    "AutoUpdateStatus": ACTION_READ_CONFIG,
+    "RunAutoUpdate": ACTION_APPLY_UPDATES,
+    # Whether an update waits for a restart, for the mark in every
+    # person's panel. Says nothing about anybody's filter, and is answered
+    # from kosherd's own note, so any account may ask without a password.
+    "PendingUpdate": ACTION_READ_OWN,
     "SetCaptiveMode": ACTION_MANAGE_NETWORK,
+    # Tailscale (#30). Reading whether this computer is on a tailnet is a
+    # read. Signing it in puts it on a network with other people's
+    # machines, which every account can then reach by name through its
+    # own filter, so it is guardian-gated; signing out only takes that
+    # away, and is not.
+    "TailscaleStatus": ACTION_READ_CONFIG,
+    "TailscaleSignIn": ACTION_MANAGE_NETWORK,
+    "TailscaleSignOut": ACTION_MANAGE_NETWORK,
+    # Whether tailscaled runs at all (#220). Starting it opens nothing
+    # until it is signed in, which is gated on its own; it is gated anyway
+    # so both of the Advanced switches ask the same way.
+    "SetTailscaleEnabled": ACTION_MANAGE_NETWORK,
     "IsEnabled": ACTION_READ_CONFIG,
     "SetGuardianPassword": ACTION_MANAGE_GUARDIAN,
     "DisableGuardian": ACTION_MANAGE_GUARDIAN,
@@ -187,13 +288,18 @@ ACTIONS = {
 
 # Methods that can weaken the filter: guardian password required when enabled.
 GUARDIAN_GATED = frozenset({
-    "SetFilterMode", "SetWhitelist", "SetWhitelistBundles", "SetUrlRules", "SetBlockedCategories", "ApplyProfile", "SaveProfile", "DeleteProfile", "ApproveRequest", "AllowUrl", "EditList",
+    "SetFilterMode", "SetWhitelist", "SetWhitelistBundles", "SetUrlRules", "SetBlockedCategories", "ApplyProfile", "SaveProfile", "DeleteProfile", "ApproveRequest", "AllowUrl", "BypassUrl", "GrantUrl", "EditList",
     "SetUserAdmin",
     "SetMediaLevel",
-    "SetLanguageFilter", "SetYouTube",
+    "SetLanguageFilter", "SetYouTube", "SetCalm",
     "SetGuestConfig", "DisableGuardian", "Enrol", "Unenrol",
-    "SetAdBlock", "SetTimeLimits", "SetChannel", "SetNetworkAccess",
+    "SetAdBlock", "SetAdBlockAllowed", "SetTimeLimits", "SetChannel", "TryImage", "Rollback",
+    "SetNetworkAccess", "SetSsh",
+    "SetDeveloperTools", "SetSshIn", "SetBuildSources",
+    "SetBootMenuPassword",
     "SetUserAppAccess", "SetUserBlockedAppKinds", "SetUserBlockedApps",
+    "SetUserAppApproval", "SetSyncthingLan", "SetSyncthingEnabled",
+    "TailscaleSignIn", "SetTailscaleEnabled", "SetKeydEnabled",
 })
 
 # First-boot only; closed forever once setup is stamped complete.
@@ -205,7 +311,15 @@ SETUP_READS = frozenset({"IsComplete", "AdminExists"})
 
 # Methods that need to know which uid called them (session management).
 UID_AWARE = frozenset({"Unlock", "Lock", "Status", "VerifyGuardian", "InstallApp",
-                       "ListStoreApps", "GetMyLayout", "GetMySettings"})
+                       "ListStoreApps", "ListMyInstalledDetails", "GetMyLayout", "SetMyLayout", "GetMySettings",
+                       "GetMyCompositor", "SetMyCompositor",
+                       "SetMyKeyboard", "SetMyAppKeys",
+                       # A nixpkgs app is in one account's profile: what is
+                       # installed, and whose copy to update or remove,
+                       # depends on who is asking.
+                       "ListInstalled", "UpdateApp", "RemoveApp",
+                       # ...and whether one of them has a newer build.
+                       "ListAppUpdates", "CheckAppUpdates", "UpdateAllApps"})
 
 # Calls that change how the machine is set up, written to the activity log
 # with the admin who made them so "who changed this?" has an answer. Reads,
@@ -215,12 +329,17 @@ CHANGES = frozenset({
     "SetFilterMode", "SetWhitelist", "SetWhitelistBundles", "SetUrlRules",
     "SetBlockedCategories",
     "ApplyProfile", "SaveProfile", "DeleteProfile", "ApproveRequest",
-    "DismissRequest", "AllowUrl", "EditList", "SetMediaLevel",
-    "SetLanguageFilter", "SetYouTube", "SetUserAdmin", "SetLayout",
-    "SetCoverStyle", "SetAdBlock", "SetTimeLimits", "SetNetworkAccess", "SetGuestConfig", "CreateUser",
-    "AdoptUser", "RemoveUser", "ResetPassword", "SetUserApps", "RemoveApp", "ApproveApp",
+    "DismissRequest", "AllowUrl", "BypassUrl", "GrantUrl", "EditList", "SetMediaLevel",
+    "SetLanguageFilter", "SetYouTube", "SetCalm", "SetUserAdmin", "SetLayout",
+    "SetCoverStyle", "SetAdBlock", "SetAdBlockAllowed", "SetTimeLimits", "SetNetworkAccess",
+    "SetDeveloperTools", "SetSshIn",
+    "SetBuildSources",
+    "SetBootMenuPassword", "SetGuestConfig", "CreateUser",
+    "AdoptUser", "RemoveUser", "ResetPassword", "SetUserApps", "RemoveApp", "RemoveUnusedApps",
+    "InstallAppFor", "ApproveApp",
     "UnapproveApp", "SetUserCanInstall", "SetUserAppAccess",
     "SetUserBlockedAppKinds", "SetUserBlockedApps", "SetCaptiveMode",
+    "SetUserAppApproval", "SetSyncthingLan", "SetSyncthingEnabled",
     "SetGuardianPassword", "DisableGuardian", "Enrol", "Unenrol",
     # Moving the system in either direction. The log answers "who changed
     # this machine, and when", and changing which OS image it runs is
@@ -231,21 +350,53 @@ CHANGES = frozenset({
     # And which stream of builds it follows from now on, which is the
     # longest-lived of the three.
     "SetChannel",
+    # And how often it fetches updates on its own.
+    "SetAutoUpdates",
+    # A test build put on the machine, and the return from it.
+    "TryImage", "ReturnToKept",
+    # Joining a tailnet and leaving it.
+    "TailscaleSignIn", "TailscaleSignOut", "SetTailscaleEnabled",
+    # And key remapping switched on or off.
+    "SetKeydEnabled",
 })
 # Changes whose first argument is the account they are about.
 PER_USER = frozenset({
     "SetFilterMode", "SetWhitelist", "SetWhitelistBundles", "SetUrlRules",
     "SetBlockedCategories",
-    "ApplyProfile", "SaveProfile", "AllowUrl", "SetMediaLevel",
-    "SetLanguageFilter", "SetYouTube", "SetUserAdmin", "SetLayout",
-    "SetCoverStyle", "SetTimeLimits", "SetNetworkAccess", "RemoveUser", "ResetPassword", "SetUserApps",
+    "ApplyProfile", "SaveProfile", "AllowUrl", "BypassUrl", "GrantUrl", "SetMediaLevel",
+    "SetLanguageFilter", "SetYouTube", "SetCalm", "SetUserAdmin", "SetLayout",
+    "SetCoverStyle", "SetTimeLimits", "SetNetworkAccess", "SetDeveloperTools", "SetSshIn", "InstallAppFor",
+    "RemoveUser", "ResetPassword", "SetUserApps",
     "SetUserCanInstall", "SetUserAppAccess", "SetUserBlockedAppKinds",
-    "SetUserBlockedApps", "SetCaptiveMode",
+    "SetUserBlockedApps", "SetCaptiveMode", "SetUserAppApproval", "SetSyncthingLan",
 })
 # Changes whose arguments are secrets or too big to be worth keeping.
-NO_ARGS_LOGGED = frozenset({"SetGuardianPassword", "DisableGuardian",
+NO_ARGS_LOGGED = frozenset({"SetGuardianPassword", "DisableGuardian", "SetBootMenuPassword",
                             "Enrol", "EditList", "SetWhitelist",
                             "SetUrlRules"})
+
+# Actions every active local account has without a password
+# (49-kosher-admin.rules answers yes to these before it asks for one).
+FREE_ACTIONS = frozenset({ACTION_USE_STORE, ACTION_READ_OWN, ACTION_SET_OWN})
+
+
+def needs_admin_session(method: str) -> bool:
+    """Would `method` ask a non-administrator for an administrator's
+    password when no session is open?
+
+    polkit keeps an answered prompt per action, so a command that read a
+    setting and then changed one asked twice. A client about to make such
+    calls opens the session first with Unlock, which is the one prompt;
+    kosherd then skips polkit for that uid until the session ends. The gate
+    is the same either way: Unlock takes an administrator's password just
+    as the read and the change do.
+    """
+    if method not in ACTIONS or method in SETUP_METHODS:
+        return False
+    if method in ("Unlock", "Lock"):
+        return False
+    return ACTIONS[method] not in FREE_ACTIONS
+
 
 SETUP_CLOSED = "initial setup is already complete"
 UNKNOWN_METHOD = "unknown method"

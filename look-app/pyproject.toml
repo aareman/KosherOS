@@ -1,0 +1,23 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "kosherlook"
+version = "0.1.0"
+description = "Look — choose your own desktop and tune how it looks"
+readme = "README.md"
+requires-python = ">=3.11"
+license = "AGPL-3.0-or-later"
+dependencies = ["kosherd"]
+
+[project.scripts]
+kosher-look = "kosherlook.app:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/kosherlook"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# So `pytest` works from this directory as it does from `just test`.
+pythonpath = ["src", "../kosherd/src"]

@@ -19,22 +19,21 @@ from kosherd.policy import YOUTUBE_CATEGORIES
 
 MODE_LABELS = {
     "none": "No internet",
-    "whitelist": "Whitelist only",
+    "whitelist": "Approved sites only",
     "dnsfilter": "DNS filter",
     "filtered": "Filtered internet",
     "unfiltered": "Unfiltered",
 }
 
 MODE_HINTS = {
-    "none": "No web access at all. Printing and local network still work.",
-    "whitelist": "Only the sites on the approved list, and safe search is forced.",
-    "dnsfilter": "Basic protection only: blocks known bad sites and forces "
-                 "safe search. Pages and pictures are NOT checked in this "
-                 "mode — for that, use Filtered internet.",
-    "filtered": "Safe search, page rules and content filtering. To judge "
-                "pages this reads the connection, so this user's HTTPS is "
-                "decrypted on this computer.",
-    "unfiltered": "No filtering of any kind for this account.",
+    "none": "Blocks internet access. Printers and the local network remain available.",
+    "whitelist": "Allows approved sites only, with SafeSearch enabled.",
+    "dnsfilter": ("Blocks listed sites and enables SafeSearch. To check pages and pictures too,"
+        " choose Filtered internet."),
+    "filtered": ("Checks pages and content, applies page rules and enables SafeSearch. HTTPS "
+        "traffic for this account is decrypted on this computer for inspection."),
+    "unfiltered": ("No content filtering for this account. Computer-wide ad blocking still "
+        "applies if enabled."),
 }
 
 # Pictures and video, in the words a parent would use. The order matches
@@ -49,17 +48,13 @@ MEDIA_LABELS = {
 }
 MEDIA_HINTS = {
     "none": "No filtering of pictures or video.",
-    "nsfw": "Hides pictures on pages that read as explicit.",
-    "suggestive": "Also hides pictures on pages that read as suggestive.",
-    "immodest": "Also hides pictures on pages about immodest dress. The "
-                "strictest setting that still judges each picture.",
-    "people": "Also hides any picture with a person in it, whatever they "
-              "wear. Tight or sheer clothing is not something the filter can "
-              "judge, and this is the honest answer to it: landscapes, "
-              "products, diagrams and text still show.",
-    "all": "No pictures from the web at all. Nothing here depends on a "
-           "judgement call, which is why it is the only setting that is "
-           "right every time.",
+    "nsfw": "Hides pictures on pages identified as explicit.",
+    "suggestive": "Also hides pictures on pages identified as suggestive.",
+    "immodest": ("Also hides pictures identified as immodest, including on pages about "
+        "immodest dress."),
+    "people": ("Hides pictures when a person is detected, regardless of clothing. Detection "
+        "can miss people."),
+    "all": "Blocks all web pictures without checking their content.",
 }
 # The same levels as one short line on a card or a chip.
 MEDIA_SHORT = {
@@ -77,21 +72,19 @@ COVER_LABELS = {
     "skin": "Paint over skin",
 }
 COVER_HINTS = {
-    "frost": "The person is frosted out: the shape is gone, the rest of the "
-             "picture and the page stay. The default.",
-    "skin": "Skin inside the picture is painted a solid grey, with a margin; "
-            "clothing and background stay. Where the colour check finds no "
-            "skin to paint, the figure is frosted instead.",
+    "frost": "Covers the person with a frosted area and keeps the rest of the picture.",
+    "skin": ("Covers detected skin with solid grey. If no skin is detected, covers the "
+        "figure with a frosted area."),
 }
 COVER_ORDER = ("frost", "skin")
 
 LANGUAGE_LABELS = {
-    "off": "Leave bad language alone",
-    "substitute": "Replace bad language with a milder word",
+    "off": "Show bad language",
+    "substitute": "Replace bad language",
     "block": "Block pages with bad language",
 }
 LANGUAGE_SHORT = {
-    "off": "Bad language left alone",
+    "off": "Bad language shown",
     "substitute": "Bad language replaced",
     "block": "Pages with bad language blocked",
 }
@@ -100,8 +93,24 @@ LANGUAGE_ORDER = ("off", "substitute", "block")
 # What the Store offers an account, as one short line.
 APP_ACCESS_SHORT = {
     "approved": "Approved apps only",
-    "store": "The whole store",
+    "store": "All available apps",
 }
+
+
+# Syncthing for one account (#213): what the admin is told before allowing it.
+SYNCTHING_REF = "nixpkgs#syncthing"
+
+
+def syncthing_approval(username: str) -> tuple[str, str]:
+    """The heading and body of the dialog that allows Syncthing."""
+    return (f"Allow Syncthing for {username}?",
+            "Files that arrive from devices paired with Syncthing aren't checked by the "
+            f"filter. Only allow it if you trust every device {username} will pair with.")
+
+
+SYNCTHING_LAN_TITLE = "Let devices on this network connect directly"
+SYNCTHING_LAN_HINT = ("Off, Syncthing only connects out. On, devices on your home network "
+                      "can connect to it too. Nothing from the internet can.")
 
 
 def app_name(ref: str) -> str:
@@ -112,7 +121,7 @@ def app_name(ref: str) -> str:
 
 def apps_line(user: dict) -> tuple[str, bool]:
     """The apps chip: what this account may have, and whether that is a
-    restriction (drawn blue) or the open store (drawn amber)."""
+    restriction (drawn red) or the open store (drawn amber)."""
     access = appaccess.access_of(user)
     kinds = len(user.get("blocked_app_kinds") or [])
     singles = len(user.get("blocked_apps") or [])
@@ -160,27 +169,13 @@ def channel_result_subtitle(channel: dict) -> str:
     parts = [p for p in (channel.get("handle"), channel.get("subscribers")) if p]
     return " · ".join(parts) or channel["id"]
 
-# How the desktop looks, in the order a parent would consider them. Not a
-# protection — the filter does not care which shell draws the windows — so
-# no guardian password, and it says so plainly.
+# The desktops, for the activity feed's line about a layout change. The
+# choice itself is the person's, in the Look app, not a row in here.
 LAYOUT_LABELS = {
     "classic": "Classic desktop",
     "tiling": "Tiling desktop",
-    "advanced": "Advanced (niri)",
+    "advanced": "Advanced (Noctalia)",
 }
-LAYOUT_HINTS = {
-    "classic": "A taskbar along the bottom, a start button, windows that "
-               "minimise. What a Windows, Mac or ChromeOS user already knows. "
-               "The right choice for almost everyone.",
-    "tiling": "Windows arrange themselves in a scrolling row and are "
-              "driven from the keyboard (PaperWM). Same lock screen, "
-              "settings and accessibility as the classic desktop.",
-    "advanced": "A separate session for power users, picked at the login "
-                "screen: the niri window manager with the Noctalia shell, "
-                "configured by text files. No GNOME Settings, and less "
-                "accessibility support. Filtering is unaffected.",
-}
-LAYOUT_ORDER = ("classic", "tiling", "advanced")
 
 NO_GROUP = "No group"
 
@@ -196,7 +191,7 @@ TIME_LIMIT_LABELS = {
     0: "No daily limit",
 }
 TIME_LIMIT_ORDER = (0, 30, 60, 120, 180)
-TIME_LIMIT_CUSTOM = "A different amount…"
+TIME_LIMIT_CUSTOM = "Custom limit…"
 TIME_LIMIT_HINT = ("Counts the time this person is signed in and using the "
                    "computer; a screen left idle is not counted. They are "
                    "warned 15 and 5 minutes before it runs out, then signed "
@@ -218,18 +213,15 @@ SCHEDULE_PRESET_HINTS = {
 }
 SCHEDULE_PRESET_ORDER = ("always", "after_school", "not_late", "weekdays")
 SCHEDULE_TITLE = "When this account may be used"
-SCHEDULE_HINT = ("Click or drag across the calendar to paint the hours. Amber "
-                 "hours are allowed; blue hours are not. Signing in outside "
-                 "the amber hours is refused, and a session that runs into a "
-                 "blue hour is warned and then signed out.")
+SCHEDULE_HINT = (("Click or drag to change the hours. Amber means allowed; red means blocked. "
+    "Use arrow keys to move and Space to change an hour. The account is signed "
+    "out when allowed hours end."))
 SCHEDULE_LEGEND_ALLOWED = "Allowed"
 SCHEDULE_LEGEND_BLOCKED = "Not allowed"
-TIME_ADMIN_NOTE = ("Administrators are never limited. A parent must always be "
-                   "able to sign in and change a setting; to limit this "
-                   "person, make the account a user account first.")
+TIME_ADMIN_NOTE = (("Time limits do not apply to administrators. Change this to a standard user "
+    "account to set a limit."))
 TIME_TODAY_TITLE = "Today"
-TIME_TAB_INTRO = ("How long, and when, this person may use the computer. "
-                  "Nothing here is set until you set it.")
+TIME_TAB_INTRO = ("Set a daily time limit and allowed hours. Changes save automatically.")
 # Why a session ended, for the activity feed (activity.TIME events).
 TIME_WHY = {
     "time:limit": "today's time was used up",
@@ -239,7 +231,7 @@ TIME_WHY = {
 
 MODE_NOTHING_APPLIES = {
     "none": "This account has no internet access, so nothing here applies.",
-    "unfiltered": "An unfiltered account enforces nothing.",
+    "unfiltered": "Content filtering is off for this account.",
 }
 
 # The lists a family may add to or take from, in their words. Everything
@@ -247,14 +239,12 @@ MODE_NOTHING_APPLIES = {
 # this house or it is not.
 EDITABLE_LISTS = (
     ("wordlist.json", "Bad language",
-     "Words replaced with a milder one on the page, for accounts set to "
-     "clean up bad language.", "word"),
+     "Words replaced on pages when language replacement is enabled.", "word"),
     ("search-blocklist.json", "Blocked searches",
-     "Searches that will not run at all, because the results page would "
-     "show the words even with every link removed.", "search"),
-    ("content-terms.json", "Words pages are judged by",
-     "Words that count as evidence when deciding whether a page is "
-     "inappropriate. No single one blocks a page on its own.", "term"),
+     "Search terms that the filter blocks before showing results.", "search"),
+    ("content-terms.json", "Content filter terms",
+     ("Terms used to check page content. A single term does not block a page on its"
+         " own."), "term"),
 )
 
 # Where a term a family adds sits on the ladder, in plain words. Weights
@@ -272,10 +262,9 @@ CONTENT_LEVELS = (
 PICTURE_STATE = {
     "too_slow": (
         "This computer is hiding pictures instead of checking them",
-        "Checking each picture takes about {ms} ms here, which would make "
-        "pages slow to load and still leave many unchecked. Hiding them is "
-        "faster and never wrong. Set “Pictures and video” to “Show all "
-        "pictures” if you would rather have them."),
+        ("Checking each picture takes about {ms} ms on this computer. Pictures are "
+            "hidden to avoid slow page loads. Choosing “Show all pictures” turns off "
+            "picture filtering.")),
     "no_model": (
         "Pictures are being hidden, not checked",
         "The picture model is not installed on this computer, so any "
@@ -286,12 +275,20 @@ CONTENT_LEVEL_WORDS = {"nsfw": "explicit", "suggestive": "suggestive",
                        "immodest": "immodest"}
 
 
-def why_text(why: str) -> str:
+def why_text(why: str, source: str = "") -> str:
     """'category:video,social' -> 'Video and streaming, Social networks'.
 
     The reason the filter gives for a block, in the family's words, for the
-    activity feed and beside a request.
+    activity feed and beside a request. A block the page's own script
+    reported, for what the page showed after it loaded, says so.
     """
+    text = _why_text(why)
+    if text and source == "page":
+        return text + " (shown after it loaded)"
+    return text
+
+
+def _why_text(why: str) -> str:
     if not why:
         return ""
     kind, _, rest = why.partition(":")
@@ -443,6 +440,16 @@ def change_sentence(event: dict, users_by_uid: dict | None = None) -> tuple[str,
     elif method == "AllowUrl":
         what = f"{who} may now reach {host_of(str(arg(1) or ''))}" + \
             (" (whole site)" if arg(2) else "")
+    elif method == "BypassUrl":
+        what = f"{who} now reaches {host_of(str(arg(1) or ''))} with nothing filtered" + \
+            (" (whole site)" if arg(2) else "")
+    elif method == "GrantUrl":
+        where = {"page": "", "folder": " (that folder)", "site": " (whole site)"}.get(
+            str(arg(3) or ""), "")
+        host = host_of(str(arg(1) or ""))
+        what = {"pictures": f"{who} now sees the pictures on {host}{where}",
+                "bypass": f"{who} now reaches {host}{where} with nothing filtered"}.get(
+            str(arg(2) or ""), f"{who} may now reach {host}{where}")
     elif method == "ApproveRequest":
         what = "A request was allowed"
     elif method == "DismissRequest":
@@ -455,6 +462,25 @@ def change_sentence(event: dict, users_by_uid: dict | None = None) -> tuple[str,
         what = f"Word list edited ({_list_title(arg(0))})"
     elif method == "SetAdBlock":
         what = "Ads and trackers " + ("blocked for everyone" if arg(0) else "no longer blocked")
+    elif method == "SetAdBlockAllowed":
+        what = "Sites the ad blocker leaves reachable changed"
+    elif method == "SetDeveloperTools":
+        what = f"{who}: developer tools {'on' if arg(1) else 'off'}"
+    elif method == "SetSshIn":
+        what = f"{who}: sign in over SSH {'on' if arg(1) else 'off'}"
+    elif method == "SetBuildSources":
+        what = "Sites Nix builds may download from changed"
+    elif method == "SetBootMenuPassword":
+        what = "Boot menu password set"
+    elif method == "TailscaleSignIn":
+        what = "Signing this computer in to Tailscale"
+    elif method == "TailscaleSignOut":
+        what = "This computer signed out of Tailscale"
+    elif method == "SetTailscaleEnabled":
+        what = "Tailscale " + ("turned on" if arg(0) else "turned off")
+    elif method == "SetSyncthingEnabled":
+        what = "Syncthing " + ("turned on for this computer" if arg(0)
+                               else "turned off for every account")
     elif method == "SetNetworkAccess":
         ports = arg(2) if isinstance(arg(2), list) else []
         what = f"{who}: video calls {'on' if arg(1) else 'off'}" + \
@@ -485,6 +511,13 @@ def change_sentence(event: dict, users_by_uid: dict | None = None) -> tuple[str,
     elif method == "SetUserBlockedApps":
         refs = arg(1) or []
         what = f"{who}: {plural(len(refs), 'app')} blocked by name"
+    elif method == "SetUserAppApproval":
+        name = "Syncthing" if arg(1) == SYNCTHING_REF else app_name(str(arg(1)))
+        what = f"{who}: {name} " + ("allowed" if arg(2) else "no longer allowed")
+    elif method == "SetSyncthingLan":
+        what = (f"{who}: devices on this network "
+                + ("may now connect to Syncthing directly" if arg(1)
+                   else "can no longer connect to Syncthing directly"))
     elif method == "RemoveApp":
         what = f"App uninstalled for everyone ({arg(0)})"
     elif method == "ApproveApp":
@@ -507,6 +540,10 @@ def change_sentence(event: dict, users_by_uid: dict | None = None) -> tuple[str,
         what = "A system update was downloaded"
     elif method == "Rollback":
         what = "The computer was put back to its previous version"
+    elif method == "TryImage":
+        what = f"A test build was put on this computer ({arg(0)})"
+    elif method == "ReturnToKept":
+        what = "The computer went back to the version kept before testing"
     else:
         what = method or "A setting changed"
     detail = f"{actor}, {when_text(event.get('t', 0))}"
@@ -565,6 +602,37 @@ def drift_sentences(changes: list[dict]) -> list[str]:
                 out.append(f"{plural(len(removed), 'app')} unblocked")
         elif field == "youtube":
             out.extend(_youtube_drift(change.get("from") or {}, change.get("to") or {}))
+        elif field == "calm":
+            out.extend(_calm_drift(change.get("from") or {}, change.get("to") or {}))
+    return out
+
+
+CALM_SITE_LABELS = {"x": "X", "reddit": "Reddit", "youtube": "YouTube",
+                    "facebook": "Facebook"}
+
+
+def _calm_drift(before: dict, after: dict) -> list[str]:
+    """What changed about the calmer sites (#179), in short lines."""
+    out = []
+    b_sites = set((before.get("sites") if before.get("enabled") else {}) or {})
+    a_sites = set((after.get("sites") if after.get("enabled") else {}) or {})
+    for key in sorted(a_sites - b_sites):
+        out.append(f"Calmer {CALM_SITE_LABELS.get(key, key)}")
+    for key in sorted(b_sites - a_sites):
+        out.append(f"{CALM_SITE_LABELS.get(key, key)} as it is")
+    if before.get("enabled") and after.get("enabled"):
+        b_items = before.get("feed_items", 30)
+        a_items = after.get("feed_items", 30)
+        if b_items != a_items:
+            out.append(f"Calmer feeds: {plural(a_items, 'item')}")
+        for key in sorted(a_sites & b_sites):
+            b_min = ((before.get("sites") or {}).get(key) or {}).get("daily_minutes", 0)
+            a_min = ((after.get("sites") or {}).get(key) or {}).get("daily_minutes", 0)
+            if b_min != a_min and a_min:
+                name = CALM_SITE_LABELS.get(key, key)
+                out.append(f"{name}: {plural(a_min, 'minute')} a day")
+            elif b_min != a_min:
+                out.append(f"{CALM_SITE_LABELS.get(key, key)}: no daily limit")
     return out
 
 
@@ -626,7 +694,7 @@ def mode_badge(user: dict) -> tuple[str, bool]:
 def protection_lines(user: dict) -> list[tuple[str, str, bool]]:
     """(icon, text, protects) × 4: web, pictures, video, apps. Always the
     same order, so the eye can compare across the family; the last element
-    says whether that line is blocking something (drawn blue) or leaving it
+    says whether that line is blocking something (drawn red) or leaving it
     open (drawn amber), which is what a parent is scanning for."""
     mode = user.get("mode", "filtered")
     kinds = len(user.get("blocked_categories") or [])
@@ -667,6 +735,13 @@ def protection_lines(user: dict) -> list[tuple[str, str, bool]]:
 
     apps, apps_protect = apps_line(user)
 
+    calm = user.get("calm") or {}
+    calm_sites = list((calm.get("sites") if calm.get("enabled") else None) or {})
+    if mode == "filtered" and calm_sites:
+        calm_text = f"Calm: {plural(len(calm_sites), 'site')}"
+    else:
+        calm_text = "Bottomless feeds"
+
     mode_protects = MODE_PROTECTS.get(mode, True)
     return [
         ("web-browser-symbolic", web, mode_protects),
@@ -676,6 +751,7 @@ def protection_lines(user: dict) -> list[tuple[str, str, bool]]:
          mode in ("none", "whitelist") or (mode == "filtered" and (
              bool(youtube.get("allowed_channels")) or bool(youtube.get("blocked_categories"))
              or youtube.get("restrict", "moderate") != "none"))),
+        ("night-light-symbolic", calm_text, mode == "filtered" and bool(calm_sites)),
         ("view-grid-symbolic", apps, apps_protect),
     ]
 

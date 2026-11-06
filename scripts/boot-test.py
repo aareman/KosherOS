@@ -17,7 +17,11 @@ With no video device the wizard takes its text path and prompts on
 /dev/console, so the test can also answer it over the same line. Work
 happens on a throwaway overlay: the image handed in is never modified.
 
-    scripts/boot-test.py [disk.qcow2]
+    scripts/boot-test.py [disk.qcow2] [--log FILE] [--keep-overlay FILE]
+
+--keep-overlay leaves the overlay at FILE when the run ends, with setup
+done and the administrator made, so `just pr-test` can carry on with the
+same machine instead of answering the wizard again.
 """
 
 from __future__ import annotations
@@ -31,6 +35,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import argparse
 from pathlib import Path
 
 DEFAULT_DISK = Path("build/qcow2/disk.qcow2")
@@ -48,14 +53,26 @@ class Console:
         self.selector = selectors.DefaultSelector()
         self.selector.register(sock, selectors.EVENT_READ)
         self.text = ""
+        # Where the answer to the last thing typed starts. expect() looks
+        # only past it: a prompt printed before we typed is not the reply.
+        self.mark = 0
         log_path.parent.mkdir(parents=True, exist_ok=True)
         self.log = log_path.open("w")
 
     def expect(self, pattern: str, timeout: int) -> bool:
+        """Wait for PATTERN in what the machine printed since the last send.
+
+        Not in everything it ever printed. The wizard asks "Password: "
+        too, so after the user name was typed at the serial login a
+        search of the whole log matched the wizard's prompt at once and
+        the password went out before login had asked for it. login
+        flushes the line before it prompts, and the password was thrown
+        away: "Password:", then a 60-second timeout (#180).
+        """
         regex = re.compile(pattern, re.IGNORECASE)
         deadline = time.monotonic() + timeout
         while True:
-            if regex.search(self.text):
+            if regex.search(self.text, self.mark):
                 return True
             remaining = deadline - time.monotonic()
             if remaining <= 0:
@@ -77,6 +94,7 @@ class Console:
         return match.start() if match else -1
 
     def send(self, line: str) -> None:
+        self.mark = len(self.text)
         self.sock.sendall((line + "\n").encode())
 
     def tail(self, n: int = 700) -> str:
@@ -94,6 +112,8 @@ def start_qemu(disk: Path, socket_path: Path) -> subprocess.Popen:
          # makes this drivable over a serial line.
          "-vga", "none", "-display", "none",
          "-serial", f"unix:{socket_path},server=on,wait=off",
+         # The power button, for a clean shutdown at the end.
+         "-qmp", f"unix:{socket_path.with_name('qmp.sock')},server=on,wait=off",
          "-netdev", "user,id=n0", "-device", "virtio-net-pci,netdev=n0"],
         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
@@ -137,6 +157,16 @@ def _shell(console: Console, command: str, marker: str, timeout: int = 60) -> st
     return out
 
 
+def counted_some(out: str) -> bool:
+    """Whether a `grep -c` in the shell printed a count above zero.
+
+    Its line starts with a carriage return: the shell turns bracketed paste
+    off (ESC[?2004l, then CR) before the command's output, and only the
+    escape is stripped.
+    """
+    return re.search(r"^\s*[1-9]\d*\s*$", out, re.M) is not None
+
+
 def enforcement(console: Console, results: "Results") -> None:
     """Log in on the serial console as the new administrator and probe.
 
@@ -177,13 +207,15 @@ def enforcement(console: Console, results: "Results") -> None:
                   "code=403" in dating, dating[-400:])
     page = _shell(console, "curl -s -m 20 https://www.unibet.com/ | grep -c 'This page is blocked'", "PAGE")
     results.check("a blocked site shows the block page, not an error",
-                  re.search(r"^[1-9]\d*\s*$", page, re.M) is not None, page[-400:])
+                  counted_some(page), page[-400:])
 
 
-def run(disk: Path) -> int:
+def run(disk: Path, log: Path = Path("build/boot-test-console.log"),
+        keep_overlay: Path | None = None) -> int:
     results = Results()
     workdir = Path(tempfile.mkdtemp(prefix="kosher-boot-test-"))
-    overlay = workdir / "overlay.qcow2"
+    overlay = keep_overlay or workdir / "overlay.qcow2"
+    overlay.parent.mkdir(parents=True, exist_ok=True)
     subprocess.run(["qemu-img", "create", "-q", "-f", "qcow2",
                     "-b", str(disk.resolve()), "-F", "qcow2", str(overlay)],
                    check=True)
@@ -192,8 +224,7 @@ def run(disk: Path) -> int:
     qemu = start_qemu(overlay, workdir / "console.sock")
     console = None
     try:
-        console = Console(connect(workdir / "console.sock"),
-                          Path("build/boot-test-console.log"))
+        console = Console(connect(workdir / "console.sock"), log)
 
         print("\nFirst boot")
         reached = console.expect(r"kosher-firstboot|first-boot setup|Username:",
@@ -267,17 +298,39 @@ def run(disk: Path) -> int:
     except (TimeoutError, OSError) as e:
         results.check("the machine boots", False, str(e))
     finally:
-        qemu.terminate()
-        try:
-            qemu.wait(timeout=20)
-        except subprocess.TimeoutExpired:
-            qemu.kill()
+        shut_down(qemu, workdir / "qmp.sock")
 
     print("\n" + "-" * 50)
     print(f"RESULT: {results.passed} passed, {results.failed} failed")
-    print("console log: build/boot-test-console.log")
+    print(f"console log: {log}")
     shutil.rmtree(workdir, ignore_errors=True)
     return 1 if results.failed else 0
+
+
+def shut_down(qemu: subprocess.Popen, qmp_path: Path) -> None:
+    """Press the power button, wait for the machine to go down, then stop QEMU.
+
+    A kept overlay is booted again, so its filesystems should be closed by
+    a shutdown rather than cut off mid-write.
+    """
+    try:
+        sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        sock.settimeout(5)
+        sock.connect(str(qmp_path))
+        sock.recv(65536)
+        for cmd in (b'{"execute":"qmp_capabilities"}', b'{"execute":"system_powerdown"}'):
+            sock.sendall(cmd + b"\n")
+            sock.recv(65536)
+        sock.close()
+        qemu.wait(timeout=120)
+        return
+    except (OSError, subprocess.TimeoutExpired):
+        pass
+    qemu.terminate()
+    try:
+        qemu.wait(timeout=20)
+    except subprocess.TimeoutExpired:
+        qemu.kill()
 
 
 def refuse_stale_disk(disk: str) -> None:
@@ -298,8 +351,9 @@ def refuse_stale_disk(disk: str) -> None:
     def short(image_id: str) -> str:
         return image_id.split(":")[-1][:12]
 
+    image = os.environ.get("KOSHER_IMAGE", "localhost/kosher-linux:dev")
     current = subprocess.run(
-        ["podman", "image", "inspect", "localhost/kosher-linux:dev",
+        ["podman", "image", "inspect", image,
          "--format", "{{.Id}}"], capture_output=True, text=True).stdout.strip()
     if not current:
         return  # no local image to compare against; not this harness's call
@@ -332,7 +386,14 @@ def refuse_stale_disk(disk: str) -> None:
 
 
 def main() -> int:
-    disk = Path(sys.argv[1]) if len(sys.argv) > 1 else DEFAULT_DISK
+    parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
+    parser.add_argument("disk", nargs="?", type=Path, default=DEFAULT_DISK)
+    parser.add_argument("--log", type=Path, default=Path("build/boot-test-console.log"),
+                        help="where the serial console is written")
+    parser.add_argument("--keep-overlay", type=Path, metavar="FILE",
+                        help="keep the booted overlay at FILE afterwards")
+    args = parser.parse_args()
+    disk = args.disk
     refuse_stale_disk(str(disk))
     if not disk.exists():
         print(f"No disk image at {disk}. Build one with: just vm", file=sys.stderr)
@@ -340,7 +401,7 @@ def main() -> int:
     if not os.access("/dev/kvm", os.W_OK):
         print("/dev/kvm is not writable; this test needs KVM.", file=sys.stderr)
         return 2
-    return run(disk)
+    return run(disk, args.log, args.keep_overlay)
 
 
 if __name__ == "__main__":

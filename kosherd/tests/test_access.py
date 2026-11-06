@@ -40,9 +40,10 @@ def test_every_method_has_an_action():
 
 READS = ["GetPolicy", "Status", "IsEnabled", "ListCatalog", "ListInstalled",
          "ListInstalledDetails", "SearchApps", "CheckUpdate", "Lock",
-         "VerifyGuardian", "PortalStatus", "SyncNow", "GetMyLayout", "GetTimeUsage"]
+         "VerifyGuardian", "PortalStatus", "SyncNow", "GetMyLayout", "GetTimeUsage",
+         "SetMyLayout", "GetMyCompositor", "SetMyCompositor"]
 CHANGES = ["SetFilterMode", "SetWhitelist", "SetUrlRules", "CreateUser",
-           "AdoptUser", "RemoveUser", "RemoveApp", "ApproveApp",
+           "AdoptUser", "RemoveUser", "RemoveApp", "InstallAppFor", "ApproveApp",
            "UnapproveApp", "SetUserApps", "SetUserCanInstall", "SetUserAppAccess",
            "SetUserBlockedAppKinds", "SetUserBlockedApps", "ApplyUpdate",
            "SetCaptiveMode", "SetGuardianPassword", "DisableGuardian",
@@ -79,6 +80,16 @@ def test_store_actions_are_open_to_ordinary_users():
     assert "ListStoreApps" in access.UID_AWARE
 
 
+def test_installing_for_an_account_is_an_admins_action():
+    # The Store's own action is answered only for the person at the
+    # keyboard (a local, active session). Installing FOR an account is
+    # how an administrator puts a tool on a child's account, and how a
+    # shell or a test does it at all — an admin action, logged as one.
+    assert ACTIONS["InstallAppFor"] == access.ACTION_INSTALL_APPS
+    assert "InstallAppFor" in access.CHANGES
+    assert "InstallAppFor" not in access.UID_AWARE  # the account is named
+
+
 def test_reading_your_own_layout_is_open_to_ordinary_users():
     # The sign-in helper runs as whoever signs in, admin or not, and the
     # answer says nothing about how they are filtered. It must know WHO
@@ -87,6 +98,25 @@ def test_reading_your_own_layout_is_open_to_ordinary_users():
     assert "GetMyLayout" in access.UID_AWARE
     assert access.ACTION_READ_OWN not in (access.ACTION_READ_CONFIG,
                                           access.ACTION_MANAGE_FILTER)
+
+
+def test_choosing_your_own_layout_is_open_to_ordinary_users():
+    # The Look app: a preference about yourself, no admin and no guardian.
+    # It must know WHO asked, so nobody chooses for anybody else, and it
+    # must be its own action, never a filter one.
+    assert ACTIONS["SetMyLayout"] == access.ACTION_SET_OWN
+    assert "SetMyLayout" in access.UID_AWARE
+    assert "SetMyLayout" not in GUARDIAN_GATED
+    assert access.ACTION_SET_OWN not in (access.ACTION_READ_CONFIG,
+                                         access.ACTION_MANAGE_FILTER,
+                                         access.ACTION_MANAGE_USERS)
+
+
+def test_the_advanced_desktops_compositor_is_yours_like_the_layout():
+    assert ACTIONS["GetMyCompositor"] == access.ACTION_READ_OWN
+    assert ACTIONS["SetMyCompositor"] == access.ACTION_SET_OWN
+    assert {"GetMyCompositor", "SetMyCompositor"} <= access.UID_AWARE
+    assert "SetMyCompositor" not in GUARDIAN_GATED
 
 
 def test_choosing_a_layout_is_an_admin_action_without_the_guardian():
@@ -132,20 +162,55 @@ def test_the_guardian_gate_covers_every_filter_weakening_method():
     # filter method is added, it belongs in this list AND in GUARDIAN_GATED.
     expected = {"SetFilterMode", "SetWhitelist", "SetWhitelistBundles", "SetUrlRules",
                 "SetBlockedCategories", "ApplyProfile", "SaveProfile",
-                "DeleteProfile", "ApproveRequest", "AllowUrl",
+                "DeleteProfile", "ApproveRequest", "AllowUrl", "BypassUrl", "GrantUrl",
                 "EditList", "SetUserAdmin",
                 "SetMediaLevel",
-                "SetLanguageFilter", "SetYouTube", "SetGuestConfig",
+                "SetLanguageFilter", "SetYouTube", "SetCalm", "SetGuestConfig",
+                # Calmer feeds and a daily budget for the addictive sites
+                # (#179): a filter setting like the others.
                 "DisableGuardian",
                 "Enrol", "Unenrol", "SetAdBlock", "SetTimeLimits",
+                # A host the ad blocker leaves reachable is a host every
+                # account can reach (#265).
+                "SetAdBlockAllowed",
                 # Beyond the web: video calls and extra ports widen reach.
                 "SetNetworkAccess",
+                # SSH to other machines (#257): a tunnel the filter cannot read.
+                "SetSsh",
+                # Developer tools: the Nix daemon and the registries, directly.
+                "SetDeveloperTools",
+                # Another host a Nix build may download from (#199).
+                "SetBuildSources",
+                # The boot menu is the way round every other protection.
+                "SetBootMenuPassword",
                 # Not a filter setting, but the same kind of decision: it
                 # puts the family computer on builds nobody has tried.
                 "SetChannel",
+                # A pull request's build, tried on purpose: the same decision.
+                "TryImage",
+                # Going back: the older version brings its older filter
+                # with it (F11, #187).
+                "Rollback",
                 # Opening an account to the whole store, or lifting an app
                 # block, widens what it can reach.
-                "SetUserAppAccess", "SetUserBlockedAppKinds", "SetUserBlockedApps"}
+                "SetUserAppAccess", "SetUserBlockedAppKinds", "SetUserBlockedApps",
+                # Syncthing for one account (#213): files from paired devices
+                # are not filtered, and its ports go out directly; letting
+                # the home network reach it opens the input side.
+                "SetUserAppApproval", "SetSyncthingLan",
+                # Signing in to an account over SSH: what arrives over the
+                # connection is not read by the filter.
+                "SetSshIn",
+                # Joining a tailnet puts the computer on a network with
+                # other people's machines, reachable by every account.
+                "TailscaleSignIn",
+                # The Advanced switches (#220): Syncthing on lets an
+                # administrator's or unfiltered account have it unapproved;
+                # Tailscale on is the first step to a sign-in.
+                "SetSyncthingEnabled", "SetTailscaleEnabled",
+                # Key remapping (#230): keyd reads every keyboard, and a
+                # remapped key can run a command.
+                "SetKeydEnabled"}
     assert GUARDIAN_GATED == expected
     filter_actions = {m for m, a in ACTIONS.items()
                       if a == access.ACTION_MANAGE_FILTER}
@@ -212,3 +277,82 @@ def test_the_wizard_can_list_pre_existing_accounts_before_setup():
     assert evaluate("ExistingAccounts", **FRESH).allowed
     # ...but not forever: it is only the wizard's business.
     assert not evaluate("ExistingAccounts", **LOCKED).allowed
+
+
+# -- Tailscale (#30) ---------------------------------------------------------
+
+def test_reading_the_tailnet_status_is_a_read():
+    assert evaluate("TailscaleStatus", **LOCKED).polkit_action == access.ACTION_READ_CONFIG
+    assert not evaluate("TailscaleStatus",
+                        **{**UNLOCKED, "guardian_enabled": True}).needs_guardian
+
+
+def test_signing_in_and_out_are_network_actions_for_an_administrator():
+    for method in ("TailscaleSignIn", "TailscaleSignOut"):
+        assert ACTIONS[method] == access.ACTION_MANAGE_NETWORK
+        assert evaluate(method, **LOCKED).polkit_action == access.ACTION_MANAGE_NETWORK
+        # Both are written to the activity log with the admin who did it.
+        assert method in access.CHANGES
+
+
+def test_joining_a_tailnet_takes_the_guardian_and_leaving_does_not():
+    guarded = {**UNLOCKED, "guardian_enabled": True}
+    assert evaluate("TailscaleSignIn", **guarded).needs_guardian
+    assert not evaluate("TailscaleSignIn",
+                        **{**guarded, "guardian_proven": True}).needs_guardian
+    assert not evaluate("TailscaleSignOut", **guarded).needs_guardian
+
+
+def test_the_tailnet_methods_are_on_the_bus_and_run_off_the_main_loop():
+    from kosherd import daemon
+
+    for method in ("TailscaleStatus", "TailscaleSignIn", "TailscaleSignOut"):
+        assert f'<method name="{method}"' in daemon.INTROSPECTION_XML
+        assert method in daemon.IN_BACKGROUND
+        assert hasattr(daemon.Daemon, f"impl_{method}")
+
+
+# -- one prompt per sitting (#181, #182) ----------------------------------------
+
+def test_a_client_opens_the_session_before_anything_that_would_prompt():
+    # polkit keeps an answered prompt per action, so `kosherctl set-mode`
+    # on a child's account asked twice: read-config for the guardian
+    # check, then manage-filter for the change. A client that opens the
+    # session first asks once, for Unlock, which needs the same
+    # administrator's password as either of them.
+    assert access.needs_admin_session("IsEnabled")
+    assert access.needs_admin_session("SetFilterMode")
+    assert access.needs_admin_session("Rollback")
+    assert ACTIONS["Unlock"] not in access.FREE_ACTIONS
+
+
+@pytest.mark.parametrize("method", ["Unlock", "Lock", "IsComplete", "AdminExists",
+                                    "GetMySettings", "GetMyLayout", "SetMyLayout",
+                                    "ListStoreApps", "ListMyInstalledDetails",
+                                    "InstallApp", "NoSuchMethod"])
+def test_free_and_setup_calls_never_open_a_session(method):
+    # Opening one would put a password prompt in front of something every
+    # account may do without one, or in front of the wizard.
+    assert not access.needs_admin_session(method)
+
+
+def test_the_free_actions_are_the_ones_the_rule_answers_yes_to():
+    import pathlib
+
+    rule = (pathlib.Path(__file__).parents[2]
+            / "os-image/files/etc/polkit-1/rules.d/49-kosher-admin.rules").read_text()
+    for action in access.FREE_ACTIONS:
+        assert f'"{action}"' in rule
+    for action in set(ACTIONS.values()) - access.FREE_ACTIONS:
+        assert f'"{action}"' not in rule, f"{action} must stay behind the password"
+
+
+def test_the_store_lists_what_is_installed_without_a_password():
+    # #182: the Store asked a child's account for an administrator's
+    # password because it read ListInstalledDetails, which names who
+    # installed what and lists every account's own apps. That stays an
+    # admin read; the Store reads the caller's own view instead.
+    assert ACTIONS["ListInstalledDetails"] == access.ACTION_READ_CONFIG
+    assert ACTIONS["ListMyInstalledDetails"] == access.ACTION_USE_STORE
+    assert "ListMyInstalledDetails" in access.UID_AWARE
+    assert ACTIONS["GetPolicy"] == access.ACTION_READ_CONFIG

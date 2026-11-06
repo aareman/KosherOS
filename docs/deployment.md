@@ -1,9 +1,10 @@
 # Updates and channels
 
-KosherOS is a container image. When a parent applies an update from the
-Updates page in KosherOS Admin, the machine pulls the newest version of
-the image it follows and restarts into it atomically, with the previous
-version kept to go back to. Updates are not applied on their own today. This page describes how a build gets
+KosherOS is a container image. The machine downloads the newest version
+of the image it follows, in the background on a schedule or when a parent
+presses Check and Download on the Updates page in KosherOS Admin, and
+starts using it at the next restart, with the previous version kept to go
+back to. It never restarts on its own. This page describes how a build gets
 from a merge to a family's machine, what a machine does when an update goes
 wrong, and what is still to be done before the first family installs it.
 
@@ -11,16 +12,15 @@ wrong, and what is still to be done before the first family installs it.
 
 | What | How it ships | Size |
 |---|---|---|
-| the OS | a container registry; a parent applies updates from the admin app | a few GB on first pull, small differences after |
+| the OS | a container registry; downloaded in the background or from the admin app, used at the next restart | a few GB on first pull, small differences after |
 | the category database | a signed manifest and a hash-verified download | about 190 MB, pulled on refresh |
 | word lists, site rules, search terms | inside the signed portal bundle | kilobytes |
 | the installer ISO | a file, for the first install only | GBs, pulled once |
 
-Filter lists must never need an OS release. The portal signs a manifest
-with the database's URL, size and SHA-256; the device fetches the file from
-wherever the manifest says and checks it against the hash before it goes
-near the filter. [Content filtering](content-filtering.md#the-lists-shipped-updated-edited)
-describes the list layers.
+Filter lists must never need an OS release, which is why the second and
+third rows ship through the portal; [content
+filtering](content-filtering.md#the-lists-shipped-updated-edited) describes
+how the bundle and the database manifest are signed and checked.
 
 ## Versions
 
@@ -52,7 +52,9 @@ called.
 | `stable` | everyone else | a person promotes a version that has run well on edge |
 
 `edge` is published by CI: every merge becomes `:edge`, alongside the
-commit's own tag and the version's tag, signed with cosign. `stable` is
+commit's own tag and the version's tag, signed twice with cosign: with the
+KosherOS key, which is the signature every machine checks, and keyless,
+which records the build in the public transparency log. `stable` is
 never built by a push. The "Promote to stable" workflow, run by hand with a
 version tag, verifies the signature on that version's image came from this
 repository's CI, copies the same image to `:stable` and `:latest` without
@@ -75,6 +77,25 @@ A machine on no channel at all, a pinned version or anything installed
 before channels existed, is shown as exactly that, with the note that it
 will not update on its own.
 
+**Updates download on their own.** Once a week by default, the computer
+looks for a newer version on its channel, downloads it in the background
+and leaves it for the next restart. The admin app's Updates page sets how
+often under Automatic updates: daily, weekly, every 2 weeks, monthly, or
+off, and `kosherctl updates auto` does the same. Off means no checks at all
+until somebody presses Check. A timer runs once a day at a time picked for
+each machine, catches up after the machine was off, and checks only when
+the last check that worked is a full period old, so a check that failed
+(no network, the registry down, a bad signature) is tried again the next
+day and never reads as up to date. It waits on a metered network and on a
+battery below 40%. The download is the same one the Download button
+starts, signature checks included, and a failed one leaves nothing
+staged. The version a machine went back from is not downloaded again
+unless somebody asks for it. When an update is ready, everyone signed in
+sees a small mark in the panel until the restart, and gets one notice
+for that version, which `kosherctl updates notify off` or the switch on
+the Updates page turns off. Restart on the mark asks for an
+administrator's password on any other account.
+
 ## Installing
 
 `just release-iso` pulls the stable image from the public registry and
@@ -87,12 +108,53 @@ registry.
 
 The installer creates no users and asks no passwords; the first boot runs
 the setup wizard instead. If the machine has exactly one internal drive
-that is not the installer stick, the disk question answers itself and the
-install is a single Begin Installation button. With two or more candidate
-disks the installer asks, so a second drive is never wiped unseen.
+that is not the installer stick, the installer names that disk and shows
+it as the destination — but writes no partitioning, because a complete
+kickstart is one Anaconda installs without a click (#134): the person
+confirms the disk, sees what will be erased, and presses Begin
+Installation. With two or more candidate disks the installer asks, so a
+second drive is never wiped unseen.
 
 Downloadable ISOs are not published yet. See [what is still to
 do](#what-is-still-to-do).
+
+## Trying a pull request's build
+
+Pull requests are not built into images on their own; the tests run, and
+the image is built from the merge. For a change that should be seen on a
+real machine before it merges, put the `try-image` label on the pull
+request. CI builds the image from the branch, signs it with the KosherOS
+key, publishes it as `ghcr.io/aareman/kosher-linux:pr-<number>` and leaves
+a comment on the pull request saying so. Every later push to the branch
+builds it again while the label is there, replacing the earlier build.
+
+On a KosherOS machine, an admin with the update right runs it with the
+guardian password:
+
+```sh
+kosherctl system try <number>
+```
+
+The version running now is kept. The first try pins that deployment, so it
+stays on the disk however many builds are tried after it; the build then
+downloads and is used from the next restart, exactly as an update is.
+Trying the same number again after a new push fetches the new build, and
+trying another number replaces the earlier test build. The disk holds the
+kept version, the build being tried and, until the next try, the one tried
+before it, so that going back from a build that does not boot lands on
+something that did. `kosherctl system status` lists them, with the kept one
+marked. On a test build, "update" fetches that pull request's newest build;
+the channels page says the machine is on no channel, which is the truth.
+
+```sh
+kosherctl system try done
+```
+
+goes back to the kept version at the next restart, with no download, and
+stops keeping it: updates then continue on its channel as before. A tag
+works in place of a number (`kosherctl system try v0.14.0`), always within
+the machine's own image repository. The admin app offers none of this; a
+family computer has no reason to run a build nobody has tested.
 
 ## Going back
 
@@ -100,11 +162,10 @@ The daemon knows which image is booted and which one "go back" would return
 to. The admin app's Updates page has a "Go back to the previous version"
 control that names the version it would return to and is disabled with a
 reason when there is nothing to go back to. `kosherctl system rollback`
-does the same. Going back needs the update right but not the guardian
-password, because the image is one this machine already ran and the
-machine has to be able to do the same thing with no password at all. Both
-directions are written to the activity log; a rollback especially, since
-it can restore an older filter.
+does the same. Going back needs the update right and the guardian
+password. The older version brings the filter it was built with, which
+can be weaker than the one running now, so it is treated like any other
+filter change. Both directions are written to the activity log.
 
 **The machine puts itself back on its own.** greenboot runs a required
 health check on every boot: the daemon is up, the resolver answers on
@@ -147,18 +208,22 @@ layers in the Containerfile for this reason.
 before a single machine is fielded. Losing it is the one unrecoverable
 failure in this design.
 
+**The machine verifies.** `/etc/containers/policy.json` on every machine
+accepts an image from KosherOS's own repository only with the KosherOS
+key's signature, refuses an unknown registry, and takes the public
+registries a developer pulls from as they are, because rootless podman
+reads the same policy. bootc checks that policy for a deployment marked
+to enforce it; the installer leaves a machine unmarked, and the first
+update kosherd runs marks it, so that update and every one after it is
+verified. Keyless signatures are not what the machine checks: podman and
+bootc can verify a keyless identity only by email, and a build's identity
+is a workflow address.
+
 ## What is still to do
 
 In the order it blocks a family installing KosherOS.
 
-1. **Signature verification on the machine.** CI signs every image; the
-   fielded machine verifies nothing yet and will boot whatever sits at the
-   ref. This is the tamper-resistance story of the whole product. It needs
-   a containers policy and registry configuration in the image, verifying
-   against a key the project controls and can rotate, rather than keyless
-   identity alone, so that renaming the repository cannot silently break
-   updates on every fielded machine.
-2. **List updates without enrolment.** Today the only path to fresh lists
+1. **List updates without enrolment.** Today the only path to fresh lists
    is a family enrolling in a portal. A shipped product has to refresh the
    category database and word lists on every machine out of the box,
    because requiring a non-technical parent to enrol somewhere before
@@ -167,18 +232,15 @@ In the order it blocks a family installing KosherOS.
    service, an unauthenticated download of the signed bundle with the
    public key pinned into the image, and the per-family portal for
    enrolment and policy. Same code, two deployments.
-3. **The list build belongs in CI, not the image build.** The image build
-   fetches the category lists and falls back to a seed list with a warning
-   if the fetch fails, so one bad upstream day could ship an image with the
-   seed list. A nightly job should build the database, publish it as a
-   release asset, and publish the signed manifest; the image then carries
-   the last good snapshot and machines pull newer on their own.
-4. **Updates in the background.** Today a parent checks for and applies
-   updates from the Updates page. Fetching them in the background, and
-   whether a fetched update should wait for the next natural restart
-   rather than interrupt anyone, is
-   [issue #19](https://github.com/aareman/KosherOS/issues/19).
-5. **Downloads.** A download page with the ISO, its SHA-256, its signature
+2. **The list build belongs in CI, not the image build.** The image build
+   fetches the category lists from UT1, or from their GitHub mirror when
+   UT1 is down, and fails when a category a family can switch on comes
+   out short, so a bad upstream day means no image that day rather than
+   an image with empty lists. A nightly job should build the database,
+   publish it as a release asset, and publish the signed manifest; the
+   image then carries the last good snapshot and machines pull newer on
+   their own.
+3. **Downloads.** A download page with the ISO, its SHA-256, its signature
    and instructions for checking them.
 
 ## Costs
@@ -188,9 +250,8 @@ ghcr is free for public images with no meaningful egress cap, and bootc
 pulls only changed layers. GitHub Pages and Releases are free.
 
 The category database should be a GitHub Release asset rather than a file
-on the VPS. The manifest's signature covers the hash, so the download needs
-no trust and can come from anywhere; GitHub Releases are free, CDN-backed
-and need no authentication for a public repository. That leaves the VPS
-serving only the signed manifest and the policy endpoints, kilobytes per
-device per day, so the recurring bill is one small VPS whether ten families
-or ten thousand are running KosherOS.
+on the VPS: its manifest is signed, so the download itself can come from
+anywhere free and CDN-backed. That leaves the VPS serving only the signed
+manifest and the policy endpoints, kilobytes per device per day, so the
+recurring bill is one small VPS whether ten families or ten thousand are
+running KosherOS.

@@ -14,6 +14,22 @@ import pytest
 from kosherd import apply as apply_mod
 from kosherd.apply import ApplyError, apply_policy, write_mitm_rules
 from kosherd.policy import Policy, UserPolicy
+from kosherd import paymentsecurity
+
+# Every filtered account's entry carries the payment and fraud-check hosts
+# no category blocks (#265).
+_NEVER_BLOCKED = list(paymentsecurity.PAYMENT_SECURITY_HOSTS)
+
+
+@pytest.fixture(autouse=True)
+def _no_nix_on_this_machine(monkeypatch):
+    """These tests describe a machine without Nix. Where Nix is installed the
+    proxy runs regardless of modes (the build users fetch through it, #123)
+    and the rules file carries the builders' entry — test_developer_tools.py
+    covers that; here the build group is absent."""
+    from kosherd import nixdaemon
+    monkeypatch.setattr(nixdaemon, "build_gid", lambda: None)
+
 
 
 class FakeRun:
@@ -51,15 +67,21 @@ def env(tmp_path, monkeypatch):
     monkeypatch.setattr(apply_mod, "DNSMASQ_DROPIN_PATH", tmp_path / "dnsmasq" / "wl.conf")
     monkeypatch.setattr(apply_mod, "SAFESEARCH_PATH", tmp_path / "dnsmasq" / "safesearch.conf")
     monkeypatch.setattr(apply_mod, "CATEGORY_BLOCK_PATH",
+                        tmp_path / "dnsmasq-dnsfilter" / "categories.conf")
+    monkeypatch.setattr(apply_mod, "LEGACY_CATEGORY_BLOCK_PATH",
                         tmp_path / "dnsmasq" / "categories.conf")
     monkeypatch.setattr(apply_mod, "ADBLOCK_PATH", tmp_path / "dnsmasq" / "adblock.conf")
     monkeypatch.setattr(apply_mod, "ADBLOCK_OPEN_PATH",
                         tmp_path / "dnsmasq-open" / "adblock.conf")
     monkeypatch.setattr(apply_mod, "MITM_DIR", tmp_path / "mitm")
+    monkeypatch.setattr(apply_mod, "STARTED_DIR", tmp_path / "started")
+    monkeypatch.setattr(apply_mod.lists, "OVERRIDE_DIR", tmp_path / "lists")
     monkeypatch.setattr(apply_mod, "MITM_RULES_PATH", tmp_path / "mitm" / "rules.json")
     monkeypatch.setattr(apply_mod, "SEARCH_DIR", tmp_path / "search")
     monkeypatch.setattr(apply_mod, "SEARCH_POLICY_PATH",
                         tmp_path / "search" / "policy.json")
+    monkeypatch.setattr(apply_mod, "NIX_USERS_PATH",
+                        tmp_path / "nix" / "kosheros-users.conf")
     monkeypatch.setattr(apply_mod, "search_uid", lambda: 987, raising=False)
     monkeypatch.setattr(apply_mod, "dnsmasq_uid", lambda: 989)
     monkeypatch.setattr(apply_mod, "mitm_uid", lambda: 988)
@@ -127,12 +149,75 @@ def test_dns_failure_does_not_undo_the_firewall(env, monkeypatch, tmp_path):
     assert (tmp_path / "nft" / "kosher.nft").exists()
 
 
+def test_the_dnsfilter_resolver_runs_only_while_someone_is_on_dnsfilter(env):
+    apply_policy(policy_with("dnsfilter", "filtered"))
+    assert env.matching("restart", "kosher-dns-dnsfilter.service")
+    # After the nft load, which empties the sets its answers fill.
+    assert env.index_of("nft", "-f", "kosher.nft") < \
+        env.index_of("restart", "kosher-dns-dnsfilter.service")
+    env.calls.clear()
+    apply_policy(policy_with("filtered", "whitelist"))
+    assert env.matching("stop", "kosher-dns-dnsfilter.service")
+    assert not env.matching("restart", "kosher-dns-dnsfilter.service")
+
+
+def test_category_blocks_are_written_for_the_dnsfilter_resolver_only(env, tmp_path):
+    # #183: in the family resolver they answered filtered accounts and the
+    # proxy too, so a blocked site never reached the proxy's block page.
+    legacy = tmp_path / "dnsmasq" / "categories.conf"
+    legacy.parent.mkdir(parents=True, exist_ok=True)
+    legacy.write_text("address=/bet.example/0.0.0.0\n")
+    apply_policy(policy_with("dnsfilter"))
+    assert (tmp_path / "dnsmasq-dnsfilter" / "categories.conf").exists()
+    assert not legacy.exists()
+
+
 # -- the inspection proxy ----------------------------------------------------
 
 def test_proxy_runs_only_while_someone_is_inspected(env):
     apply_policy(policy_with("filtered", "whitelist"))
     assert env.matching("restart", "kosher-mitm.service")
     assert not env.matching("stop", "kosher-mitm.service")
+
+
+def test_a_change_the_proxy_reads_from_its_file_does_not_restart_it(env):
+    # Every change used to restart the proxy (and search): seconds before
+    # the admin app heard back, and every account's web down meanwhile.
+    # Its rules file is re-read as it changes.
+    first = policy_with("filtered")
+    apply_policy(first)
+    assert len(env.matching("restart", "kosher-mitm.service")) == 1
+    first.users[0].media_level = "all"
+    first.users[0].rules = [{"action": "block", "pattern": "example.com"}]
+    apply_policy(first)
+    assert len(env.matching("restart", "kosher-mitm.service")) == 1
+    assert len(env.matching("restart", "kosher-search.service")) == 1
+    assert len(env.matching("restart", "kosher-searxng.service")) == 1
+
+
+def test_a_new_listener_restarts_the_proxy(env):
+    # A new filtered account needs a port of its own: read only at start.
+    apply_policy(policy_with("filtered"))
+    apply_policy(policy_with("filtered", "filtered"))
+    assert len(env.matching("restart", "kosher-mitm.service")) == 2
+
+
+def test_edited_lists_restart_the_proxy_and_the_search_front_end(env, tmp_path):
+    apply_policy(policy_with("filtered"))
+    (tmp_path / "lists").mkdir()
+    (tmp_path / "lists" / "wordlist.json").write_text("{}")
+    apply_policy(policy_with("filtered"))
+    assert len(env.matching("restart", "kosher-mitm.service")) == 2
+    assert len(env.matching("restart", "kosher-search.service")) == 2
+    assert len(env.matching("restart", "kosher-searxng.service")) == 1, "reads no lists"
+
+
+def test_a_proxy_that_is_not_running_is_started(env, monkeypatch):
+    apply_policy(policy_with("filtered"))
+    stopped = FakeRun(fail=["is-active --quiet kosher-mitm"])
+    monkeypatch.setattr(apply_mod.subprocess, "run", stopped)
+    apply_policy(policy_with("filtered"))
+    assert stopped.matching("restart", "kosher-mitm.service")
 
 
 def test_proxy_is_stopped_when_nobody_is_filtered(env):
@@ -185,10 +270,12 @@ def test_only_inspected_users_rules_reach_the_proxy(tmp_path, monkeypatch):
     assert rules_written(tmp_path) == {
         "1001": {"port": 30000, "rules": block, "blocked_categories": [],
                  "media_level": "none", "cover_style": "frost", "language_filter": "off",
-                 "youtube": {}},
+                 "youtube": {}, "calm": {}, "system_allowed": [],
+                 "never_blocked": _NEVER_BLOCKED},
         "1003": {"port": 30001, "rules": [], "blocked_categories": [],
                  "media_level": "none", "cover_style": "frost", "language_filter": "off",
-                 "youtube": {}}}
+                 "youtube": {}, "calm": {}, "system_allowed": [],
+                 "never_blocked": _NEVER_BLOCKED}}
     listen = (tmp_path / "mitm" / "listen.env").read_text()
     assert listen == ("MITM_MODES=--mode transparent@127.0.0.1:30000 "
                       "--mode transparent@127.0.0.1:30001\n")
@@ -262,7 +349,8 @@ def test_categories_alone_are_enough_to_reach_the_proxy(tmp_path, monkeypatch):
     assert rules_written(tmp_path) == {
         "1001": {"port": 30000, "rules": [], "blocked_categories": ["adult"],
                  "media_level": "none", "cover_style": "frost", "language_filter": "off",
-                 "youtube": {}}}
+                 "youtube": {}, "calm": {}, "system_allowed": [],
+                 "never_blocked": _NEVER_BLOCKED}}
 
 
 def test_a_media_level_alone_reaches_the_proxy(tmp_path, monkeypatch):

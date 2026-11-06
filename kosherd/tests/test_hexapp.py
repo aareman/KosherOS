@@ -68,6 +68,17 @@ def dev():
     return Developer()
 
 
+@pytest.fixture(autouse=True)
+def systemd(monkeypatch):
+    """The account's user manager is the one running the tests' own
+    session; a test reaching it once stopped and disabled the developer's
+    real Hex. What systemd does with these is checked in the VM
+    (scripts/vm-tests/30-apps.sh)."""
+    calls: list[tuple[str, ...]] = []
+    monkeypatch.setattr(hexapp, "_systemctl", lambda *args: calls.append(args))
+    return calls
+
+
 def test_a_signed_build_is_laid_out_as_anomalys_installer_lays_it(tmp_path, dev):
     _install(tmp_path, dev, dev.publish("3.3.0"))
     root = tmp_path / ".local/share/hex"
@@ -142,7 +153,7 @@ def test_files_that_are_not_hexs_are_left_alone(tmp_path, dev):
     assert unit.read_text() == "[Service]\nExecStart=/opt/other\n"
 
 
-def test_removal_takes_the_program_and_keeps_settings_and_models(tmp_path, dev):
+def test_removal_takes_the_program_and_keeps_settings_and_models(tmp_path, dev, systemd):
     _install(tmp_path, dev, dev.publish("1.0"))
     root = tmp_path / ".local/share/hex"
     (root / "settings.json").write_text("{}")
@@ -163,6 +174,7 @@ def test_removal_takes_the_program_and_keeps_settings_and_models(tmp_path, dev):
     assert not (tmp_path / ".config/autostart/anomaly.hex.desktop").exists()
     assert not (tmp_path / ".config/systemd/user/hex.service").exists()
     assert (root / "settings.json").exists() and (root / "models").is_dir()
+    assert systemd[-2:] == [("disable", "--now", "hex.service"), ("daemon-reload",)]
 
 
 @pytest.mark.parametrize("change, message", [
@@ -215,17 +227,3 @@ def test_the_helper_dispatches_hex(monkeypatch, tmp_path, dev):
     assert u.main(["upgrade", "hex"]) == 0
     assert u.main(["remove", "hex"]) == 0
     assert hexapp.installed_version(tmp_path) is None
-
-
-def test_a_home_that_is_not_the_accounts_never_reaches_its_systemd(monkeypatch, tmp_path, dev):
-    # The user manager runs the account's real Hex; removing a copy in some
-    # other home once stopped and disabled it.
-    calls = []
-    real_run = hexapp.subprocess.run
-    monkeypatch.setattr(hexapp.subprocess, "run",
-                        lambda argv, **kw: calls.append(argv) if argv[0] == "systemctl"
-                        else real_run(argv, **kw))
-    monkeypatch.setenv("XDG_RUNTIME_DIR", "/run/user/0")
-    _install(tmp_path, dev, dev.publish("1.0"))
-    hexapp.remove(tmp_path)
-    assert calls == []

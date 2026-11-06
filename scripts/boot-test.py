@@ -41,6 +41,10 @@ from pathlib import Path
 DEFAULT_DISK = Path("build/qcow2/disk.qcow2")
 ADMIN_USER = "boottest"
 ADMIN_PASSWORD = "boot-test-pw-1"
+# Not the installer's placeholder (New York) nor a VM's usual UTC, so the
+# check after setup proves the answer was applied, not that it was the
+# default all along.
+TIMEZONE = "Asia/Jerusalem"
 BOOT_TIMEOUT = 420
 
 
@@ -185,6 +189,15 @@ def enforcement(console: Console, results: "Results") -> None:
         return
     results.check("the administrator can log in", True)
 
+    # The installer does not ask for a time zone; setup does. Screen-time
+    # schedules follow local time, so the zone setup was given must be the
+    # zone the machine has, with network time on.
+    clock = _shell(console, 'echo "TZ=[$(timedatectl show -p Timezone --value)]'
+                            ' NTP=[$(timedatectl show -p NTP --value)]"', "CLOCK")
+    results.check(f"the time zone setup was given is set ({TIMEZONE})",
+                  f"TZ=[{TIMEZONE}]" in clock, clock[-400:])
+    results.check("network time is on", "NTP=[yes]" in clock, clock[-400:])
+
     # No network in this VM (a firewalled CI runner, say) is not a filter
     # fault. Establish reachability first so a failure below means what it
     # says.
@@ -266,6 +279,20 @@ def run(disk: Path, log: Path = Path("build/boot-test-console.log"),
         results.check("the machine calls itself kosheros",
                       not console.saw(r"fedora login:"),
                       console.tail())
+
+        # The first question is where the computer is. Enter would keep the
+        # guess; a typed city must be what gets set.
+        # Either prompt ends the wait: the base machine pr-test makes is
+        # master's image, which may not ask yet, and must not stall here.
+        console.expect(r"Time zone \[|Username:", 180)
+        if re.search(r"Time zone \[", console.text[console.mark:]):
+            results.check("setup asks for the time zone", True)
+            console.send("jerusalem")
+            results.check("setup sets the time zone",
+                          console.expect(r"Time zone set to Jerusalem", 60),
+                          console.tail())
+        else:
+            results.check("setup asks for the time zone", False, console.tail())
 
         if console.expect(r"Username:", 180):
             results.check("setup asks for an administrator", True)

@@ -71,7 +71,9 @@ things:
   the welcome screen says KosherOS;
 - a configuration drop-in that points at the KosherOS stylesheet and
   hides every hub screen the kickstart already answers: keyboard,
-  language, time zone, network, source, software. The disk question
+  language, time zone, network, source, software. The kickstart's time
+  zone is a placeholder; the first-boot wizard asks where the computer is
+  and sets the real one. The disk question
   answers itself when the machine has exactly one internal drive that is
   not the installer stick, so the hub arrives complete and the install is
   a single Begin Installation button; with two or more candidate disks the

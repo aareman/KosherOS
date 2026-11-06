@@ -91,7 +91,7 @@ KosherOS uses the whole of the disk it was installed on. The installer itself se
 
 ## 6. Set up your family and test
 
-The first start runs the KosherOS setup wizard. Follow it to create the administrator account and review the optional guardian password and device-security steps. Connect to your network when requested.
+The first start runs the KosherOS setup wizard. Check the time zone it shows (it guesses from your internet connection; search for your city if it is wrong), then create the administrator account and review the optional guardian password and device-security steps. Connect to your network when requested.
 
 Start with a sample account and a few tasks: open the Store, try a site you normally use, review the account's settings in My Filter, and check Protection in the admin app. Add family accounts and choose their settings as you become comfortable with the system.
 

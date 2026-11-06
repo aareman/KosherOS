@@ -192,6 +192,21 @@ def cmd_developer_tools(args) -> int:
     return 0
 
 
+def cmd_ssh_in(args) -> int:
+    """kosherctl ssh-in UID on|off
+
+    May the account be signed in to from another machine over SSH? Keys
+    only: the account adds its public key to ~/.ssh/authorized_keys.
+    Needs developer tools on.
+    """
+    on = args.state == "on"
+    _client().set_ssh_in(args.uid, on, _guardian_pw(args))
+    print(f"uid {args.uid}: sign in over SSH {'on' if on else 'off'}")
+    if on:
+        print("Add the key to ~/.ssh/authorized_keys in that account; passwords are refused.")
+    return 0
+
+
 def cmd_build_sources(args) -> int:
     """kosherctl build-sources [list | add HOST... | remove HOST...]
 
@@ -260,7 +275,8 @@ def cmd_network(args) -> int:
 
 
 def cmd_ssh(args) -> int:
-    """kosherctl ssh UID [--hosts nas.example.org,10.0.0.5,tailnet|none] [--anywhere on|off]"""
+    """kosherctl ssh UID [--hosts nas.example.org,git.example.org:222,10.0.0.5,tailnet|none]
+    [--anywhere on|off]"""
     c = _client()
     user = next((u for u in c.get_policy().get("users", []) if u.get("uid") == args.uid), None)
     if user is None:
@@ -316,14 +332,14 @@ def cmd_rules(args) -> int:
         rules = user.get("rules", [])
         print(f"{len(rules)} rule(s) for {user['username']} (mode: {user['mode']})")
         for i, r in enumerate(rules, 1):
-            print(f"  {i}. {r['action']:5} {r['pattern']}")
+            print(f"  {i}. {r['action']:6} {r['pattern']}")
         if rules and user["mode"] != "filtered":
             print("  note: rules only apply in filtered mode", file=sys.stderr)
         return 0
 
     user = next((u for u in c.get_policy()["users"] if u["uid"] == args.uid), None)
     rules = list(user.get("rules", [])) if user else []
-    if args.action in ("allow", "block"):
+    if args.action in ("allow", "block", "bypass"):
         rules.append({"action": args.action, "pattern": args.pattern})
     elif args.action == "remove":
         index = int(args.pattern) - 1
@@ -1417,6 +1433,14 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("--guardian-password")
     s.set_defaults(func=cmd_developer_tools)
 
+    s = sub.add_parser("ssh-in",
+                       help="may an account with developer tools be signed in to over SSH, "
+                            "with a key")
+    s.add_argument("uid", type=int)
+    s.add_argument("state", choices=["on", "off"])
+    s.add_argument("--guardian-password")
+    s.set_defaults(func=cmd_ssh_in)
+
     s = sub.add_parser("build-sources",
                        help="where a Nix build may download from while a developer account "
                             "is on approved sites only")
@@ -1435,8 +1459,8 @@ def main(argv: list[str] | None = None) -> int:
 
     s = sub.add_parser("ssh", help="which other machines an account may ssh to (#257)")
     s.add_argument("uid", type=int)
-    s.add_argument("--hosts", help="comma-separated names, addresses, ranges or 'tailnet'; "
-                                   "or 'none'")
+    s.add_argument("--hosts", help="comma-separated names, addresses, ranges or 'tailnet', "
+                                   "each with :PORT if not 22; or 'none'")
     s.add_argument("--anywhere", choices=["on", "off"])
     s.add_argument("--guardian-password")
     s.set_defaults(func=cmd_ssh)
@@ -1471,9 +1495,11 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("mode", choices=policy_mod.MODES)
     s.set_defaults(func=cmd_adopt)
 
-    s = sub.add_parser("rules", help="URL allow/block rules (inspect mode)")
+    s = sub.add_parser("rules", help="URL rules: block, allow or bypass (filtered mode)")
     s.add_argument("uid", type=int)
-    s.add_argument("action", choices=["list", "allow", "block", "remove", "clear"])
+    s.add_argument("action", choices=["list", "allow", "block", "bypass", "remove", "clear"],
+                   help="allow opens the page but still filters its pictures, video "
+                        "and words; bypass filters nothing on it")
     s.add_argument("pattern", nargs="?", default="",
                    help="URL pattern, or the rule number for 'remove'")
     s.add_argument("--guardian-password")

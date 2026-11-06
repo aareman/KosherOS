@@ -60,7 +60,10 @@ proxy could not read them:
   machines an account may connect to over SSH — a name, an address, a
   range, or `tailnet` for every machine on this computer's tailnet — and
   nothing else. Port 22 is otherwise closed, because an SSH tunnel reaches
-  anything. *Anywhere* opens it to every machine, for an account an
+  anything. A server whose SSH listens on another port takes the port after a
+  colon, `git.example.com:222` (an IPv6 address in brackets, `[fd00::5]:222`).
+  That port is opened to that machine only; there's no need to open it to
+  every server under *Extra ports*. The web's and DNS's ports can't be named. *Anywhere* opens it to every machine, for an account an
   administrator trusts with that, and the switch says so.
 - **Video calls.** Zoom, Meet and school calls send picture and sound over
   UDP to high ports, which cannot be inspected. That is allowed by default
@@ -99,6 +102,26 @@ work. Port 22 is open to those four hosts only, and SSH to any other server is
 refused, because an SSH connection can carry a tunnel around the filter. For a
 git server of the family's own, an administrator can add port 22 under *Extra
 ports*, which opens SSH to every server for that account.
+
+With developer tools on, a second switch appears: **Sign in over SSH**. On,
+the account can be used from another computer with `ssh`. Only keys are
+accepted, never a password, so the person adds the other computer's public
+key to `~/.ssh/authorized_keys` in this account, at this computer:
+
+```
+mkdir -p ~/.ssh
+curl -s https://github.com/NAME.keys >> ~/.ssh/authorized_keys
+```
+
+or by pasting the line from the other computer's `~/.ssh/id_ed25519.pub`.
+The SSH server runs only while at least one account has the switch on, and
+lets in only those accounts. It keeps the account's time limits. Anything the
+account does here over SSH goes through its own filter, and `ssh -L` works.
+`ssh -R` and tunnels are refused, because a listener here would reach out
+from the other computer unfiltered. Files copied in over the connection are
+not checked, which is why the switch is guardian-gated. Turning developer
+tools off turns this off too. From a terminal it's
+`kosherctl ssh-in UID on`.
 
 What the switch cannot stop is a copy of Nix the account downloads itself.
 nix-portable, for one, is a single file on GitHub that brings its own Nix
@@ -200,14 +223,25 @@ judged like any other site's.
 ## Page rules
 
 A page rule is the one thing a parent writes by hand, and most families
-never need to. Rules are an ordered allow and block list, first match wins,
-matched without regard to case, scheme or a leading `www`. A bare host
-covers the whole site, `*.host` includes subdomains, and `host/dir/*` covers
-a directory. An unmatched request is allowed, so a trailing `block *` makes
-an account deny-by-default.
+never need to. Rules are an ordered list, first match wins, matched without
+regard to case, scheme or a leading `www`. A bare host covers the whole
+site, `*.host` includes subdomains, and `host/dir/*` covers a directory. An
+unmatched request is allowed, so a trailing `block *` makes an account
+deny-by-default.
 
-Rules are edited on the person's page in the admin app, or with
-`kosherctl rules`.
+A rule does one of three things. *Block* refuses the page. *Allow* opens it
+whatever the category lists and the content scorer say, but the page is
+still a page: its pictures and video are judged, and its words are cleaned,
+like any other. *Bypass* is the level above that, for a site the
+administrator trusts outright: nothing on it is filtered, and the proxy
+passes it through as it came. A bypassed page's own pictures and scripts
+are left alone with it wherever they are served from, because the browser
+names the page they came from. Safe search is still forced on a bypassed
+search engine.
+
+Rules are edited on the person's page in the admin app, where a rule's
+level can be changed in place, or with `kosherctl rules`. The Allow button
+on a blocked page in the activity view offers the same levels.
 
 ## Judging a page by its words
 

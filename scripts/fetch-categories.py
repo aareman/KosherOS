@@ -469,6 +469,13 @@ def build(out: Path, only: set[str] | None, mirror_ref: str = MIRROR_REF) -> int
                 "hostsVN, Badd Boyz, FadeMind, minecraft-hosts, URLhaus, "
                 "yoyo.org and Steven Black; plus KosherOS curated. "
                 "See THIRD-PARTY.md",))
+    # The count and the categories present, so kosherd need not walk the
+    # whole table for either at every start (categories.py, #276).
+    db.execute("INSERT OR REPLACE INTO meta VALUES ('count', ?)",
+               (str(db.execute("SELECT count(*) FROM domains").fetchone()[0]),))
+    db.execute("INSERT OR REPLACE INTO meta VALUES ('categories', ?)",
+               (",".join(sorted(row[0] for row in db.execute(
+                   "SELECT DISTINCT category FROM domains"))),))
     db.commit()
 
     # Guard against shipping a catalogue with no version/source. This is not

@@ -303,6 +303,18 @@ def test_an_accounts_ssh_names_feed_its_own_sets():
     assert "nftset=/10.0.0.5" not in out and "nftset=/tailnet" not in out
 
 
+def test_a_name_with_a_port_feeds_that_ports_sets():
+    from kosherd.policy import UserPolicy
+
+    u = UserPolicy(uid=1003, username="s", mode="filtered",
+                   ssh_hosts=["nas.example.org", "git.example.org:222"])
+    out = dns.render(Policy(users=[u]))
+    assert "nftset=/nas.example.org/4#inet#kosher#ssh4_1003,6#inet#kosher#ssh6_1003" in out
+    assert ("nftset=/git.example.org/4#inet#kosher#ssh4_1003_222,"
+            "6#inet#kosher#ssh6_1003_222") in out
+    assert "git.example.org:222" not in out
+
+
 def test_ssh_anywhere_and_unfiltered_accounts_get_no_ssh_set():
     from kosherd.policy import UserPolicy
 

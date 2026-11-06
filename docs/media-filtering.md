@@ -97,6 +97,22 @@ asked whether there is anyone there, and its box is what the skin
 measurement runs on. On a shop's grid for that search it recovered ten of
 the eleven pictures that had been passing.
 
+**The figure's own pixels.** The detector's box is a rectangle, and what is
+behind the figure is in it too. A shiur's rabbi at his desk, bookshelves
+behind him, measured past the line over his box: warm wood and beige book
+spines pass the skin gate, and in a desaturated video frame, which the
+filter measures by lightness alone, so does a white shirt. When a found
+figure measures past the line but the box is not plainly bare, a small
+person segmenter is asked which pixels are the person, and the skin is
+measured over those alone. In a monochrome picture the segmenter's own
+skin classes are what count as skin, since a band of lightness cannot
+tell a shirt from a hand. Over a figure that is bare, taking the
+background out can only raise the fraction, so nothing is let off by it.
+If the segmenter sees no figure where the detector found one (marble,
+paint, a figure too small) its answer is not believed and the box's own
+measurement stands. It is asked only in that narrow band, so an ordinary
+picture pays nothing for it; when it is asked it costs about 150 ms.
+
 A family that wants tzniut enforced strictly should still choose `people`
 or `all`, which need no judgement of what someone is wearing.
 

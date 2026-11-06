@@ -371,8 +371,10 @@
         "action": {
           "enum": [
             "allow",
-            "block"
-          ]
+            "block",
+            "bypass"
+          ],
+          "description": "block refuses the page. allow opens it whatever the category lists and the content scorer say; its pictures, video and words are still filtered. bypass passes it through untouched: nothing on it is filtered."
         },
         "pattern": {
           "type": "string",
@@ -419,7 +421,7 @@
             "$ref": "#/$defs/rule"
           },
           "default": [],
-          "description": "URL allow/block rules, first match wins. Only enforced in inspect mode (paths are encrypted otherwise)."
+          "description": "URL rules (block, allow or bypass), first match wins. Only enforced in filtered mode (paths are encrypted otherwise)."
         },
         "admin": {
           "type": "boolean",
@@ -601,11 +603,11 @@
           "items": {
             "type": "string",
             "minLength": 1,
-            "maxLength": 253
+            "maxLength": 261
           },
           "maxItems": 50,
           "uniqueItems": true,
-          "description": "Machines this account may connect to over SSH, and no others: a name, an address, a range (CIDR), or 'tailnet' for every machine on this computer's tailnet. Empty by default: port 22 is closed, since an SSH tunnel reaches anything."
+          "description": "Machines this account may connect to over SSH, and no others: a name, an address, a range (CIDR), or 'tailnet' for every machine on this computer's tailnet, each on port 22 or the port it names (git.example.org:222, [fd00::5]:222). Empty by default: port 22 is closed, since an SSH tunnel reaches anything."
         },
         "ssh_anywhere": {
           "type": "boolean",
@@ -614,6 +616,10 @@
         "developer_tools": {
           "type": "boolean",
           "description": "May use the Nix daemon and reach the package registries directly (nix, devbox, devenv from a shell). Default false."
+        },
+        "ssh_in": {
+          "type": "boolean",
+          "description": "May be signed in to from another machine over SSH, with a key in the account's own ~/.ssh/authorized_keys; passwords are refused. Only takes effect with developer_tools on. Default false."
         },
         "approved_apps": {
           "type": "array",

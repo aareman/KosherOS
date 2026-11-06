@@ -168,7 +168,12 @@ it, for a shell, a VM suite or a support call. For a person at a
 terminal there is `kosher`, in the words apt and dnf taught: `kosher
 install claude-code`, `kosher search`, `kosher list`, `kosher update`,
 `kosher upgrade`, `kosher remove`, `kosher info`. It talks to the same
-daemon under the same rules and shows the install as it happens.
+daemon under the same rules and shows the install as it happens. A
+nixpkgs app the Store installed is checked against the channel the way
+a Flatpak is checked against Flathub; `kosher update --local` and
+`kosher upgrade --local` take in the rest of a developer's own nix
+profile as well, run as them in their own shell, since those packages
+are theirs and not the Store's.
 
 A second source sits beside Flathub for what has no Flatpak, the AI coding
 tools and a few editors and toolchains: upstream nixpkgs. A catalog entry

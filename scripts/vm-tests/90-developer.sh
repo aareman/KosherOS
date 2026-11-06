@@ -435,4 +435,45 @@ kctl developer-tools "$dev" off >/dev/null
 kctl rules "$dev" clear >/dev/null
 kctl developer-tools "$(id -u wlkid)" on >/dev/null
 
+section "Signing in over SSH"
+# wlkid has developer tools; dnskid does not. A dev disk runs sshd anyway
+# for root's key, so what is checked is who it lets in, and how.
+ssh_conf=/etc/ssh/sshd_config.d/40-kosheros.conf
+ssh_key=$(mktemp -d)/key
+ssh-keygen -q -t ed25519 -N "" -f "$ssh_key"
+for u in wlkid dnskid; do
+    home=$(getent passwd "$u" | cut -d: -f6)
+    install -d -o "$u" -g "$u" -m 700 "$home/.ssh"
+    install -o "$u" -g "$u" -m 600 "$ssh_key.pub" "$home/.ssh/authorized_keys"
+done
+ssh_as() {
+    local u="$1"
+    shift
+    ssh -i "$ssh_key" -o BatchMode=yes -o StrictHostKeyChecking=no \
+        -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10 -o LogLevel=ERROR \
+        "$u@127.0.0.1" "$@"
+}
+check_contains "an account without developer tools cannot have it" "developer tools" \
+    kctl ssh-in "$(id -u dnskid)" on
+kctl ssh-in "$(id -u wlkid)" on >/dev/null
+sleep 2
+check_contains "kosherd lets that account in" "AllowUsers root wlkid" cat "$ssh_conf"
+check "and sshd is running" 0 systemctl is-active --quiet sshd
+check_contains "sshd takes keys only" "passwordauthentication no" \
+    sshd -T -C user=wlkid,host=localhost,addr=127.0.0.1
+check_contains "the account signs in with its key" "^wlkid$" ssh_as wlkid id -un
+check "another account with the same key is refused" 1 ssh_as dnskid true
+check "ssh -R is refused (a listener here reaching out unfiltered)" 1 \
+    ssh_as wlkid -o ExitOnForwardFailure=yes -R 127.0.0.1:2299:example.com:80 true
+kctl developer-tools "$(id -u wlkid)" off >/dev/null
+sleep 2
+check "turning developer tools off removes the account from sshd" 1 test -e "$ssh_conf"
+# With no file a family machine has no sshd at all; a dev disk keeps it
+# for root's key, on Fedora's settings, so signing in is not checked here.
+kctl developer-tools "$(id -u wlkid)" on >/dev/null
+for u in wlkid dnskid; do
+    rm -f "$(getent passwd "$u" | cut -d: -f6)/.ssh/authorized_keys"
+done
+rm -rf "$(dirname "$ssh_key")"
+
 report

@@ -96,8 +96,20 @@ class WhitelistDialog(Adw.Dialog):
             self.list_box.append(row)
 
 
+# A rule's three levels (#273), in the order a person steps a page up:
+# the word on its drop-down, what the row says under the pattern, its
+# icon, the icon's colour. The drop-down's word stays short: a sentence
+# there took the row's width and wrapped the pattern a letter a line.
+RULE_LEVELS = {
+    "block": ("Blocked", "Blocked", "action-unavailable-symbolic", "error"),
+    "allow": ("Allowed", "Allowed · pictures, video and words still filtered",
+              "emblem-ok-symbolic", "success"),
+    "bypass": ("Bypassed", "Bypassed · nothing filtered", "security-low-symbolic", "warning"),
+}
+
+
 class RulesDialog(Adw.Dialog):
-    """Ordered URL allow/block rules.
+    """Ordered URL rules: block, allow or bypass.
 
     The first matching rule wins, so order is meaningful and rows can be
     moved up and down. Rules only do anything in inspect mode, which is
@@ -105,7 +117,7 @@ class RulesDialog(Adw.Dialog):
     """
 
     def __init__(self, win, title: str, rules: list[dict], on_save):
-        super().__init__(title=title, content_width=580, content_height=660)
+        super().__init__(title=title, content_width=860, content_height=760)
         self.win = win
         self.rules = [dict(r) for r in rules]
 
@@ -122,19 +134,27 @@ class RulesDialog(Adw.Dialog):
         block_btn = Gtk.Button(label="Block", tooltip_text="Add a block rule")
         block_btn.add_css_class("destructive-action")
         block_btn.connect("clicked", lambda _b: self._add("block"))
-        allow_btn = Gtk.Button(label="Allow", tooltip_text="Add an allow rule")
+        allow_btn = Gtk.Button(
+            label="Allow", tooltip_text="The page opens; its pictures, video and words "
+                                        "are still filtered")
         allow_btn.add_css_class("suggested-action")
         allow_btn.connect("clicked", lambda _b: self._add("allow"))
+        bypass_btn = Gtk.Button(label="Bypass",
+                                tooltip_text="Nothing on the page is filtered")
+        bypass_btn.connect("clicked", lambda _b: self._add("bypass"))
 
         add_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6,
                           margin_start=12, margin_end=12, margin_top=12, margin_bottom=4)
         add_box.append(self.entry)
         add_box.append(allow_btn)
+        add_box.append(bypass_btn)
         add_box.append(block_btn)
 
         hint = Gtk.Label(
             label=("Rules are checked from top to bottom. The first match applies. Other pages "
-                "use the normal filter settings. Add “block *” last to block all other pages."),
+                "use the normal filter settings. An allowed page still has its pictures, "
+                "video and words filtered; a bypassed page has nothing filtered. "
+                "Add “block *” last to block all other pages."),
             wrap=True, xalign=0, margin_start=14, margin_end=14, margin_bottom=8)
         hint.add_css_class("dim-label")
         hint.add_css_class("caption")
@@ -165,6 +185,11 @@ class RulesDialog(Adw.Dialog):
         self.entry.set_text("")
         self._rebuild()
 
+    def _set_level(self, index: int, action: str) -> None:
+        if 0 <= index < len(self.rules) and self.rules[index]["action"] != action:
+            self.rules[index]["action"] = action
+            self._rebuild()
+
     def _move(self, index: int, delta: int) -> None:
         target = index + delta
         if 0 <= target < len(self.rules):
@@ -180,14 +205,24 @@ class RulesDialog(Adw.Dialog):
             self.list_box.append(row)
             return
         for index, rule in enumerate(self.rules):
-            blocked = rule["action"] == "block"
-            row = Adw.ActionRow(title=rule["pattern"],
-                                subtitle="Blocked" if blocked else "Allowed",
+            _word, subtitle, icon_name, style = RULE_LEVELS.get(
+                rule["action"], RULE_LEVELS["allow"])
+            row = Adw.ActionRow(title=rule["pattern"], subtitle=subtitle,
                                 use_markup=False)
-            icon = Gtk.Image(icon_name="action-unavailable-symbolic" if blocked
-                             else "emblem-ok-symbolic")
-            icon.add_css_class("error" if blocked else "success")
+            icon = Gtk.Image(icon_name=icon_name)
+            icon.add_css_class(style)
             row.add_prefix(icon)
+            # The level, changeable in place: blocked, allowed, bypassed.
+            level = Gtk.DropDown.new_from_strings([lv[0] for lv in RULE_LEVELS.values()])
+            level.set_valign(Gtk.Align.CENTER)
+            # One width for all three, so the arrows line up down the list.
+            level.set_size_request(130, -1)
+            level.set_tooltip_text("What this rule does")
+            level.set_selected(list(RULE_LEVELS).index(
+                rule["action"] if rule["action"] in RULE_LEVELS else "allow"))
+            level.connect("notify::selected", lambda dd, _p, i=index: self._set_level(
+                i, list(RULE_LEVELS)[dd.get_selected()]))
+            row.add_suffix(level)
 
             up = Gtk.Button(icon_name="go-up-symbolic", valign=Gtk.Align.CENTER,
                             tooltip_text="Check earlier", sensitive=index > 0)
@@ -1035,6 +1070,14 @@ def allow_menu(win, uid: int, username: str, url: str, on_done=None) -> Gtk.Menu
             done_msg=f"Allowed {'all of ' if whole else ''}{host} for {username}",
             on_done=on_done))
 
+    def bypass(whole: bool):
+        popover.popdown()
+        win.with_guardian(lambda pw: win.call(
+            lambda: win.client.bypass_url(uid, url, whole, pw),
+            done_msg=f"Nothing on {'all of ' if whole else ''}{host} is filtered "
+                     f"for {username} now",
+            on_done=on_done))
+
     page = Gtk.Button(label="Allow this page")
     page.add_css_class("flat")
     page.connect("clicked", lambda _b: grant(False))
@@ -1043,6 +1086,12 @@ def allow_menu(win, uid: int, username: str, url: str, on_done=None) -> Gtk.Menu
     site.connect("clicked", lambda _b: grant(True))
     box.append(page)
     box.append(site)
+    # The level above allowing: the site opens with nothing on it filtered.
+    whole = Gtk.Button(label=f"Bypass the filter on {host}",
+                       tooltip_text="Pictures, video and words on it are not filtered")
+    whole.add_css_class("flat")
+    whole.connect("clicked", lambda _b: bypass(True))
+    box.append(whole)
     popover.set_child(box)
     button.set_popover(popover)
     return button

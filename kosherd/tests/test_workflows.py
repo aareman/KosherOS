@@ -375,9 +375,13 @@ def test_the_train_tests_a_batch_once_and_lands_it():
     # One train at a time, never cancelling the one running.
     assert "merge-train" in train["concurrency"]["group"]
     assert train["concurrency"]["cancel-in-progress"] is False
-    # The VM test is the same workflow a pull request would run.
+    # The VM test is the same workflow a pull request would run, and it
+    # runs only once the quick checks passed: a minute's wait on a green
+    # train, ten or more saved on one whose unit tests failed.
     assert jobs["vm"]["uses"] == "./.github/workflows/vm-test.yml"
+    assert jobs["vm"]["needs"] == ["assemble", "checks"]
     assert jobs["land"]["needs"] == ["assemble", "checks", "vm"]
+    assert jobs["land"]["if"].startswith("always()"), "a skipped VM test still lands or splits"
     land = jobs["land"]["steps"][0]["run"]
     # master takes pull requests only, with a linear history.
     assert "gh pr merge" in land and "--squash" in land
@@ -420,6 +424,14 @@ def test_the_vm_harness_never_needs_sudo():
     assert dirty.returncode == 1 and "_sudo" in dirty.stdout
 
 
+def test_the_weekly_release_may_ask_for_the_docs_rebuild():
+    # Its last step dispatches ci.yml for the Releases page; the first run
+    # made the release and then failed there, "Resource not accessible by
+    # integration", for want of this permission.
+    roundup = yaml.safe_load((ROOT / ".github/workflows/roundup.yml").read_text())
+    assert roundup["permissions"]["actions"] == "write"
+    runs = "\n".join(step.get("run", "") for step in roundup["jobs"]["roundup"]["steps"])
+    assert "gh workflow run ci.yml" in runs
 def test_the_train_lands_only_the_commit_it_tested_and_may_carry_a_workflow_change():
     # A push to a queued pull request after assembly used to land untested
     # (plain `gh pr merge`); and the workflow's own token cannot push a

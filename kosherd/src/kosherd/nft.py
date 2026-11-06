@@ -155,15 +155,48 @@ GIT_SSH_PORT = 22
 # from the start), or `tailnet`, every machine on this computer's tailnet
 # (Tailscale's own ranges). Or anywhere, for the account an administrator
 # trusts with a way around the filter: the switch says so in words.
+# An entry may name its port, for a server whose SSH is not on 22 (a
+# Forgejo on 222): `git.example.org:222`, `[fd00::5]:222`, `tailnet:2222`.
+# Only that machine's port is opened; the port elsewhere stays as it was.
 SSH_PORT = 22
+# Never on an entry: DNS and the web are what the filter reads.
+SSH_PORTS_REFUSED = (53, 80, 443)
 TAILNET_RANGES4 = ("100.64.0.0/10",)
 TAILNET_RANGES6 = ("fd7a:115c:a1e0::/48",)
 
 
+def ssh_entry(entry: str) -> tuple[str, int]:
+    """An SSH list entry's machine and port: ("git.example.org", 222) for
+    `git.example.org:222`, the port 22 when none is given. An IPv6 address
+    takes a port only in brackets, `[fd00::5]:222`. ValueError for a port
+    that is not a number from 1 to 65535."""
+    entry = entry.strip().lower()
+    host, port = entry, None
+    if entry.startswith("["):
+        host, _, rest = entry[1:].partition("]")
+        if rest:
+            if not rest.startswith(":"):
+                raise ValueError(f"{entry!r}: a port follows the brackets as :PORT")
+            port = rest[1:]
+    elif entry.count(":") == 1:
+        host, port = entry.split(":")
+    if port is None:
+        return host, SSH_PORT
+    if not port.isdigit() or not 1 <= int(port) <= 65535:
+        raise ValueError(f"{entry!r}: the port must be a number from 1 to 65535")
+    return host, int(port)
+
+
+def ssh_ports(hosts) -> list[int]:
+    """The ports an account's list opens, 22 first if it is among them."""
+    ports = {ssh_entry(h)[1] for h in hosts}
+    return sorted(ports, key=lambda p: (p != SSH_PORT, p))
+
+
 def ssh_entry_kind(entry: str) -> str:
     """What an SSH list entry is: "tailnet", "v4" or "v6" (an address or a
-    range), or "name"."""
-    entry = entry.strip().lower()
+    range), or "name". A port on it makes no difference."""
+    entry = ssh_entry(entry)[0]
     if entry == "tailnet":
         return "tailnet"
     try:
@@ -173,24 +206,30 @@ def ssh_entry_kind(entry: str) -> str:
     return "v4" if net.version == 4 else "v6"
 
 
-def ssh_set_names(uid: int) -> tuple[str, str]:
-    return f"ssh4_{uid}", f"ssh6_{uid}"
+def ssh_set_names(uid: int, port: int = SSH_PORT) -> tuple[str, str]:
+    """An account's sets for one port: ssh4_1000 for 22, as before ports
+    could be named, and ssh4_1000_222 for another."""
+    suffix = "" if port == SSH_PORT else f"_{port}"
+    return f"ssh4_{uid}{suffix}", f"ssh6_{uid}{suffix}"
 
 
-def ssh_set_elements(hosts) -> tuple[tuple[str, ...], tuple[str, ...]]:
-    """The addresses and ranges an account's list puts in its sets from the
-    start (names arrive later, from dnsmasq): (v4, v6)."""
+def ssh_set_elements(hosts, port: int = SSH_PORT) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    """The addresses and ranges an account's list puts in its sets for one
+    port from the start (names arrive later, from dnsmasq): (v4, v6)."""
     v4: list[str] = []
     v6: list[str] = []
     for h in hosts:
-        kind = ssh_entry_kind(h)
+        host, p = ssh_entry(h)
+        if p != port:
+            continue
+        kind = ssh_entry_kind(host)
         if kind == "tailnet":
             v4 += TAILNET_RANGES4
             v6 += TAILNET_RANGES6
         elif kind == "v4":
-            v4.append(str(ipaddress.ip_network(h.strip(), strict=False)))
+            v4.append(str(ipaddress.ip_network(host, strict=False)))
         elif kind == "v6":
-            v6.append(str(ipaddress.ip_network(h.strip(), strict=False)))
+            v6.append(str(ipaddress.ip_network(host, strict=False)))
     return tuple(dict.fromkeys(v4)), tuple(dict.fromkeys(v6))
 # UDP cannot be inspected at all. Below this a port is a named service and
 # the account gets only NTP; above it is where video calls live, and that
@@ -339,21 +378,30 @@ def render(policy: Policy, *, dns_uid: int, mitm_uid: int | None = None,
     # ports; an unfiltered account has it open anyway, and one with no
     # internet has nothing.
     ssh_sets = ""
+    # A listed machine on a port other than 22 is let past the proxy
+    # redirect (dns_redirect), which takes every port but a few: that
+    # machine's port only, so the same port anywhere else is still read.
+    ssh_nat = ""
     for u in sorted(policy.effective_users(), key=lambda u: u.uid):
         if u.mode in UNFILTERED_MODES or u.mode == "none":
             continue
         if u.ssh_anywhere:
             per_user += f"        meta skuid {owner_match(u.uid)} tcp dport {SSH_PORT} accept\n"
-        elif u.ssh_hosts:
-            s4, s6 = ssh_set_names(u.uid)
-            e4, e6 = ssh_set_elements(u.ssh_hosts)
-            ssh_sets += (f"    # SSH machines of uid {u.uid}: the listed addresses and ranges, and\n"
-                         f"    # the listed names as dnsmasq resolves them.\n"
+            continue
+        for port in ssh_ports(u.ssh_hosts):
+            s4, s6 = ssh_set_names(u.uid, port)
+            e4, e6 = ssh_set_elements(u.ssh_hosts, port)
+            ssh_sets += (f"    # SSH machines of uid {u.uid} on port {port}: the listed addresses\n"
+                         f"    # and ranges, and the listed names as dnsmasq resolves them.\n"
                          + _set_block(s4, "ipv4_addr", e4, interval=True) + "\n"
                          + _set_block(s6, "ipv6_addr", e6, interval=True) + "\n")
             per_user += (
-                f"        meta skuid {owner_match(u.uid)} ip daddr @{s4} tcp dport {SSH_PORT} accept\n"
-                f"        meta skuid {owner_match(u.uid)} ip6 daddr @{s6} tcp dport {SSH_PORT} accept\n")
+                f"        meta skuid {owner_match(u.uid)} ip daddr @{s4} tcp dport {port} accept\n"
+                f"        meta skuid {owner_match(u.uid)} ip6 daddr @{s6} tcp dport {port} accept\n")
+            if port != SSH_PORT:
+                ssh_nat += (
+                    f"        meta skuid {owner_match(u.uid)} ip daddr @{s4} tcp dport {port} accept\n"
+                    f"        meta skuid {owner_match(u.uid)} ip6 daddr @{s6} tcp dport {port} accept\n")
     # Syncthing (#213), ahead of everything else per account: its ports
     # are open to the account's own Syncthing service — the socket's
     # cgroup is that unit's, which kosherd adds to @syncthing_out while
@@ -532,7 +580,7 @@ table {TABLE} {{
         meta skuid {{ 0, {dns_uid}{mitm_exempt}{search_exempt} }} return
 {build_redirect}{open_dns}        udp dport 53 redirect to :53
         tcp dport 53 redirect to :53
-{syncthing_nat}{web_redirect}    }}
+{syncthing_nat}{ssh_nat}{web_redirect}    }}
 
     chain output {{
         type filter hook output priority filter; policy accept;
@@ -568,7 +616,8 @@ table {TABLE} {{
         meta l4proto {{ icmp, ipv6-icmp }} accept
         udp dport {{ 68, 546 }} accept
         udp dport 5353 accept
-{syncthing_in}        # Dev convenience; the production image ships with sshd disabled.
+{syncthing_in}        # SSH sign-in: sshd runs only for a dev disk's root key or an account
+        # with "Sign in over SSH" on, and takes keys only (sshin.py).
         tcp dport 22 accept
     }}
 

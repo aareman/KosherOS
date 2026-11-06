@@ -131,6 +131,9 @@ ACTIONS = {
     # Developer tools: the Nix daemon and the registries, directly. On
     # widens what the account reaches, so dual-controlled like a filter.
     "SetDeveloperTools": ACTION_MANAGE_FILTER,
+    # Signing in to the account over SSH from another machine: what comes
+    # in over the connection is not read by the filter.
+    "SetSshIn": ACTION_MANAGE_FILTER,
     # Where a Nix build may download from, beyond the built-in hosts.
     "SetBuildSources": ACTION_MANAGE_FILTER,
     # The boot menu: the way round every other protection, so setting its
@@ -144,6 +147,7 @@ ACTIONS = {
     # Allowing a blocked page from the activity view is the same grant as
     # approving a request for it.
     "AllowUrl": ACTION_MANAGE_FILTER,
+    "BypassUrl": ACTION_MANAGE_FILTER,
     "ListActivity": ACTION_READ_CONFIG,
     "ActivitySummary": ACTION_READ_CONFIG,
     "Usage": ACTION_READ_CONFIG,
@@ -281,14 +285,14 @@ ACTIONS = {
 
 # Methods that can weaken the filter: guardian password required when enabled.
 GUARDIAN_GATED = frozenset({
-    "SetFilterMode", "SetWhitelist", "SetWhitelistBundles", "SetUrlRules", "SetBlockedCategories", "ApplyProfile", "SaveProfile", "DeleteProfile", "ApproveRequest", "AllowUrl", "EditList",
+    "SetFilterMode", "SetWhitelist", "SetWhitelistBundles", "SetUrlRules", "SetBlockedCategories", "ApplyProfile", "SaveProfile", "DeleteProfile", "ApproveRequest", "AllowUrl", "BypassUrl", "EditList",
     "SetUserAdmin",
     "SetMediaLevel",
     "SetLanguageFilter", "SetYouTube", "SetCalm",
     "SetGuestConfig", "DisableGuardian", "Enrol", "Unenrol",
     "SetAdBlock", "SetAdBlockAllowed", "SetTimeLimits", "SetChannel", "TryImage", "Rollback",
     "SetNetworkAccess", "SetSsh",
-    "SetDeveloperTools", "SetBuildSources",
+    "SetDeveloperTools", "SetSshIn", "SetBuildSources",
     "SetBootMenuPassword",
     "SetUserAppAccess", "SetUserBlockedAppKinds", "SetUserBlockedApps",
     "SetUserAppApproval", "SetSyncthingLan", "SetSyncthingEnabled",
@@ -310,7 +314,9 @@ UID_AWARE = frozenset({"Unlock", "Lock", "Status", "VerifyGuardian", "InstallApp
                        # A nixpkgs app is in one account's profile: what is
                        # installed, and whose copy to update or remove,
                        # depends on who is asking.
-                       "ListInstalled", "UpdateApp", "RemoveApp"})
+                       "ListInstalled", "UpdateApp", "RemoveApp",
+                       # ...and whether one of them has a newer build.
+                       "ListAppUpdates", "CheckAppUpdates", "UpdateAllApps"})
 
 # Calls that change how the machine is set up, written to the activity log
 # with the admin who made them so "who changed this?" has an answer. Reads,
@@ -320,10 +326,10 @@ CHANGES = frozenset({
     "SetFilterMode", "SetWhitelist", "SetWhitelistBundles", "SetUrlRules",
     "SetBlockedCategories",
     "ApplyProfile", "SaveProfile", "DeleteProfile", "ApproveRequest",
-    "DismissRequest", "AllowUrl", "EditList", "SetMediaLevel",
+    "DismissRequest", "AllowUrl", "BypassUrl", "EditList", "SetMediaLevel",
     "SetLanguageFilter", "SetYouTube", "SetCalm", "SetUserAdmin", "SetLayout",
     "SetCoverStyle", "SetAdBlock", "SetAdBlockAllowed", "SetTimeLimits", "SetNetworkAccess",
-    "SetDeveloperTools",
+    "SetDeveloperTools", "SetSshIn",
     "SetBuildSources",
     "SetBootMenuPassword", "SetGuestConfig", "CreateUser",
     "AdoptUser", "RemoveUser", "ResetPassword", "SetUserApps", "RemoveApp", "RemoveUnusedApps",
@@ -354,9 +360,9 @@ CHANGES = frozenset({
 PER_USER = frozenset({
     "SetFilterMode", "SetWhitelist", "SetWhitelistBundles", "SetUrlRules",
     "SetBlockedCategories",
-    "ApplyProfile", "SaveProfile", "AllowUrl", "SetMediaLevel",
+    "ApplyProfile", "SaveProfile", "AllowUrl", "BypassUrl", "SetMediaLevel",
     "SetLanguageFilter", "SetYouTube", "SetCalm", "SetUserAdmin", "SetLayout",
-    "SetCoverStyle", "SetTimeLimits", "SetNetworkAccess", "SetDeveloperTools", "InstallAppFor",
+    "SetCoverStyle", "SetTimeLimits", "SetNetworkAccess", "SetDeveloperTools", "SetSshIn", "InstallAppFor",
     "RemoveUser", "ResetPassword", "SetUserApps",
     "SetUserCanInstall", "SetUserAppAccess", "SetUserBlockedAppKinds",
     "SetUserBlockedApps", "SetCaptiveMode", "SetUserAppApproval", "SetSyncthingLan",

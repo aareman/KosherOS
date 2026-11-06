@@ -437,6 +437,9 @@ def change_sentence(event: dict, users_by_uid: dict | None = None) -> tuple[str,
     elif method == "AllowUrl":
         what = f"{who} may now reach {host_of(str(arg(1) or ''))}" + \
             (" (whole site)" if arg(2) else "")
+    elif method == "BypassUrl":
+        what = f"{who} now reaches {host_of(str(arg(1) or ''))} with nothing filtered" + \
+            (" (whole site)" if arg(2) else "")
     elif method == "ApproveRequest":
         what = "A request was allowed"
     elif method == "DismissRequest":
@@ -453,6 +456,8 @@ def change_sentence(event: dict, users_by_uid: dict | None = None) -> tuple[str,
         what = "Sites the ad blocker leaves reachable changed"
     elif method == "SetDeveloperTools":
         what = f"{who}: developer tools {'on' if arg(1) else 'off'}"
+    elif method == "SetSshIn":
+        what = f"{who}: sign in over SSH {'on' if arg(1) else 'off'}"
     elif method == "SetBuildSources":
         what = "Sites Nix builds may download from changed"
     elif method == "SetBootMenuPassword":

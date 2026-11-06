@@ -142,6 +142,11 @@ class DaemonClient:
         self._call("Profiles", "AllowUrl", "(isbs)", uid, url, whole_site,
                    guardian_password)
 
+    def bypass_url(self, uid: int, url: str, whole_site: bool = False,
+                   guardian_password: str = "") -> None:
+        self._call("Profiles", "BypassUrl", "(isbs)", uid, url, whole_site,
+                   guardian_password)
+
     def list_activity(self, since: int = 0, uid: int = -1) -> list[dict]:
         return json.loads(self._call("Profiles", "ListActivity", "(ii)",
                                      since, uid)[0])
@@ -206,6 +211,11 @@ class DaemonClient:
         """May the account use the Nix daemon and the package registries
         itself (nix, devbox, devenv from a shell)?"""
         self._call("Profiles", "SetDeveloperTools", "(ibs)", uid, bool(enabled), guardian_password)
+
+    def set_ssh_in(self, uid: int, enabled: bool, guardian_password: str = "") -> None:
+        """May the account be signed in to over SSH with a key? Needs
+        developer tools on."""
+        self._call("Profiles", "SetSshIn", "(ibs)", uid, bool(enabled), guardian_password)
 
     def set_build_sources(self, hosts: list[str], guardian_password: str = "") -> None:
         """The hosts added to where a Nix build may download from; the

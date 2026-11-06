@@ -112,6 +112,12 @@ INTROSPECTION_XML = """
       <arg direction="in" type="b" name="whole_site"/>
       <arg direction="in" type="s" name="guardian_password"/>
     </method>
+    <method name="BypassUrl">
+      <arg direction="in" type="i" name="uid"/>
+      <arg direction="in" type="s" name="url"/>
+      <arg direction="in" type="b" name="whole_site"/>
+      <arg direction="in" type="s" name="guardian_password"/>
+    </method>
     <method name="ListActivity">
       <arg direction="in" type="i" name="since"/>
       <arg direction="in" type="i" name="uid"/>
@@ -199,6 +205,11 @@ INTROSPECTION_XML = """
       <arg direction="out" type="s" name="usage_json"/>
     </method>
     <method name="SetDeveloperTools">
+      <arg direction="in" type="i" name="uid"/>
+      <arg direction="in" type="b" name="enabled"/>
+      <arg direction="in" type="s" name="guardian_password"/>
+    </method>
+    <method name="SetSshIn">
       <arg direction="in" type="i" name="uid"/>
       <arg direction="in" type="b" name="enabled"/>
       <arg direction="in" type="s" name="guardian_password"/>
@@ -545,6 +556,8 @@ INTROSPECTION_XML = """
 # without a D-Bus bus; see tests/test_access.py.
 ACTIONS = access.ACTIONS
 UID_AWARE = access.UID_AWARE
+# keyd's unit on systemd's bus (the name escaped as systemd does: "." is _2e).
+KEYD_UNIT_PATH = "/org/freedesktop/systemd1/unit/keyd_2eservice"
 
 # Methods that run `bootc`, answered from a worker thread instead of the
 # main loop. Every bootc command waits for the one sysroot lock, and an
@@ -875,7 +888,38 @@ class Daemon:
             connection.signal_subscribe(
                 "org.freedesktop.login1", iface, member, path, None,
                 Gio.DBusSignalFlags.NONE, lambda *_a: self._refresh_keyboard(), None)
+        # keyd starts from the computer's own config alone (its unit's
+        # ExecStartPre empties /run/keyd), so a start that lands after a
+        # person signed in, or a restart after its panic keys, dropped their
+        # files until the next session change asked for them again (#276).
+        # systemd says when the unit comes up; the right set goes back then.
+        try:
+            connection.call_sync(
+                "org.freedesktop.systemd1", "/org/freedesktop/systemd1",
+                "org.freedesktop.systemd1.Manager", "Subscribe", None, None,
+                Gio.DBusCallFlags.NONE, 5000, None)
+        except GLib.Error as e:
+            log.warning("keyboard: could not ask systemd for keyd's state: %s", e.message)
+        connection.signal_subscribe(
+            "org.freedesktop.systemd1", "org.freedesktop.DBus.Properties",
+            "PropertiesChanged", KEYD_UNIT_PATH, None,
+            Gio.DBusSignalFlags.NONE, self._keyd_unit_changed, None)
         self._refresh_keyboard()
+
+    def _keyd_unit_changed(self, _conn, _sender, _path, _iface, _signal, params, _data) -> None:
+        """keyd's unit changed state. Up again means its config directory
+        holds the computer's file alone: put the person's back. Once now,
+        and again a moment later, because the unit is active the instant
+        keyd's process starts, a beat before it answers a reload."""
+        try:
+            changed = params.unpack()[1]
+        except (IndexError, TypeError, ValueError):
+            return
+        if changed.get("ActiveState") != "active":
+            return
+        self._refresh_keyboard()
+        for delay in (1000, 3000):
+            GLib.timeout_add(delay, lambda: (self._refresh_keyboard(), False)[1])
 
     # ---- time limits: the minute tick and logind -------------------------
 
@@ -1307,8 +1351,9 @@ class Daemon:
                 "a list that needs more than that is not finished, and "
                 "should be fixed for everybody rather than here")
         lists.save_delta(list_name, add=add, remove=list(remove))
-        # The proxy and the search service reload on their own, but the
-        # resolver's category blocks are rendered from the policy.
+        # The proxy and the search service load the lists when they start;
+        # apply restarts them because the lists changed (apply.py,
+        # _restart_if_changed), and renders the resolver's category blocks.
         self._save_and_apply()
         log.info("edited %s: +%s -%s", list_name, len(add), len(remove))
         return None
@@ -1421,9 +1466,27 @@ class Daemon:
         log.info("allowed uid %d to %s from the activity log", uid, host)
         return None
 
-    def _grant(self, user, url: str, whole_site: bool) -> str:
+    def impl_BypassUrl(self, uid: int, url: str, whole_site: bool,
+                       _guardian_pw: str):
+        """Let a page, or a whole site, through with nothing on it filtered
+        (#273): the level above allowing, for a site the administrator
+        trusts outright. Only a filtered account reads pages, so only there
+        is there anything to bypass."""
+        user = self.policy.account(uid)
+        if user is None:
+            raise PolicyError(f"uid {uid} is not managed")
+        if user.mode != "filtered":
+            raise PolicyError("only a filtered account's pages are read; "
+                              "there is nothing to bypass in this mode")
+        host = self._grant(user, url, whole_site, action="bypass")
+        log.info("uid %d now reaches %s with nothing filtered", uid, host)
+        return None
+
+    def _grant(self, user, url: str, whole_site: bool, action: str = "allow") -> str:
         """Open one page or one site for an account, in the terms of its
-        mode: a whitelist entry, or an allow rule ahead of the rest."""
+        mode: a whitelist entry, or a rule ahead of the rest. A rule the
+        account already has for the same pattern is replaced, so allowing
+        and then bypassing a site leaves one rule, not two."""
         from urllib.parse import urlsplit
 
         parts = urlsplit(url)
@@ -1436,12 +1499,12 @@ class Daemon:
                 user.whitelist = sorted({*user.whitelist, host})
         else:
             pattern = host if whole_site else _url_pattern(url)
-            if not any(r.get("pattern") == pattern and r.get("action") == "allow"
+            if not any(r.get("pattern") == pattern and r.get("action") == action
                        for r in user.rules):
                 # Ahead of the existing rules: a rule added after the one
                 # that blocked the page would never be reached.
-                user.rules = [{"action": "allow", "pattern": pattern},
-                              *user.rules]
+                user.rules = [{"action": action, "pattern": pattern},
+                              *[r for r in user.rules if r.get("pattern") != pattern]]
         self._save_and_apply()
         return host
 
@@ -1693,6 +1756,10 @@ class Daemon:
 
         user = self._managed(uid)
         user.developer_tools = bool(enabled)
+        # Signing in over SSH is part of developer tools: it goes with them,
+        # and does not come back on its own when they are turned on again.
+        if not enabled:
+            user.ssh_in = False
         if enabled:
             try:
                 home = Path(pwd.getpwuid(uid).pw_dir)
@@ -1702,6 +1769,21 @@ class Daemon:
                         shutil.chown(path, uid, pwd.getpwuid(uid).pw_gid)
             except (KeyError, OSError) as e:
                 log.warning("could not hand uid %d its nix profile: %s", uid, e)
+        self._save_and_apply()
+        return None
+
+    def impl_SetSshIn(self, uid: int, enabled: bool, _guardian_pw: str):
+        """May this account be signed in to from another machine over SSH,
+        with a key in its own ~/.ssh/authorized_keys (sshin.py)?
+
+        Guardian-gated: whatever arrives over the connection is not read
+        by the filter. Only for an account with developer tools on; apply
+        writes sshd's list and starts or stops it.
+        """
+        user = self._managed(uid)
+        if enabled and not user.developer_tools:
+            raise PolicyError("turn developer tools on for this account first")
+        user.ssh_in = bool(enabled)
         self._save_and_apply()
         return None
 
@@ -1777,7 +1859,8 @@ class Daemon:
         self._save_and_apply()
 
     def impl_SetSsh(self, uid: int, anywhere: bool, hosts_json: str, _guardian_pw: str):
-        """SSH to other machines (#257): the listed ones, or anywhere.
+        """SSH to other machines (#257): the listed ones, or anywhere. An
+        entry may name its port (`git.example.org:222`); 22 otherwise.
 
         Guardian-gated like every widening of what an account reaches. An
         SSH connection cannot be read, and a tunnel through one reaches
@@ -1794,12 +1877,19 @@ class Daemon:
         if len(hosts) > 50:
             raise PolicyError("at most 50 SSH machines")
         for h in hosts:
-            kind = nft.ssh_entry_kind(h)
+            try:
+                host, port = nft.ssh_entry(h)
+            except ValueError as e:
+                raise PolicyError(str(e)) from None
+            if port in nft.SSH_PORTS_REFUSED:
+                raise PolicyError(f"{h!r}: port {port} is the web or DNS, which the filter reads; "
+                                  "it cannot be opened to a machine")
+            kind = nft.ssh_entry_kind(host)
             if kind == "name":
-                if not SSH_NAME_RE.fullmatch(h):
+                if not SSH_NAME_RE.fullmatch(host):
                     raise PolicyError(f"{h!r} is not a machine name, an address, a range or 'tailnet'")
             elif kind in ("v4", "v6"):
-                net = ipaddress.ip_network(h, strict=False)
+                net = ipaddress.ip_network(host, strict=False)
                 if net.prefixlen == 0:
                     raise PolicyError("every address is the Anywhere switch, not a machine")
                 if net.is_loopback:
@@ -2556,16 +2646,43 @@ class Daemon:
             raise PolicyError(f"{ref} is not installed for any account")
         return owner
 
-    def impl_ListAppUpdates(self):
+    def _nix_updates_known(self) -> dict[int, list[dict]]:
+        """What the last check found for each account's nixpkgs apps.
+        Finding out means evaluating nixpkgs, seconds of work and the
+        channel's news from the network, so only CheckAppUpdates does it;
+        ListAppUpdates, which the Store reads when it opens, answers from
+        here."""
+        return self.__dict__.setdefault("_nix_updates", {})
+
+    def _check_nix_updates(self, uid: int) -> list[dict]:
+        """The Store's nixpkgs apps in the caller's own profile that the
+        channel has a newer build of (nixapps.updates): kept for
+        ListAppUpdates and UpdateAllApps until the next check."""
+        if uid <= 0:
+            return []
+        refs = {r for r in apps.accountapps.installed(uid) if apps.nixapps.is_nix(r)}
+        names = {a["ref"]: a.get("name") or "" for a in apps.load_catalog().get("apps", [])}
+        found = apps.nixapps.updates(uid, refs, names, as_root=not self._developer(uid))
+        self._nix_updates_known()[uid] = found
+        return found
+
+    def _forget_nix_update(self, uid: int, ref: str) -> None:
+        known = self._nix_updates_known().get(uid)
+        if known:
+            known[:] = [u for u in known if u["ref"] != ref]
+
+    def impl_ListAppUpdates(self, *, _uid: int):
         try:
             found = apps.available_updates()
         except Exception as e:  # noqa: BLE001 - "could not look" is an empty list, said
             log.warning("could not list app updates: %s", e)
             found = []
+        found += self._nix_updates_known().get(_uid, [])
         return GLib.Variant("(s)", (json.dumps(found),))
 
-    def impl_CheckAppUpdates(self):
-        """Fetch the remote's news first, then list what can be updated.
+    def impl_CheckAppUpdates(self, *, _uid: int):
+        """Fetch the remote's news first, then list what can be updated:
+        Flathub's for every Flatpak, nixpkgs' for the caller's own apps.
 
         Slower than ListAppUpdates — it goes to the network — which is why
         it is what a person asks for by pressing a button, and the cheap
@@ -2576,6 +2693,10 @@ class Daemon:
         except Exception as e:  # noqa: BLE001 - "could not look" is an empty list, said
             log.warning("could not check for app updates: %s", e)
             found = []
+        try:
+            found += self._check_nix_updates(_uid)
+        except Exception as e:  # noqa: BLE001 - nix could not say; the Flatpaks still can
+            log.warning("could not check nixpkgs apps of uid %d for updates: %s", _uid, e)
         return GLib.Variant("(s)", (json.dumps(found),))
 
     def impl_UpdateApp(self, ref: str, *, _uid: int):
@@ -2585,11 +2706,14 @@ class Daemon:
         if apps.accountapps.is_account_app(ref):
             owner = self._nix_owner(ref, _uid)
             self.app_manager.update(ref, uid=owner, as_root=not self._developer(owner))
+            self._forget_nix_update(owner, ref)
         else:
             self.app_manager.update(ref)
         return None
 
-    def impl_UpdateAllApps(self):
+    def impl_UpdateAllApps(self, *, _uid: int):
+        """Every Flatpak with a newer build, and the caller's own nixpkgs
+        apps the last check found newer builds of."""
         queued = 0
         pending = self.app_manager.pending
         for entry in apps.available_updates():
@@ -2597,6 +2721,15 @@ class Daemon:
                 continue
             try:
                 self.app_manager.update(entry["ref"])
+                queued += 1
+            except apps.AppError as e:
+                log.warning("could not queue %s: %s", entry["ref"], e)
+        for entry in list(self._nix_updates_known().get(_uid, [])):
+            if entry["ref"] in pending:
+                continue
+            try:
+                self.app_manager.update(entry["ref"], uid=_uid, as_root=not self._developer(_uid))
+                self._forget_nix_update(_uid, entry["ref"])
                 queued += 1
             except apps.AppError as e:
                 log.warning("could not queue %s: %s", entry["ref"], e)

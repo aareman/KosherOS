@@ -199,3 +199,131 @@ def default() -> PersonDetector:
     if _default is None:
         _default = PersonDetector()
     return _default
+
+
+# -- the figure's own pixels (#274) ------------------------------------------------
+#
+# The detector's box is a rectangle around the figure; what is behind the
+# figure is in it too. A shiur's rabbi at his desk, bookshelves behind him,
+# measured 0.186 skin over his box — warm wood and beige book spines pass
+# the skin-colour gate — and was refused at the immodest level. Google's
+# multiclass selfie segmenter (Apache-2.0) says, per pixel, whether it is
+# a person: measured over those pixels alone the same frame is 0.075.
+# It is asked only when the box's measurement lands near the line (see
+# vision.shows_too_much), so a clean frame pays nothing for it. The model
+# is built into the image from Google's own TFLite file (the Containerfile
+# converts it, since it ships in no other form).
+
+MASK_MODEL_PATH = Path(os.environ.get("KOSHER_PERSON_MASK_MODEL",
+                                      "/usr/share/kosher/models/selfie_multiclass.onnx"))
+MASK_SOURCE_URL = ("https://storage.googleapis.com/mediapipe-models/image_segmenter/"
+                   "selfie_multiclass_256x256/float32/latest/selfie_multiclass_256x256.tflite")
+MASK_INPUT = 256     # the square the model takes, RGB in 0..1
+MASK_BACKGROUND = 0  # of its six classes (background, hair, body skin, face skin, clothes, other)
+MASK_SKIN = (2, 3)   # body skin, face skin
+
+
+def person_probability(logits):
+    """The model's six class logits per pixel [256, 256, 6] -> how surely
+    each pixel is a person [256, 256], in 0..1: everything but background."""
+    return 1.0 - _probabilities(logits)[..., MASK_BACKGROUND]
+
+
+def skin_probability(logits):
+    """... and how surely each pixel is skin, body or face."""
+    probs = _probabilities(logits)
+    return sum(probs[..., c] for c in MASK_SKIN)
+
+
+def _probabilities(logits):
+    import numpy as np
+
+    shifted = logits - logits.max(axis=-1, keepdims=True)
+    e = np.exp(shifted)
+    return e / e.sum(axis=-1, keepdims=True)
+
+
+class FigureMask:
+    """What the segmenter said of a picture, as two PIL 'L' images its
+    size: `person`, 255 where it is sure of a person; `skin`, 255 where
+    it is sure that person is bare skin (body or face)."""
+
+    def __init__(self, person, skin=None):
+        self.person = person
+        self.skin = skin
+
+
+class PersonMask:
+    """Which pixels of a picture are a person, from the segmenter."""
+
+    def __init__(self, model_path: Path = MASK_MODEL_PATH):
+        self.model_path = Path(model_path)
+        self._session = None
+        self._input = None
+        self._failed = False
+        self._lock = threading.Lock()
+
+    def available(self) -> bool:
+        return self._load() is not None
+
+    def _load(self):
+        if self._session is not None or self._failed:
+            return self._session
+        with self._lock:
+            if self._session is not None or self._failed:
+                return self._session
+            try:
+                import numpy  # noqa: F401
+                import onnxruntime as ort
+
+                if not self.model_path.exists():
+                    raise FileNotFoundError(self.model_path)
+                options = ort.SessionOptions()
+                options.intra_op_num_threads = 2
+                options.inter_op_num_threads = 1
+                self._session = ort.InferenceSession(
+                    str(self.model_path), sess_options=options,
+                    providers=["CPUExecutionProvider"])
+                self._input = self._session.get_inputs()[0].name
+            except Exception as e:  # noqa: BLE001 - "cannot tell", never a crash
+                log.warning("no person mask model (%s): a figure is measured over "
+                            "its whole box", e)
+                self._failed = True
+        return self._session
+
+    def mask(self, image_bytes: bytes) -> FigureMask | None:
+        """The picture's FigureMask, or None when the model cannot be
+        asked."""
+        session = self._load()
+        if session is None:
+            return None
+        try:
+            import numpy as np
+            from PIL import Image
+
+            with Image.open(io.BytesIO(image_bytes)) as im:
+                size = im.size
+                small = im.convert("RGB").resize((MASK_INPUT, MASK_INPUT),
+                                                 Image.Resampling.BILINEAR)
+            tensor = (np.asarray(small, dtype=np.float32) / 255.0)[None]
+            logits = session.run(None, {self._input: tensor})[0][0]
+
+            def as_image(probability):
+                sure = (np.clip(probability, 0.0, 1.0) * 255).astype(np.uint8)
+                return Image.fromarray(sure, "L").resize(size, Image.Resampling.BILINEAR)
+
+            return FigureMask(as_image(person_probability(logits)),
+                              as_image(skin_probability(logits)))
+        except Exception:  # noqa: BLE001
+            log.debug("person mask failed", exc_info=True)
+            return None
+
+
+_default_mask: PersonMask | None = None
+
+
+def default_mask() -> PersonMask:
+    global _default_mask
+    if _default_mask is None:
+        _default_mask = PersonMask()
+    return _default_mask

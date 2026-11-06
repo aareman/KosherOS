@@ -218,3 +218,26 @@ def test_a_change_is_written_with_who_made_it_and_no_password(tmp_path, monkeypa
     assert adblock["uid"] == -1          # machine-wide, not about one account
     assert adblock["args"] == [False]
     assert all(m in access.ACTIONS for m in access.CHANGES)
+
+
+def test_bypassing_a_site_replaces_its_allow_rule_rather_than_stacking(tmp_path, monkeypatch):
+    # #273: the level above allowing. Stepping a site up from allowed to
+    # bypassed leaves one rule for it, ahead of the rest.
+    from kosherd.policy import UserPolicy
+
+    user = UserPolicy(uid=1001, username="yosef", mode="filtered",
+                      rules=[{"action": "block", "pattern": "*"}])
+    daemon = _daemon([user], tmp_path, monkeypatch)
+    daemon.impl_AllowUrl(1001, "https://trusted.example/x", True, "")
+    daemon.impl_BypassUrl(1001, "https://trusted.example/x", True, "")
+    assert user.rules == [{"action": "bypass", "pattern": "trusted.example"},
+                          {"action": "block", "pattern": "*"}]
+
+
+def test_bypassing_is_only_for_a_filtered_account(tmp_path, monkeypatch):
+    from kosherd.policy import PolicyError, UserPolicy
+
+    user = UserPolicy(uid=1001, username="shmuli", mode="whitelist")
+    daemon = _daemon([user], tmp_path, monkeypatch)
+    with pytest.raises(PolicyError):
+        daemon.impl_BypassUrl(1001, "https://chabad.org/x", True, "")

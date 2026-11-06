@@ -2434,3 +2434,101 @@ def test_a_tailscale_page_is_still_judged_by_its_pictures(addon):
     assert filt._blocked_categories_of("login.tailscale.com", 1001) == set()
     filt = _tailscale_filter(addon, ())
     assert filt._blocked_categories_of("login.tailscale.com", 1001) == {"proxy"}
+
+
+# -- the three levels of a rule (#273) ----------------------------------------
+
+def _rules_policy(addon, raw, blocked=()):
+    return type("P", (), {
+        "uid_for_listener_port": staticmethod(lambda port: None),
+        "rules_for": staticmethod(lambda uid: addon.parse_rules(raw)),
+        "blocked_categories_for": staticmethod(lambda uid: list(blocked)),
+        "youtube_for": staticmethod(lambda uid: {}),
+    })()
+
+
+def test_a_bypass_rule_skips_the_categories_and_marks_the_request(addon):
+    # The site is in a blocked category; a bypass rule opens it anyway and
+    # marks the request, so the response hooks pass it through unread.
+    filt = addon.KosherFilter.__new__(addon.KosherFilter)
+    filt.uids = type("U", (), {"uid_for_connection": staticmethod(lambda *a, **k: 1001)})()
+    filt.categories = type("C", (), {
+        "blocked_categories_of": staticmethod(
+            lambda host, blocked: {"adult"} if host == "trusted.example" else set()),
+        "categories_of": staticmethod(lambda host: {"adult"}),
+    })()
+    filt.siterules = type("S", (), {"reason": staticmethod(lambda url: None),
+                                    "is_suggestions": staticmethod(lambda url: False)})()
+    filt.blocklist = _stub_blocklist()
+
+    filt.policy = _rules_policy(addon, [], blocked=["adult"])
+    refused = _request_flow("https://trusted.example/page")
+    filt.request(refused)
+    assert refused.response is not None and refused.response.status_code == 403
+
+    filt.policy = _rules_policy(
+        addon, [{"action": "bypass", "pattern": "trusted.example"}], blocked=["adult"])
+    passed = _request_flow("https://trusted.example/page")
+    filt.request(passed)
+    assert passed.response is None
+    assert passed.metadata.get("kosher_bypass") is True
+
+    # An allow rule opens the page too, but leaves it a page to be judged.
+    filt.policy = _rules_policy(
+        addon, [{"action": "allow", "pattern": "trusted.example"}], blocked=["adult"])
+    allowed = _request_flow("https://trusted.example/page")
+    filt.request(allowed)
+    assert allowed.response is None
+    assert not allowed.metadata.get("kosher_bypass")
+
+
+def test_what_a_bypassed_page_asks_for_is_bypassed_with_it(addon):
+    # The page's own pictures come on later requests, to another host as
+    # often as not; the browser names the page they came from.
+    filt = addon.KosherFilter.__new__(addon.KosherFilter)
+    filt.uids = type("U", (), {"uid_for_connection": staticmethod(lambda *a, **k: 1001)})()
+    filt.categories = _stub_categories()
+    filt.siterules = type("S", (), {"reason": staticmethod(lambda url: None),
+                                    "is_suggestions": staticmethod(lambda url: False)})()
+    filt.blocklist = _stub_blocklist()
+    filt.policy = _rules_policy(addon, [{"action": "bypass", "pattern": "trusted.example"}])
+
+    picture = _request_flow("https://cdn.example.net/p.jpg")
+    picture.request.headers["referer"] = "https://trusted.example/"
+    filt.request(picture)
+    assert picture.metadata.get("kosher_bypass") is True
+
+    elsewhere = _request_flow("https://cdn.example.net/p.jpg")
+    elsewhere.request.headers["referer"] = "https://other.example/"
+    filt.request(elsewhere)
+    assert not elsewhere.metadata.get("kosher_bypass")
+
+
+def _headers_hook(filt, flow):
+    """responseheaders, whichever shape it has: it is synchronous on one
+    branch and a coroutine on another (the source-sampled video), and a
+    test of the bypass must pass on both."""
+    result = filt.responseheaders(flow)
+    if asyncio.iscoroutine(result):
+        asyncio.run(result)
+
+
+def test_a_bypassed_response_streams_through_unread(addon):
+    for kind in ("text/html", "image/jpeg", "video/mp4"):
+        flow = _hflow(kind)
+        flow.metadata["kosher_bypass"] = True
+        _headers_hook(_filt(addon, media="immodest"), flow)
+        assert flow.response.stream is True, kind
+
+
+def test_an_allowed_pages_pictures_are_still_held_to_be_judged(addon):
+    # Reported as "once a page is allowed its pictures are not filtered"
+    # (#273). Allowing is the page scorer and the categories stepping
+    # aside; a picture on an allowed page is judged like any other.
+    filt = _filt(addon, media="immodest")
+    filt.policy.rules_for = lambda uid: addon.parse_rules(
+        [{"action": "allow", "pattern": "trusted.example"}])
+    picture = _hflow("image/jpeg", url="https://trusted.example/p.jpg")
+    picture.request.headers["referer"] = "https://trusted.example/"
+    _headers_hook(filt, picture)
+    assert not getattr(picture.response, "stream", False), "held, so it can be judged"

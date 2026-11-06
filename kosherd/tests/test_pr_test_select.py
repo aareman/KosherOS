@@ -15,6 +15,11 @@ def test_docs_alone_run_nothing():
     assert all("nothing to run" in r for r in sel.reasons)
 
 
+def test_the_issue_closer_runs_on_github_and_nothing_here():
+    sel = select([".github/workflows/close-linked-issues.yml", "scripts/close-linked-issues.py"])
+    assert sel.empty
+
+
 def test_a_desktop_app_runs_the_signed_in_session_only():
     sel = select(["look-app/src/kosherlook/app.py"])
     assert sel.desktop == {"session"} and not sel.suites and not sel.boot

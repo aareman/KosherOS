@@ -72,6 +72,7 @@ RULES = [
     (r"\.md$", NOTHING, "documentation"),
     (r"^[^/]+/tests/|^tests/", NOTHING, "unit tests, which CI runs on their own"),
     (r"^\.github/workflows/(?!vm-test\.yml$)", NOTHING, "another workflow"),
+    (r"^scripts/close-linked-issues\.py$", NOTHING, "a GitHub job's script"),
     (r"^(legacy/|portal/)", NOTHING, "not in the image"),
     # Power-on to setup: a fresh install.
     (r"^os-image/files/usr/lib/bootupd/", BOOT, "the bootloader"),

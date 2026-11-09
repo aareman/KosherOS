@@ -97,6 +97,15 @@ class Unreadable(Exception):
 
 def sample_frames(data: bytes, max_frames: int = SAMPLE_FRAMES,
                   short_side: int = FRAME_SHORT_SIDE) -> list[bytes]:
+    """A spread of keyframes from a clip held in memory, as JPEGs (see
+    _sample)."""
+    import av
+
+    return _sample(lambda: av.open(io.BytesIO(data)), max_frames, short_side)
+
+
+def _sample(open_container, max_frames: int = SAMPLE_FRAMES,
+                  short_side: int = FRAME_SHORT_SIDE) -> list[bytes]:
     """Up to `max_frames` keyframes from the clip, spread through it, as
     small JPEGs.
 
@@ -109,7 +118,6 @@ def sample_frames(data: bytes, max_frames: int = SAMPLE_FRAMES,
     which decode — a codec this build lacks — which is a different thing
     and stays refused.
     """
-    import av
     from PIL import Image
 
     frames: list[bytes] = []
@@ -132,7 +140,7 @@ def sample_frames(data: bytes, max_frames: int = SAMPLE_FRAMES,
         return True
 
     try:
-        container = av.open(io.BytesIO(data))
+        container = open_container()
     except Exception as e:  # noqa: BLE001 - PyAV raises several kinds
         raise Unreadable(f"could not open the clip: {e}") from None
     with container:
@@ -170,7 +178,7 @@ def sample_frames(data: bytes, max_frames: int = SAMPLE_FRAMES,
             # at the modesty levels (#271).
             candidates = []
             try:
-                with av.open(io.BytesIO(data)) as fresh:
+                with open_container() as fresh:
                     walked = [s for s in fresh.streams if s.type == "video"][0]
                     walked.thread_type = "AUTO"
                     walked.codec_context.skip_frame = "NONKEY"
@@ -203,6 +211,110 @@ def _has_video_packets(container, stream) -> bool:
     except Exception:  # noqa: BLE001 - failing to read is having data
         return True
     return False
+
+
+# A clip too big to hold, or asked for in pieces, is sampled THROUGH ITS
+# SOURCE: a reader the decoder seeks in, which fetches the ranges the
+# demuxer asks for — the index, a few keyframes — and no more. Once per
+# file, within a budget; the verdict is cached by the file's address and
+# size, and the player's own requests then stream (#271: a 45-minute
+# shiur as one MP4, reddit's and X's files fetched by byte range).
+REMOTE_BLOCK = 1 << 20
+REMOTE_MAX_BYTES = 24 * 1024 * 1024
+REMOTE_MAX_FETCHES = 24
+# Longer than a held clip's: the fetches are the wait, and a person who
+# opened a long video is already waiting for it to start.
+REMOTE_TIMEOUT = 30.0
+
+
+class RangeBudget(Exception):
+    """The reader was asked for more of the file than sampling may fetch."""
+
+
+class RangeReader(io.RawIOBase):
+    """A file-like over byte ranges of a clip, for the decoder.
+
+    `fetch(start, end)` returns the bytes from start to end inclusive.
+    Whole blocks are fetched and kept in `blocks`, which a second reader
+    of the same clip may share, so the walk after the seeks does not
+    fetch the start again."""
+
+    def __init__(self, fetch, size: int, blocks: dict | None = None,
+                 max_bytes: int = REMOTE_MAX_BYTES, max_fetches: int = REMOTE_MAX_FETCHES):
+        self.fetch = fetch
+        self.size = int(size)
+        self.blocks = blocks if blocks is not None else {}
+        self.max_bytes = max_bytes
+        self.max_fetches = max_fetches
+        self.fetched = 0
+        self.calls = 0
+        self.pos = 0
+
+    def readable(self) -> bool:
+        return True
+
+    def seekable(self) -> bool:
+        return True
+
+    def tell(self) -> int:
+        return self.pos
+
+    def seek(self, offset: int, whence: int = io.SEEK_SET) -> int:
+        if whence == io.SEEK_SET:
+            target = offset
+        elif whence == io.SEEK_CUR:
+            target = self.pos + offset
+        elif whence == io.SEEK_END:
+            target = self.size + offset
+        else:
+            raise ValueError(f"bad whence {whence}")
+        self.pos = max(0, min(self.size, target))
+        return self.pos
+
+    def _block(self, index: int) -> bytes:
+        data = self.blocks.get(index)
+        if data is not None:
+            return data
+        if self.calls >= self.max_fetches or self.fetched >= self.max_bytes:
+            raise RangeBudget(f"{self.calls} fetches, {self.fetched} bytes")
+        start = index * REMOTE_BLOCK
+        end = min(self.size, start + REMOTE_BLOCK) - 1
+        data = self.fetch(start, end)
+        self.calls += 1
+        self.fetched += len(data)
+        self.blocks[index] = data
+        return data
+
+    def read(self, n: int = -1) -> bytes:
+        if n is None or n < 0:
+            n = self.size - self.pos
+        end = min(self.size, self.pos + n)
+        out = bytearray()
+        while self.pos < end:
+            index = self.pos // REMOTE_BLOCK
+            data = self._block(index)
+            offset = self.pos - index * REMOTE_BLOCK
+            take = data[offset:offset + (end - self.pos)]
+            if not take:
+                break
+            out += take
+            self.pos += len(take)
+        return bytes(out)
+
+    def readinto(self, buffer) -> int:
+        chunk = self.read(len(buffer))
+        buffer[:len(chunk)] = chunk
+        return len(chunk)
+
+
+def sample_remote(fetch, size: int, max_frames: int = SAMPLE_FRAMES,
+                  short_side: int = FRAME_SHORT_SIDE) -> list[bytes]:
+    """A spread of keyframes from a clip read through `fetch`, within
+    RangeReader's budget. Raises Unreadable like sample_frames."""
+    import av
+
+    blocks: dict = {}
+    return _sample(lambda: av.open(RangeReader(fetch, size, blocks)), max_frames, short_side)
 
 
 class VideoChecker:
@@ -248,6 +360,70 @@ class VideoChecker:
         log.info("judged a clip from %d frame(s) in %.0f ms: %s", len(frames),
                  (time.monotonic() - started) * 1000, verdict.level)
         return verdict
+
+    def judge_remote(self, fetch, size: int, clip_key: str) -> ImageVerdict | None:
+        """The whole judgement of a clip read through `fetch`, on the
+        calling thread: sample, judge each frame, combine, cache."""
+        started = time.monotonic()
+        try:
+            frames = sample_remote(fetch, size)
+        except Exception:  # noqa: BLE001 - unreadable, or over the budget
+            log.debug("could not sample the clip through its source", exc_info=True)
+            return None
+        if not frames:
+            verdict = ImageVerdict(CLEAN, (), False)
+            self.cache.put_video(clip_key, verdict)
+            return verdict
+        verdict = combine(self.images.judge_bytes(frame) for frame in frames)
+        if verdict is None:
+            return None
+        self.cache.put_video(clip_key, verdict)
+        log.info("judged a clip through its source from %d frame(s) in %.0f ms: %s",
+                 len(frames), (time.monotonic() - started) * 1000, verdict.level)
+        return verdict
+
+    def verdict_remote(self, fetch, size: int, clip_key: str) -> ImageVerdict | None:
+        """Judge a clip through its source, waiting up to REMOTE_TIMEOUT."""
+        cached = self.cached(clip_key)
+        if cached is not None:
+            return cached
+        if not self.available:
+            return None
+        future = self.images._executor().submit(self.judge_remote, fetch, size, clip_key)
+        try:
+            return future.result(timeout=REMOTE_TIMEOUT)
+        except Exception:  # noqa: BLE001 - includes the timeout
+            return None
+
+    def _judge_remote_if_needed(self, fetch, size: int, clip_key: str):
+        cached = self.cached(clip_key)
+        return cached if cached is not None else self.judge_remote(fetch, size, clip_key)
+
+    async def verdict_remote_async(self, fetch, size: int, clip_key: str) -> ImageVerdict | None:
+        """Share bounded source sampling, including off-loop preparation."""
+        import asyncio
+
+        started = time.monotonic()
+        try:
+            cached, ready = await asyncio.wait_for(
+                self._prepare_async(clip_key), REMOTE_TIMEOUT)
+            if cached is not None:
+                return cached
+            if not ready:
+                return None
+            remaining = REMOTE_TIMEOUT - (time.monotonic() - started)
+            if remaining <= 0:
+                return None
+            return await asyncio.wait_for(
+                self.images.run_async(self._judge_remote_if_needed, fetch, size, clip_key,
+                                      share_key=("video-remote", clip_key)), remaining)
+        except asyncio.TimeoutError:
+            log.info("a clip took longer than %.0f s to judge through its source; refused",
+                     REMOTE_TIMEOUT)
+            return None
+        except Exception:  # noqa: BLE001
+            log.debug("clip judgement through its source failed", exc_info=True)
+            return None
 
     def verdict(self, data: bytes, clip_key: str) -> ImageVerdict | None:
         """Judge a clip, waiting up to the deadline."""

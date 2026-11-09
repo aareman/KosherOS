@@ -1584,6 +1584,15 @@ def _stub_videos(available=True, cached=None, verdict=None):
 
     async def precheck_async(key):
         return cached, available
+    sampled = []
+
+    def verdict_remote(fetch, size, key):
+        sampled.append((size, key))
+        return verdict
+
+    async def verdict_remote_async(fetch, size, key):
+        sampled.append((size, key))
+        return verdict
 
     return type("VC", (), {
         "available": available,
@@ -1591,6 +1600,9 @@ def _stub_videos(available=True, cached=None, verdict=None):
         "verdict": staticmethod(lambda data, key: verdict),
         "verdict_async": staticmethod(verdict_async),
         "precheck_async": staticmethod(precheck_async),
+        "verdict_remote": staticmethod(verdict_remote),
+        "verdict_remote_async": staticmethod(verdict_remote_async),
+        "sampled": sampled,
     })()
 
 
@@ -1776,14 +1788,83 @@ def test_a_clip_already_judged_clean_streams_without_being_held(addon):
     assert bad.response.status_code == 403
 
 
-def test_a_range_from_the_middle_of_an_unjudged_clip_is_held_and_tried(addon):
+def test_a_range_from_the_middle_of_an_unjudged_clip_is_judged_through_its_source(addon):
     # Firefox asks for a clip in pieces and cancels its first request as
-    # soon as it has the header; refusing every later piece outright meant
-    # "breaking and stuck". The piece is held and decoded if it can be.
+    # soon as it has the header; a slice of a plain file cannot be read on
+    # its own, so the clip is judged once through its source (a few range
+    # fetches at spread points), and then the piece streams (#271).
+    from kosherd.vision import CLEAN, IMMODEST, ImageVerdict
+
     flow = _hflow("video/mp4", status=206, content_range="bytes 500000-999999/2000000")
-    _headers_hook(_filt(addon, media="immodest", videos=_stub_videos()), flow)
-    assert not getattr(flow.response, "stream", False)
-    assert flow.response.status_code != 403
+    videos = _stub_videos(verdict=ImageVerdict(CLEAN, (), True))
+    asyncio.run(_filt(addon, media="immodest", videos=videos).responseheaders(flow))
+    assert flow.response.stream is True
+    assert flow.response.headers["x-kosheros"] == "video-checked=clean"
+    assert videos.sampled == [(2000000, addon.videocheck_mod.key("https://example.com/a", 2000000))]
+
+    flow = _hflow("video/mp4", status=206, content_range="bytes 500000-999999/2000000")
+    videos = _stub_videos(verdict=ImageVerdict(IMMODEST, (), True))
+    asyncio.run(_filt(addon, media="immodest", videos=videos).responseheaders(flow))
+    assert flow.response.status_code == 403, "refused before a byte of the piece"
+    assert flow.response.stream(b"chunk") == b""
+
+
+def test_a_clip_too_big_to_hold_is_judged_through_its_source_when_it_serves_ranges(addon):
+    from kosherd.vision import CLEAN, ImageVerdict
+
+    flow = _hflow("video/mp4", length=addon.videocheck_mod.VIDEO_MAX_BYTES + 1)
+    flow.response.headers["accept-ranges"] = "bytes"
+    videos = _stub_videos(verdict=ImageVerdict(CLEAN, (), False))
+    asyncio.run(_filt(addon, media="immodest", videos=videos).responseheaders(flow))
+    assert flow.response.stream is True
+    assert videos.sampled and videos.sampled[0][0] == addon.videocheck_mod.VIDEO_MAX_BYTES + 1
+
+
+def test_a_clip_that_cannot_be_looked_at_through_its_source_is_refused_at_the_strict_levels(addon):
+    flow = _hflow("video/mp4", status=206, content_range="bytes 500000-999999/2000000")
+    asyncio.run(_filt(addon, media="immodest", videos=_stub_videos(verdict=None)).responseheaders(flow))
+    assert flow.response.status_code == 403
+    mild = _hflow("video/mp4", status=206, content_range="bytes 500000-999999/2000000")
+    asyncio.run(_filt(addon, media="nsfw", videos=_stub_videos(verdict=None)).responseheaders(mild))
+    assert mild.response.stream is True
+    assert mild.response.headers["x-kosheros"] == "video-unchecked"
+
+
+def test_the_range_fetcher_carries_identity_and_the_range_and_insists_on_a_piece(addon, monkeypatch):
+    import urllib.request
+
+    seen = []
+
+    class _Answer:
+        def __init__(self, status):
+            self.status = status
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def read(self):
+            return b"piece"
+
+    def fake_urlopen(request, timeout=None):
+        seen.append(dict(request.header_items()))
+        return _Answer(206 if "whole" not in request.full_url else 200)
+
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+    flow = _hflow("video/mp4", status=206, content_range="bytes 0-9/100")
+    flow.request.headers = {"User-Agent": "Firefox", "Cookie": "secret=1", "Referer": "https://x.com/"}
+    fetch = _filt(addon)._range_fetcher(flow)
+    assert fetch(10, 19) == b"piece"
+    headers = {k.lower(): v for k, v in seen[-1].items()}
+    assert headers["range"] == "bytes=10-19"
+    assert headers["user-agent"] == "Firefox" and headers["referer"] == "https://x.com/"
+    assert "cookie" not in headers, "the proxy's own fetch carries no cookie"
+    whole = _hflow("video/mp4", status=206, content_range="bytes 0-9/100", url="https://example.com/whole")
+    whole.request.headers = {}
+    with pytest.raises(OSError):
+        _filt(addon)._range_fetcher(whole)(0, 9)
 
 
 def test_a_clip_that_says_it_is_a_download_is_still_a_clip(addon):

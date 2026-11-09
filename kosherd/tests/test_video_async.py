@@ -17,8 +17,9 @@ async def wait_started(event):
     await asyncio.wait_for(poll(), 2)
 
 
-@pytest.mark.parametrize("method", ["precheck", "verdict"])
-def test_cache_wait_has_a_deadline_and_leaves_the_loop_free(tmp_path, method):
+@pytest.mark.parametrize("method", ["precheck", "verdict", "remote"])
+def test_cache_wait_has_a_deadline_and_leaves_the_loop_free(tmp_path, monkeypatch, method):
+    monkeypatch.setattr(videocheck, "REMOTE_TIMEOUT", 0.05)
     cache = vision.VerdictCache(tmp_path / "cache.sqlite")
     images = vision.ImageFilter(cache=cache, workers=1, timeout=0.05)
     checker = videocheck.VideoChecker(images, timeout=0.05)
@@ -35,10 +36,14 @@ def test_cache_wait_has_a_deadline_and_leaves_the_loop_free(tmp_path, method):
     checker.cached = blocked_cache
     checker._available = True
     checker.judge_bytes = lambda *args: judged.append(True)
+    checker.judge_remote = lambda *args: judged.append(True)
 
     async def run():
-        work = checker.precheck_async("clip") if method == "precheck" else \
-            checker.verdict_async(b"clip", "clip")
+        work = {
+            "precheck": lambda: checker.precheck_async("clip"),
+            "verdict": lambda: checker.verdict_async(b"clip", "clip"),
+            "remote": lambda: checker.verdict_remote_async(lambda *args: b"", 100, "clip"),
+        }[method]()
         task = asyncio.create_task(work)
         try:
             await wait_started(started)
@@ -126,7 +131,8 @@ def test_response_headers_do_not_block_on_a_busy_cache(addon, tmp_path, level, r
     asyncio.run(run())
 
 
-def test_concurrent_copies_of_a_video_share_inference(tmp_path, monkeypatch):
+@pytest.mark.parametrize("remote", [False, True])
+def test_concurrent_copies_of_a_video_share_inference(tmp_path, monkeypatch, remote):
     images = vision.ImageFilter(cache=vision.VerdictCache(tmp_path / "cache.sqlite"),
                                 workers=2, timeout=2)
     checker = videocheck.VideoChecker(images, timeout=2)
@@ -141,9 +147,12 @@ def test_concurrent_copies_of_a_video_share_inference(tmp_path, monkeypatch):
         return []  # header-only clip: its verdict still gets cached
 
     monkeypatch.setattr(videocheck, "sample_frames", sample)
+    monkeypatch.setattr(videocheck, "sample_remote", lambda fetch, size: sample(size))
 
     async def run():
-        tasks = [asyncio.create_task(checker.verdict_async(b"clip", "clip")) for _ in range(2)]
+        tasks = [asyncio.create_task(
+            checker.verdict_remote_async(lambda *args: b"", 100, "clip") if remote else
+            checker.verdict_async(b"clip", "clip")) for _ in range(2)]
         try:
             await wait_started(started)
             await asyncio.sleep(0.02)
@@ -175,6 +184,7 @@ def test_distinct_ranges_of_one_video_are_judged_and_cached_separately(addon, tm
         return [] if data == b"init" else [b"explicit frame"]
 
     monkeypatch.setattr(videocheck, "sample_frames", sample)
+    monkeypatch.setattr(videocheck, "sample_remote", lambda fetch, size: sample(b"media"))
     monkeypatch.setattr(images, "judge_bytes", lambda data: vision.ImageVerdict(vision.NSFW))
     monkeypatch.setattr(addon.activity_mod, "record", lambda *args, **kwargs: None)
 

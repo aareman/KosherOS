@@ -257,7 +257,7 @@ verified separately by the ClientHello checks above.
 
 ## Reproduction and local raw files
 
-See [the harness instructions](../../../scripts/perf-media/README.md). Full
+See [the harness instructions](https://github.com/aareman/KosherOS/blob/master/scripts/perf-media/README.md). Full
 raw captures are under the main checkout's `build/public-media-before`,
 `build/public-media-subtle`, `build/public-media-colors-subtle`,
 `build/image-status-browser-subtle`, `build/image-perf-browser-verified`,

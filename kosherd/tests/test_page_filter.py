@@ -132,7 +132,7 @@ def test_the_script_is_injected_into_a_page_that_is_let_through(addon):
     filt._filter_page(flow, 1001)
     text = flow.response.text
     tag = re.search(r"<script [^>]*></script></head>", text).group(0)
-    assert 'src="/__kosheros__/filter.js" data-kosheros-language="substitute" data-kosheros-judge="1" ' in tag
+    assert re.search(r'src="/__kosheros__/filter.js\?v=[a-f0-9]+" data-kosheros-language="substitute" data-kosheros-judge="1" ', tag)
     assert ' defer>' in tag
     assert flow.response.headers["x-kosheros-page"] == "filter-script"
 
@@ -199,7 +199,7 @@ def test_the_tag_goes_before_the_real_head_not_one_inside_a_script(addon):
     filt._filter_page(flow, 1001)
     text = flow.response.text
     assert flow.response.status_code == 200
-    tag = re.search(r"<script src=\"/__kosheros__/filter.js\"[^>]*></script>", text).group(0)
+    tag = re.search(r'<script src="/__kosheros__/filter.js\?v=[a-f0-9]+"[^>]*></script>', text).group(0)
     # Right before the page's own </head>, after its first script...
     assert text.index(tag) + len(tag) == text.index("</head>")
     # ...and the app's template script comes through byte for byte.

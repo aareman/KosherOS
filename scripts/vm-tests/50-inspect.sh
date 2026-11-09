@@ -61,15 +61,35 @@ code=$(http_code_as wlkid https://example.com/)
 assert_that "an allowed URL loads with TLS trusted (got $code)" \
     test "$code" = "200"
 
+# Compare the TLS signer with this guest's CA, not branding in the body:
+# an outer inspection proxy may legitimately add its own KosherOS script.
+# First prove that the probe recognizes this guest's filtered connection.
+guest_ca=/etc/pki/ca-trust/source/anchors/kosheros-inspect-ca.crt
+probe_dir=$(mktemp -d)
+chmod 0755 "$probe_dir"
+for who in wlkid dnskid; do
+    if timeout 20 runuser -u "$who" -- openssl s_client \
+        -connect example.com:443 -servername example.com -showcerts \
+        </dev/null >"$probe_dir/$who.chain" 2>"$probe_dir/$who.log" \
+        && openssl x509 -in "$probe_dir/$who.chain" \
+            -out "$probe_dir/$who.pem" 2>/dev/null; then
+        ok "$who receives a readable TLS certificate"
+    else
+        bad "$who TLS signer probe failed"
+    fi
+done
+check "the filtered connection is signed by this guest's CA" 0 \
+    openssl verify -no-CApath -no-CAstore -CAfile "$guest_ca" "$probe_dir/wlkid.pem"
 code=$(http_code_as dnskid https://example.com/blocked/page /tmp/other.html)
-# "000" would mean the request never completed, which proves nothing — the
-# uninspected user must actually reach the real server.
 if [ "$code" != "000" ] && [ "$code" != "403" ] \
-   && ! grep -qi "KosherOS" /tmp/other.html 2>/dev/null; then
-    ok "users not in inspect mode reach the real server (HTTP $code)"
+   && openssl x509 -in "$probe_dir/dnskid.pem" -noout >/dev/null 2>&1 \
+   && ! openssl verify -no-CApath -no-CAstore -CAfile "$guest_ca" \
+       "$probe_dir/dnskid.pem" >/dev/null 2>&1; then
+    ok "uninspected user reaches upstream without this guest's TLS interception (HTTP $code)"
 else
-    bad "uninspected user got '$code' (expected a real response)"
+    bad "uninspected user failed the upstream/TLS isolation check (HTTP $code)"
 fi
+rm -rf "$probe_dir"
 
 section "Pictures allowed on a folder"
 # A site on a network namespace (TEST-NET-1) serving a page and a picture

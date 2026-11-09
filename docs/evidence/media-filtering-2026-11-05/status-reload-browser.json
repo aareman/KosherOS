@@ -1,0 +1,56 @@
+{
+  "date": "2026-11-05",
+  "scope": "Functional browser regression on an isolated Brave profile via CDP9223. Synthetic .test requests are intercepted by Playwright; backend request/304 behavior is covered separately by proxy unit tests. This is not a performance measurement.",
+  "source": {
+    "base_commit": "5468b17e64a67dcc2cc07465a9e9a7831fc8ed4d",
+    "uncommitted_status_race_fix": true,
+    "sha256": {
+      "mitm/kosher_filter.py": "e788c509fbd379712d29994d23ad3ff7a15f2e460c265cbbfcf66e293c579a2e",
+      "mitm/kosher_page.js": "7a1787cd2bf714ae14fbd69e564ed06fbea9c59020f105fd78bf9a9738ef7d4c",
+      "scripts/perf-media/status_ui.py": "3b681c0d9e3fdb2f95abd32410f03cb0ebeea6e271303df31b398188fbdaae0f",
+      "kosherd/tests/test_image_status.py": "09fb3e78b67eb4e4d236f87f79c67ae17268654635f74ff36576a146545a5029"
+    }
+  },
+  "assertions": "passed",
+  "page_errors": [],
+  "capture_errors": [
+    {
+      "path": "filtered.png",
+      "error": "TimeoutError: "
+    },
+    {
+      "path": "approved.png",
+      "error": "TimeoutError: "
+    },
+    {
+      "path": "same-url-pending.png",
+      "error": "TimeoutError: "
+    },
+    {
+      "path": "unavailable.png",
+      "error": "TimeoutError: "
+    }
+  ],
+  "same_url_regression": {
+    "trigger": "Change an IMG fetch mode with crossOrigin=anonymous and assign its existing src. This causes a real same-URL network refetch; an ordinary same-src setter can reuse the active decoded-image cache.",
+    "assertions": [
+      "An old checked status response is held while the new same-URL image request starts.",
+      "The old response does not settle the new generation; another status poll occurs.",
+      "The image is still incomplete and its waiting indicator is visible before release.",
+      "The new unavailable result is shown after the response completes.",
+      "Image URL and layout dimensions remain unchanged."
+    ]
+  },
+  "other_browser_assertions": [
+    "Subtle pending indicator; approved badges hidden; filtered, unavailable and inline-background labels.",
+    "Click-through; removal cleanup; bounded long-URL batches; late-visible images checked."
+  ],
+  "negative_control": {
+    "change": "Remove only the generation comparison from the status-response guard, in the test process without editing product files.",
+    "result": "Expected failure: the stale checked reply settles the restarted image and suppresses its next status poll.",
+    "observed_badge": "checked",
+    "page_errors": []
+  },
+  "capture_note": "Four direct CDP screenshots timed out as recorded in capture_errors. All browser behavior assertions passed; no same-url-pending screenshot was produced. Existing checking and background captures succeeded.",
+  "proxy_and_node_validation": "57 passed, no skips: test_image_status.py and test_page_filter.py, including Node syntax/behavior checks. Coverage includes request-stage invalidation, same-level unexpired 304 restoration, stale/in-flight policy levels, and unchanged video304 refusal."
+}

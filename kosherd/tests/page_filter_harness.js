@@ -25,7 +25,7 @@ class FakeXHR {
   }
 }
 
-const nodes = texts.map((t) => ({ nodeType: 3, data: t, parentNode: { nodeType: 1, nodeName: "P", isContentEditable: false, parentNode: null } }));
+const nodes = texts.map((t) => ({ nodeType: 3, data: t, parentNode: { nodeType: 1, nodeName: "P", isContentEditable: false, parentNode: null, hasAttribute: () => false } }));
 
 global.window = {};
 global.location = { href: "https://example.test/page" };
@@ -39,7 +39,7 @@ global.document = {
                           : k === "data-kosheros-token" ? TOKEN : null),
     removeAttribute() {},
   },
-  body: { nodeType: 1, nodeName: "BODY", isContentEditable: false },
+  body: { nodeType: 1, nodeName: "BODY", isContentEditable: false, hasAttribute: () => false },
   documentElement: {},
   createTreeWalker: () => { let i = -1; return { nextNode: () => (++i < 0 ? null : null) }; },
   open() {}, write() {}, close() {},

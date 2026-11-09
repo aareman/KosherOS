@@ -40,6 +40,13 @@ def test_the_key_forgets_fragments_but_not_size_or_judgement_version(monkeypatch
     assert videocheck.key("https://x/v.mp4", 1000) != b, "a fix must reach cached clips"
 
 
+def test_byte_ranges_have_separate_verdicts_even_with_the_same_start():
+    url = "https://x/v.mp4"
+    keys = {videocheck.key(url, 1000, content_range=byte_range) for byte_range in
+            (None, "bytes 0-99/1000", "bytes 0-499/1000", "bytes 100-999/1000")}
+    assert len(keys) == 4, "a clean header cannot approve unsampled video bytes"
+
+
 class _Images:
     """An ImageFilter double: judges whatever it is handed by a script."""
 
@@ -50,6 +57,18 @@ class _Images:
         self.cache = cache
         self.judged = 0
         self._pool = None
+        self._workers = 1
+        self._async_slots = None
+        self._prepare_slots = None
+        self._prepare_pool = None
+        self._inflight = {}
+        self._closed = False
+        self.timeout = 1.0
+
+    run_async = vision.ImageFilter.run_async
+    prepare_async = vision.ImageFilter.prepare_async
+    close = vision.ImageFilter.close
+    _run_async = vision.ImageFilter._run_async
 
     def judge_bytes(self, frame, sha=None):
         self.judged += 1

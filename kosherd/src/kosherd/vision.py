@@ -1172,11 +1172,18 @@ class ImageFilter:
         import asyncio
         from concurrent.futures import ThreadPoolExecutor
 
+        async def wait_result(result):
+            # asyncio.wait does not cancel the shared worker when its waiter
+            # leaves. Unlike shield on Python 3.14, it also does not report
+            # an abandoned failure separately from our completion observer.
+            await asyncio.wait((result,))
+            return result.result()
+
         if self._closed:
             raise RuntimeError("image filter is closed")
         loop = asyncio.get_running_loop()
         if share_key is not None and share_key in self._inflight:
-            return await asyncio.shield(self._inflight[share_key])
+            return await wait_result(self._inflight[share_key])
         if preparation:
             if self._prepare_slots is None:
                 self._prepare_slots = asyncio.Semaphore(1)
@@ -1195,7 +1202,7 @@ class ImageFilter:
         # its result in asyncio, never by parking a detector thread.
         if share_key is not None and share_key in self._inflight:
             slots.release()
-            return await asyncio.shield(self._inflight[share_key])
+            return await wait_result(self._inflight[share_key])
         try:
             future = executor.submit(fn, *args)
         except BaseException:
@@ -1203,30 +1210,21 @@ class ImageFilter:
             raise
 
         result = asyncio.wrap_future(future, loop=loop)
-        # A timed-out request may be the last observer of a running job.
-        # Retrieve its eventual exception even then; awaiting the future
-        # still raises it normally for callers that remain interested.
-        def observe(done):
-            if not done.cancelled():
-                done.exception()
-
-        result.add_done_callback(observe)
         if share_key is not None:
             self._inflight[share_key] = result
 
-        def release():
+        def finished(done):
+            # Retire the job before waking its waiters, so an immediate
+            # retry cannot rejoin a completed failure. This callback runs
+            # only after the actual worker finishes, even if callers cancel.
             slots.release()
             if share_key is not None:
                 self._inflight.pop(share_key, None)
+            if not done.cancelled():
+                done.exception()  # observe failures after every caller left
 
-        def finished(_):
-            try:
-                loop.call_soon_threadsafe(release)
-            except RuntimeError:
-                pass  # the proxy's event loop has already shut down
-
-        future.add_done_callback(finished)
-        return await asyncio.shield(result)
+        result.add_done_callback(finished)
+        return await wait_result(result)
 
     def close(self, *, wait=False):
         """Stop accepting work; let already-running checks finish safely.

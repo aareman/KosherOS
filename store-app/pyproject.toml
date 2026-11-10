@@ -8,7 +8,7 @@ version = "0.1.0"
 description = "KosherOS Store — install approved applications"
 readme = "README.md"
 requires-python = ">=3.11"
-license = "GPL-3.0-or-later"
+license = "AGPL-3.0-or-later"
 dependencies = ["kosherd"]
 
 [project.scripts]

@@ -8,7 +8,7 @@ version = "0.1.0"
 description = "Kosher Linux privileged management daemon, policy engine, and CLI"
 readme = "README.md"
 requires-python = ">=3.11"
-license = "GPL-3.0-or-later"
+license = "AGPL-3.0-or-later"
 dependencies = [
     "jsonschema>=4",
     "cryptography>=42",  # verify signed portal policies

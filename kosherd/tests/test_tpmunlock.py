@@ -236,3 +236,25 @@ def test_an_unexpected_weak_policy_is_removed_before_returning(platform, monkeyp
         tpm.enroll('test password')
     assert set(platform['metadata']['keyslots']) == {'0', '1'}
     assert not platform['metadata']['tokens']
+
+
+def test_lost_receipt_can_resume_without_claiming_someone_elses_token(platform, monkeypatch):
+    tpm.enroll('test password')
+    (tpm.DIRECTORY / 'enrollment.json').unlink()
+    original = disk._run
+    def no_op_enrollment(argv, **kwargs):
+        if argv[0] == 'systemd-cryptenroll':
+            return subprocess.CompletedProcess(argv, 0, '', '')
+        return original(argv, **kwargs)
+    monkeypatch.setattr(disk, '_run', no_op_enrollment)
+    tpm.enroll('test password')
+    assert tpm.status()['enrolled']
+    assert tpm._read('enrollment.json')['owned'] is False
+    assert set(platform['metadata']['keyslots']) == {'0', '1', '2'}
+    # A later policy change may add our own slot, but cannot erase the
+    # adopted token: it could have been enrolled by somebody else.
+    monkeypatch.setattr(disk, '_run', original)
+    platform['bad_tokens'] = {'0'}
+    tpm.enroll('test password')
+    assert set(platform['metadata']['keyslots']) == {'0', '1', '2', '3'}
+    assert tpm._read('enrollment.json')['owned'] is True

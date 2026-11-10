@@ -489,7 +489,7 @@ recovery unlock available and retries on a later boot.
 Enrollment is deliberately tied to one measured boot, rather than
 silently trusting updates. OS/firmware changes can require manual unlock
 and explicit administrator/guardian re-enrollment. A successful replacement
-removes only the old slot recorded by KosherOS whose salted metadata still
+removes only the old slot created and recorded by KosherOS whose salted metadata still
 matches; other enrollments and recovery/password slots are retained.
 This protects offline data; it does not defend against an already authorized
 root process or an attacker with a saved recovery credential.

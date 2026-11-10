@@ -179,7 +179,8 @@ def enroll(password: str) -> None:
         before = disk._json(['cryptsetup', 'luksDump', '--dump-json-metadata', device])
         previous = _read('enrollment.json')
         old_token = before.get('tokens', {}).get(str(previous.get('token')), {})
-        owned = previous.get('uuid') == info['uuid'] and old_token.get('type') == 'systemd-tpm2' \
+        owned = previous.get('owned', True) and previous.get('uuid') == info['uuid'] \
+            and old_token.get('type') == 'systemd-tpm2' \
             and old_token.get('tpm2-pcrs') == list(PCRS) and old_token.get('tpm2-pcr-bank') == 'sha256' \
             and old_token.get('keyslots') == [str(previous.get('slot'))] \
             and previous.get('fingerprint') is not None \
@@ -200,6 +201,28 @@ def enroll(password: str) -> None:
                        f'--unlock-key-file=/proc/self/fd/{fd}', device], pass_fds=(fd,))
         after = disk._json(['cryptsetup', 'luksDump', '--dump-json-metadata', device])
         added = set(after.get('tokens', {})) - set(before.get('tokens', {}))
+        if not added:
+            # cryptenroll is idempotent: a crash after the LUKS write but before
+            # our receipt leaves a valid token and a successful no-op on retry.
+            # Prove it works, but never claim ownership of a pre-existing slot.
+            for existing_id, existing in after.get('tokens', {}).items():
+                existing_slots = existing.get('keyslots', [])
+                if existing.get('type') != 'systemd-tpm2' \
+                        or existing.get('tpm2-pcrs') != list(PCRS) \
+                        or existing.get('tpm2-pcr-bank') != 'sha256' or len(existing_slots) != 1:
+                    continue
+                fingerprint = disk._slot_fingerprint(after, existing_slots[0])
+                if fingerprint is None:
+                    continue
+                try:
+                    disk._run(['cryptsetup', 'open', '--test-passphrase', '--token-only',
+                               '--token-id', existing_id, device])
+                except disk.DiskError:
+                    continue
+                _write('enrollment.json', {'uuid': info['uuid'], 'token': existing_id,
+                                          'slot': existing_slots[0], 'fingerprint': fingerprint,
+                                          'owned': False})
+                return
         try:
             if len(added) != 1:
                 raise disk.DiskError('The TPM enrollment could not be verified. Your disk password still works.')
@@ -224,7 +247,7 @@ def enroll(password: str) -> None:
                                    f'/proc/self/fd/{fd}', device, new_slot], pass_fds=(fd,))
             raise
         _write('enrollment.json', {'uuid': info['uuid'], 'token': token_id, 'slot': slots[0],
-                                  'fingerprint': disk._slot_fingerprint(after, slots[0])})
+                                  'fingerprint': disk._slot_fingerprint(after, slots[0]), 'owned': True})
         if owned:
             # Only a slot with our salted fingerprint and no other token owner.
             old_slot = str(previous['slot'])

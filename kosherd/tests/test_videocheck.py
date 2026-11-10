@@ -184,11 +184,28 @@ def test_a_video_verdict_expires_like_a_picture_verdict(tmp_path):
     assert cache.get_video("k") is None
 
 
-def test_the_sampler_is_only_exercised_when_pyav_is_present():
+def test_invalid_media_is_unreadable_with_the_real_decoder():
     pytest.importorskip("av")
-    # A container with no video stream yields no frames rather than raising
-    # through to the caller.
-    assert videocheck.sample_frames(b"\x00" * 64) == [] or True
+    with pytest.raises(videocheck.Unreadable):
+        videocheck.sample_frames(b"\x00" * 64)
+
+
+def test_a_valid_audio_only_container_has_no_video_frames():
+    av = pytest.importorskip("av")
+    import io
+
+    output = io.BytesIO()
+    with av.open(output, mode="w", format="wav") as container:
+        stream = container.add_stream("pcm_s16le", rate=8000)
+        frame = av.AudioFrame(format="s16", layout="mono", samples=80)
+        frame.sample_rate = 8000
+        for plane in frame.planes:
+            plane.update(b"\x00" * plane.buffer_size)
+        for packet in stream.encode(frame):
+            container.mux(packet)
+        for packet in stream.encode(None):
+            container.mux(packet)
+    assert videocheck.sample_frames(output.getvalue()) == []
 
 
 

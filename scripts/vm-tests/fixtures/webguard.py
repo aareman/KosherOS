@@ -44,8 +44,17 @@ class Origin(BaseHTTPRequestHandler):
     def answer(self):
         self.rfile.read(int(self.headers.get("Content-Length", "0")))
         type(self).seen += 1
+        if self.path == "/range-redirect":
+            self.send_response(302)
+            self.send_header("Location", "http://127.0.0.1:9/private")
+            self.end_headers()
+            return
         body = b"controlled origin answered"
-        self.send_response(200)
+        partial = self.path == "/range"
+        if partial:
+            first, last = map(int, self.headers["Range"].removeprefix("bytes=").split("-"))
+            body = body[first:last + 1]
+        self.send_response(206 if partial else 200)
         self.send_header("Content-Type", "text/plain")
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
@@ -280,6 +289,25 @@ addons = [f]
                 tls_probe(inspected_tls, "approved.example", der, intercepted=True)
                 assert received_sni[-1] == "approved.example", received_sni
                 print("PASS [F6] private/mixed DNS and path-only LAN exception refused; explicit LAN HTTP/HTTPS works")
+                # The range sampler uses real HTTP/TLS too, with the peer
+                # already checked by the proxy. No DNS lookup of this fake
+                # hostname is available to hide a failure to pin its address.
+                from unittest.mock import patch
+                if (repo / "kosherd/src").exists():
+                    sys.path.insert(0, str(repo / "kosherd/src"))
+                from kosherd import webguard
+                with patch.dict(os.environ, {"SSL_CERT_FILE": str(directory / "cert.pem")}):
+                    for scheme, origin in (("http", http_origin), ("https", tls_origin)):
+                        url = f"{scheme}://approved.example:{origin.server_port}"
+                        peer = (UPSTREAM, origin.server_port)
+                        assert webguard.fetch_range(url + "/range", peer, {}, 0, 7, lan=True) == b"controll"
+                        try:
+                            webguard.fetch_range(url + "/range-redirect", peer, {}, 0, 7, lan=True)
+                        except OSError as error:
+                            assert "HTTP 302" in str(error), str(error)
+                        else:
+                            raise AssertionError("the range fetcher followed a redirect")
+                print("PASS [F6] video ranges use the pinned peer, verify TLS hostname, and refuse redirects")
             except BaseException:
                 process.terminate()
                 process.wait(timeout=5)

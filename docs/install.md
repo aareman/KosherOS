@@ -87,7 +87,7 @@ If the computer has more than one eligible disk, open **Installation Destination
 
 After you confirm the destination and start installation, keep the computer plugged in and wait for completion. On restart, remove the USB when prompted or once installation has finished, so the computer boots from its internal disk.
 
-KosherOS uses the whole of the disk it was installed on. The installer itself sets aside 70 GB; the first start after installation extends that to the rest of the disk, so a larger drive is not left half empty.
+KosherOS uses the whole of the disk it was installed on. Automatic partitioning uses the available space; recovery setup can also grow a supported encrypted root when the disk has been expanded.
 
 ## 6. Set up your family and test
 
@@ -97,7 +97,7 @@ that passphrase: the computer asks for it before starting KosherOS. The
 disk still waits for your destination choice and confirmation before
 anything is erased. Its automatic root partition uses the available space.
 
-The first start runs the KosherOS setup wizard. Follow it to create the administrator account and review the optional guardian password and device-security steps. Connect to your network when requested.
+The first start runs the KosherOS setup wizard. Check the time zone it shows (it guesses from your internet connection; search for your city if it is wrong), then create the administrator account and review the optional guardian password and device-security steps. Connect to your network when requested.
 
 For an encrypted disk, setup asks for the installer passphrase and makes
 a separate recovery key. Write all eight groups somewhere outside this

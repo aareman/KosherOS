@@ -301,6 +301,9 @@ def _why_text(why: str) -> str:
         return "the page reads as " + CONTENT_LEVEL_WORDS.get(rest, rest or "inappropriate")
     if kind == "language":
         return "bad language on the page"
+    if kind == "ai":
+        return ("an AI answer with bad language" if rest == "language"
+                else "an AI answer that did not pass the filter")
     if kind == "shop":
         return rest or "a blocked department"
     if kind == "youtube":
@@ -440,6 +443,13 @@ def change_sentence(event: dict, users_by_uid: dict | None = None) -> tuple[str,
     elif method == "BypassUrl":
         what = f"{who} now reaches {host_of(str(arg(1) or ''))} with nothing filtered" + \
             (" (whole site)" if arg(2) else "")
+    elif method == "GrantUrl":
+        where = {"page": "", "folder": " (that folder)", "site": " (whole site)"}.get(
+            str(arg(3) or ""), "")
+        host = host_of(str(arg(1) or ""))
+        what = {"pictures": f"{who} now sees the pictures on {host}{where}",
+                "bypass": f"{who} now reaches {host}{where} with nothing filtered"}.get(
+            str(arg(2) or ""), f"{who} may now reach {host}{where}")
     elif method == "ApproveRequest":
         what = "A request was allowed"
     elif method == "DismissRequest":

@@ -34,7 +34,9 @@
 # Language, keyboard and time zone are answered here; the spokes for them
 # (and for network, source and software, which an offline bootc install
 # never needs) are hidden by the product.img drop-in scripts/brand-iso.py
-# puts on the ISO, so the hub is the disk and the button.
+# puts on the ISO, so the hub is the disk and the button. The time zone
+# here is only a placeholder: the first-boot wizard asks where the
+# computer is, guessing from the internet when it can, and sets it.
 
 [customizations.installer.kickstart]
 contents = '''

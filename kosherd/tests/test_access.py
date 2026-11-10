@@ -162,7 +162,7 @@ def test_the_guardian_gate_covers_every_filter_weakening_method():
     # filter method is added, it belongs in this list AND in GUARDIAN_GATED.
     expected = {"SetFilterMode", "SetWhitelist", "SetWhitelistBundles", "SetUrlRules",
                 "SetBlockedCategories", "ApplyProfile", "SaveProfile",
-                "DeleteProfile", "ApproveRequest", "AllowUrl", "BypassUrl",
+                "DeleteProfile", "ApproveRequest", "AllowUrl", "BypassUrl", "GrantUrl",
                 "EditList", "SetUserAdmin",
                 "SetMediaLevel",
                 "SetLanguageFilter", "SetYouTube", "SetCalm", "SetGuestConfig",

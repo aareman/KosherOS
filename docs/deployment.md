@@ -107,7 +107,7 @@ update, so an installer for a real machine is always built from the
 registry.
 
 The installer creates no users and asks no passwords; the first boot runs
-the setup wizard instead. If the machine has exactly one internal drive
+the setup wizard instead, which also asks for the time zone. If the machine has exactly one internal drive
 that is not the installer stick, the installer names that disk and shows
 it as the destination — but writes no partitioning, because a complete
 kickstart is one Anaconda installs without a click (#134): the person

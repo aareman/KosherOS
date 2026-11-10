@@ -22,7 +22,7 @@ from kosherd import activity as activity_mod  # noqa: E402
 
 from . import labels  # noqa: E402
 from .common import avatar, clear, error_text, pointer_cursors, run_async, tag  # noqa: E402
-from .dialogs import allow_menu  # noqa: E402
+from .dialogs import allow_menu, pictures_menu  # noqa: E402
 
 EVERYONE = -1
 WEEK = 7 * 86400
@@ -232,6 +232,9 @@ class ActivityPage(Gtk.Box):
         elif kind == activity_mod.PICTURES:
             row.set_title(f"Hid pictures on {labels.short_url(url)}")
             row.set_subtitle(f"{name} · Page shown with pictures covered{again}")
+            if event.get("username", "?") != "?" and url:
+                row.add_suffix(pictures_menu(self.win, event["uid"], name, url,
+                                             on_done=self.refresh))
         elif kind == activity_mod.VIDEO:
             row.set_title(f"Blocked video on {labels.short_url(url) or 'a page'}")
             row.set_subtitle(f"{name} · Blocked by video filtering{again}")

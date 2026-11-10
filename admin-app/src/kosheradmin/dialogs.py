@@ -104,12 +104,14 @@ RULE_LEVELS = {
     "block": ("Blocked", "Blocked", "action-unavailable-symbolic", "error"),
     "allow": ("Allowed", "Allowed · pictures, video and words still filtered",
               "emblem-ok-symbolic", "success"),
+    "pictures": ("Pictures", "Pictures shown · video and words still filtered",
+                 "image-x-generic-symbolic", "success"),
     "bypass": ("Bypassed", "Bypassed · nothing filtered", "security-low-symbolic", "warning"),
 }
 
 
 class RulesDialog(Adw.Dialog):
-    """Ordered URL rules: block, allow or bypass.
+    """Ordered URL rules: block, allow, pictures or bypass.
 
     The first matching rule wins, so order is meaningful and rows can be
     moved up and down. Rules only do anything in inspect mode, which is
@@ -1055,48 +1057,75 @@ def confirm_remove_user(win, user: dict) -> None:
     dialog.present(win)
 
 
-def allow_menu(win, uid: int, username: str, url: str, on_done=None) -> Gtk.MenuButton:
-    """The Allow button on a blocked entry: this page, or the whole site."""
-    host = labels.host_of(url)
-    button = Gtk.MenuButton(label="Allow", valign=Gtk.Align.CENTER)
+def _folder_label(url: str) -> str | None:
+    """The folder a page is in, as a person reads it: "/library/article/"
+    for example.com/library/article/123. None at the top of a site."""
+    from kosherd.urlrules import folder_of
+
+    folder = folder_of(url)
+    if not folder:
+        return None
+    return "/" + folder.split("/", 1)[1].removesuffix("*")
+
+
+def _grant_menu(win, uid: int, username: str, url: str, label: str,
+                choices: list[tuple[str, str, str, str]], on_done=None) -> Gtk.MenuButton:
+    """A button on an activity entry whose menu grants a level to this
+    page, its folder or the whole site. choices: (button label, level,
+    scope, what the toast says), in the order shown."""
+    button = Gtk.MenuButton(label=label, valign=Gtk.Align.CENTER)
     button.add_css_class("flat")
     popover = Gtk.Popover()
     box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
 
-    def grant(whole: bool):
+    def grant(level: str, scope: str, said: str):
         popover.popdown()
         win.with_guardian(lambda pw: win.call(
-            lambda: win.client.allow_url(uid, url, whole, pw),
-            done_msg=f"Allowed {'all of ' if whole else ''}{host} for {username}",
-            on_done=on_done))
+            lambda: win.client.grant_url(uid, url, level, scope, pw),
+            done_msg=f"{said} for {username}", on_done=on_done))
 
-    def bypass(whole: bool):
-        popover.popdown()
-        win.with_guardian(lambda pw: win.call(
-            lambda: win.client.bypass_url(uid, url, whole, pw),
-            done_msg=f"Nothing on {'all of ' if whole else ''}{host} is filtered "
-                     f"for {username} now",
-            on_done=on_done))
-
-    page = Gtk.Button(label="Allow this page")
-    page.add_css_class("flat")
-    page.connect("clicked", lambda _b: grant(False))
-    site = Gtk.Button(label=f"Allow {host}")
-    site.add_css_class("flat")
-    site.connect("clicked", lambda _b: grant(True))
-    box.append(page)
-    box.append(site)
-    # The level above allowing: the site opens with nothing on it filtered.
-    whole = Gtk.Button(label=f"Bypass the filter on {host}",
-                       tooltip_text="Pictures, video and words on it are not filtered")
-    whole.add_css_class("flat")
-    whole.connect("clicked", lambda _b: bypass(True))
-    box.append(whole)
+    for text, level, scope, said in choices:
+        item = Gtk.Button(label=text)
+        item.add_css_class("flat")
+        item.get_child().set_xalign(0)
+        item.connect("clicked", lambda _b, lv=level, sc=scope, sd=said: grant(lv, sc, sd))
+        box.append(item)
     popover.set_child(box)
     button.set_popover(popover)
     return button
 
 
+def allow_menu(win, uid: int, username: str, url: str, on_done=None) -> Gtk.MenuButton:
+    """The Allow button on a blocked entry: this page, its folder or the
+    whole site; or, the level above, the site with nothing filtered."""
+    host = labels.host_of(url)
+    folder = _folder_label(url)
+    choices = [("Allow this page", "allow", "page", f"Allowed that page on {host}")]
+    if folder:
+        choices.append((f"Allow everything in {folder}", "allow", "folder",
+                        f"Allowed {host}{folder}"))
+    choices += [(f"Allow all of {host}", "allow", "site", f"Allowed all of {host}"),
+                (f"Bypass the filter on {host}", "bypass", "site",
+                 f"Nothing on all of {host} is filtered")]
+    return _grant_menu(win, uid, username, url, "Allow", choices, on_done)
+
+
+def pictures_menu(win, uid: int, username: str, url: str, on_done=None) -> Gtk.MenuButton:
+    """Allow pictures, on an entry saying pictures were hidden: shown as
+    they are on this page, its folder or the whole site. Video and words
+    are still filtered there."""
+    host = labels.host_of(url)
+    folder = _folder_label(url)
+    choices = [("Show pictures on this page", "pictures", "page",
+                f"Pictures are shown on that page of {host}")]
+    if folder:
+        choices.append((f"Show pictures everywhere in {folder}", "pictures", "folder",
+                        f"Pictures are shown in {host}{folder}"))
+    choices.append((f"Show pictures on all of {host}", "pictures", "site",
+                    f"Pictures are shown on all of {host}"))
+    return _grant_menu(win, uid, username, url, "Allow pictures", choices, on_done)
+
+
 __all__ = ["WhitelistDialog", "RulesDialog", "ListEditDialog", "SavePresetDialog",
            "RequestsDialog", "RequestRow", "HealthDialog", "guardian_dialog", "add_person_dialog",
-           "confirm_remove_user", "request_row", "allow_menu", "tag"]
+           "confirm_remove_user", "request_row", "allow_menu", "pictures_menu", "tag"]

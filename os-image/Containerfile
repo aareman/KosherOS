@@ -9,7 +9,7 @@
 # failing the whole image; the final stage warns and ships without it.
 # Lowercase "as": the podman on GitHub's Ubuntu runners (4.9) rejects "AS"
 # with "FROM requires either one argument, or three".
-FROM ghcr.io/aareman/kosher-base-fedora:44-20261029@sha256:278ccc1c8af3d618b64accbba691bb14f82d371b2e13c86fa2ac7a447d1e03bb as gnome-ext-build
+FROM ghcr.io/aareman/kosher-base-fedora:44-20261109@sha256:526646a990bb8442f936827d98253677dd7a4c28fad33f938e32c7ffdadb72c1 as gnome-ext-build
 ARG ARCMENU_REF=v69.2
 RUN dnf -y install glib2-devel gettext make git-core && dnf clean all
 RUN mkdir -p /out && ( git clone --depth 1 --branch "${ARCMENU_REF}" \
@@ -21,7 +21,7 @@ RUN mkdir -p /out && ( git clone --depth 1 --branch "${ARCMENU_REF}" \
 # Aura Glass's shell styling and patched Blur My Shell, built separately so
 # an optional ArcMenu failure cannot discard these assets. Fail closed on a
 # source/patch mismatch rather than shipping half of the desktop appearance.
-FROM ghcr.io/aareman/kosher-base-fedora:44-20261029@sha256:278ccc1c8af3d618b64accbba691bb14f82d371b2e13c86fa2ac7a447d1e03bb as glass-build
+FROM ghcr.io/aareman/kosher-base-fedora:44-20261109@sha256:526646a990bb8442f936827d98253677dd7a4c28fad33f938e32c7ffdadb72c1 as glass-build
 ARG AURA_GLASS_REF=ac8253097b88bac1c9dea58dff67fcee8217d847
 ARG BLUR_MY_SHELL_REF=425761d5504941899cfb8cda24202d829024c622
 RUN dnf -y install git-core make gnome-shell glib2-devel gettext unzip python3 && dnf clean all
@@ -42,7 +42,7 @@ RUN bash /build-glass/build-glass.sh /tmp/aura-glass /tmp/blur-my-shell /out
 # checkout whose HEAD is not the pinned hash. Only the installed files and a
 # list of the runtime packages they need (NEEDS) go to the final stage.
 # Fedora 44's wlroots 0.20 is the series Umbriel is written against.
-FROM ghcr.io/aareman/kosher-base-fedora:44-20261029@sha256:278ccc1c8af3d618b64accbba691bb14f82d371b2e13c86fa2ac7a447d1e03bb as umbriel-build
+FROM ghcr.io/aareman/kosher-base-fedora:44-20261109@sha256:526646a990bb8442f936827d98253677dd7a4c28fad33f938e32c7ffdadb72c1 as umbriel-build
 ARG UMBRIEL_REF=7097aeeb80e7b50d22c995b3905ce722e4fdbfaf
 ARG UMBRIEL_PORTAL_REF=1cc6eb18ba0d6c82dd66999646d7e554f76a85b6
 RUN dnf -y install --setopt=install_weak_deps=False git-core gcc-c++ meson ninja-build \
@@ -77,7 +77,7 @@ RUN bash /build-umbriel.sh /tmp/umbriel /tmp/xdg-desktop-portal-umbriel /out \
 # replaced by KosherOS's own (files/usr/share/gnome-shell/extensions), which
 # only reports the window in front: upstream's also starts the mapper, and
 # kills it whenever GNOME turns extensions off, as it does at the lock screen.
-FROM ghcr.io/aareman/kosher-base-fedora:44-20261029@sha256:278ccc1c8af3d618b64accbba691bb14f82d371b2e13c86fa2ac7a447d1e03bb as keyd-build
+FROM ghcr.io/aareman/kosher-base-fedora:44-20261109@sha256:526646a990bb8442f936827d98253677dd7a4c28fad33f938e32c7ffdadb72c1 as keyd-build
 ARG KEYD_VERSION=2.6.0
 ARG KEYD_SHA256=697089681915b89d9e98caf93d870dbd4abce768af8a647d54650a6a90744e26
 RUN dnf -y install gcc make && dnf clean all
@@ -109,7 +109,7 @@ RUN curl -fsSL -o /tmp/keyd.tar.gz \
 # because TensorFlow has no wheel for Fedora 44's own Python. 16 MB,
 # ~150 ms on a laptop CPU, asked only for a figure that measures near the
 # line, so an ordinary picture never pays for it.
-FROM ghcr.io/aareman/kosher-base-fedora:44-20261029@sha256:278ccc1c8af3d618b64accbba691bb14f82d371b2e13c86fa2ac7a447d1e03bb as segmenter-build
+FROM ghcr.io/aareman/kosher-base-fedora:44-20261109@sha256:526646a990bb8442f936827d98253677dd7a4c28fad33f938e32c7ffdadb72c1 as segmenter-build
 ARG SEGMENTER_SHA256=c6748b1253a99067ef71f7e26ca71096cd449baefa8f101900ea23016507e0e0
 RUN dnf -y install python3.12 && dnf clean all \
     && python3.12 -m venv /tmp/venv \
@@ -122,7 +122,7 @@ RUN dnf -y install python3.12 && dnf clean all \
          --output /out/selfie_multiclass.onnx --opset 14 \
     && test -s /out/selfie_multiclass.onnx
 
-FROM ghcr.io/aareman/kosher-base-fedora-bootc:44-20261029@sha256:cbca5adc859a7c973aef49b5de1e43cc540409758f598674e3c5594099448a75
+FROM ghcr.io/aareman/kosher-base-fedora-bootc:44-20261109@sha256:15fad9bc79d341f63d51af6d901749c0b0878148aeb1227267a473b05cbc1c2e
 
 # --- Packages ---------------------------------------------------------------
 # GNOME desktop + our runtime deps. toolbox is excluded: a mutable Fedora
@@ -163,6 +163,11 @@ RUN dnf -y install dnsmasq nftables python3-gobject python3-jsonschema python3-p
         gnome-shell-extension-dash-to-panel gnome-shell-extension-appindicator \
         gnome-shell-extension-user-theme \
         niri noctalia xdg-desktop-portal-gtk \
+        # Typing into other windows on the desktops without GNOME's Remote
+        # Desktop portal: Hex (the Store's dictation app) pastes there with
+        # wtype over the virtual-keyboard protocol, and wl-clipboard is its
+        # clipboard on every Wayland desktop.
+        wtype wl-clipboard \
         # Hebrew, properly: the Culmus family (David, Frank Ruehl, Hadasim,
         # Miriam, Nachlieli, Taamey Frank with te'amim), Noto Sans/Serif
         # Hebrew, Noto Rashi for sefarim, Ezra SIL for Tanach with
@@ -333,7 +338,14 @@ RUN python3 -m pip install --prefix=/usr mitmproxy
 # product whose premise is that it works on a weak machine with nothing
 # leaving the house. onnxruntime and Pillow come with it; Pillow is also
 # what covers a detected region instead of blanking the whole picture.
-RUN python3 -m pip install --prefix=/usr nudenet onnxruntime pillow \
+# Fedora's Pillow may omit AVIF even though its version satisfies pip.
+# Amazon/Prime carousels use AVIF under .jpg URLs: the full pipeline needs
+# that decoder for resizing, person/skin refinement, covers and placeholders.
+# Install the tested upstream wheel explicitly rather than accepting the
+# codec-limited RPM. Fail the build if the decoder is unavailable.
+RUN python3 -m pip install --prefix=/usr --ignore-installed --only-binary=:all: "pillow==13.0.0" \
+    && python3 -c 'import io; from PIL import Image, features; assert features.check("avif"), "Pillow AVIF decoder is required"; b=io.BytesIO(); Image.new("RGB", (8, 8)).save(b, "AVIF"); b.seek(0); im=Image.open(b); im.load(); assert im.size == (8, 8)'
+RUN python3 -m pip install --prefix=/usr nudenet onnxruntime \
     || echo "WARNING: no image model; picture filtering will hide pictures"
 # A person detector beside it (kosherd/persons.py): the nudity model labels
 # parts and has no class for legs, so a skirt photographed from the hips

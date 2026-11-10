@@ -29,11 +29,168 @@
   var me = document.currentScript;
   var mode = (me && me.getAttribute("data-kosheros-language")) || "off";
   var judge = !!(me && me.getAttribute("data-kosheros-judge") === "1");
+  var showImages = !!(me && me.getAttribute("data-kosheros-images") === "1");
   var token = (me && me.getAttribute("data-kosheros-token")) || "";
   if (me) me.removeAttribute("data-kosheros-token");
-  if (mode === "off" && !judge) return;
+  if (mode === "off" && !judge && !showImages) return;
   if (window.__kosheros_page_filter) return;
   window.__kosheros_page_filter = true;
+
+  // Status badges observe the existing image requests; they never change an
+  // image URL, delay loading, or send image bytes back to the proxy.
+  function startImageStatus() {
+    var states = new Map(), visible = new Set(), pollTimer = null, polling = false, layoutQueued = false;
+    var labels = { waiting: "Waiting…", checking: "Checking…", checked: "Checked",
+      filtered: "Filtered", hidden: "Hidden", unavailable: "Not checked · hidden",
+      not_checked: "Not checked", unknown: "Status unavailable" };
+    var host = document.createElement("div");
+    host.setAttribute("data-kosheros-ui", "images");
+    host.style.cssText = "position:fixed;inset:0;pointer-events:none;z-index:2147483646";
+    var shadow = host.attachShadow({ mode: "open" });
+    var style = document.createElement("style");
+    if (me && me.nonce) style.nonce = me.nonce;
+    style.textContent = ":host{position:fixed;inset:0;pointer-events:none;z-index:2147483646}.badge{position:absolute;pointer-events:none;font:11px/1.4 system-ui,sans-serif;padding:2px 6px;border-radius:4px;background:rgba(22,28,35,.82);color:#fff;white-space:nowrap;box-shadow:0 1px 3px #0003}.badge[data-state=checking],.badge[data-state=waiting]{padding:0 4px;font-size:12px;line-height:14px;background:rgba(22,28,35,.45);box-shadow:none}";
+    shadow.appendChild(style);
+    document.documentElement.appendChild(host);
+
+    function source(img) {
+      // Inline backgrounds cover carousels without scanning computed styles
+      // across every element on a busy page. Multiple layers stay unlabelled.
+      var raw = img.currentSrc || img.src;
+      if (!raw && img.style) {
+        var match = /^url\(["']?([^"')]+)["']?\)$/.exec(img.style.backgroundImage);
+        raw = match && match[1];
+      }
+      if (!raw) return "";
+      try { var u = new URL(raw, location.href); return /^https?:$/.test(u.protocol) && u.href.length <= 2048 ? u.href.split("#")[0] : ""; }
+      catch (e) { return ""; }
+    }
+    function forget(img) {
+      var item = states.get(img);
+      if (item) item.badge.remove();
+      states.delete(img); visible.delete(img);
+      intersection.unobserve(img); resize.unobserve(img);
+    }
+    function setState(item, state) {
+      item.state = state;
+      var pending = state === "waiting" || state === "checking";
+      var label = labels[state] || labels.unknown;
+      item.badge.textContent = pending ? "…" : label;
+      item.badge.setAttribute("role", "img");
+      item.badge.setAttribute("aria-label", label);
+      item.badge.setAttribute("data-state", state);
+      if (state === "checked" || state === "not_checked") item.badge.hidden = true;
+    }
+    function layout() {
+      layoutQueued = false;
+      visible.forEach(function (img) {
+        var item = states.get(img);
+        if (!img.isConnected) { forget(img); return; }
+        if (item.state === "checked" || item.state === "not_checked") {
+          item.badge.hidden = true; item.displayed = false; return;
+        }
+        var rect = img.getBoundingClientRect();
+        var show = rect.width >= 80 && rect.height >= 48;
+        item.displayed = show;
+        item.badge.hidden = !show;
+        if (show) item.badge.style.transform = "translate(" + Math.max(0, rect.left + 5) + "px," + Math.max(0, rect.top + 5) + "px)";
+      });
+    }
+    function scheduleLayout() { if (!layoutQueued) { layoutQueued = true; requestAnimationFrame(layout); } }
+    var intersection = new IntersectionObserver(function (entries) {
+      entries.forEach(function (entry) {
+        if (!states.has(entry.target)) return;
+        if (entry.isIntersecting) visible.add(entry.target);
+        else { visible.delete(entry.target); states.get(entry.target).badge.hidden = true; }
+      });
+      scheduleLayout(); schedulePoll();
+    });
+    var resize = new ResizeObserver(scheduleLayout);
+    function refresh(img, restart) {
+      var item = states.get(img), url = source(img);
+      if (!url) { if (item) forget(img); return; }
+      if (!item) {
+        var badge = document.createElement("span"); badge.className = "badge"; badge.hidden = true;
+        shadow.appendChild(badge);
+        item = { badge: badge, url: "", state: "waiting", started: 0, settled: false, generation: 0 };
+        states.set(img, item); intersection.observe(img); resize.observe(img);
+      }
+      if (item.url !== url || restart === true) { item.url = url; item.generation++; item.started = 0; item.settled = false; setState(item, "waiting"); }
+      scheduleLayout(); schedulePoll();
+    }
+    function scan(root) {
+      if (!root || root.nodeType !== 1 || root.hasAttribute("data-kosheros-ui")) return;
+      if (root.tagName === "IMG" || root.style.backgroundImage) refresh(root);
+      root.querySelectorAll('img,[style*="background"]' ).forEach(refresh);
+    }
+    function schedulePoll() {
+      if (!pollTimer && !polling && !document.hidden) pollTimer = setTimeout(poll, 750);
+    }
+    function poll() {
+      pollTimer = null;
+      var wanted = [], bytes = 20;
+      visible.forEach(function (img) {
+        var item = states.get(img);
+        if (!item || !item.displayed || item.settled || wanted.length >= 64) return;
+        if (item.started && Date.now() - item.started > 30000) { setState(item, "unknown"); item.settled = true; return; }
+        var size = JSON.stringify(item.url).length + 1;
+        if (bytes + size > 18000) return;
+        bytes += size;
+        if (!item.started) item.started = Date.now();
+        wanted.push({ item: item, url: item.url, generation: item.generation });
+      });
+      if (!wanted.length || document.hidden) return;
+      polling = true;
+      var req = new XMLHttpRequest(); req.open("POST", ROOT + "image-status", true);
+      req.setRequestHeader("Content-Type", "application/json");
+      req.setRequestHeader("X-KosherOS-Page", token);
+      req.timeout = 3000;
+      req.onload = function () {
+        var images = {}; try { if (req.status === 200) images = JSON.parse(req.responseText).images || {}; } catch (e) {}
+        wanted.forEach(function (entry) {
+          var item = entry.item, state = images[entry.url];
+          if (item.url !== entry.url || item.generation !== entry.generation) return;
+          if (state && Object.prototype.hasOwnProperty.call(labels, state)) {
+            setState(item, state); item.settled = state !== "checking";
+          }
+        });
+        polling = false; scheduleLayout(); schedulePoll();
+      };
+      req.onerror = req.ontimeout = function () { polling = false; schedulePoll(); };
+      req.send(JSON.stringify({ urls: wanted.map(function (entry) { return entry.url; }) }));
+    }
+    new MutationObserver(function (records) {
+      records.forEach(function (r) {
+        if (r.type === "attributes") {
+          if (r.target.hasAttribute("data-kosheros-ui")) return;
+          if (r.target.tagName === "IMG") {
+            // Assigning the same src can start a fresh request. Its previous
+            // terminal badge must not suppress polling for the new load.
+            refresh(r.target, r.attributeName !== "style" && !r.target.complete);
+          } else if (r.attributeName === "style") refresh(r.target);
+          else if (r.target.tagName === "SOURCE" && r.target.parentElement) scan(r.target.parentElement);
+        } else {
+          r.addedNodes.forEach(scan);
+          r.removedNodes.forEach(function (root) {
+            if (root.nodeType !== 1 || root.isConnected) return;
+            if (states.has(root)) forget(root);
+            root.querySelectorAll('img,[style*="background"]').forEach(function (img) { if (states.has(img)) forget(img); });
+          });
+        }
+      });
+    }).observe(document.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: ["src", "srcset", "sizes", "style"] });
+    document.addEventListener("load", function (event) { if (event.target.tagName === "IMG") refresh(event.target); }, true);
+    document.addEventListener("error", function (event) {
+      var item = states.get(event.target);
+      if (item) { setState(item, "unknown"); item.settled = true; scheduleLayout(); }
+    }, true);
+    addEventListener("scroll", scheduleLayout, { passive: true, capture: true });
+    addEventListener("resize", scheduleLayout, { passive: true });
+    document.addEventListener("visibilitychange", schedulePoll);
+    scan(document.documentElement);
+  }
+  if (showImages && typeof IntersectionObserver !== "undefined" && typeof ResizeObserver !== "undefined") startImageStatus();
+  if (mode === "off" && !judge) return;
 
   // Elements whose text is not prose: code the page runs or shows raw,
   // and what the person is typing (their own words are not the page's).
@@ -41,7 +198,7 @@
 
   function skipped(node) {
     for (var el = node.parentNode; el && el.nodeType === 1; el = el.parentNode) {
-      if (SKIP[el.nodeName]) return true;
+      if (SKIP[el.nodeName] || el.hasAttribute("data-kosheros-ui")) return true;
       if (el.isContentEditable) return true;
     }
     return false;
@@ -201,7 +358,7 @@
   function walk(root) {
     if (root.nodeType === 3) { handleText(root); return; }
     if (root.nodeType !== 1 && root.nodeType !== 11) return;
-    if (root.nodeType === 1 && (SKIP[root.nodeName] || root.isContentEditable)) return;
+    if (root.nodeType === 1 && (SKIP[root.nodeName] || root.isContentEditable || root.hasAttribute("data-kosheros-ui"))) return;
     var walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null);
     var n;
     while ((n = walker.nextNode())) handleText(n);

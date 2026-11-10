@@ -356,8 +356,12 @@ def _stub_categories(source_cats=()):
 
 
 def _stub_vision(verdict):
+    async def prepare_async(fn, *args):
+        return fn(*args)
+
     return type("V", (), {
         "verdict": staticmethod(lambda data: verdict),
+        "prepare_async": staticmethod(prepare_async),
         "write_status": staticmethod(lambda *a, **k: None),
     })()
 
@@ -1578,11 +1582,27 @@ def _stub_videos(available=True, cached=None, verdict=None):
     async def verdict_async(data, key):
         return verdict
 
+    async def precheck_async(key):
+        return cached, available
+    sampled = []
+
+    def verdict_remote(fetch, size, key):
+        sampled.append((size, key))
+        return verdict
+
+    async def verdict_remote_async(fetch, size, key):
+        sampled.append((size, key))
+        return verdict
+
     return type("VC", (), {
         "available": available,
         "cached": staticmethod(lambda key: cached),
         "verdict": staticmethod(lambda data, key: verdict),
         "verdict_async": staticmethod(verdict_async),
+        "precheck_async": staticmethod(precheck_async),
+        "verdict_remote": staticmethod(verdict_remote),
+        "verdict_remote_async": staticmethod(verdict_remote_async),
+        "sampled": sampled,
     })()
 
 
@@ -1602,26 +1622,26 @@ def test_downloads_stream_through_instead_of_being_held(addon):
     filt = _filt(addon)
     for kind in ("application/octet-stream", "application/zip", "audio/mpeg", "font/woff2"):
         flow = _hflow(kind)
-        filt.responseheaders(flow)
+        _headers_hook(filt, flow)
         assert flow.response.stream is True, kind
 
 
 def test_a_large_unknown_body_streams_but_a_page_never_does(addon):
     filt = _filt(addon)
     big = _hflow("application/x-something", length=50_000_000)
-    filt.responseheaders(big)
+    _headers_hook(filt, big)
     assert big.response.stream is True
     page = _hflow("text/html", length=50_000_000)
-    filt.responseheaders(page)
+    _headers_hook(filt, page)
     assert not getattr(page.response, "stream", False), "pages are read, so held"
 
 
 def test_pictures_are_held_only_when_they_will_be_looked_at(addon):
     held = _hflow("image/jpeg")
-    _filt(addon, media="immodest").responseheaders(held)
+    _headers_hook(_filt(addon, media="immodest"), held)
     assert not getattr(held.response, "stream", False)
     passed = _hflow("image/jpeg")
-    _filt(addon, media="none").responseheaders(passed)
+    _headers_hook(_filt(addon, media="none"), passed)
     assert passed.response.stream is True
 
 
@@ -1650,7 +1670,8 @@ def test_a_hidden_picture_keeps_its_size_so_the_page_does_not_jump(addon):
     filt._blank_image(flow)
     with Image.open(io.BytesIO(flow.response.content)) as tile:
         assert tile.size == (320, 200)
-        assert tile.getpixel((5, 5)) == addon.imageedit_mod.PLACEHOLDER_GREY
+        color = tile.convert("RGB").getpixel((5, 5))
+        assert all(abs(got - source) <= 16 for got, source in zip(color, (90, 120, 200)))
     assert flow.response.headers["content-type"] == "image/png"
     assert flow.response.headers["x-kosheros"] == "image-hidden"
     # A picture whose size cannot be read still gets the old one-pixel blank.
@@ -1669,18 +1690,18 @@ def test_a_picture_judged_clean_a_moment_ago_streams_instead_of_being_held(addon
     filt._filter_image(first, 1001)                   # judged clean by content
     again = _hflow("image/jpeg")
     again.request.pretty_url = "https://cdn.example.com/p.jpg"
-    filt.responseheaders(again)
+    _headers_hook(filt, again)
     assert again.response.stream is True, "the same URL is not held twice"
     # A different URL, or a different media level, is still held.
     other = _hflow("image/jpeg")
     other.request.pretty_url = "https://cdn.example.com/q.jpg"
-    filt.responseheaders(other)
+    _headers_hook(filt, other)
     assert not getattr(other.response, "stream", False)
     stricter = _filt(addon, media="suggestive")
     stricter.__dict__["_clean_urls"] = filt.__dict__["_clean_urls"]
     same = _hflow("image/jpeg")
     same.request.pretty_url = "https://cdn.example.com/p.jpg"
-    stricter.responseheaders(same)
+    _headers_hook(stricter, same)
     assert not getattr(same.response, "stream", False)
 
 
@@ -1694,7 +1715,7 @@ def test_a_hidden_or_covered_picture_is_never_remembered_as_clean(addon):
     assert not filt.__dict__.get("_clean_urls")
     again = _hflow("image/jpeg")
     again.request.pretty_url = "https://cdn.example.com/p.jpg"
-    filt.responseheaders(again)
+    _headers_hook(filt, again)
     assert not getattr(again.response, "stream", False)
 
 
@@ -1713,13 +1734,13 @@ def test_the_clean_memo_forgets_after_its_window(addon, monkeypatch):
 
 def test_a_connection_that_is_nobodys_streams(addon):
     flow = _hflow("text/html", uid=None)
-    _filt(addon).responseheaders(flow)
+    _headers_hook(_filt(addon), flow)
     assert flow.response.stream is True
 
 
 def test_video_streams_at_the_level_that_does_not_filter_pictures(addon):
     flow = _hflow("video/mp4", length=1000)
-    _filt(addon, media="none").responseheaders(flow)
+    _headers_hook(_filt(addon, media="none"), flow)
     assert flow.response.stream is True
 
 
@@ -1727,7 +1748,7 @@ def test_video_is_refused_before_a_byte_is_fetched_when_it_cannot_be_checked(add
     # No decoder on this machine: an account whose pictures are filtered
     # gets no open-web video, as before — and does not download it first.
     flow = _hflow("video/mp4", length=1000)
-    _filt(addon, media="immodest", videos=_stub_videos(available=False)).responseheaders(flow)
+    _headers_hook(_filt(addon, media="immodest", videos=_stub_videos(available=False)), flow)
     assert flow.response.status_code == 403
     assert flow.response.headers["x-kosheros"] == "video-blocked"
     assert callable(flow.response.stream), "the body is discarded as it arrives"
@@ -1738,19 +1759,19 @@ def test_the_mildest_level_keeps_passing_video_it_cannot_check(addon):
     # Video passed unchecked at "nsfw" before frame sampling existed; a
     # missing decoder must not take that away.
     flow = _hflow("video/mp4", length=1000)
-    _filt(addon, media="nsfw", videos=_stub_videos(available=False)).responseheaders(flow)
+    _headers_hook(_filt(addon, media="nsfw", videos=_stub_videos(available=False)), flow)
     assert flow.response.stream is True
 
 
 def test_a_checkable_clip_is_held_for_sampling(addon):
     flow = _hflow("video/mp4", length=5_000_000)
-    _filt(addon, media="immodest", videos=_stub_videos()).responseheaders(flow)
+    _headers_hook(_filt(addon, media="immodest", videos=_stub_videos()), flow)
     assert not getattr(flow.response, "stream", False)
 
 
 def test_a_clip_too_big_to_hold_is_refused_at_the_modesty_levels(addon):
     flow = _hflow("video/mp4", length=addon.videocheck_mod.VIDEO_MAX_BYTES + 1)
-    _filt(addon, media="suggestive", videos=_stub_videos()).responseheaders(flow)
+    _headers_hook(_filt(addon, media="suggestive", videos=_stub_videos()), flow)
     assert flow.response.status_code == 403
 
 
@@ -1758,23 +1779,92 @@ def test_a_clip_already_judged_clean_streams_without_being_held(addon):
     from kosherd.vision import CLEAN, NSFW, ImageVerdict
 
     flow = _hflow("video/mp4", length=5_000_000)
-    _filt(addon, media="immodest",
-          videos=_stub_videos(cached=ImageVerdict(CLEAN, ()))).responseheaders(flow)
+    _headers_hook(_filt(addon, media="immodest",
+          videos=_stub_videos(cached=ImageVerdict(CLEAN, ()))), flow)
     assert flow.response.stream is True
     bad = _hflow("video/mp4", length=5_000_000)
-    _filt(addon, media="immodest",
-          videos=_stub_videos(cached=ImageVerdict(NSFW, ()))).responseheaders(bad)
+    _headers_hook(_filt(addon, media="immodest",
+          videos=_stub_videos(cached=ImageVerdict(NSFW, ()))), bad)
     assert bad.response.status_code == 403
 
 
-def test_a_range_from_the_middle_of_an_unjudged_clip_is_held_and_tried(addon):
+def test_a_range_from_the_middle_of_an_unjudged_clip_is_judged_through_its_source(addon):
     # Firefox asks for a clip in pieces and cancels its first request as
-    # soon as it has the header; refusing every later piece outright meant
-    # "breaking and stuck". The piece is held and decoded if it can be.
+    # soon as it has the header; a slice of a plain file cannot be read on
+    # its own, so the clip is judged once through its source (a few range
+    # fetches at spread points), and then the piece streams (#271).
+    from kosherd.vision import CLEAN, IMMODEST, ImageVerdict
+
     flow = _hflow("video/mp4", status=206, content_range="bytes 500000-999999/2000000")
-    _filt(addon, media="immodest", videos=_stub_videos()).responseheaders(flow)
-    assert not getattr(flow.response, "stream", False)
-    assert flow.response.status_code != 403
+    videos = _stub_videos(verdict=ImageVerdict(CLEAN, (), True))
+    asyncio.run(_filt(addon, media="immodest", videos=videos).responseheaders(flow))
+    assert flow.response.stream is True
+    assert flow.response.headers["x-kosheros"] == "video-checked=clean"
+    assert videos.sampled == [(2000000, addon.videocheck_mod.key("https://example.com/a", 2000000))]
+
+    flow = _hflow("video/mp4", status=206, content_range="bytes 500000-999999/2000000")
+    videos = _stub_videos(verdict=ImageVerdict(IMMODEST, (), True))
+    asyncio.run(_filt(addon, media="immodest", videos=videos).responseheaders(flow))
+    assert flow.response.status_code == 403, "refused before a byte of the piece"
+    assert flow.response.stream(b"chunk") == b""
+
+
+def test_a_clip_too_big_to_hold_is_judged_through_its_source_when_it_serves_ranges(addon):
+    from kosherd.vision import CLEAN, ImageVerdict
+
+    flow = _hflow("video/mp4", length=addon.videocheck_mod.VIDEO_MAX_BYTES + 1)
+    flow.response.headers["accept-ranges"] = "bytes"
+    videos = _stub_videos(verdict=ImageVerdict(CLEAN, (), False))
+    asyncio.run(_filt(addon, media="immodest", videos=videos).responseheaders(flow))
+    assert flow.response.stream is True
+    assert videos.sampled and videos.sampled[0][0] == addon.videocheck_mod.VIDEO_MAX_BYTES + 1
+
+
+def test_a_clip_that_cannot_be_looked_at_through_its_source_is_refused_at_the_strict_levels(addon):
+    flow = _hflow("video/mp4", status=206, content_range="bytes 500000-999999/2000000")
+    asyncio.run(_filt(addon, media="immodest", videos=_stub_videos(verdict=None)).responseheaders(flow))
+    assert flow.response.status_code == 403
+    mild = _hflow("video/mp4", status=206, content_range="bytes 500000-999999/2000000")
+    asyncio.run(_filt(addon, media="nsfw", videos=_stub_videos(verdict=None)).responseheaders(mild))
+    assert mild.response.stream is True
+    assert mild.response.headers["x-kosheros"] == "video-unchecked"
+
+
+def test_the_range_fetcher_carries_identity_and_the_range_and_insists_on_a_piece(addon, monkeypatch):
+    import urllib.request
+
+    seen = []
+
+    class _Answer:
+        def __init__(self, status):
+            self.status = status
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def read(self):
+            return b"piece"
+
+    def fake_urlopen(request, timeout=None):
+        seen.append(dict(request.header_items()))
+        return _Answer(206 if "whole" not in request.full_url else 200)
+
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+    flow = _hflow("video/mp4", status=206, content_range="bytes 0-9/100")
+    flow.request.headers = {"User-Agent": "Firefox", "Cookie": "secret=1", "Referer": "https://x.com/"}
+    fetch = _filt(addon)._range_fetcher(flow)
+    assert fetch(10, 19) == b"piece"
+    headers = {k.lower(): v for k, v in seen[-1].items()}
+    assert headers["range"] == "bytes=10-19"
+    assert headers["user-agent"] == "Firefox" and headers["referer"] == "https://x.com/"
+    assert "cookie" not in headers, "the proxy's own fetch carries no cookie"
+    whole = _hflow("video/mp4", status=206, content_range="bytes 0-9/100", url="https://example.com/whole")
+    whole.request.headers = {}
+    with pytest.raises(OSError):
+        _filt(addon)._range_fetcher(whole)(0, 9)
 
 
 def test_a_clip_that_says_it_is_a_download_is_still_a_clip(addon):
@@ -1782,7 +1872,7 @@ def test_a_clip_that_says_it_is_a_download_is_still_a_clip(addon):
     # content type alone the filter streamed them through unchecked.
     clip = _hflow("application/octet-stream", length=5_000_000,
                   url="https://cdn.example.com/media/clip.mp4?x=1")
-    _filt(addon, media="immodest", videos=_stub_videos()).responseheaders(clip)
+    _headers_hook(_filt(addon, media="immodest", videos=_stub_videos()), clip)
     assert not getattr(clip.response, "stream", False), "held for sampling"
     gif = _hflow("application/octet-stream", length=50_000,
                  url="https://cdn.example.com/media/fun.gif")
@@ -1795,7 +1885,7 @@ def test_a_clip_that_says_it_is_a_download_is_still_a_clip(addon):
 def test_a_manifest_passes_where_its_segments_will_be_judged(addon):
     flow = _hflow("application/vnd.apple.mpegurl", url="https://example.com/live.m3u8")
     filt = _filt(addon, media="immodest", videos=_stub_videos())
-    filt.responseheaders(flow)
+    _headers_hook(filt, flow)
     assert not getattr(flow.response, "stream", False)
     before = flow.response
     filt._filter_video(flow, 1001)
@@ -1862,13 +1952,14 @@ def _async_vision(verdict):
     async def verdict_async(data):
         return verdict
 
-    async def run_async(fn, *args):
+    async def run_async(fn, *args, **kwargs):
         return fn(*args)
 
     return type("V", (), {
         "verdict": staticmethod(lambda data: verdict),
         "verdict_async": staticmethod(verdict_async),
         "run_async": staticmethod(run_async),
+        "prepare_async": staticmethod(run_async),
         "write_status": staticmethod(lambda *a, **k: None),
     })()
 
@@ -2111,7 +2202,7 @@ def test_an_animated_preview_picture_is_hidden_for_an_account_that_limits_youtub
                   length=4000)
     flow.request.path = "/an_webp/v1/mqdefault_6s.webp"
     # Not streamed past the filter, whatever the account's picture setting.
-    filt.responseheaders(flow)
+    _headers_hook(filt, flow)
     assert not getattr(flow.response, "stream", False)
     asyncio.run(filt.response(flow))
     assert flow.response.headers.get("x-kosheros") == "image-hidden"
@@ -2450,3 +2541,75 @@ def test_an_allowed_pages_pictures_are_still_held_to_be_judged(addon):
     picture.request.headers["referer"] = "https://trusted.example/"
     _headers_hook(filt, picture)
     assert not getattr(picture.response, "stream", False), "held, so it can be judged"
+
+
+
+# -- pictures allowed: a level between allow and bypass ------------------------------
+
+def _rules_filter(addon, raw):
+    filt = addon.KosherFilter.__new__(addon.KosherFilter)
+    filt.uids = type("U", (), {"uid_for_connection": staticmethod(lambda *a, **k: 1001)})()
+    filt.categories = _stub_categories()
+    filt.siterules = type("S", (), {"reason": staticmethod(lambda url: None),
+                                    "is_suggestions": staticmethod(lambda url: False)})()
+    filt.blocklist = _stub_blocklist()
+    filt.policy = _rules_policy(addon, raw)
+    return filt
+
+
+def test_a_pictures_rule_marks_its_page_and_what_the_page_shows(addon):
+    filt = _rules_filter(addon, [{"action": "pictures", "pattern": "shop.example/gallery/*"}])
+    page = _request_flow("https://shop.example/gallery/rings")
+    filt.request(page)
+    assert page.response is None
+    assert page.metadata.get("kosher_pictures") is True
+    assert page.metadata.get("kosher_pictures_page") is True
+    assert not page.metadata.get("kosher_bypass"), "its video and words are still read"
+
+    # A CDN picture names the page in full (the page's Referrer-Policy).
+    picture = _request_flow("https://cdn.example.net/ring.jpg")
+    picture.request.headers["referer"] = "https://shop.example/gallery/rings"
+    filt.request(picture)
+    assert picture.metadata.get("kosher_pictures") is True
+    assert not picture.metadata.get("kosher_pictures_page")
+
+    elsewhere = _request_flow("https://cdn.example.net/ring.jpg")
+    elsewhere.request.headers["referer"] = "https://shop.example/swimwear/"
+    filt.request(elsewhere)
+    assert not elsewhere.metadata.get("kosher_pictures")
+
+
+def test_a_pictures_page_shows_its_pictures_and_asks_for_full_referers(addon):
+    filt = _filt(addon, media="immodest")
+    picture = _hflow("image/jpeg", url="https://cdn.example.net/ring.jpg")
+    picture.metadata["kosher_pictures"] = True
+    _headers_hook(filt, picture)
+    assert picture.response.stream is True, "shown as it is, not judged"
+
+    page = _hflow("text/html", url="https://shop.example/gallery/rings")
+    page.metadata["kosher_pictures"] = True
+    page.metadata["kosher_pictures_page"] = True
+    _headers_hook(filt, page)
+    assert page.response.headers["Referrer-Policy"] == addon.PICTURES_REFERRER_POLICY
+    assert not getattr(page.response, "stream", False), "the page's words are still read"
+
+    # Without the rule a picture is held to be judged, as before.
+    plain = _hflow("image/jpeg", url="https://cdn.example.net/ring.jpg")
+    _headers_hook(filt, plain)
+    assert not getattr(plain.response, "stream", False)
+
+
+def test_hidden_pictures_from_another_site_name_the_page_not_the_site(addon):
+    # A CDN picture's Referer is the page's origin alone; the log named the
+    # site, and "allow this page" allowed the home page.
+    filt = _filt(addon)
+    filt._remember_last_page(1001, "https://shop.example/gallery/rings#top")
+    picture = _hflow("image/jpeg", url="https://cdn.example.net/ring.jpg")
+    picture.request.headers["referer"] = "https://shop.example/"
+    assert filt._page_of(picture) == "https://shop.example/gallery/rings"
+    # A full Referer is the page itself; another account's pages are its own.
+    picture.request.headers["referer"] = "https://shop.example/sale?x=1"
+    assert filt._page_of(picture) == "https://shop.example/sale?x=1"
+    other = _hflow("image/jpeg", uid=1002, url="https://cdn.example.net/ring.jpg")
+    other.request.headers["referer"] = "https://shop.example/"
+    assert filt._page_of(other) == "https://shop.example/"

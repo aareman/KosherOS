@@ -26,7 +26,8 @@ gi.require_version("Gio", "2.0")
 from gi.repository import Gio, GLib
 
 from . import (BUS_NAME, OBJECT_PATH, access, appaccess, appkinds, apps, auth,
-               keyboard, onepassword, policy as policy_mod, syncthing, ytsearch, nft)
+               keyboard, onepassword, policy as policy_mod, syncthing, urlrules, ytsearch,
+               nft)
 from .apply import apply_policy
 from .apps import AppError
 from .guardian import Guardian, GuardianError
@@ -116,6 +117,13 @@ INTROSPECTION_XML = """
       <arg direction="in" type="i" name="uid"/>
       <arg direction="in" type="s" name="url"/>
       <arg direction="in" type="b" name="whole_site"/>
+      <arg direction="in" type="s" name="guardian_password"/>
+    </method>
+    <method name="GrantUrl">
+      <arg direction="in" type="i" name="uid"/>
+      <arg direction="in" type="s" name="url"/>
+      <arg direction="in" type="s" name="level"/>
+      <arg direction="in" type="s" name="scope"/>
       <arg direction="in" type="s" name="guardian_password"/>
     </method>
     <method name="ListActivity">
@@ -726,6 +734,10 @@ def _url_pattern(url: str) -> str:
     host = (parts.hostname or "").lower().strip(".").removeprefix("www.")
     path = parts.path or "/"
     return f"{host}{path.rstrip('/') or '/'}"
+
+
+# How much of a site a grant from the activity log covers.
+GRANT_SCOPES = ("page", "folder", "site")
 
 
 # Where ostree keeps each deployment's tree. A deployment's own
@@ -1504,12 +1516,37 @@ class Daemon:
         log.info("uid %d now reaches %s with nothing filtered", uid, host)
         return None
 
-    def _grant(self, user, url: str, whole_site: bool, action: str = "allow") -> str:
-        """Open one page or one site for an account, in the terms of its
-        mode: a whitelist entry, or a rule ahead of the rest. A rule the
-        account already has for the same pattern is replaced, so allowing
-        and then bypassing a site leaves one rule, not two."""
+    def impl_GrantUrl(self, uid: int, url: str, level: str, scope: str,
+                      _guardian_pw: str):
+        """From the activity log: one page, its folder or the whole site,
+        allowed, with its pictures shown, or bypassed. Pictures and bypass
+        are levels of what the proxy reads, so only a filtered account has
+        them; allowing works in any mode, as AllowUrl does."""
+        if level not in ("allow", "pictures", "bypass"):
+            raise PolicyError(f"unknown level {level!r}")
+        if scope not in GRANT_SCOPES:
+            raise PolicyError(f"unknown scope {scope!r}")
+        user = self.policy.account(uid)
+        if user is None:
+            raise PolicyError(f"uid {uid} is not managed")
+        if level != "allow" and user.mode != "filtered":
+            raise PolicyError("only a filtered account's pages are read; "
+                              "allowing is all there is in this mode")
+        host = self._grant(user, url, scope, action=level)
+        log.info("uid %d: %s %s (%s) from the activity log", uid, level, host, scope)
+        return None
+
+    def _grant(self, user, url: str, scope, action: str = "allow") -> str:
+        """Open one page, its folder or one site for an account, in the
+        terms of its mode: a whitelist entry, or a rule ahead of the rest.
+        A rule the account already has for the same pattern is replaced, so
+        allowing and then bypassing a site leaves one rule, not two. scope
+        is "page", "folder" or "site"; True and False are the whole site
+        and the page, as AllowUrl and BypassUrl pass it."""
         from urllib.parse import urlsplit
+
+        if isinstance(scope, bool):
+            scope = "site" if scope else "page"
 
         parts = urlsplit(url)
         host = (parts.hostname or "").lower().strip(".")
@@ -1520,7 +1557,8 @@ class Daemon:
             if host not in user.whitelist:
                 user.whitelist = sorted({*user.whitelist, host})
         else:
-            pattern = host if whole_site else _url_pattern(url)
+            pattern = {"site": host, "page": _url_pattern(url),
+                       "folder": urlrules.folder_of(url) or host}[scope]
             if not any(r.get("pattern") == pattern and r.get("action") == action
                        for r in user.rules):
                 # Ahead of the existing rules: a rule added after the one

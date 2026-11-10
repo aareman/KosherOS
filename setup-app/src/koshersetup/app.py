@@ -1,7 +1,7 @@
 """KosherOS first-boot wizard.
 
-Six steps: welcome, an optional internet connection (Wi-Fi, through
-kosherd), administrator account, protection (guardian + boot password),
+Seven steps: welcome, an optional internet connection (Wi-Fi, through
+kosherd), the time zone, administrator account, protection (guardian + boot password),
 disk recovery, and a firmware checklist for the things an OS cannot enforce about its own
 hardware. Runs full-screen on first boot; kosherd closes the
 setup API permanently once this finishes.
@@ -18,7 +18,7 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 from gi.repository import Adw, Gdk, Gio, GLib, Gtk  # noqa: E402
 
-from kosherd import usernames  # noqa: E402
+from kosherd import timezones, usernames  # noqa: E402
 from kosherd.client import DaemonClient  # noqa: E402
 
 APP_ID = "org.kosherlinux.Setup"
@@ -176,6 +176,7 @@ WIZARD_CSS = b"""
 .kosher-wizard .caption { font-size: 0.92em; }
 .kosher-wizard button.pill { padding: 8px 26px; }
 .kosher-wizard row { min-height: 52px; }
+.kosher-wizard .tz-list row { min-height: 44px; }
 """
 
 
@@ -233,6 +234,7 @@ class Window(Adw.ApplicationWindow):
 
         self.stack.add_named(self._welcome_page(), "welcome")
         self.stack.add_named(self._network_page(), "network")
+        self.stack.add_named(self._timezone_page(), "timezone")
         self.stack.add_named(self._admin_page(), "admin")
         self.stack.add_named(self._protect_page(), "protect")
         self.stack.add_named(self._disk_page(), "disk")
@@ -445,6 +447,136 @@ class Window(Adw.ApplicationWindow):
             self.toast(_error_text(e))
 
         _run_async(lambda: self.client.connect_wifi(ssid, password), on_done, on_error)
+
+    def _timezone_page(self) -> Gtk.Widget:
+        """The installer does not ask where the computer is (its kickstart
+        has a fixed answer), and screen-time limits and the day's usage
+        follow local time. So: show a guess, and one click keeps it. The
+        guess is the internet's when there is a connection, otherwise the
+        zone the machine already has."""
+        box, group = _page(
+            "Time zone",
+            "The clock and the daily screen-time limits follow this. If it "
+            "is not where you are, search for your city below.")
+        self.tz_zones = timezones.zones()
+        self.tz_chosen = timezones.current()
+        self._tz_picked = False        # the person chose; a late guess must not move it
+        self._tz_guessing = False
+        self._tz_guessed = False
+
+        self.tz_row = Adw.ActionRow(use_markup=False)
+        self.tz_row.add_prefix(Gtk.Image(icon_name="preferences-system-time-symbolic"))
+        self.tz_spinner = Gtk.Spinner(visible=False, valign=Gtk.Align.CENTER)
+        self.tz_row.add_suffix(self.tz_spinner)
+        group.add(self.tz_row)
+
+        self.tz_search = Gtk.SearchEntry(placeholder_text="Search for a city or country")
+        self.tz_list = Gtk.ListBox(selection_mode=Gtk.SelectionMode.NONE)
+        self.tz_list.add_css_class("boxed-list")
+        self.tz_list.add_css_class("tz-list")
+        empty = Gtk.Label(label="Nothing matches. Try the nearest large city.",
+                          margin_top=18, margin_bottom=18)
+        empty.add_css_class("dim-label")
+        self.tz_list.set_placeholder(empty)
+        for index, zone in enumerate(self.tz_zones):
+            row = Adw.ActionRow(title=zone.label, activatable=True, use_markup=False)
+            row.zone, row.index = zone, index
+            row.connect("activated", lambda r: self._tz_pick(r.zone.id))
+            row.set_cursor_from_name("pointer")
+            self.tz_list.append(row)
+        self.tz_list.set_filter_func(
+            lambda r: r.zone.matches(self.tz_search.get_text()))
+        # Cities that start with what was typed come first: "new" puts New
+        # York above Auckland, New Zealand.
+        self.tz_list.set_sort_func(lambda a, b: self._tz_rank(a) - self._tz_rank(b))
+        self.tz_search.connect("search-changed", lambda _e: self._tz_filter())
+        # Enter in the search takes the first place that matches.
+        self.tz_search.connect("activate", lambda _e: self._tz_pick_first())
+        # The list stays out of the way until the person searches: most
+        # people keep the guess, and a wall of 400 cities is not a question.
+        scroller = Gtk.ScrolledWindow(hscrollbar_policy=Gtk.PolicyType.NEVER,
+                                      min_content_height=240, max_content_height=240,
+                                      propagate_natural_height=True, visible=False)
+        scroller.set_child(self.tz_list)
+        self.tz_scroller = scroller
+        box.append(self.tz_search)
+        box.append(scroller)
+        self._tz_show(self.tz_chosen)
+        return box
+
+    def _tz_rank(self, row) -> int:
+        typed = self.tz_search.get_text().strip().casefold().replace("_", " ")
+        city = row.zone.city.casefold()
+        first = 0 if typed and city.startswith(typed) else \
+            1 if typed and f" {typed}" in f" {city}" else 2
+        return first * 10000 + row.index
+
+    def _tz_filter(self) -> None:
+        self.tz_list.invalidate_filter()
+        self.tz_list.invalidate_sort()
+        self.tz_scroller.set_visible(bool(self.tz_search.get_text().strip()))
+
+    def _tz_show(self, zone_id: str) -> None:
+        """Make zone_id the one shown at the top."""
+        self.tz_chosen = zone_id
+        zone = timezones.zone_for(zone_id, self.tz_zones)
+        self.tz_row.set_title(zone.label)
+        try:
+            now = GLib.DateTime.new_now(GLib.TimeZone.new_identifier(zone_id))
+            self.tz_row.set_subtitle(f"It is {now.format('%l:%M %p').strip()} there now.")
+        except (TypeError, GLib.Error):
+            self.tz_row.set_subtitle(zone.id)
+
+    def _tz_pick(self, zone_id: str) -> None:
+        """The person chose: show it at the top, put the list away, and
+        leave the keyboard on Continue."""
+        self._tz_picked = True
+        self._tz_show(zone_id)
+        self.tz_search.set_text("")
+        self._tz_filter()
+        self.next.grab_focus()
+
+    def _tz_pick_first(self) -> None:
+        index = 0
+        while (row := self.tz_list.get_row_at_index(index)) is not None:
+            if row.get_child_visible():
+                self._tz_pick(row.zone.id)
+                return
+            index += 1
+
+    def _tz_guess(self) -> None:
+        """Ask the internet where this computer is, off the main loop. A
+        slow or missing answer leaves the zone already shown; nothing
+        waits on it."""
+        if self._tz_guessing or self._tz_guessed or self._tz_picked:
+            return
+        self._tz_guessing = True
+        self.tz_spinner.set_visible(True)
+        self.tz_spinner.start()
+
+        def finished(zone_id):
+            self._tz_guessing = False
+            self.tz_spinner.stop()
+            self.tz_spinner.set_visible(False)
+            if zone_id and timezones.valid(zone_id):
+                self._tz_guessed = True
+                if not self._tz_picked:
+                    self._tz_show(zone_id)
+
+        _run_async(timezones.guess, finished, lambda _e: finished(""))
+
+    def _set_timezone(self) -> None:
+        """Set the zone shown and go on. A failure is told, not a wall: the
+        zone can be changed later in Settings."""
+        zone_id = self.tz_chosen
+        self.next.set_sensitive(False)
+
+        def failed(e):
+            self.toast(f"The time zone could not be set: {_error_text(e)}")
+            self._go("admin")
+
+        _run_async(lambda: timezones.set_zone(zone_id),
+                   lambda _r: self._go("admin"), failed)
 
     def _admin_page(self) -> Gtk.Widget:
         box, group = _page(
@@ -679,8 +811,9 @@ class Window(Adw.ApplicationWindow):
 
     # Back goes to the PREVIOUS page. Not to the welcome page, which is what
     # it did, and not past the account step once the account exists.
-    PAGES = ("welcome", "network", "admin", "protect", "disk", "firmware")
-    PREVIOUS = {"network": "welcome", "admin": "network", "disk": "protect", "firmware": "disk"}
+    PAGES = ("welcome", "network", "timezone", "admin", "protect", "disk", "firmware")
+    PREVIOUS = {"network": "welcome", "timezone": "network", "admin": "timezone",
+                "disk": "protect", "firmware": "disk"}
 
     def _go(self, name: str) -> None:
         self.stack.set_visible_child_name(name)
@@ -688,20 +821,22 @@ class Window(Adw.ApplicationWindow):
         self.next.set_visible(True)
         self.next.set_sensitive(True)
         self.next.set_label({"welcome": "Get Started", "network": "Skip for now",
-                             "admin": "Create Account", "protect": "Continue", "disk": "Continue",
+                             "timezone": "Continue", "admin": "Create Account", "protect": "Continue", "disk": "Continue",
                              "firmware": "Finish"}[name])
         self._revalidate()
         if name == "network":
             self._refresh_network()
         if name == "disk":
             self._refresh_disk()
+        if name == "timezone":
+            self._tz_guess()
         # Put the keyboard where the person will type next — and on the
         # welcome page, on the button, so Enter starts the wizard: there is
         # nothing to type there, and a person who reads the screen and
         # presses Enter should not find nothing happens.
         if name == "admin":
             self.full_name.grab_focus()
-        elif name == "welcome":
+        elif name in ("welcome", "timezone"):
             self.next.grab_focus()
 
     def _back(self) -> None:
@@ -739,7 +874,9 @@ class Window(Adw.ApplicationWindow):
         if page == "welcome":
             self._go("network")
         elif page == "network":
-            self._go("admin")
+            self._go("timezone")
+        elif page == "timezone":
+            self._set_timezone()
         elif page == "admin":
             self._create_admin()
         elif page == "protect":

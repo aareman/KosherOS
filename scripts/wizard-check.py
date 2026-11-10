@@ -65,8 +65,13 @@ if pid == 0:
     # The script's redirection: the console on fd 0 and fd 1.
     os.dup2(s, 0); os.dup2(s, 1)
     import kosherd.cli as cli
+    from kosherd import timezones
     cli._client = lambda: FakeClient()
-    class Args: username = None; password_stdin = False; full_name = None; guardian_password = None
+    # Offline, on the installer's zone; and never touch this machine's clock.
+    timezones.guess = lambda *a, **k: ""
+    timezones.current = lambda *a, **k: "America/New_York"
+    timezones.set_zone = lambda zone: created.update(timezone=zone)
+    class Args: username = None; password_stdin = False; full_name = None; guardian_password = None; timezone = ""
     try:
         rc = cli.cmd_setup(Args())
     except BaseException as e:
@@ -99,6 +104,8 @@ def send(text):
     os.write(m, text.encode() + b"\n")
 
 steps = [
+    (b"Time zone [America/New_York]: ", "nowhere-at-all"),
+    (b"not a time zone",     "jerusalem"),
     (b"Username: ",          "boot-test-admin"),
     (b"Full name",           "Boot Test"),
     (b"Password: ",          "boot-test-pw-1"),
@@ -128,6 +135,7 @@ if ok:
     assert created.get("username") == "boot-test-admin", created
     assert created.get("password") == "boot-test-pw-1", created
     assert created.get("guardian") == "", created
+    assert created.get("timezone") == "Asia/Jerusalem", created
     assert created.get("grub") == "boot-test-pw-1", created
     if ENCRYPTED:
         assert created.get("recovery_prepared") and created.get("recovery_confirmed"), created

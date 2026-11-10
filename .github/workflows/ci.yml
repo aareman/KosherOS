@@ -57,8 +57,10 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y python3-gi gir1.2-glib-2.0 python3-pip nftables
+          # mitmproxy: the proxy addon tests, including the AI answer
+          # checks, run against the real thing rather than being skipped.
           python3 -m pip install --break-system-packages \
-            pytest pytest-cov jsonschema cryptography fastapi httpx pillow pyyaml
+            pytest pytest-cov jsonschema cryptography fastapi httpx pillow pyyaml mitmproxy
       - name: Device tests with coverage
         run: |
           cd kosherd
@@ -206,9 +208,21 @@ jobs:
           # of Python. The base is pinned by digest (scripts/bump-base.py),
           # so the cache holds until the base is bumped on purpose.
           podman login ghcr.io -u "$GITHUB_ACTOR" -p "${{ secrets.GITHUB_TOKEN }}"
-          podman build --build-arg "KOSHER_VERSION=$version" \
-            --layers --cache-from "$IMAGE-cache" --cache-to "$IMAGE-cache" \
-            -t "$IMAGE:${SHA::12}" -t "$IMAGE:edge" -f os-image/Containerfile .
+          # Builds that write the same new layers at once (a base bump: this
+          # and two trains on 2026-11-09) get "User cannot be authenticated"
+          # from ghcr for one push, and a failed cache push fails the build.
+          # Another go is cheap: the layers built so far stay on the runner.
+          for try in 1 2 3; do
+            if podman build --build-arg "KOSHER_VERSION=$version" \
+                 --layers --cache-from "$IMAGE-cache" --cache-to "$IMAGE-cache" \
+                 -t "$IMAGE:${SHA::12}" -t "$IMAGE:edge" -f os-image/Containerfile .; then
+              break
+            fi
+            [ "$try" -lt 3 ] || exit 1
+            echo "::warning::the image build failed (try $try of 3); trying again"
+            sleep 30
+            podman login ghcr.io -u "$GITHUB_ACTOR" -p "${{ secrets.GITHUB_TOKEN }}"
+          done
 
       - name: The category lists are complete
         # Reads the catalogue back out of the built image and holds every

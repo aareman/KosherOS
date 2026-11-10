@@ -40,6 +40,13 @@ def test_the_key_forgets_fragments_but_not_size_or_judgement_version(monkeypatch
     assert videocheck.key("https://x/v.mp4", 1000) != b, "a fix must reach cached clips"
 
 
+def test_byte_ranges_have_separate_verdicts_even_with_the_same_start():
+    url = "https://x/v.mp4"
+    keys = {videocheck.key(url, 1000, content_range=byte_range) for byte_range in
+            (None, "bytes 0-99/1000", "bytes 0-499/1000", "bytes 100-999/1000")}
+    assert len(keys) == 4, "a clean header cannot approve unsampled video bytes"
+
+
 class _Images:
     """An ImageFilter double: judges whatever it is handed by a script."""
 
@@ -50,6 +57,18 @@ class _Images:
         self.cache = cache
         self.judged = 0
         self._pool = None
+        self._workers = 1
+        self._async_slots = None
+        self._prepare_slots = None
+        self._prepare_pool = None
+        self._inflight = {}
+        self._closed = False
+        self.timeout = 1.0
+
+    run_async = vision.ImageFilter.run_async
+    prepare_async = vision.ImageFilter.prepare_async
+    close = vision.ImageFilter.close
+    _run_async = vision.ImageFilter._run_async
 
     def judge_bytes(self, frame, sha=None):
         self.judged += 1
@@ -249,3 +268,48 @@ def test_the_walk_after_fruitless_seeks_decodes_on_a_fresh_container(monkeypatch
     frames = videocheck.sample_frames(b"\x47" * 188 * 10, max_frames=4)
     assert frames, "the segment is readable: the drained first decoder was the problem"
     assert _Container.opened == 2, "the walk opened the clip afresh"
+
+
+# -- a clip read through its source (#271) --------------------------------------------
+
+def test_the_range_reader_fetches_whole_blocks_once_and_keeps_to_its_budget():
+    size = 3 * videocheck.REMOTE_BLOCK + 10
+    calls = []
+
+    def fetch(start, end):
+        calls.append((start, end))
+        return bytes([start // videocheck.REMOTE_BLOCK]) * (end - start + 1)
+
+    reader = videocheck.RangeReader(fetch, size, max_fetches=2)
+    assert reader.seekable() and reader.readable()
+    reader.seek(videocheck.REMOTE_BLOCK - 2)
+    assert reader.read(4) == b"\x00\x00\x01\x01", "a read across a block edge"
+    assert calls == [(0, videocheck.REMOTE_BLOCK - 1),
+                     (videocheck.REMOTE_BLOCK, 2 * videocheck.REMOTE_BLOCK - 1)]
+    reader.seek(0)
+    assert reader.read(3) == b"\x00\x00\x00" and len(calls) == 2, "a block is fetched once"
+    assert reader.seek(-10, 2) == size - 10
+    with pytest.raises(videocheck.RangeBudget):
+        reader.read(1)
+    assert reader.seek(10 ** 9) == size, "seeks clamp to the file"
+
+
+def test_sampling_through_the_source_shares_the_fetched_blocks_between_passes(monkeypatch):
+    import sys
+    import types
+
+    readers = []
+
+    class _Fresh(_Container):
+        def __init__(self, reader):
+            super().__init__()
+            readers.append(reader)
+
+    fake_av = types.ModuleType("av")
+    fake_av.open = lambda reader, *a, **k: _Fresh(reader)
+    monkeypatch.setitem(sys.modules, "av", fake_av)
+    _Container.opened = 0
+    frames = videocheck.sample_remote(lambda s, e: b"x" * (e - s + 1), 5 * videocheck.REMOTE_BLOCK,
+                                      max_frames=4)
+    assert frames and _Container.opened == 2
+    assert readers[0].blocks is readers[1].blocks, "the walk reuses what the seeks fetched"

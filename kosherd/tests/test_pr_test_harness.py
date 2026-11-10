@@ -335,3 +335,32 @@ def test_a_switch_to_the_release_repository_is_held_to_the_signature_policy():
         == pr_test.RELEASE_IMAGE
     assert pr_test.parse_registry_image("ghcr.io/aareman/kosher-linux-ci:x-1@sha256:" + "0" * 64)[0] \
         != pr_test.RELEASE_IMAGE
+
+
+def test_the_registry_keeps_only_the_base_tag_and_collects_the_rest(tmp_path):
+    tags = tmp_path / "docker/registry/v2/repositories/kosher-linux/_manifests/tags"
+    for t in ("base", "pr-test-head", "pr-test-pr-224"):
+        (tags / t / "current").mkdir(parents=True)
+    bin_ = tmp_path / "bin"
+    bin_.mkdir()
+    (bin_ / "registry").write_text('#!/bin/sh\necho "$@" > "$GC_LOG"\n')
+    (bin_ / "registry").chmod(0o755)
+    env = {**os.environ, "PATH": f"{bin_}:{os.environ['PATH']}", "GC_LOG": str(tmp_path / "gc")}
+    subprocess.run(["sh", "-c", pr_test.REGISTRY_PRUNE, "sh", str(tmp_path)], env=env, check=True)
+    assert sorted(p.name for p in tags.iterdir()) == ["base"]
+    assert "garbage-collect --delete-untagged" in (tmp_path / "gc").read_text()
+
+
+def test_an_empty_registry_is_left_alone(tmp_path):
+    subprocess.run(["sh", "-c", pr_test.REGISTRY_PRUNE, "sh", str(tmp_path)], check=True)
+
+
+def test_the_registry_is_restarted_after_a_collection(tmp_path, monkeypatch):
+    # Its in-memory blob cache would otherwise vouch for deleted layers.
+    calls = []
+    monkeypatch.setattr(pr_test.subprocess, "run", lambda *a, **k: subprocess.CompletedProcess(a, 0))
+    monkeypatch.setattr(pr_test, "registry_up", lambda env, log: calls.append(["up"]))
+    monkeypatch.setattr(pr_test, "run_logged", lambda cmd, log, env, **k: calls.append(cmd) or 0)
+    pr_test.prune_registry({}, tmp_path / "log")
+    kinds = [c[1] if c[0] == "podman" else c[0] for c in calls]
+    assert kinds.index("exec") < kinds.index("restart") < len(kinds) - 1 and kinds[-1] == "up"

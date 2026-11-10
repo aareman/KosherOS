@@ -1,0 +1,1953 @@
+{
+  "scope": "Preliminary low-power pipeline evidence only. Candidate fbe3edc used the older persistent Checked badges. These timings do not measure the final subtle-loading/no-approved-badge UI at 62b72c6.",
+  "baseline_commit": "506ebba40af8fd5fefb37125eb61c7bc565d45fb",
+  "candidate_commit": "fbe3edccea90b66e9d8d9fec3164dde8c6d0d904",
+  "source": "build/image-perf-browser-verified",
+  "selection": "Only completed before/after pairs with the same scenario and repeat, valid recorded geometry/pixel/media checks, no browser errors, matching source hashes and per-trial quiet/power/powersave metadata. Aborted/incomplete trials excluded. Modes were recorded at trial start, not continuously.",
+  "aggregation": "Median of per-trial metrics within each side. Percentiles are not pooled across trials. Exactly two completed pairs per scenario; descriptive preliminary results, without a statistical-significance claim.",
+  "run_environment": {
+    "browser": {
+      "protocolVersion": "1.3",
+      "product": "Chrome/156.0.8078.80",
+      "revision": "@cc92146ef17860a4511f7de658b078128dbaad5",
+      "userAgent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Safari/537.36",
+      "jsVersion": "15.6.75.27"
+    },
+    "browser_command_line": {
+      "arguments": null
+    },
+    "host": {
+      "architecture": "x86_64",
+      "kernel": "7.2.13-200.fc44.x86_64",
+      "logical_cpus": 12,
+      "python": "3.14.8",
+      "cpu_model": "Intel(R) Core(TM) i7-10710U CPU @ 1.10GHz",
+      "platform_profile": "quiet",
+      "energy_preferences": [
+        "power"
+      ],
+      "governors": [
+        "powersave"
+      ],
+      "load_average": [
+        2.4365234375,
+        3.09619140625,
+        3.49609375
+      ]
+    },
+    "seconds": 20.0,
+    "repeats": 3,
+    "scenarios": [
+      "hidden",
+      "intrinsic",
+      "covers",
+      "inference"
+    ],
+    "harness_sha256": {
+      "browser.py": "39310351c6bd6d63bdf9c12f81922e7469f1f7927f91075c70e4ab5f3d3f5162",
+      "addon.py": "55dc901c5dacfde9eeb668f8c25fd0aa0b6c342aecd3be375b6a87b58bb34e48"
+    },
+    "assets_sha256": {
+      "22.jpg": "4fe5d61dbeb2c4381093e434486adb5fa87bacb1cd593195bc53dae0d9297206",
+      "2.jpg": "682bfc1e826d0d138c2d4e2cfcf063fc9d19f4145536e90b0abdf9eed90fb95a",
+      "13.jpg": "806713a7dbefe4bf8d48788d2d131498e0ac34333cb97b7b3bb7d15625bbf75e",
+      "7.jpg": "6c74f05902a9f31aad58f8178ed0f7a850c6bb3b59935f0c7cbf7b5c2e3f86d4",
+      "10.jpg": "c391239e6ff0b66ef5cc346a99f26554ebef848a540ef10011e25c06b21f7967",
+      "19.jpg": "249b8d3b85599320d1f189d2fb33b0b4d8eece40ea986d80a9a70248d169e3a6",
+      "5.jpg": "ff53c8cf428133a5e13c2e7a4b36791cc8c2599a97ab8d4f5218a65d5b7b79f2",
+      "6.jpg": "0323c0e92626b0ea1717d5881b094a1a35b7b44173c7c64662573a65a1df30e8",
+      "0.jpg": "a263df97f7d81ad15b85a374ae9a492475e1729cb691dace57ee7cb06e054e8c",
+      "1.jpg": "bcfb65ca044b28feb43c1b8e0fcf7372beea0e8a333ca3901c21eb15be83bd56",
+      "9.jpg": "4fea027283a52f094537cf1b8a4800913d9a4d655b6b021c7fcd8e3fa7578d37",
+      "14.jpg": "3bc0e9edff014e60d5cab7f977a2c710e108d907f8ee253685e51e342eeb550b",
+      "11.jpg": "fc0ab69c313b1822a536f85630b5e739176dfd6c328c9dc799cc5729aef78c5a",
+      "23.jpg": "103a91bcf03acba13b7adf9f266807d300493e8928c16a661d5de6d541adf47d",
+      "21.jpg": "2895523ecc79b1122aac10f760c8ebd858ab6582f1d60d8a7e19bf0dfb7542b6",
+      "8.jpg": "1b7d5b5593529d190eb408e0ab4d38f0a16f2e6fa3db254be48a3ccf885cd6fd",
+      "15.jpg": "d8b0bb097d76621ec85f9df5a31a0085a40b7927ff7fe9f45e0a97a70ad3bce4",
+      "clip.mp4": "ce0f7b8f8daa3684209d3e4a639e4a80af29bc8eab4f5247e4aea7b14d0d5978",
+      "18.jpg": "ff0137ae8581c3cc71ef22d9ae5016494b9ed8ea81ae4adc1fcb5b4c21bb90af",
+      "12.jpg": "81ffcf47858187079b66e31adc069c72df041a90a6c67300d3a9a2e5967fe122",
+      "20.jpg": "7d66a3c14eeaa6ee412d7ba08621d995f5620717c7ccb838916d03d52d19c666",
+      "16.jpg": "83ad060cbf673eb739043399c003a5ba9328c99395e1fe227b0ccd3676ed2bd4",
+      "17.jpg": "b0a4b9aafef7838a030a8906488311a935bf6221a94a53a30a8cc0222ff28fcc",
+      "3.jpg": "deba6d9ef4be8618e7e8c7cdb072a75dd000934375134034de0abdad4820ab1c",
+      "4.jpg": "b6a1dd8c5ac52439f89683918f1c0e2f21ef143d6b3816b644dda41572d615be"
+    }
+  },
+  "trials": [
+    {
+      "directory": "before-hidden-0",
+      "environment": {
+        "source": {
+          "root": "/tmp/kosher-browser-baseline",
+          "commit": null,
+          "tracked_diff_sha256": null,
+          "files_sha256": {
+            "mitm/kosher_filter.py": "4bf6924083cdc2e2976fd875ba52e3de17681280bf75a96f1737cc6ec38a51ee",
+            "mitm/kosher_page.js": "8d2f7db3514da1689a9732ce3d9ff118e17e0cb875073714b7c1770ca8b29948",
+            "kosherd/src/kosherd/vision.py": "90e1602019c70bb5c242c3f8db3c029da4b124aea79111ebb58ea18acbba9f8e",
+            "kosherd/src/kosherd/videocheck.py": "00f1f4023b82525012111932b844622ac43c938fcb6ab8b2cda55fc40fa4a19b",
+            "kosherd/src/kosherd/imageedit.py": "b03afebf4ffc4d8a2ddb9d92d7a743107fc2c22be46e0879411f586fcf617465"
+          }
+        },
+        "host": {
+          "architecture": "x86_64",
+          "kernel": "7.2.13-200.fc44.x86_64",
+          "logical_cpus": 12,
+          "python": "3.14.8",
+          "cpu_model": "Intel(R) Core(TM) i7-10710U CPU @ 1.10GHz",
+          "platform_profile": "quiet",
+          "energy_preferences": [
+            "power"
+          ],
+          "governors": [
+            "powersave"
+          ],
+          "load_average": [
+            2.4365234375,
+            3.09619140625,
+            3.49609375
+          ]
+        },
+        "runtime_pythonpath": [
+          "/tmp/kosher-browser-baseline/kosherd/src"
+        ]
+      },
+      "independent_checks": {
+        "completed": true,
+        "recorded_validation_passed": true,
+        "browser_errors_empty": true,
+        "power_mode_matches": true,
+        "source_files_match_commit": "506ebba40af8fd5fefb37125eb61c7bc565d45fb",
+        "natural_dimensions_match_original_assets": 36,
+        "raw_response_counts_match_summary": true
+      },
+      "summary": {
+        "version": "before",
+        "scenario": "hidden",
+        "repeat": 0,
+        "browser": "156.0.8078.80",
+        "critical_js_ms": 192.9,
+        "dom_content_loaded_ms": 193.1,
+        "load_ms": 3132.9,
+        "frame_gap_p95_ms": 16.7,
+        "frame_gap_max_ms": 133.4,
+        "frames_over_50ms": 6,
+        "loading_frame_gap_p95_ms": 16.8,
+        "loading_frame_gap_max_ms": 133.4,
+        "input_next_frame_p95_ms": 8.5,
+        "input_next_frame_max_ms": 105.8,
+        "reported_interactions": 0,
+        "reported_interaction_max_ms": null,
+        "input_dispatches": 107,
+        "cdp_dispatch_roundtrip_max_ms": 133.44,
+        "clicks": 107,
+        "long_tasks": 0,
+        "long_task_total_ms": 0,
+        "layout_shift_sum": 0,
+        "layout_shift_sum_including_input": 2.1e-05,
+        "ping_p95_ms": 1115,
+        "ping_max_ms": 1538.1,
+        "proxy_lag_p95_ms": 3.99,
+        "proxy_lag_max_ms": 594.64,
+        "inferences": 0,
+        "image_complete": 36,
+        "media_results": {
+          "image-hidden": 36
+        },
+        "image_status_ui_hosts": 0,
+        "visible_image_status_labels": {},
+        "status_api_http_codes": {},
+        "video_states": [],
+        "validation": {
+          "valid": true,
+          "errors": [],
+          "geometry_preserved": 36,
+          "verified_hidden_tiles": 36,
+          "verified_covers": 0
+        }
+      },
+      "raw_sha256": {
+        "summary.json": "754ca5065168d95bb877052bb1e0efcccb821d5990c79334191584e590f36ee1",
+        "browser.json": "59de86fc41bbc9eaf7649bd8598c3ac8e1223462868ede69dc92bd4f7d18f690",
+        "proxy.json": "60ea6377431ca49b324797c1483ffde2678fa99e86e6ac784372cfc01724c7b8",
+        "environment.json": "9e4023b366b0b8354ab132e9ab0af06fd3553dd8eb9740233ea2b9b515e728c6"
+      }
+    },
+    {
+      "directory": "after-hidden-0",
+      "environment": {
+        "source": {
+          "root": "/tmp/kosher-image-perf",
+          "commit": "fbe3edccea90b66e9d8d9fec3164dde8c6d0d904",
+          "tracked_diff_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "files_sha256": {
+            "mitm/kosher_filter.py": "1f04048aa249bdd519d5a4af0c916a2dcbb4a3e26e29b4a13e3d3a32bcd55e4c",
+            "mitm/kosher_page.js": "b362b74b6462fa9aa8774bca4659b751c23a643fb2d1c6ae00453a9348f3226a",
+            "kosherd/src/kosherd/vision.py": "ec8accb4240ced2e2f9a895bc09e83623f4777897659cab009b78969bd1abec3",
+            "kosherd/src/kosherd/videocheck.py": "f25405816695a32992047b62593e9c78810bfc4ced9779604bbdbaea90a34ce9",
+            "kosherd/src/kosherd/imageedit.py": "465877afcf50b70884e3571241464a9bfa99e12c24ecbaf781f5dfd92cff0f0e"
+          }
+        },
+        "host": {
+          "architecture": "x86_64",
+          "kernel": "7.2.13-200.fc44.x86_64",
+          "logical_cpus": 12,
+          "python": "3.14.8",
+          "cpu_model": "Intel(R) Core(TM) i7-10710U CPU @ 1.10GHz",
+          "platform_profile": "quiet",
+          "energy_preferences": [
+            "power"
+          ],
+          "governors": [
+            "powersave"
+          ],
+          "load_average": [
+            2.40185546875,
+            3.001953125,
+            3.44384765625
+          ]
+        },
+        "runtime_pythonpath": [
+          "/tmp/kosher-image-perf/kosherd/src",
+          "/tmp/kosher-avif-pillow"
+        ]
+      },
+      "independent_checks": {
+        "completed": true,
+        "recorded_validation_passed": true,
+        "browser_errors_empty": true,
+        "power_mode_matches": true,
+        "source_files_match_commit": "fbe3edccea90b66e9d8d9fec3164dde8c6d0d904",
+        "natural_dimensions_match_original_assets": 36,
+        "raw_response_counts_match_summary": true
+      },
+      "summary": {
+        "version": "after",
+        "scenario": "hidden",
+        "repeat": 0,
+        "browser": "156.0.8078.80",
+        "critical_js_ms": 210.1,
+        "dom_content_loaded_ms": 222.5,
+        "load_ms": 3174.8,
+        "frame_gap_p95_ms": 16.8,
+        "frame_gap_max_ms": 100,
+        "frames_over_50ms": 7,
+        "loading_frame_gap_p95_ms": 50,
+        "loading_frame_gap_max_ms": 100,
+        "input_next_frame_p95_ms": 9.1,
+        "input_next_frame_max_ms": 66.6,
+        "reported_interactions": 0,
+        "reported_interaction_max_ms": null,
+        "input_dispatches": 107,
+        "cdp_dispatch_roundtrip_max_ms": 89.13,
+        "clicks": 106,
+        "long_tasks": 0,
+        "long_task_total_ms": 0,
+        "layout_shift_sum": 0,
+        "layout_shift_sum_including_input": 0,
+        "ping_p95_ms": 57.7,
+        "ping_max_ms": 470.6,
+        "proxy_lag_p95_ms": 4.31,
+        "proxy_lag_max_ms": 167.27,
+        "inferences": 0,
+        "image_complete": 36,
+        "media_results": {
+          "image-hidden": 36
+        },
+        "image_status_ui_hosts": 1,
+        "visible_image_status_labels": {
+          "Hidden": 16
+        },
+        "status_api_http_codes": {
+          "200": 5
+        },
+        "video_states": [],
+        "validation": {
+          "valid": true,
+          "errors": [],
+          "geometry_preserved": 36,
+          "verified_hidden_tiles": 36,
+          "verified_covers": 0
+        }
+      },
+      "raw_sha256": {
+        "summary.json": "d56c1353b8902ec3a5033bdd183252e87cff1a5feed2125dcf5dbb40d1635ccc",
+        "browser.json": "664be7142b4d8b3fb31c60cb7c09019ce9451504b125d1bd9bf7d339bb21b6bf",
+        "proxy.json": "284af7adf75c9d6e2d450dac3ed35542365e626118cc31f1c40812b9dc1011f4",
+        "environment.json": "9b94f25ce7e32b8aa399784e0dd25adc4fcb0c329fcc57bd87262141345d7d9d"
+      }
+    },
+    {
+      "directory": "before-hidden-1",
+      "environment": {
+        "source": {
+          "root": "/tmp/kosher-browser-baseline",
+          "commit": null,
+          "tracked_diff_sha256": null,
+          "files_sha256": {
+            "mitm/kosher_filter.py": "4bf6924083cdc2e2976fd875ba52e3de17681280bf75a96f1737cc6ec38a51ee",
+            "mitm/kosher_page.js": "8d2f7db3514da1689a9732ce3d9ff118e17e0cb875073714b7c1770ca8b29948",
+            "kosherd/src/kosherd/vision.py": "90e1602019c70bb5c242c3f8db3c029da4b124aea79111ebb58ea18acbba9f8e",
+            "kosherd/src/kosherd/videocheck.py": "00f1f4023b82525012111932b844622ac43c938fcb6ab8b2cda55fc40fa4a19b",
+            "kosherd/src/kosherd/imageedit.py": "b03afebf4ffc4d8a2ddb9d92d7a743107fc2c22be46e0879411f586fcf617465"
+          }
+        },
+        "host": {
+          "architecture": "x86_64",
+          "kernel": "7.2.13-200.fc44.x86_64",
+          "logical_cpus": 12,
+          "python": "3.14.8",
+          "cpu_model": "Intel(R) Core(TM) i7-10710U CPU @ 1.10GHz",
+          "platform_profile": "quiet",
+          "energy_preferences": [
+            "power"
+          ],
+          "governors": [
+            "powersave"
+          ],
+          "load_average": [
+            3.12060546875,
+            3.40869140625,
+            3.50146484375
+          ]
+        },
+        "runtime_pythonpath": [
+          "/tmp/kosher-browser-baseline/kosherd/src"
+        ]
+      },
+      "independent_checks": {
+        "completed": true,
+        "recorded_validation_passed": true,
+        "browser_errors_empty": true,
+        "power_mode_matches": true,
+        "source_files_match_commit": "506ebba40af8fd5fefb37125eb61c7bc565d45fb",
+        "natural_dimensions_match_original_assets": 36,
+        "raw_response_counts_match_summary": true
+      },
+      "summary": {
+        "version": "before",
+        "scenario": "hidden",
+        "repeat": 1,
+        "browser": "156.0.8078.80",
+        "critical_js_ms": 194.3,
+        "dom_content_loaded_ms": 194.6,
+        "load_ms": 3130.7,
+        "frame_gap_p95_ms": 16.8,
+        "frame_gap_max_ms": 266.6,
+        "frames_over_50ms": 6,
+        "loading_frame_gap_p95_ms": 16.8,
+        "loading_frame_gap_max_ms": 266.6,
+        "input_next_frame_p95_ms": 10.7,
+        "input_next_frame_max_ms": 106.5,
+        "reported_interactions": 0,
+        "reported_interaction_max_ms": null,
+        "input_dispatches": 106,
+        "cdp_dispatch_roundtrip_max_ms": 113.96,
+        "clicks": 106,
+        "long_tasks": 1,
+        "long_task_total_ms": 50,
+        "layout_shift_sum": 0,
+        "layout_shift_sum_including_input": 2.1e-05,
+        "ping_p95_ms": 1117.4,
+        "ping_max_ms": 1834.2,
+        "proxy_lag_p95_ms": 3.98,
+        "proxy_lag_max_ms": 1106.07,
+        "inferences": 0,
+        "image_complete": 36,
+        "media_results": {
+          "image-hidden": 36
+        },
+        "image_status_ui_hosts": 0,
+        "visible_image_status_labels": {},
+        "status_api_http_codes": {},
+        "video_states": [],
+        "validation": {
+          "valid": true,
+          "errors": [],
+          "geometry_preserved": 36,
+          "verified_hidden_tiles": 36,
+          "verified_covers": 0
+        }
+      },
+      "raw_sha256": {
+        "summary.json": "585bcdde61e9f4e665ecaed85ff37ead34b6627dda2fe195d73d1277cd048e3e",
+        "browser.json": "8e652042b09bcde6fe4cb0ea71528db8a2bb5d8030c879d19c04a05d01b3d69a",
+        "proxy.json": "d34d2d5f19f8a57fe929b62fbe3b06aebcfba77fefea5b51cc0a233e3aad1154",
+        "environment.json": "6b06edeee680b773649628ac80e14fc313010753bc8ec5a671d49b1c1709201e"
+      }
+    },
+    {
+      "directory": "after-hidden-1",
+      "environment": {
+        "source": {
+          "root": "/tmp/kosher-image-perf",
+          "commit": "fbe3edccea90b66e9d8d9fec3164dde8c6d0d904",
+          "tracked_diff_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "files_sha256": {
+            "mitm/kosher_filter.py": "1f04048aa249bdd519d5a4af0c916a2dcbb4a3e26e29b4a13e3d3a32bcd55e4c",
+            "mitm/kosher_page.js": "b362b74b6462fa9aa8774bca4659b751c23a643fb2d1c6ae00453a9348f3226a",
+            "kosherd/src/kosherd/vision.py": "ec8accb4240ced2e2f9a895bc09e83623f4777897659cab009b78969bd1abec3",
+            "kosherd/src/kosherd/videocheck.py": "f25405816695a32992047b62593e9c78810bfc4ced9779604bbdbaea90a34ce9",
+            "kosherd/src/kosherd/imageedit.py": "465877afcf50b70884e3571241464a9bfa99e12c24ecbaf781f5dfd92cff0f0e"
+          }
+        },
+        "host": {
+          "architecture": "x86_64",
+          "kernel": "7.2.13-200.fc44.x86_64",
+          "logical_cpus": 12,
+          "python": "3.14.8",
+          "cpu_model": "Intel(R) Core(TM) i7-10710U CPU @ 1.10GHz",
+          "platform_profile": "quiet",
+          "energy_preferences": [
+            "power"
+          ],
+          "governors": [
+            "powersave"
+          ],
+          "load_average": [
+            3.6181640625,
+            3.5390625,
+            3.546875
+          ]
+        },
+        "runtime_pythonpath": [
+          "/tmp/kosher-image-perf/kosherd/src",
+          "/tmp/kosher-avif-pillow"
+        ]
+      },
+      "independent_checks": {
+        "completed": true,
+        "recorded_validation_passed": true,
+        "browser_errors_empty": true,
+        "power_mode_matches": true,
+        "source_files_match_commit": "fbe3edccea90b66e9d8d9fec3164dde8c6d0d904",
+        "natural_dimensions_match_original_assets": 36,
+        "raw_response_counts_match_summary": true
+      },
+      "summary": {
+        "version": "after",
+        "scenario": "hidden",
+        "repeat": 1,
+        "browser": "156.0.8078.80",
+        "critical_js_ms": 185.9,
+        "dom_content_loaded_ms": 238.1,
+        "load_ms": 3138.5,
+        "frame_gap_p95_ms": 16.7,
+        "frame_gap_max_ms": 83.5,
+        "frames_over_50ms": 12,
+        "loading_frame_gap_p95_ms": 66.7,
+        "loading_frame_gap_max_ms": 83.5,
+        "input_next_frame_p95_ms": 9.6,
+        "input_next_frame_max_ms": 57.4,
+        "reported_interactions": 0,
+        "reported_interaction_max_ms": null,
+        "input_dispatches": 108,
+        "cdp_dispatch_roundtrip_max_ms": 106.9,
+        "clicks": 108,
+        "long_tasks": 0,
+        "long_task_total_ms": 0,
+        "layout_shift_sum": 0,
+        "layout_shift_sum_including_input": 2.1e-05,
+        "ping_p95_ms": 65.7,
+        "ping_max_ms": 521,
+        "proxy_lag_p95_ms": 3.85,
+        "proxy_lag_max_ms": 216.9,
+        "inferences": 0,
+        "image_complete": 36,
+        "media_results": {
+          "image-hidden": 36
+        },
+        "image_status_ui_hosts": 1,
+        "visible_image_status_labels": {
+          "Hidden": 20
+        },
+        "status_api_http_codes": {
+          "200": 5
+        },
+        "video_states": [],
+        "validation": {
+          "valid": true,
+          "errors": [],
+          "geometry_preserved": 36,
+          "verified_hidden_tiles": 36,
+          "verified_covers": 0
+        }
+      },
+      "raw_sha256": {
+        "summary.json": "165639b0f2f0e748bb0113f0d740e3856f6a5982e23fa444bc94088a368d0628",
+        "browser.json": "3a63b4829f8ebe96b36b7e271c86f14525f1efddf1da58fb93bd7955dd8d4912",
+        "proxy.json": "3a2a2a6cdfee95982b2ae1206f01942a861bd149a5a800cfb98184676ce38986",
+        "environment.json": "2784723beb62444f161f8a305e045e798fc91bd9126ddcc4a7edef56cecf4c1c"
+      }
+    },
+    {
+      "directory": "before-intrinsic-0",
+      "environment": {
+        "source": {
+          "root": "/tmp/kosher-browser-baseline",
+          "commit": null,
+          "tracked_diff_sha256": null,
+          "files_sha256": {
+            "mitm/kosher_filter.py": "4bf6924083cdc2e2976fd875ba52e3de17681280bf75a96f1737cc6ec38a51ee",
+            "mitm/kosher_page.js": "8d2f7db3514da1689a9732ce3d9ff118e17e0cb875073714b7c1770ca8b29948",
+            "kosherd/src/kosherd/vision.py": "90e1602019c70bb5c242c3f8db3c029da4b124aea79111ebb58ea18acbba9f8e",
+            "kosherd/src/kosherd/videocheck.py": "00f1f4023b82525012111932b844622ac43c938fcb6ab8b2cda55fc40fa4a19b",
+            "kosherd/src/kosherd/imageedit.py": "b03afebf4ffc4d8a2ddb9d92d7a743107fc2c22be46e0879411f586fcf617465"
+          }
+        },
+        "host": {
+          "architecture": "x86_64",
+          "kernel": "7.2.13-200.fc44.x86_64",
+          "logical_cpus": 12,
+          "python": "3.14.8",
+          "cpu_model": "Intel(R) Core(TM) i7-10710U CPU @ 1.10GHz",
+          "platform_profile": "quiet",
+          "energy_preferences": [
+            "power"
+          ],
+          "governors": [
+            "powersave"
+          ],
+          "load_average": [
+            2.76025390625,
+            3.01513671875,
+            3.42822265625
+          ]
+        },
+        "runtime_pythonpath": [
+          "/tmp/kosher-browser-baseline/kosherd/src"
+        ]
+      },
+      "independent_checks": {
+        "completed": true,
+        "recorded_validation_passed": true,
+        "browser_errors_empty": true,
+        "power_mode_matches": true,
+        "source_files_match_commit": "506ebba40af8fd5fefb37125eb61c7bc565d45fb",
+        "natural_dimensions_match_original_assets": 6,
+        "raw_response_counts_match_summary": true
+      },
+      "summary": {
+        "version": "before",
+        "scenario": "intrinsic",
+        "repeat": 0,
+        "browser": "156.0.8078.80",
+        "critical_js_ms": 227.2,
+        "dom_content_loaded_ms": 227.4,
+        "load_ms": 1165.2,
+        "frame_gap_p95_ms": 16.7,
+        "frame_gap_max_ms": 116.6,
+        "frames_over_50ms": 2,
+        "loading_frame_gap_p95_ms": 16.8,
+        "loading_frame_gap_max_ms": 16.8,
+        "input_next_frame_p95_ms": 6.4,
+        "input_next_frame_max_ms": 69.6,
+        "reported_interactions": 0,
+        "reported_interaction_max_ms": null,
+        "input_dispatches": 109,
+        "cdp_dispatch_roundtrip_max_ms": 153.87,
+        "clicks": 108,
+        "long_tasks": 2,
+        "long_task_total_ms": 177,
+        "layout_shift_sum": 0,
+        "layout_shift_sum_including_input": 1.5e-05,
+        "ping_p95_ms": 42.8,
+        "ping_max_ms": 1133,
+        "proxy_lag_p95_ms": 3.66,
+        "proxy_lag_max_ms": 866.69,
+        "inferences": 0,
+        "image_complete": 6,
+        "media_results": {
+          "image-hidden": 6
+        },
+        "image_status_ui_hosts": 0,
+        "visible_image_status_labels": {},
+        "status_api_http_codes": {},
+        "video_states": [],
+        "validation": {
+          "valid": true,
+          "errors": [],
+          "geometry_preserved": 6,
+          "verified_hidden_tiles": 6,
+          "verified_covers": 0
+        }
+      },
+      "raw_sha256": {
+        "summary.json": "8771bb7f03093613bbc0e7d07c7e5a136420e9d90528804ca9faf4160d42b3af",
+        "browser.json": "38a50921371457a05f70803a8e83cb96e38c83db11c89c76d220758c1b719e29",
+        "proxy.json": "bf9918446900de9fbad40e83a0823f24ddb6eaf1ef585aff35f1a7cd91bef0a8",
+        "environment.json": "8d35589a7f33f5d511dd7e46fe0066d37f84b5c4703a3e8d3d6aa5fa976545c1"
+      }
+    },
+    {
+      "directory": "after-intrinsic-0",
+      "environment": {
+        "source": {
+          "root": "/tmp/kosher-image-perf",
+          "commit": "fbe3edccea90b66e9d8d9fec3164dde8c6d0d904",
+          "tracked_diff_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "files_sha256": {
+            "mitm/kosher_filter.py": "1f04048aa249bdd519d5a4af0c916a2dcbb4a3e26e29b4a13e3d3a32bcd55e4c",
+            "mitm/kosher_page.js": "b362b74b6462fa9aa8774bca4659b751c23a643fb2d1c6ae00453a9348f3226a",
+            "kosherd/src/kosherd/vision.py": "ec8accb4240ced2e2f9a895bc09e83623f4777897659cab009b78969bd1abec3",
+            "kosherd/src/kosherd/videocheck.py": "f25405816695a32992047b62593e9c78810bfc4ced9779604bbdbaea90a34ce9",
+            "kosherd/src/kosherd/imageedit.py": "465877afcf50b70884e3571241464a9bfa99e12c24ecbaf781f5dfd92cff0f0e"
+          }
+        },
+        "host": {
+          "architecture": "x86_64",
+          "kernel": "7.2.13-200.fc44.x86_64",
+          "logical_cpus": 12,
+          "python": "3.14.8",
+          "cpu_model": "Intel(R) Core(TM) i7-10710U CPU @ 1.10GHz",
+          "platform_profile": "quiet",
+          "energy_preferences": [
+            "power"
+          ],
+          "governors": [
+            "powersave"
+          ],
+          "load_average": [
+            2.82275390625,
+            2.99609375,
+            3.40185546875
+          ]
+        },
+        "runtime_pythonpath": [
+          "/tmp/kosher-image-perf/kosherd/src",
+          "/tmp/kosher-avif-pillow"
+        ]
+      },
+      "independent_checks": {
+        "completed": true,
+        "recorded_validation_passed": true,
+        "browser_errors_empty": true,
+        "power_mode_matches": true,
+        "source_files_match_commit": "fbe3edccea90b66e9d8d9fec3164dde8c6d0d904",
+        "natural_dimensions_match_original_assets": 6,
+        "raw_response_counts_match_summary": true
+      },
+      "summary": {
+        "version": "after",
+        "scenario": "intrinsic",
+        "repeat": 0,
+        "browser": "156.0.8078.80",
+        "critical_js_ms": 248.3,
+        "dom_content_loaded_ms": 259.1,
+        "load_ms": 903.7,
+        "frame_gap_p95_ms": 16.8,
+        "frame_gap_max_ms": 16.8,
+        "frames_over_50ms": 0,
+        "loading_frame_gap_p95_ms": 16.8,
+        "loading_frame_gap_max_ms": 16.8,
+        "input_next_frame_p95_ms": 6.2,
+        "input_next_frame_max_ms": 27.8,
+        "reported_interactions": 0,
+        "reported_interaction_max_ms": null,
+        "input_dispatches": 109,
+        "cdp_dispatch_roundtrip_max_ms": 49.72,
+        "clicks": 108,
+        "long_tasks": 0,
+        "long_task_total_ms": 0,
+        "layout_shift_sum": 0,
+        "layout_shift_sum_including_input": 1.5e-05,
+        "ping_p95_ms": 28,
+        "ping_max_ms": 89.3,
+        "proxy_lag_p95_ms": 3.99,
+        "proxy_lag_max_ms": 186.86,
+        "inferences": 0,
+        "image_complete": 6,
+        "media_results": {
+          "image-hidden": 6
+        },
+        "image_status_ui_hosts": 1,
+        "visible_image_status_labels": {
+          "Hidden": 6
+        },
+        "status_api_http_codes": {
+          "200": 1
+        },
+        "video_states": [],
+        "validation": {
+          "valid": true,
+          "errors": [],
+          "geometry_preserved": 6,
+          "verified_hidden_tiles": 6,
+          "verified_covers": 0
+        }
+      },
+      "raw_sha256": {
+        "summary.json": "ecf7d1ce1ce46ddc79df0535474050ef6a53444e6c00f0205a51678394ffcb45",
+        "browser.json": "4382b12b0c3eba58fa4f9726b602782566c00522478116bce7748f2910dfebbe",
+        "proxy.json": "93626dfafd9aaddfdd65cb98e0397d5564354cd6f9b81637c2f8a0f2a9c48a8b",
+        "environment.json": "242ba986396d39504596f64db78ba4abe6897ff20b0abe687f9abc6edf152caf"
+      }
+    },
+    {
+      "directory": "before-intrinsic-1",
+      "environment": {
+        "source": {
+          "root": "/tmp/kosher-browser-baseline",
+          "commit": null,
+          "tracked_diff_sha256": null,
+          "files_sha256": {
+            "mitm/kosher_filter.py": "4bf6924083cdc2e2976fd875ba52e3de17681280bf75a96f1737cc6ec38a51ee",
+            "mitm/kosher_page.js": "8d2f7db3514da1689a9732ce3d9ff118e17e0cb875073714b7c1770ca8b29948",
+            "kosherd/src/kosherd/vision.py": "90e1602019c70bb5c242c3f8db3c029da4b124aea79111ebb58ea18acbba9f8e",
+            "kosherd/src/kosherd/videocheck.py": "00f1f4023b82525012111932b844622ac43c938fcb6ab8b2cda55fc40fa4a19b",
+            "kosherd/src/kosherd/imageedit.py": "b03afebf4ffc4d8a2ddb9d92d7a743107fc2c22be46e0879411f586fcf617465"
+          }
+        },
+        "host": {
+          "architecture": "x86_64",
+          "kernel": "7.2.13-200.fc44.x86_64",
+          "logical_cpus": 12,
+          "python": "3.14.8",
+          "cpu_model": "Intel(R) Core(TM) i7-10710U CPU @ 1.10GHz",
+          "platform_profile": "quiet",
+          "energy_preferences": [
+            "power"
+          ],
+          "governors": [
+            "powersave"
+          ],
+          "load_average": [
+            3.08740234375,
+            3.25634765625,
+            3.43359375
+          ]
+        },
+        "runtime_pythonpath": [
+          "/tmp/kosher-browser-baseline/kosherd/src"
+        ]
+      },
+      "independent_checks": {
+        "completed": true,
+        "recorded_validation_passed": true,
+        "browser_errors_empty": true,
+        "power_mode_matches": true,
+        "source_files_match_commit": "506ebba40af8fd5fefb37125eb61c7bc565d45fb",
+        "natural_dimensions_match_original_assets": 6,
+        "raw_response_counts_match_summary": true
+      },
+      "summary": {
+        "version": "before",
+        "scenario": "intrinsic",
+        "repeat": 1,
+        "browser": "156.0.8078.80",
+        "critical_js_ms": 202.6,
+        "dom_content_loaded_ms": 203,
+        "load_ms": 1135.1,
+        "frame_gap_p95_ms": 16.7,
+        "frame_gap_max_ms": 83.3,
+        "frames_over_50ms": 1,
+        "loading_frame_gap_p95_ms": 16.7,
+        "loading_frame_gap_max_ms": 33.3,
+        "input_next_frame_p95_ms": 6,
+        "input_next_frame_max_ms": 7.4,
+        "reported_interactions": 0,
+        "reported_interaction_max_ms": null,
+        "input_dispatches": 109,
+        "cdp_dispatch_roundtrip_max_ms": 44.86,
+        "clicks": 108,
+        "long_tasks": 1,
+        "long_task_total_ms": 66,
+        "layout_shift_sum": 0,
+        "layout_shift_sum_including_input": 1.5e-05,
+        "ping_p95_ms": 30,
+        "ping_max_ms": 995.4,
+        "proxy_lag_p95_ms": 4.2,
+        "proxy_lag_max_ms": 737.42,
+        "inferences": 0,
+        "image_complete": 6,
+        "media_results": {
+          "image-hidden": 6
+        },
+        "image_status_ui_hosts": 0,
+        "visible_image_status_labels": {},
+        "status_api_http_codes": {},
+        "video_states": [],
+        "validation": {
+          "valid": true,
+          "errors": [],
+          "geometry_preserved": 6,
+          "verified_hidden_tiles": 6,
+          "verified_covers": 0
+        }
+      },
+      "raw_sha256": {
+        "summary.json": "6c3d84dd358d826714065651dbcdd5fa478d965003eb287a84e232f391a22c4c",
+        "browser.json": "43a11728e45b777c963ea6ebcbc9144f7ac353dedcc7bceb31effefb68c15b1e",
+        "proxy.json": "b7c24a51d70292e471a03336ece48f67f244536d63044878c8c40ed2b68cba2c",
+        "environment.json": "cfbadabf5065e7695770618d5166d2b5bd2086605fbdf8b0116e3f44b81366c4"
+      }
+    },
+    {
+      "directory": "after-intrinsic-1",
+      "environment": {
+        "source": {
+          "root": "/tmp/kosher-image-perf",
+          "commit": "fbe3edccea90b66e9d8d9fec3164dde8c6d0d904",
+          "tracked_diff_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "files_sha256": {
+            "mitm/kosher_filter.py": "1f04048aa249bdd519d5a4af0c916a2dcbb4a3e26e29b4a13e3d3a32bcd55e4c",
+            "mitm/kosher_page.js": "b362b74b6462fa9aa8774bca4659b751c23a643fb2d1c6ae00453a9348f3226a",
+            "kosherd/src/kosherd/vision.py": "ec8accb4240ced2e2f9a895bc09e83623f4777897659cab009b78969bd1abec3",
+            "kosherd/src/kosherd/videocheck.py": "f25405816695a32992047b62593e9c78810bfc4ced9779604bbdbaea90a34ce9",
+            "kosherd/src/kosherd/imageedit.py": "465877afcf50b70884e3571241464a9bfa99e12c24ecbaf781f5dfd92cff0f0e"
+          }
+        },
+        "host": {
+          "architecture": "x86_64",
+          "kernel": "7.2.13-200.fc44.x86_64",
+          "logical_cpus": 12,
+          "python": "3.14.8",
+          "cpu_model": "Intel(R) Core(TM) i7-10710U CPU @ 1.10GHz",
+          "platform_profile": "quiet",
+          "energy_preferences": [
+            "power"
+          ],
+          "governors": [
+            "powersave"
+          ],
+          "load_average": [
+            2.5146484375,
+            3.22216796875,
+            3.43310546875
+          ]
+        },
+        "runtime_pythonpath": [
+          "/tmp/kosher-image-perf/kosherd/src",
+          "/tmp/kosher-avif-pillow"
+        ]
+      },
+      "independent_checks": {
+        "completed": true,
+        "recorded_validation_passed": true,
+        "browser_errors_empty": true,
+        "power_mode_matches": true,
+        "source_files_match_commit": "fbe3edccea90b66e9d8d9fec3164dde8c6d0d904",
+        "natural_dimensions_match_original_assets": 6,
+        "raw_response_counts_match_summary": true
+      },
+      "summary": {
+        "version": "after",
+        "scenario": "intrinsic",
+        "repeat": 1,
+        "browser": "156.0.8078.80",
+        "critical_js_ms": 239.3,
+        "dom_content_loaded_ms": 247.5,
+        "load_ms": 926.3,
+        "frame_gap_p95_ms": 16.7,
+        "frame_gap_max_ms": 16.8,
+        "frames_over_50ms": 0,
+        "loading_frame_gap_p95_ms": 16.7,
+        "loading_frame_gap_max_ms": 16.8,
+        "input_next_frame_p95_ms": 6.4,
+        "input_next_frame_max_ms": 16.8,
+        "reported_interactions": 0,
+        "reported_interaction_max_ms": null,
+        "input_dispatches": 111,
+        "cdp_dispatch_roundtrip_max_ms": 44.91,
+        "clicks": 110,
+        "long_tasks": 0,
+        "long_task_total_ms": 0,
+        "layout_shift_sum": 0,
+        "layout_shift_sum_including_input": 0,
+        "ping_p95_ms": 28.1,
+        "ping_max_ms": 78.3,
+        "proxy_lag_p95_ms": 3.55,
+        "proxy_lag_max_ms": 191.34,
+        "inferences": 0,
+        "image_complete": 6,
+        "media_results": {
+          "image-hidden": 6
+        },
+        "image_status_ui_hosts": 1,
+        "visible_image_status_labels": {
+          "Hidden": 6
+        },
+        "status_api_http_codes": {
+          "200": 1
+        },
+        "video_states": [],
+        "validation": {
+          "valid": true,
+          "errors": [],
+          "geometry_preserved": 6,
+          "verified_hidden_tiles": 6,
+          "verified_covers": 0
+        }
+      },
+      "raw_sha256": {
+        "summary.json": "a466a1f18d069e5068366f4d34fb6796530db4f8a0e9be0c94512560d5e8155c",
+        "browser.json": "c5156095a693cb7627f6d3984ebeb08c387824fc6ec7ae3d6baf7b440a9adca5",
+        "proxy.json": "4ad009ef2ff7b6796f1d3b39b75b90985085ead5667bf4403414f30826947e19",
+        "environment.json": "e2f43a2819b896bd5b137276ce9440a272a567c0010ce941f1cf59b8cd6ed34e"
+      }
+    },
+    {
+      "directory": "before-covers-0",
+      "environment": {
+        "source": {
+          "root": "/tmp/kosher-browser-baseline",
+          "commit": null,
+          "tracked_diff_sha256": null,
+          "files_sha256": {
+            "mitm/kosher_filter.py": "4bf6924083cdc2e2976fd875ba52e3de17681280bf75a96f1737cc6ec38a51ee",
+            "mitm/kosher_page.js": "8d2f7db3514da1689a9732ce3d9ff118e17e0cb875073714b7c1770ca8b29948",
+            "kosherd/src/kosherd/vision.py": "90e1602019c70bb5c242c3f8db3c029da4b124aea79111ebb58ea18acbba9f8e",
+            "kosherd/src/kosherd/videocheck.py": "00f1f4023b82525012111932b844622ac43c938fcb6ab8b2cda55fc40fa4a19b",
+            "kosherd/src/kosherd/imageedit.py": "b03afebf4ffc4d8a2ddb9d92d7a743107fc2c22be46e0879411f586fcf617465"
+          }
+        },
+        "host": {
+          "architecture": "x86_64",
+          "kernel": "7.2.13-200.fc44.x86_64",
+          "logical_cpus": 12,
+          "python": "3.14.8",
+          "cpu_model": "Intel(R) Core(TM) i7-10710U CPU @ 1.10GHz",
+          "platform_profile": "quiet",
+          "energy_preferences": [
+            "power"
+          ],
+          "governors": [
+            "powersave"
+          ],
+          "load_average": [
+            3.10791015625,
+            3.04443359375,
+            3.39794921875
+          ]
+        },
+        "runtime_pythonpath": [
+          "/tmp/kosher-browser-baseline/kosherd/src"
+        ]
+      },
+      "independent_checks": {
+        "completed": true,
+        "recorded_validation_passed": true,
+        "browser_errors_empty": true,
+        "power_mode_matches": true,
+        "source_files_match_commit": "506ebba40af8fd5fefb37125eb61c7bc565d45fb",
+        "natural_dimensions_match_original_assets": 36,
+        "raw_response_counts_match_summary": true
+      },
+      "summary": {
+        "version": "before",
+        "scenario": "covers",
+        "repeat": 0,
+        "browser": "156.0.8078.80",
+        "critical_js_ms": 229,
+        "dom_content_loaded_ms": 229.2,
+        "load_ms": 6138.3,
+        "frame_gap_p95_ms": 16.8,
+        "frame_gap_max_ms": 149.9,
+        "frames_over_50ms": 25,
+        "loading_frame_gap_p95_ms": 83.4,
+        "loading_frame_gap_max_ms": 149.9,
+        "input_next_frame_p95_ms": 13.7,
+        "input_next_frame_max_ms": 101,
+        "reported_interactions": 0,
+        "reported_interaction_max_ms": null,
+        "input_dispatches": 104,
+        "cdp_dispatch_roundtrip_max_ms": 112.42,
+        "clicks": 104,
+        "long_tasks": 0,
+        "long_task_total_ms": 0,
+        "layout_shift_sum": 0,
+        "layout_shift_sum_including_input": 1.6e-05,
+        "ping_p95_ms": 1430.5,
+        "ping_max_ms": 1696.9,
+        "proxy_lag_p95_ms": 6.14,
+        "proxy_lag_max_ms": 680.14,
+        "inferences": 0,
+        "image_complete": 36,
+        "media_results": {
+          "image-covered=nsfw": 36
+        },
+        "image_status_ui_hosts": 0,
+        "visible_image_status_labels": {},
+        "status_api_http_codes": {},
+        "video_states": [],
+        "validation": {
+          "valid": true,
+          "errors": [],
+          "geometry_preserved": 36,
+          "verified_hidden_tiles": 0,
+          "verified_covers": 36
+        }
+      },
+      "raw_sha256": {
+        "summary.json": "43f5b7e632eda377ee41e3d204b219174b1e144f01a24474643528e060d45e7c",
+        "browser.json": "eaf37247dc603fd4834ace5acf75256dd7d02a290f8fd137c9cf49c5be785d90",
+        "proxy.json": "9bea0de42776ed2c313dfc58376b266936030fb997bc9e88b37d2bb621bef58e",
+        "environment.json": "ecfa3ece4dd5f274145c8df7a66593171b883b2c6f43929615382d1700abce31"
+      }
+    },
+    {
+      "directory": "after-covers-0",
+      "environment": {
+        "source": {
+          "root": "/tmp/kosher-image-perf",
+          "commit": "fbe3edccea90b66e9d8d9fec3164dde8c6d0d904",
+          "tracked_diff_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "files_sha256": {
+            "mitm/kosher_filter.py": "1f04048aa249bdd519d5a4af0c916a2dcbb4a3e26e29b4a13e3d3a32bcd55e4c",
+            "mitm/kosher_page.js": "b362b74b6462fa9aa8774bca4659b751c23a643fb2d1c6ae00453a9348f3226a",
+            "kosherd/src/kosherd/vision.py": "ec8accb4240ced2e2f9a895bc09e83623f4777897659cab009b78969bd1abec3",
+            "kosherd/src/kosherd/videocheck.py": "f25405816695a32992047b62593e9c78810bfc4ced9779604bbdbaea90a34ce9",
+            "kosherd/src/kosherd/imageedit.py": "465877afcf50b70884e3571241464a9bfa99e12c24ecbaf781f5dfd92cff0f0e"
+          }
+        },
+        "host": {
+          "architecture": "x86_64",
+          "kernel": "7.2.13-200.fc44.x86_64",
+          "logical_cpus": 12,
+          "python": "3.14.8",
+          "cpu_model": "Intel(R) Core(TM) i7-10710U CPU @ 1.10GHz",
+          "platform_profile": "quiet",
+          "energy_preferences": [
+            "power"
+          ],
+          "governors": [
+            "powersave"
+          ],
+          "load_average": [
+            4.29638671875,
+            3.458984375,
+            3.5244140625
+          ]
+        },
+        "runtime_pythonpath": [
+          "/tmp/kosher-image-perf/kosherd/src",
+          "/tmp/kosher-avif-pillow"
+        ]
+      },
+      "independent_checks": {
+        "completed": true,
+        "recorded_validation_passed": true,
+        "browser_errors_empty": true,
+        "power_mode_matches": true,
+        "source_files_match_commit": "fbe3edccea90b66e9d8d9fec3164dde8c6d0d904",
+        "natural_dimensions_match_original_assets": 36,
+        "raw_response_counts_match_summary": true
+      },
+      "summary": {
+        "version": "after",
+        "scenario": "covers",
+        "repeat": 0,
+        "browser": "156.0.8078.80",
+        "critical_js_ms": 297,
+        "dom_content_loaded_ms": 308.1,
+        "load_ms": 5527.7,
+        "frame_gap_p95_ms": 16.8,
+        "frame_gap_max_ms": 150,
+        "frames_over_50ms": 25,
+        "loading_frame_gap_p95_ms": 100,
+        "loading_frame_gap_max_ms": 150,
+        "input_next_frame_p95_ms": 43.6,
+        "input_next_frame_max_ms": 105.9,
+        "reported_interactions": 0,
+        "reported_interaction_max_ms": null,
+        "input_dispatches": 102,
+        "cdp_dispatch_roundtrip_max_ms": 84.01,
+        "clicks": 101,
+        "long_tasks": 0,
+        "long_task_total_ms": 0,
+        "layout_shift_sum": 0,
+        "layout_shift_sum_including_input": 0,
+        "ping_p95_ms": 123.3,
+        "ping_max_ms": 399.7,
+        "proxy_lag_p95_ms": 7.5,
+        "proxy_lag_max_ms": 166.47,
+        "inferences": 0,
+        "image_complete": 36,
+        "media_results": {
+          "image-covered=nsfw": 36
+        },
+        "image_status_ui_hosts": 1,
+        "visible_image_status_labels": {
+          "Filtered": 16
+        },
+        "status_api_http_codes": {
+          "200": 7
+        },
+        "video_states": [],
+        "validation": {
+          "valid": true,
+          "errors": [],
+          "geometry_preserved": 36,
+          "verified_hidden_tiles": 0,
+          "verified_covers": 36
+        }
+      },
+      "raw_sha256": {
+        "summary.json": "f63bcd2c013f90416a2f02b97064c688794ebc43ddc01ca5c37103bd62b7444e",
+        "browser.json": "de97aa7b2eee65a6137a960461d550aa9966c91c2b2224465fbb33b0f4c64e26",
+        "proxy.json": "dcf9314417514dc2086f324664fdf3f8aac046b9e754034298116beccfc8f485",
+        "environment.json": "700fda00741fd8c41473a6a556dba34407e658f795238531d96bb80232ea5c31"
+      }
+    },
+    {
+      "directory": "before-covers-1",
+      "environment": {
+        "source": {
+          "root": "/tmp/kosher-browser-baseline",
+          "commit": null,
+          "tracked_diff_sha256": null,
+          "files_sha256": {
+            "mitm/kosher_filter.py": "4bf6924083cdc2e2976fd875ba52e3de17681280bf75a96f1737cc6ec38a51ee",
+            "mitm/kosher_page.js": "8d2f7db3514da1689a9732ce3d9ff118e17e0cb875073714b7c1770ca8b29948",
+            "kosherd/src/kosherd/vision.py": "90e1602019c70bb5c242c3f8db3c029da4b124aea79111ebb58ea18acbba9f8e",
+            "kosherd/src/kosherd/videocheck.py": "00f1f4023b82525012111932b844622ac43c938fcb6ab8b2cda55fc40fa4a19b",
+            "kosherd/src/kosherd/imageedit.py": "b03afebf4ffc4d8a2ddb9d92d7a743107fc2c22be46e0879411f586fcf617465"
+          }
+        },
+        "host": {
+          "architecture": "x86_64",
+          "kernel": "7.2.13-200.fc44.x86_64",
+          "logical_cpus": 12,
+          "python": "3.14.8",
+          "cpu_model": "Intel(R) Core(TM) i7-10710U CPU @ 1.10GHz",
+          "platform_profile": "quiet",
+          "energy_preferences": [
+            "power"
+          ],
+          "governors": [
+            "powersave"
+          ],
+          "load_average": [
+            3.078125,
+            3.18701171875,
+            3.3896484375
+          ]
+        },
+        "runtime_pythonpath": [
+          "/tmp/kosher-browser-baseline/kosherd/src"
+        ]
+      },
+      "independent_checks": {
+        "completed": true,
+        "recorded_validation_passed": true,
+        "browser_errors_empty": true,
+        "power_mode_matches": true,
+        "source_files_match_commit": "506ebba40af8fd5fefb37125eb61c7bc565d45fb",
+        "natural_dimensions_match_original_assets": 36,
+        "raw_response_counts_match_summary": true
+      },
+      "summary": {
+        "version": "before",
+        "scenario": "covers",
+        "repeat": 1,
+        "browser": "156.0.8078.80",
+        "critical_js_ms": 270.4,
+        "dom_content_loaded_ms": 270.7,
+        "load_ms": 6067.6,
+        "frame_gap_p95_ms": 16.8,
+        "frame_gap_max_ms": 183.2,
+        "frames_over_50ms": 21,
+        "loading_frame_gap_p95_ms": 99.9,
+        "loading_frame_gap_max_ms": 183.2,
+        "input_next_frame_p95_ms": 19.5,
+        "input_next_frame_max_ms": 91.4,
+        "reported_interactions": 102,
+        "reported_interaction_max_ms": 256,
+        "input_dispatches": 103,
+        "cdp_dispatch_roundtrip_max_ms": 89.89,
+        "clicks": 102,
+        "long_tasks": 1,
+        "long_task_total_ms": 75,
+        "layout_shift_sum": 0,
+        "layout_shift_sum_including_input": 0,
+        "ping_p95_ms": 1402.5,
+        "ping_max_ms": 1740.2,
+        "proxy_lag_p95_ms": 5.43,
+        "proxy_lag_max_ms": 779.17,
+        "inferences": 0,
+        "image_complete": 36,
+        "media_results": {
+          "image-covered=nsfw": 36
+        },
+        "image_status_ui_hosts": 0,
+        "visible_image_status_labels": {},
+        "status_api_http_codes": {},
+        "video_states": [],
+        "validation": {
+          "valid": true,
+          "errors": [],
+          "geometry_preserved": 36,
+          "verified_hidden_tiles": 0,
+          "verified_covers": 36
+        }
+      },
+      "raw_sha256": {
+        "summary.json": "b7c941a35f059b28a277f403b5febb49e59c5057f7d9c47b07900a3ca47c76a6",
+        "browser.json": "ebd7a018346e1eb6c2220f61d9ea99dcff0ec42f29564f14980ebf6219bcc962",
+        "proxy.json": "76cf6a3c3ae89d4ba3da5178f1752511df294d380226b6c84b6e60f40877df62",
+        "environment.json": "135d5c6ca3cc7d52c71481c8458d4f9e2537fcb36ab1f5a1ab9155b1cc0b92e3"
+      }
+    },
+    {
+      "directory": "after-covers-1",
+      "environment": {
+        "source": {
+          "root": "/tmp/kosher-image-perf",
+          "commit": "fbe3edccea90b66e9d8d9fec3164dde8c6d0d904",
+          "tracked_diff_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "files_sha256": {
+            "mitm/kosher_filter.py": "1f04048aa249bdd519d5a4af0c916a2dcbb4a3e26e29b4a13e3d3a32bcd55e4c",
+            "mitm/kosher_page.js": "b362b74b6462fa9aa8774bca4659b751c23a643fb2d1c6ae00453a9348f3226a",
+            "kosherd/src/kosherd/vision.py": "ec8accb4240ced2e2f9a895bc09e83623f4777897659cab009b78969bd1abec3",
+            "kosherd/src/kosherd/videocheck.py": "f25405816695a32992047b62593e9c78810bfc4ced9779604bbdbaea90a34ce9",
+            "kosherd/src/kosherd/imageedit.py": "465877afcf50b70884e3571241464a9bfa99e12c24ecbaf781f5dfd92cff0f0e"
+          }
+        },
+        "host": {
+          "architecture": "x86_64",
+          "kernel": "7.2.13-200.fc44.x86_64",
+          "logical_cpus": 12,
+          "python": "3.14.8",
+          "cpu_model": "Intel(R) Core(TM) i7-10710U CPU @ 1.10GHz",
+          "platform_profile": "quiet",
+          "energy_preferences": [
+            "power"
+          ],
+          "governors": [
+            "powersave"
+          ],
+          "load_average": [
+            2.78759765625,
+            3.16748046875,
+            3.39599609375
+          ]
+        },
+        "runtime_pythonpath": [
+          "/tmp/kosher-image-perf/kosherd/src",
+          "/tmp/kosher-avif-pillow"
+        ]
+      },
+      "independent_checks": {
+        "completed": true,
+        "recorded_validation_passed": true,
+        "browser_errors_empty": true,
+        "power_mode_matches": true,
+        "source_files_match_commit": "fbe3edccea90b66e9d8d9fec3164dde8c6d0d904",
+        "natural_dimensions_match_original_assets": 36,
+        "raw_response_counts_match_summary": true
+      },
+      "summary": {
+        "version": "after",
+        "scenario": "covers",
+        "repeat": 1,
+        "browser": "156.0.8078.80",
+        "critical_js_ms": 315.9,
+        "dom_content_loaded_ms": 326.2,
+        "load_ms": 5122.3,
+        "frame_gap_p95_ms": 16.7,
+        "frame_gap_max_ms": 149.9,
+        "frames_over_50ms": 14,
+        "loading_frame_gap_p95_ms": 66.6,
+        "loading_frame_gap_max_ms": 149.9,
+        "input_next_frame_p95_ms": 18,
+        "input_next_frame_max_ms": 100,
+        "reported_interactions": 105,
+        "reported_interaction_max_ms": 224,
+        "input_dispatches": 105,
+        "cdp_dispatch_roundtrip_max_ms": 102.96,
+        "clicks": 105,
+        "long_tasks": 0,
+        "long_task_total_ms": 0,
+        "layout_shift_sum": 0,
+        "layout_shift_sum_including_input": 1.6e-05,
+        "ping_p95_ms": 138.7,
+        "ping_max_ms": 229.6,
+        "proxy_lag_p95_ms": 12.37,
+        "proxy_lag_max_ms": 213.61,
+        "inferences": 0,
+        "image_complete": 36,
+        "media_results": {
+          "image-covered=nsfw": 36
+        },
+        "image_status_ui_hosts": 1,
+        "visible_image_status_labels": {
+          "Filtered": 16
+        },
+        "status_api_http_codes": {
+          "200": 7
+        },
+        "video_states": [],
+        "validation": {
+          "valid": true,
+          "errors": [],
+          "geometry_preserved": 36,
+          "verified_hidden_tiles": 0,
+          "verified_covers": 36
+        }
+      },
+      "raw_sha256": {
+        "summary.json": "7b2bd3316bb25fe3bba643c32e93acb3aee8baca183e1ae47a845129714a0e77",
+        "browser.json": "8f88711580ced6ca9490b564d91368f214d047d7e39b7885ca8c11b2f6728602",
+        "proxy.json": "51f3446b929149066ae4867feb724607c13d2d5ba37b4c789f2ba513f463c0ad",
+        "environment.json": "13aba4243e3d010bfe7433a5aa2b88aa9f253219754b17daf9560988e86f6af2"
+      }
+    },
+    {
+      "directory": "before-inference-0",
+      "environment": {
+        "source": {
+          "root": "/tmp/kosher-browser-baseline",
+          "commit": null,
+          "tracked_diff_sha256": null,
+          "files_sha256": {
+            "mitm/kosher_filter.py": "4bf6924083cdc2e2976fd875ba52e3de17681280bf75a96f1737cc6ec38a51ee",
+            "mitm/kosher_page.js": "8d2f7db3514da1689a9732ce3d9ff118e17e0cb875073714b7c1770ca8b29948",
+            "kosherd/src/kosherd/vision.py": "90e1602019c70bb5c242c3f8db3c029da4b124aea79111ebb58ea18acbba9f8e",
+            "kosherd/src/kosherd/videocheck.py": "00f1f4023b82525012111932b844622ac43c938fcb6ab8b2cda55fc40fa4a19b",
+            "kosherd/src/kosherd/imageedit.py": "b03afebf4ffc4d8a2ddb9d92d7a743107fc2c22be46e0879411f586fcf617465"
+          }
+        },
+        "host": {
+          "architecture": "x86_64",
+          "kernel": "7.2.13-200.fc44.x86_64",
+          "logical_cpus": 12,
+          "python": "3.14.8",
+          "cpu_model": "Intel(R) Core(TM) i7-10710U CPU @ 1.10GHz",
+          "platform_profile": "quiet",
+          "energy_preferences": [
+            "power"
+          ],
+          "governors": [
+            "powersave"
+          ],
+          "load_average": [
+            4.14453125,
+            3.55517578125,
+            3.55419921875
+          ]
+        },
+        "runtime_pythonpath": [
+          "/tmp/kosher-browser-baseline/kosherd/src"
+        ]
+      },
+      "independent_checks": {
+        "completed": true,
+        "recorded_validation_passed": true,
+        "browser_errors_empty": true,
+        "power_mode_matches": true,
+        "source_files_match_commit": "506ebba40af8fd5fefb37125eb61c7bc565d45fb",
+        "natural_dimensions_match_original_assets": 36,
+        "raw_response_counts_match_summary": true
+      },
+      "summary": {
+        "version": "before",
+        "scenario": "inference",
+        "repeat": 0,
+        "browser": "156.0.8078.80",
+        "critical_js_ms": 206.9,
+        "dom_content_loaded_ms": 207.2,
+        "load_ms": 4705.5,
+        "frame_gap_p95_ms": 16.8,
+        "frame_gap_max_ms": 183.3,
+        "frames_over_50ms": 15,
+        "loading_frame_gap_p95_ms": 66.7,
+        "loading_frame_gap_max_ms": 183.3,
+        "input_next_frame_p95_ms": 17.6,
+        "input_next_frame_max_ms": 87.6,
+        "reported_interactions": 0,
+        "reported_interaction_max_ms": null,
+        "input_dispatches": 104,
+        "cdp_dispatch_roundtrip_max_ms": 113.99,
+        "clicks": 104,
+        "long_tasks": 0,
+        "long_task_total_ms": 0,
+        "layout_shift_sum": 0,
+        "layout_shift_sum_including_input": 1.6e-05,
+        "ping_p95_ms": 981.9,
+        "ping_max_ms": 1798.3,
+        "proxy_lag_p95_ms": 8.43,
+        "proxy_lag_max_ms": 720.69,
+        "inferences": 38,
+        "image_complete": 36,
+        "media_results": {
+          "passed": 6,
+          "image-hidden": 30,
+          "video-checked=clean": 2
+        },
+        "image_status_ui_hosts": 0,
+        "visible_image_status_labels": {},
+        "status_api_http_codes": {},
+        "video_states": [
+          {
+            "src": "http://127.0.0.8:36389/clip/0.mp4",
+            "readyState": 4,
+            "networkState": 1,
+            "width": 640,
+            "height": 360,
+            "error": null
+          },
+          {
+            "src": "http://127.0.0.9:36389/clip/1.mp4",
+            "readyState": 4,
+            "networkState": 1,
+            "width": 640,
+            "height": 360,
+            "error": null
+          }
+        ],
+        "validation": {
+          "valid": true,
+          "errors": [],
+          "geometry_preserved": 36,
+          "verified_hidden_tiles": 30,
+          "verified_covers": 0
+        }
+      },
+      "raw_sha256": {
+        "summary.json": "6c0e7a64b931634ae1e41bc12c365ef997240f4fcc41c714402731f7cccccd88",
+        "browser.json": "d7e95d3fef24f8e16e384f1f20ca045b7352f801e6876cf7415aa302d5dc89cc",
+        "proxy.json": "fdcd1af16563741bc69368c998e99ee7fbd7e3af2c665f8aff832e2df20b585e",
+        "environment.json": "537274e631d0f982f359f56ce42946edf001211c3a0666304bff6c16f55d89d8"
+      }
+    },
+    {
+      "directory": "after-inference-0",
+      "environment": {
+        "source": {
+          "root": "/tmp/kosher-image-perf",
+          "commit": "fbe3edccea90b66e9d8d9fec3164dde8c6d0d904",
+          "tracked_diff_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "files_sha256": {
+            "mitm/kosher_filter.py": "1f04048aa249bdd519d5a4af0c916a2dcbb4a3e26e29b4a13e3d3a32bcd55e4c",
+            "mitm/kosher_page.js": "b362b74b6462fa9aa8774bca4659b751c23a643fb2d1c6ae00453a9348f3226a",
+            "kosherd/src/kosherd/vision.py": "ec8accb4240ced2e2f9a895bc09e83623f4777897659cab009b78969bd1abec3",
+            "kosherd/src/kosherd/videocheck.py": "f25405816695a32992047b62593e9c78810bfc4ced9779604bbdbaea90a34ce9",
+            "kosherd/src/kosherd/imageedit.py": "465877afcf50b70884e3571241464a9bfa99e12c24ecbaf781f5dfd92cff0f0e"
+          }
+        },
+        "host": {
+          "architecture": "x86_64",
+          "kernel": "7.2.13-200.fc44.x86_64",
+          "logical_cpus": 12,
+          "python": "3.14.8",
+          "cpu_model": "Intel(R) Core(TM) i7-10710U CPU @ 1.10GHz",
+          "platform_profile": "quiet",
+          "energy_preferences": [
+            "power"
+          ],
+          "governors": [
+            "powersave"
+          ],
+          "load_average": [
+            4.09619140625,
+            3.6005859375,
+            3.5673828125
+          ]
+        },
+        "runtime_pythonpath": [
+          "/tmp/kosher-image-perf/kosherd/src",
+          "/tmp/kosher-avif-pillow"
+        ]
+      },
+      "independent_checks": {
+        "completed": true,
+        "recorded_validation_passed": true,
+        "browser_errors_empty": true,
+        "power_mode_matches": true,
+        "source_files_match_commit": "fbe3edccea90b66e9d8d9fec3164dde8c6d0d904",
+        "natural_dimensions_match_original_assets": 36,
+        "raw_response_counts_match_summary": true
+      },
+      "summary": {
+        "version": "after",
+        "scenario": "inference",
+        "repeat": 0,
+        "browser": "156.0.8078.80",
+        "critical_js_ms": 245.3,
+        "dom_content_loaded_ms": 285.8,
+        "load_ms": 5100.5,
+        "frame_gap_p95_ms": 16.8,
+        "frame_gap_max_ms": 116.7,
+        "frames_over_50ms": 22,
+        "loading_frame_gap_p95_ms": 66.7,
+        "loading_frame_gap_max_ms": 116.7,
+        "input_next_frame_p95_ms": 22.9,
+        "input_next_frame_max_ms": 83.7,
+        "reported_interactions": 0,
+        "reported_interaction_max_ms": null,
+        "input_dispatches": 104,
+        "cdp_dispatch_roundtrip_max_ms": 87.59,
+        "clicks": 103,
+        "long_tasks": 0,
+        "long_task_total_ms": 0,
+        "layout_shift_sum": 0,
+        "layout_shift_sum_including_input": 0,
+        "ping_p95_ms": 116.6,
+        "ping_max_ms": 461.7,
+        "proxy_lag_p95_ms": 4.76,
+        "proxy_lag_max_ms": 203.09,
+        "inferences": 10,
+        "image_complete": 36,
+        "media_results": {
+          "passed": 10,
+          "image-hidden": 26,
+          "video-checked=clean": 2
+        },
+        "image_status_ui_hosts": 1,
+        "visible_image_status_labels": {
+          "Checked": 4,
+          "Not checked \u00b7 hidden": 12
+        },
+        "status_api_http_codes": {
+          "200": 7
+        },
+        "video_states": [
+          {
+            "src": "http://127.0.0.8:36389/clip/0.mp4",
+            "readyState": 4,
+            "networkState": 1,
+            "width": 640,
+            "height": 360,
+            "error": null
+          },
+          {
+            "src": "http://127.0.0.9:36389/clip/1.mp4",
+            "readyState": 4,
+            "networkState": 1,
+            "width": 640,
+            "height": 360,
+            "error": null
+          }
+        ],
+        "validation": {
+          "valid": true,
+          "errors": [],
+          "geometry_preserved": 36,
+          "verified_hidden_tiles": 26,
+          "verified_covers": 0
+        }
+      },
+      "raw_sha256": {
+        "summary.json": "f2078121de61d1efd6a2003daf7bac1364a0e65889a9a0b5ba5399adc7b5f55f",
+        "browser.json": "63b02850e4788dfe3ba505f0d7b0902dc145e4ecaf9403df20eaff22e9f76b01",
+        "proxy.json": "2749f725c14fef604db23253628891da1235ba0c121cf03733ed2ed821ed5a83",
+        "environment.json": "54158a0a229bb771067c36116e20c920bad845a18c88fa211adb7c06076180ab"
+      }
+    },
+    {
+      "directory": "before-inference-1",
+      "environment": {
+        "source": {
+          "root": "/tmp/kosher-browser-baseline",
+          "commit": null,
+          "tracked_diff_sha256": null,
+          "files_sha256": {
+            "mitm/kosher_filter.py": "4bf6924083cdc2e2976fd875ba52e3de17681280bf75a96f1737cc6ec38a51ee",
+            "mitm/kosher_page.js": "8d2f7db3514da1689a9732ce3d9ff118e17e0cb875073714b7c1770ca8b29948",
+            "kosherd/src/kosherd/vision.py": "90e1602019c70bb5c242c3f8db3c029da4b124aea79111ebb58ea18acbba9f8e",
+            "kosherd/src/kosherd/videocheck.py": "00f1f4023b82525012111932b844622ac43c938fcb6ab8b2cda55fc40fa4a19b",
+            "kosherd/src/kosherd/imageedit.py": "b03afebf4ffc4d8a2ddb9d92d7a743107fc2c22be46e0879411f586fcf617465"
+          }
+        },
+        "host": {
+          "architecture": "x86_64",
+          "kernel": "7.2.13-200.fc44.x86_64",
+          "logical_cpus": 12,
+          "python": "3.14.8",
+          "cpu_model": "Intel(R) Core(TM) i7-10710U CPU @ 1.10GHz",
+          "platform_profile": "quiet",
+          "energy_preferences": [
+            "power"
+          ],
+          "governors": [
+            "powersave"
+          ],
+          "load_average": [
+            4.14111328125,
+            3.4580078125,
+            3.4599609375
+          ]
+        },
+        "runtime_pythonpath": [
+          "/tmp/kosher-browser-baseline/kosherd/src"
+        ]
+      },
+      "independent_checks": {
+        "completed": true,
+        "recorded_validation_passed": true,
+        "browser_errors_empty": true,
+        "power_mode_matches": true,
+        "source_files_match_commit": "506ebba40af8fd5fefb37125eb61c7bc565d45fb",
+        "natural_dimensions_match_original_assets": 36,
+        "raw_response_counts_match_summary": true
+      },
+      "summary": {
+        "version": "before",
+        "scenario": "inference",
+        "repeat": 1,
+        "browser": "156.0.8078.80",
+        "critical_js_ms": 226.6,
+        "dom_content_loaded_ms": 227,
+        "load_ms": 4711.2,
+        "frame_gap_p95_ms": 16.8,
+        "frame_gap_max_ms": 216.6,
+        "frames_over_50ms": 18,
+        "loading_frame_gap_p95_ms": 66.7,
+        "loading_frame_gap_max_ms": 216.6,
+        "input_next_frame_p95_ms": 18.8,
+        "input_next_frame_max_ms": 104.8,
+        "reported_interactions": 101,
+        "reported_interaction_max_ms": 224,
+        "input_dispatches": 102,
+        "cdp_dispatch_roundtrip_max_ms": 102.39,
+        "clicks": 101,
+        "long_tasks": 0,
+        "long_task_total_ms": 0,
+        "layout_shift_sum": 0,
+        "layout_shift_sum_including_input": 0,
+        "ping_p95_ms": 1276.8,
+        "ping_max_ms": 2108.9,
+        "proxy_lag_p95_ms": 8.65,
+        "proxy_lag_max_ms": 713.49,
+        "inferences": 36,
+        "image_complete": 36,
+        "media_results": {
+          "passed": 4,
+          "video-checked=clean": 2,
+          "image-hidden": 32
+        },
+        "image_status_ui_hosts": 0,
+        "visible_image_status_labels": {},
+        "status_api_http_codes": {},
+        "video_states": [
+          {
+            "src": "http://127.0.0.8:36389/clip/0.mp4",
+            "readyState": 4,
+            "networkState": 1,
+            "width": 640,
+            "height": 360,
+            "error": null
+          },
+          {
+            "src": "http://127.0.0.9:36389/clip/1.mp4",
+            "readyState": 4,
+            "networkState": 1,
+            "width": 640,
+            "height": 360,
+            "error": null
+          }
+        ],
+        "validation": {
+          "valid": true,
+          "errors": [],
+          "geometry_preserved": 36,
+          "verified_hidden_tiles": 32,
+          "verified_covers": 0
+        }
+      },
+      "raw_sha256": {
+        "summary.json": "36730cb09868284772f0a1ada3306a3f7cee31fa5ee887d7603b7b0ca333d621",
+        "browser.json": "95e4192bb3fbbe49a7993df468187fc54829d880d99c6d82c7f740481e663808",
+        "proxy.json": "97cc3ecbc24249dbb1e544b28f6169f7df60a23abf2419888be5a26715d9e4c1",
+        "environment.json": "5e83062439c56c864bdee5ea1e04a0d7591bb11ad8d93bea17d469a789a966ee"
+      }
+    },
+    {
+      "directory": "after-inference-1",
+      "environment": {
+        "source": {
+          "root": "/tmp/kosher-image-perf",
+          "commit": "fbe3edccea90b66e9d8d9fec3164dde8c6d0d904",
+          "tracked_diff_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "files_sha256": {
+            "mitm/kosher_filter.py": "1f04048aa249bdd519d5a4af0c916a2dcbb4a3e26e29b4a13e3d3a32bcd55e4c",
+            "mitm/kosher_page.js": "b362b74b6462fa9aa8774bca4659b751c23a643fb2d1c6ae00453a9348f3226a",
+            "kosherd/src/kosherd/vision.py": "ec8accb4240ced2e2f9a895bc09e83623f4777897659cab009b78969bd1abec3",
+            "kosherd/src/kosherd/videocheck.py": "f25405816695a32992047b62593e9c78810bfc4ced9779604bbdbaea90a34ce9",
+            "kosherd/src/kosherd/imageedit.py": "465877afcf50b70884e3571241464a9bfa99e12c24ecbaf781f5dfd92cff0f0e"
+          }
+        },
+        "host": {
+          "architecture": "x86_64",
+          "kernel": "7.2.13-200.fc44.x86_64",
+          "logical_cpus": 12,
+          "python": "3.14.8",
+          "cpu_model": "Intel(R) Core(TM) i7-10710U CPU @ 1.10GHz",
+          "platform_profile": "quiet",
+          "energy_preferences": [
+            "power"
+          ],
+          "governors": [
+            "powersave"
+          ],
+          "load_average": [
+            3.7060546875,
+            3.294921875,
+            3.41259765625
+          ]
+        },
+        "runtime_pythonpath": [
+          "/tmp/kosher-image-perf/kosherd/src",
+          "/tmp/kosher-avif-pillow"
+        ]
+      },
+      "independent_checks": {
+        "completed": true,
+        "recorded_validation_passed": true,
+        "browser_errors_empty": true,
+        "power_mode_matches": true,
+        "source_files_match_commit": "fbe3edccea90b66e9d8d9fec3164dde8c6d0d904",
+        "natural_dimensions_match_original_assets": 36,
+        "raw_response_counts_match_summary": true
+      },
+      "summary": {
+        "version": "after",
+        "scenario": "inference",
+        "repeat": 1,
+        "browser": "156.0.8078.80",
+        "critical_js_ms": 204.9,
+        "dom_content_loaded_ms": 218.1,
+        "load_ms": 5080.6,
+        "frame_gap_p95_ms": 16.8,
+        "frame_gap_max_ms": 183.2,
+        "frames_over_50ms": 19,
+        "loading_frame_gap_p95_ms": 66.7,
+        "loading_frame_gap_max_ms": 183.2,
+        "input_next_frame_p95_ms": 21.5,
+        "input_next_frame_max_ms": 110,
+        "reported_interactions": 103,
+        "reported_interaction_max_ms": 248,
+        "input_dispatches": 104,
+        "cdp_dispatch_roundtrip_max_ms": 86.24,
+        "clicks": 103,
+        "long_tasks": 0,
+        "long_task_total_ms": 0,
+        "layout_shift_sum": 0,
+        "layout_shift_sum_including_input": 0,
+        "ping_p95_ms": 146.6,
+        "ping_max_ms": 472,
+        "proxy_lag_p95_ms": 5.46,
+        "proxy_lag_max_ms": 154.77,
+        "inferences": 10,
+        "image_complete": 36,
+        "media_results": {
+          "passed": 8,
+          "image-hidden": 28,
+          "video-checked=clean": 2
+        },
+        "image_status_ui_hosts": 1,
+        "visible_image_status_labels": {
+          "Checked": 4,
+          "Not checked \u00b7 hidden": 12
+        },
+        "status_api_http_codes": {
+          "200": 7
+        },
+        "video_states": [
+          {
+            "src": "http://127.0.0.8:36389/clip/0.mp4",
+            "readyState": 4,
+            "networkState": 1,
+            "width": 640,
+            "height": 360,
+            "error": null
+          },
+          {
+            "src": "http://127.0.0.9:36389/clip/1.mp4",
+            "readyState": 4,
+            "networkState": 1,
+            "width": 640,
+            "height": 360,
+            "error": null
+          }
+        ],
+        "validation": {
+          "valid": true,
+          "errors": [],
+          "geometry_preserved": 36,
+          "verified_hidden_tiles": 28,
+          "verified_covers": 0
+        }
+      },
+      "raw_sha256": {
+        "summary.json": "99e45e6883542f844fba01720de734e4a24495894eab85029685c811a7d6b5f2",
+        "browser.json": "1c9a781c0ed5e2630c884498c5572b7764995cd0bce6bb5e06b7eaec55938b0e",
+        "proxy.json": "afb4aa6c30cfc2547a3ee13da815d5ff332b988828011b3717b029327a87fd05",
+        "environment.json": "b95123b5f55ad25e388ac56ccf47129184f376b4d9ec40cf758739fd1faf47fb"
+      }
+    }
+  ],
+  "aggregates": {
+    "hidden": {
+      "paired_trials": 2,
+      "median": {
+        "before": {
+          "critical_js_ms": 193.6,
+          "dom_content_loaded_ms": 193.85,
+          "load_ms": 3131.8,
+          "frame_gap_p95_ms": 16.75,
+          "frame_gap_max_ms": 200.0,
+          "loading_frame_gap_p95_ms": 16.8,
+          "input_next_frame_p95_ms": 9.6,
+          "input_next_frame_max_ms": 106.15,
+          "ping_p95_ms": 1116.2,
+          "ping_max_ms": 1686.15,
+          "proxy_lag_p95_ms": 3.985,
+          "proxy_lag_max_ms": 850.355,
+          "inferences": 0.0
+        },
+        "after": {
+          "critical_js_ms": 198.0,
+          "dom_content_loaded_ms": 230.3,
+          "load_ms": 3156.65,
+          "frame_gap_p95_ms": 16.75,
+          "frame_gap_max_ms": 91.75,
+          "loading_frame_gap_p95_ms": 58.35,
+          "input_next_frame_p95_ms": 9.35,
+          "input_next_frame_max_ms": 62.0,
+          "ping_p95_ms": 61.7,
+          "ping_max_ms": 495.8,
+          "proxy_lag_p95_ms": 4.08,
+          "proxy_lag_max_ms": 192.085,
+          "inferences": 0.0
+        }
+      }
+    },
+    "intrinsic": {
+      "paired_trials": 2,
+      "median": {
+        "before": {
+          "critical_js_ms": 214.9,
+          "dom_content_loaded_ms": 215.2,
+          "load_ms": 1150.15,
+          "frame_gap_p95_ms": 16.7,
+          "frame_gap_max_ms": 99.95,
+          "loading_frame_gap_p95_ms": 16.75,
+          "input_next_frame_p95_ms": 6.2,
+          "input_next_frame_max_ms": 38.5,
+          "ping_p95_ms": 36.4,
+          "ping_max_ms": 1064.2,
+          "proxy_lag_p95_ms": 3.93,
+          "proxy_lag_max_ms": 802.055,
+          "inferences": 0.0
+        },
+        "after": {
+          "critical_js_ms": 243.8,
+          "dom_content_loaded_ms": 253.3,
+          "load_ms": 915.0,
+          "frame_gap_p95_ms": 16.75,
+          "frame_gap_max_ms": 16.8,
+          "loading_frame_gap_p95_ms": 16.75,
+          "input_next_frame_p95_ms": 6.3,
+          "input_next_frame_max_ms": 22.3,
+          "ping_p95_ms": 28.05,
+          "ping_max_ms": 83.8,
+          "proxy_lag_p95_ms": 3.77,
+          "proxy_lag_max_ms": 189.1,
+          "inferences": 0.0
+        }
+      }
+    },
+    "covers": {
+      "paired_trials": 2,
+      "median": {
+        "before": {
+          "critical_js_ms": 249.7,
+          "dom_content_loaded_ms": 249.95,
+          "load_ms": 6102.95,
+          "frame_gap_p95_ms": 16.8,
+          "frame_gap_max_ms": 166.55,
+          "loading_frame_gap_p95_ms": 91.65,
+          "input_next_frame_p95_ms": 16.6,
+          "input_next_frame_max_ms": 96.2,
+          "ping_p95_ms": 1416.5,
+          "ping_max_ms": 1718.55,
+          "proxy_lag_p95_ms": 5.785,
+          "proxy_lag_max_ms": 729.655,
+          "inferences": 0.0
+        },
+        "after": {
+          "critical_js_ms": 306.45,
+          "dom_content_loaded_ms": 317.15,
+          "load_ms": 5325.0,
+          "frame_gap_p95_ms": 16.75,
+          "frame_gap_max_ms": 149.95,
+          "loading_frame_gap_p95_ms": 83.3,
+          "input_next_frame_p95_ms": 30.8,
+          "input_next_frame_max_ms": 102.95,
+          "ping_p95_ms": 131.0,
+          "ping_max_ms": 314.65,
+          "proxy_lag_p95_ms": 9.935,
+          "proxy_lag_max_ms": 190.04,
+          "inferences": 0.0
+        }
+      }
+    },
+    "inference": {
+      "paired_trials": 2,
+      "median": {
+        "before": {
+          "critical_js_ms": 216.75,
+          "dom_content_loaded_ms": 217.1,
+          "load_ms": 4708.35,
+          "frame_gap_p95_ms": 16.8,
+          "frame_gap_max_ms": 199.95,
+          "loading_frame_gap_p95_ms": 66.7,
+          "input_next_frame_p95_ms": 18.2,
+          "input_next_frame_max_ms": 96.2,
+          "ping_p95_ms": 1129.35,
+          "ping_max_ms": 1953.6,
+          "proxy_lag_p95_ms": 8.54,
+          "proxy_lag_max_ms": 717.09,
+          "inferences": 37.0
+        },
+        "after": {
+          "critical_js_ms": 225.1,
+          "dom_content_loaded_ms": 251.95,
+          "load_ms": 5090.55,
+          "frame_gap_p95_ms": 16.8,
+          "frame_gap_max_ms": 149.95,
+          "loading_frame_gap_p95_ms": 66.7,
+          "input_next_frame_p95_ms": 22.2,
+          "input_next_frame_max_ms": 96.85,
+          "ping_p95_ms": 131.6,
+          "ping_max_ms": 466.85,
+          "proxy_lag_p95_ms": 5.11,
+          "proxy_lag_max_ms": 178.93,
+          "inferences": 10.0
+        }
+      }
+    }
+  },
+  "excluded": [
+    {
+      "scenario": "hidden",
+      "repeat": 2,
+      "reason": "incomplete or unstarted pair",
+      "existing_directories": [
+        "before-hidden-2"
+      ]
+    },
+    {
+      "scenario": "intrinsic",
+      "repeat": 2,
+      "reason": "incomplete or unstarted pair",
+      "existing_directories": []
+    },
+    {
+      "scenario": "covers",
+      "repeat": 2,
+      "reason": "incomplete or unstarted pair",
+      "existing_directories": []
+    },
+    {
+      "scenario": "inference",
+      "repeat": 2,
+      "reason": "incomplete or unstarted pair",
+      "existing_directories": []
+    }
+  ],
+  "asset_hashes_verified": true
+}

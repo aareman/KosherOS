@@ -593,6 +593,9 @@ class DemoClient:
     def bypass_url(self, uid, url, whole_site=False, pw=""):
         self._change(uid, "BypassUrl", [uid, url, whole_site])
 
+    def grant_url(self, uid, url, level, scope, pw=""):
+        self._change(uid, "GrantUrl", [uid, url, level, scope])
+
     def list_activity(self, since=0, uid=-1):
         return [e for e in self.events if e["t"] >= since and (uid < 0 or e["uid"] == uid)]
 

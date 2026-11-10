@@ -97,7 +97,7 @@ def test_hide_everything_needs_no_detector_at_all():
 
 # -- caching ------------------------------------------------------------------
 
-def test_the_same_picture_is_judged_once(tmp_path):
+def test_the_same_picture_is_judged_once(tmp_path, photo):
     calls = []
 
     class Once:
@@ -109,7 +109,7 @@ def test_the_same_picture_is_judged_once(tmp_path):
 
     f = vision.ImageFilter(detector=Once(),
                            cache=vision.VerdictCache(tmp_path / "i.sqlite"))
-    blob = b"x" * 10_000
+    blob = photo + b"\0" * vision.MIN_IMAGE_BYTES  # a valid PNG, above the icon byte floor
     assert f.verdict(blob).level == NSFW
     assert f.verdict(blob).level == NSFW
     assert len(calls) == 1
@@ -242,9 +242,13 @@ def _slow_filter(tmp_path, ms, slow_ms=400):
             _t.sleep(ms / 1000)
             return []
 
-    return vision.ImageFilter(detector=Slow(),
+    filt = vision.ImageFilter(detector=Slow(),
                               cache=vision.VerdictCache(tmp_path / "i.sqlite"),
                               slow_ms=slow_ms)
+    # These tests exercise timing with synthetic byte strings. Image
+    # refinement/decoder failures are covered separately with real images.
+    filt._person_aware = lambda data, detections, verdict: verdict
+    return filt
 
 
 def test_a_machine_that_keeps_up_keeps_checking(tmp_path):

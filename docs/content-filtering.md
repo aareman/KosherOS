@@ -252,19 +252,28 @@ site, `*.host` includes subdomains, and `host/dir/*` covers a directory. An
 unmatched request is allowed, so a trailing `block *` makes an account
 deny-by-default.
 
-A rule does one of three things. *Block* refuses the page. *Allow* opens it
+A rule does one of four things. *Block* refuses the page. *Allow* opens it
 whatever the category lists and the content scorer say, but the page is
 still a page: its pictures and video are judged, and its words are cleaned,
-like any other. *Bypass* is the level above that, for a site the
-administrator trusts outright: nothing on it is filtered, and the proxy
-passes it through as it came. A bypassed page's own pictures and scripts
-are left alone with it wherever they are served from, because the browser
-names the page they came from. Safe search is still forced on a bypassed
-search engine.
+like any other. *Pictures* is allow with the page's pictures shown as they
+are, wherever they're served from; its video and words are still filtered.
+*Bypass* is the level above that, for a site the administrator trusts
+outright: nothing on it is filtered, and the proxy passes it through as it
+came. A bypassed page's own pictures and scripts are left alone with it
+wherever they are served from, because the browser names the page they came
+from. Safe search is still forced on a bypassed search engine.
+
+A browser tells another site only which site a page is on, not which page,
+so a page with a *Pictures* rule is told to send its full address with the
+pictures it asks for. That's what lets a rule for one page or one folder
+reach pictures served from a CDN. It happens only on the pages a rule names.
 
 Rules are edited on the person's page in the admin app, where a rule's
-level can be changed in place, or with `kosherctl rules`. The Allow button
-on a blocked page in the activity view offers the same levels.
+level can be changed in place, or with `kosherctl rules`. In the activity
+view, a blocked page has an *Allow* button: this page, everything in its
+folder, the whole site, or bypass the filter on the site. A page where
+pictures were hidden has an *Allow pictures* button with the same three
+choices: this page, its folder, or the whole site.
 
 ## Judging a page by its words
 

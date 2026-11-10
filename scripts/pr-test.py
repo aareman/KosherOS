@@ -1211,6 +1211,33 @@ def registry_up(env: dict, log: Path) -> None:
     raise StageError("the harness registry did not start")
 
 
+# Run in the registry's container with its storage root as $1: untag all
+# but "base", then delete what no tag reaches.
+REGISTRY_PRUNE = """cd "$1/docker/registry/v2/repositories/kosher-linux/_manifests/tags" 2>/dev/null || exit 0
+for t in *; do [ "$t" = base ] || rm -rf "$t"; done
+registry garbage-collect --delete-untagged /etc/docker/registry/config.yml >/dev/null 2>&1
+"""
+
+
+def prune_registry(env: dict, log: Path) -> None:
+    """Every run pushes its image under a tag of its own, and nothing took
+    them out again: 26 runs' images came to 28 GB in the registry's
+    volume, outside any worktree. Keep only "base" (the cached bases'
+    image) and collect the layers nothing is tagged with. Called holding
+    CACHE_LOCK, so no other run is pushing or pulling meanwhile."""
+    if subprocess.run(["podman", "container", "exists", REGISTRY]).returncode != 0:
+        return
+    registry_up(env, log)
+    run_logged(["podman", "exec", REGISTRY, "sh", "-c", REGISTRY_PRUNE,
+                "sh", "/var/lib/registry"], log, env, timeout=1800)
+    # The registry remembers which blobs it has (an in-memory cache). After
+    # a collection it would still answer "have it" for a deleted layer, the
+    # push would skip it, and the machine's pull would end in "unexpected
+    # EOF". A restart empties the cache.
+    run_logged(["podman", "restart", REGISTRY], log, env)
+    registry_up(env, log)
+
+
 def push(image: str, tag: str, env: dict, log: Path) -> str:
     ref = f"127.0.0.1:{REGISTRY_PORT}/kosher-linux:{tag}"
     digestfile = log.parent / f"{tag}.digest"
@@ -1699,6 +1726,7 @@ def main() -> int:
         print(f"Removed {len(pruned)} dangling images over a day old: {' '.join(pruned)}",
               flush=True)
     env = sudo_trap(outdir)
+    prune_registry(env, outdir / "registry.log")
     registry = parse_registry_image(args.registry_image) if args.registry_image else None
     image = args.image or f"localhost/kosher-linux:pr-test-{run_id.lower()}"
     if not args.image:

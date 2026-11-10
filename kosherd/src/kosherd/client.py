@@ -156,6 +156,12 @@ class DaemonClient:
         self._call("Profiles", "BypassUrl", "(isbs)", uid, url, whole_site,
                    guardian_password)
 
+    def grant_url(self, uid: int, url: str, level: str, scope: str,
+                  guardian_password: str = "") -> None:
+        """level: allow, pictures or bypass; scope: page, folder or site."""
+        self._call("Profiles", "GrantUrl", "(issss)", uid, url, level, scope,
+                   guardian_password)
+
     def list_activity(self, since: int = 0, uid: int = -1) -> list[dict]:
         return json.loads(self._call("Profiles", "ListActivity", "(ii)",
                                      since, uid)[0])

@@ -23,6 +23,40 @@ if not Gtk.init_check():  # pragma: no cover - no display
 Adw.init()
 
 from koshersetup import app as setup  # noqa: E402
+from kosherd import timezones  # noqa: E402
+
+ZONES = [timezones.Zone("Pacific/Auckland", "Auckland", "New Zealand"),
+         timezones.Zone("Asia/Jerusalem", "Jerusalem", "Israel"),
+         timezones.Zone("Europe/London", "London", "Britain (UK)"),
+         timezones.Zone("America/New_York", "New York", "United States"),
+         timezones.Zone("UTC", "UTC", "")]
+
+
+class FakeTimezones:
+    """The wizard's view of the clock, without the internet or timedated:
+    nothing in a test may change this machine's time zone."""
+
+    Zone = timezones.Zone
+    zone_for = staticmethod(timezones.zone_for)
+
+    def __init__(self, guess="", current="America/New_York"):
+        self._guess, self._current = guess, current
+        self.set = []
+
+    def zones(self):
+        return list(ZONES)
+
+    def valid(self, zone_id):
+        return zone_id in {z.id for z in ZONES}
+
+    def current(self):
+        return self._current
+
+    def guess(self):
+        return self._guess
+
+    def set_zone(self, zone_id):
+        self.set.append(zone_id)
 
 
 class FakeClient:
@@ -66,10 +100,11 @@ class FakeClient:
         self.status = {"online": True, "kind": "wifi", "name": ssid, "wifi_hardware": True}
 
 
-def window(admin: str = "") -> setup.Window:
+def window(admin: str = "", tz: FakeTimezones | None = None) -> setup.Window:
     # The client is consulted in __init__ for resume, so it has to be in
     # place before the window is built.
     setup.DaemonClient = lambda: FakeClient(admin)  # type: ignore[assignment]
+    setup.timezones = tz or FakeTimezones()  # type: ignore[assignment]
     return setup.Window(application=setup.App())
 
 
@@ -124,7 +159,9 @@ def test_back_goes_to_the_previous_page_not_the_start():
     assert page(win) == "disk", "Back from the last page must go one page back"
     win._go("admin")
     win._back()
-    assert page(win) == "network"  # the internet step now sits before the account
+    assert page(win) == "timezone"
+    win._back()
+    assert page(win) == "network"
 
 
 def test_back_is_hidden_once_the_account_exists():
@@ -452,7 +489,7 @@ def test_the_internet_step_sits_between_welcome_and_the_account_and_never_blocks
     settle()
     assert win.next.get_label() == "Skip for now"
     win._advance()
-    assert page(win) == "admin"
+    assert page(win) == "timezone"
     win._back()
     assert page(win) == "network"
 
@@ -536,3 +573,109 @@ def test_no_wifi_card_says_a_cable_will_do_and_lets_the_person_skip():
     assert "no Wi-Fi found" in win.net_row.get_title()
     assert not win.wifi_group.get_visible()
     assert win.next.get_sensitive() and win.next.get_label() == "Skip for now"
+
+
+# -- the time zone step --------------------------------------------------------
+
+def visible_zones(win):
+    """The places the list shows, in the order it shows them."""
+    found, index = [], 0
+    while (row := win.tz_list.get_row_at_index(index)) is not None:
+        if row.get_child_visible():
+            found.append(row.zone.id)
+        index += 1
+    return found
+
+
+def test_the_time_zone_step_follows_the_internet_step():
+    tz = FakeTimezones()
+    win = window(tz=tz)
+    win._go("network")
+    win._advance()
+    assert page(win) == "timezone"
+    assert win.next.get_label() == "Continue" and win.next.get_sensitive()
+    assert win.back.get_visible()
+
+
+def test_the_internet_guess_is_preselected_and_continue_sets_it():
+    tz = FakeTimezones(guess="Asia/Jerusalem")
+    win = window(tz=tz)
+    win._go("timezone")
+    settle()
+    assert win.tz_chosen == "Asia/Jerusalem"
+    assert win.tz_row.get_title() == "Jerusalem, Israel"
+    assert "there now" in win.tz_row.get_subtitle()
+    assert not win.tz_scroller.get_visible(), "no list of cities until one is searched for"
+    win._advance()                      # Continue: one click
+    settle()
+    assert tz.set == ["Asia/Jerusalem"]
+    assert page(win) == "admin"
+
+
+@pytest.mark.parametrize("guess", ["", "Mars/Olympus_Mons"])
+def test_no_guess_or_a_wrong_one_keeps_the_zone_the_machine_has(guess):
+    tz = FakeTimezones(guess=guess, current="Europe/London")
+    win = window(tz=tz)
+    win._go("timezone")
+    settle()
+    assert win.tz_chosen == "Europe/London"
+    assert win.tz_row.get_title() == "London, Britain (UK)"
+    win._advance()
+    settle()
+    assert tz.set == ["Europe/London"]
+
+
+def test_a_place_the_person_picks_is_what_gets_set_even_if_the_guess_comes_later():
+    tz = FakeTimezones(guess="America/New_York", current="UTC")
+    win = window(tz=tz)
+    win._go("timezone")
+    win._tz_pick("Asia/Jerusalem")      # before the guess has answered
+    settle()
+    assert win.tz_chosen == "Asia/Jerusalem"
+    win._advance()
+    settle()
+    assert tz.set == ["Asia/Jerusalem"]
+
+
+def test_searching_narrows_the_list_by_city_or_country_and_enter_takes_the_first():
+    win = window()
+    win._go("timezone")
+    settle()
+    win.tz_search.set_text("israel")
+    win._tz_filter()
+    assert win.tz_scroller.get_visible()
+    assert visible_zones(win) == ["Asia/Jerusalem"]
+    win.tz_search.set_text("new york")
+    win._tz_filter()
+    assert visible_zones(win) == ["America/New_York"]
+    win.tz_search.set_text("new")
+    win._tz_filter()
+    assert visible_zones(win) == ["America/New_York", "Pacific/Auckland"], \
+        "a city named New... comes before a country that is"
+    win.tz_search.set_text("lon")
+    win._tz_filter()
+    win._tz_pick_first()
+    assert win.tz_chosen == "Europe/London"
+    # Chosen: the list goes away and the choice is what the page shows.
+    assert win.tz_search.get_text() == "" and not win.tz_scroller.get_visible()
+    assert win.tz_row.get_title() == "London, Britain (UK)"
+
+
+def test_a_zone_that_cannot_be_set_is_told_and_does_not_trap_the_person():
+    class Refusing(FakeTimezones):
+        def set_zone(self, zone_id):
+            raise RuntimeError("timedated is not running")
+
+    win = window(tz=Refusing())
+    win._go("timezone")
+    settle()
+    win._advance()
+    settle()
+    assert page(win) == "admin"
+
+
+def test_the_place_names_are_text_not_markup():
+    # "Trinidad & Tobago" is a country name, not a broken entity.
+    win = window()
+    assert not win.tz_row.get_use_markup()
+    assert all(not r.get_use_markup() for r in rows(win.tz_list) if hasattr(r, "zone"))

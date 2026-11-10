@@ -664,6 +664,7 @@ class Window(Adw.ApplicationWindow):
             "A recovery key opens an encrypted disk if its usual unlock stops "
             "working. Keep a written copy somewhere outside this computer.")
         self._disk_ready = False
+        self._tpm_available = False
         self.disk_status = Adw.ActionRow(title="Checking the system disk…",
                                        subtitle_lines=5)
         group.add(self.disk_status)
@@ -683,6 +684,17 @@ class Window(Adw.ApplicationWindow):
         self.disk_ack = Gtk.CheckButton(label="I have read the disk protection information above")
         self.disk_ack.connect("toggled", lambda _b: self._revalidate())
         box.append(self.disk_ack)
+        self.tpm_status = Adw.ActionRow(title="Automatic disk unlock", subtitle_lines=5)
+        group.add(self.tpm_status)
+        self.tpm_choice = Gtk.CheckButton(label="Use this computer’s TPM to unlock the disk")
+        box.append(self.tpm_choice)
+        self.tpm_password = Adw.PasswordEntryRow(title="Disk password or saved recovery key")
+        group.add(self.tpm_password)
+        self.tpm_save = Gtk.Button(label="Save unlock choice", halign=Gtk.Align.START)
+        self.tpm_save.connect("clicked", lambda _b: self._save_tpm_choice())
+        box.append(self.tpm_save)
+        for widget in (self.tpm_status, self.tpm_choice, self.tpm_password, self.tpm_save):
+            widget.set_visible(False)
         self._disk_controls()
         return box
 
@@ -704,6 +716,13 @@ class Window(Adw.ApplicationWindow):
             self.disk_status.set_title("Disk encrypted" if status["encrypted"] else "Disk not encrypted")
             self.disk_status.set_subtitle(status["message"])
             self._disk_ready = bool(status.get("recovery_saved"))
+            tpm = status.get("tpm", {})
+            self._tpm_available = bool(tpm.get("available"))
+            self.tpm_status.set_visible(bool(status["supported"]))
+            self.tpm_status.set_subtitle(tpm.get("message", "Automatic unlock is unavailable."))
+            for widget in (self.tpm_choice, self.tpm_password, self.tpm_save):
+                widget.set_visible(bool(tpm.get("available") and self._disk_ready))
+            self.tpm_choice.set_active(bool(tpm.get("pending") or tpm.get("enrolled")))
             self._disk_controls(prepare=bool(status["supported"] and not self._disk_ready),
                                 acknowledge=not status["supported"])
             if self._disk_ready:
@@ -752,6 +771,8 @@ class Window(Adw.ApplicationWindow):
             self._disk_controls()
             self.disk_status.set_subtitle("Your saved key opens the encrypted disk. "
                                          "Keep it somewhere safe outside this computer.")
+            for widget in (self.tpm_choice, self.tpm_password, self.tpm_save):
+                widget.set_visible(self._tpm_available)
             self._revalidate()
 
         def failed(error):
@@ -759,6 +780,27 @@ class Window(Adw.ApplicationWindow):
             self.toast(_error_text(error))
 
         _run_async(lambda: self.client.confirm_disk_recovery(key), done, failed)
+
+    def _save_tpm_choice(self) -> None:
+        password = self.tpm_password.get_text()
+        enabled = self.tpm_choice.get_active()
+        if enabled and not password:
+            self.toast("Enter your disk password or saved recovery key")
+            return
+        self.tpm_password.set_text("")
+        self.tpm_save.set_sensitive(False)
+        self.next.set_sensitive(False)
+
+        def done(_result):
+            self.tpm_save.set_sensitive(True)
+            self._refresh_disk()
+
+        def failed(error):
+            self.tpm_save.set_sensitive(True)
+            self._revalidate()
+            self.toast(_error_text(error))
+
+        _run_async(lambda: self.client.setup_disk_tpm(password, enabled), done, failed)
 
     def _firmware_page(self) -> Gtk.Widget:
         box, group = _page(

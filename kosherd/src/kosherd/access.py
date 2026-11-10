@@ -47,6 +47,9 @@ ACTIONS = {
     "CreateFirstAdmin": ACTION_MANAGE_USERS,
     "FinishSetup": ACTION_MANAGE_USERS,
     "DiskSecurity": ACTION_READ_CONFIG,
+    "DiskUnlockStatus": ACTION_READ_CONFIG,
+    "EnrollDiskTpm": ACTION_MANAGE_USERS,
+    "SetupDiskTpm": ACTION_MANAGE_USERS,
     "PrepareDiskRecovery": ACTION_MANAGE_USERS,
     "ConfirmDiskRecovery": ACTION_MANAGE_USERS,
     # Getting the new machine online from the wizard. First-boot only like
@@ -291,7 +294,7 @@ ACTIONS = {
 }
 
 # Methods that can weaken the filter: guardian password required when enabled.
-GUARDIAN_GATED = frozenset({
+GUARDIAN_GATED = frozenset({"EnrollDiskTpm",
     "SetFilterMode", "SetWhitelist", "SetWhitelistBundles", "SetUrlRules", "SetBlockedCategories", "ApplyProfile", "SaveProfile", "DeleteProfile", "ApproveRequest", "AllowUrl", "BypassUrl", "GrantUrl", "EditList",
     "SetUserAdmin",
     "SetMediaLevel",
@@ -309,7 +312,7 @@ GUARDIAN_GATED = frozenset({
 # First-boot only; closed forever once setup is stamped complete.
 SETUP_METHODS = frozenset({"IsComplete", "AdminExists", "ExistingAccounts",
                            "CreateFirstAdmin", "FinishSetup",
-                           "DiskSecurity", "PrepareDiskRecovery", "ConfirmDiskRecovery",
+                           "DiskSecurity", "PrepareDiskRecovery", "ConfirmDiskRecovery", "SetupDiskTpm",
                            "NetworkStatus", "ListWifi", "ConnectWifi"})
 # Readable forever: the wizard and the apps ask these on every start.
 SETUP_READS = frozenset({"IsComplete", "AdminExists"})
@@ -377,7 +380,7 @@ PER_USER = frozenset({
 })
 # Changes whose arguments are secrets or too big to be worth keeping.
 NO_ARGS_LOGGED = frozenset({"SetGuardianPassword", "DisableGuardian", "SetBootMenuPassword",
-                            "PrepareDiskRecovery", "ConfirmDiskRecovery",
+                            "PrepareDiskRecovery", "ConfirmDiskRecovery", "SetupDiskTpm", "EnrollDiskTpm",
                             "Enrol", "EditList", "SetWhitelist",
                             "SetUrlRules"})
 

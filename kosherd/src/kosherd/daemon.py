@@ -415,6 +415,12 @@ INTROSPECTION_XML = """
     </signal>
   </interface>
   <interface name="org.kosherlinux.Daemon1.System">
+    <method name="DiskUnlockStatus">
+      <arg direction="out" type="s" name="status_json"/>
+    </method>
+    <method name="EnrollDiskTpm">
+      <arg direction="in" type="s" name="disk_password"/>
+    </method>
     <method name="CheckUpdate">
       <arg direction="out" type="s" name="status"/>
     </method>
@@ -526,6 +532,10 @@ INTROSPECTION_XML = """
       <arg direction="in" type="s" name="guardian_password"/>
       <arg direction="in" type="s" name="grub_password"/>
     </method>
+    <method name="SetupDiskTpm">
+      <arg direction="in" type="s" name="disk_password"/>
+      <arg direction="in" type="b" name="enabled"/>
+    </method>
     <method name="DiskSecurity">
       <arg direction="out" type="s" name="status_json"/>
     </method>
@@ -598,6 +608,7 @@ IN_BACKGROUND = frozenset({"CheckUpdate", "DeploymentStatus", "ListChannels",
                            "RunAutoUpdate",
                            "SearchYouTubeChannels",
                            "DiskSecurity", "PrepareDiskRecovery", "ConfirmDiskRecovery",
+                           "SetupDiskTpm", "EnrollDiskTpm", "DiskUnlockStatus",
                            "TailscaleStatus", "TailscaleSignIn", "TailscaleSignOut"})
 # SetTailscaleEnabled is not here although it waits on systemctl: it
 # changes the policy, which only the main loop may do.
@@ -3890,7 +3901,34 @@ class Daemon:
         from . import disksecurity
 
         try:
-            return GLib.Variant("(s)", (json.dumps(disksecurity.inspect()),))
+            from . import tpmunlock
+            info = disksecurity.inspect()
+            info["tpm"] = tpmunlock.status(info)
+            return GLib.Variant("(s)", (json.dumps(info),))
+        except disksecurity.DiskError as exc:
+            raise PolicyError(str(exc)) from None
+
+    def impl_SetupDiskTpm(self, disk_password: str, enabled: bool):
+        from . import disksecurity, tpmunlock
+
+        try:
+            tpmunlock.schedule(disk_password, enabled)
+        except disksecurity.DiskError as exc:
+            raise PolicyError(str(exc)) from None
+
+    def impl_DiskUnlockStatus(self):
+        from . import disksecurity, tpmunlock
+
+        try:
+            return GLib.Variant("(s)", (json.dumps(tpmunlock.status()),))
+        except disksecurity.DiskError as exc:
+            raise PolicyError(str(exc)) from None
+
+    def impl_EnrollDiskTpm(self, disk_password: str):
+        from . import disksecurity, tpmunlock
+
+        try:
+            tpmunlock.enroll(disk_password)
         except disksecurity.DiskError as exc:
             raise PolicyError(str(exc)) from None
 

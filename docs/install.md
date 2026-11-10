@@ -93,7 +93,8 @@ KosherOS uses the whole of the disk it was installed on. Automatic partitioning 
 
 The installer selects **Encrypt my data** in Installation Destination.
 Leave it selected and choose a disk passphrase when Anaconda asks. Keep
-that passphrase: the computer asks for it before starting KosherOS. The
+that passphrase: it unlocks the disk during the initial starts and remains
+a fallback after automatic unlock is enabled. The
 disk still waits for your destination choice and confirmation before
 anything is erased. Its automatic root partition uses the available space.
 
@@ -106,6 +107,29 @@ opens the disk. The wizard clears the displayed key after verification;
 it cannot show it again later. Your original disk passphrase still works.
 An interrupted setup can resume, and generating another unsaved recovery
 key does not remove the original passphrase.
+
+After verifying the recovery key, a supported computer offers **Use this
+computer’s TPM to unlock the disk**. This is optional. Select it, enter the
+disk password or recovery key, and choose **Save unlock choice**. Finish
+setup, then restart and enter the disk password once more. This lets
+KosherOS enroll the final boot configuration, including its new boot-menu
+password. Subsequent unchanged boots unlock automatically. Without a
+supported TPM and measured Secure Boot, the disk stays encrypted and asks
+for its passphrase at startup.
+
+Keep the recovery key even when automatic unlock works. Changing firmware,
+Secure Boot settings, boot options, or the OS deployment can make the TPM
+refuse automatic unlock. Enter the saved passphrase or recovery key to
+start the computer. After confirming that the change was intended, an
+administrator can run `kosherctl disk-tpm enroll` to authorize the current
+boot; the guardian password is also required when configured.
+`kosherctl disk-tpm status` reports the enrollment. Do not re-enroll an
+unexpected boot change before investigating it.
+
+Automatic unlock is bound to this computer. Moving the disk to another
+laptop, clearing the TPM, or booting another operating system requires the
+saved passphrase or recovery key. It does not encrypt an existing plain
+disk.
 
 If the disk is unencrypted, setup says so. An update cannot encrypt an
 existing installation in place: back up the files and reinstall with

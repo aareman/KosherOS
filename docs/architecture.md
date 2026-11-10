@@ -460,3 +460,36 @@ changed), or when a parent downloads it there, and starts it at the next
 restart, keeping the previous version to go back to. It never restarts on
 its own.
 [Updates and channels](deployment.md) has the detail.
+
+
+### Encrypted disks and optional TPM unlock
+
+New installations default to LUKS2 encryption for the system data. The
+administrator chooses the installer passphrase and verifies a separate
+recovery key during setup. Neither credential is removed when TPM unlock
+is enabled. The EFI and boot partitions remain readable so firmware can
+start the system; TPM sealing detects changes to the measured boot path.
+
+Optional automatic unlock requires UEFI Secure Boot in user mode and a
+TPM2 SHA256 event log that matches PCRs 4, 7, 8 and 9. Enrollment checks the
+measured kernel command line against `/proc/cmdline`, requires kernel and
+initramfs measurements, and replays the event log against the TPM's current
+PCRs. `systemd-cryptenroll` explicitly seals to those PCRs, with automatic
+public-key/PCR-lock discovery disabled. PCR 7 alone is insufficient: a
+signed alternate kernel or a modified initramfs must not receive the key.
+
+Setup changes GRUB's password file, so enrollment waits until the next
+manually unlocked boot. A root-only credential under `/var/lib/kosher/tpm`
+inside the encrypted disk survives this single restart; successful token
+verification deletes it. It is never copied into `/boot` or the initramfs,
+or passed in arguments, the environment or logs. Canceling the setup choice
+removes the pending credential. A failed enrollment keeps password and
+recovery unlock available and retries on a later boot.
+
+Enrollment is deliberately tied to one measured boot, rather than
+silently trusting updates. OS/firmware changes can require manual unlock
+and explicit administrator/guardian re-enrollment. A successful replacement
+removes only the old slot recorded by KosherOS whose salted metadata still
+matches; other enrollments and recovery/password slots are retained.
+This protects offline data; it does not defend against an already authorized
+root process or an attacker with a saved recovery credential.

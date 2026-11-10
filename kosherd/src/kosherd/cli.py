@@ -67,6 +67,24 @@ def cmd_log(args) -> int:
     return 0
 
 
+def cmd_disk_tpm(args) -> int:
+    c = _client()
+    status = c.disk_unlock_status()
+    print(status["message"])
+    if args.action == "enroll":
+        if not status["available"]:
+            return 1
+        console = _Console()
+        if not console.secret_terminal():
+            print("TPM enrollment needs a direct terminal for the disk password.", file=sys.stderr)
+            return 1
+        if c.guardian_enabled():
+            c.verify_guardian(console.ask_secret("Guardian password: "))
+        c.enroll_disk_tpm(console.ask_secret("Disk password or saved recovery key: "))
+        print("Automatic unlock enrolled for this boot. Keep your recovery key.")
+    return 0
+
+
 def cmd_status(args) -> int:
     pol = _client().get_policy()
     print(f"policy revision {pol['revision']} (source: {pol['source']}, "
@@ -1247,6 +1265,16 @@ def cmd_setup(args) -> int:
             except Exception as error:
                 console.say(str(error))
         console.say("The saved recovery key was verified. Your original disk password still works.")
+    tpm = disk.get("tpm", {})
+    if tpm.get("available"):
+        console.say("\n" + tpm["message"])
+        if console.ask("Use automatic TPM unlock? [y/N]: ").strip().lower() == "y":
+            if not console.secret_terminal():
+                console.say("TPM enrollment needs a direct terminal. Run setup on this computer.")
+                return 1
+            c.setup_disk_tpm(console.ask_secret("Disk password or saved recovery key: "), True)
+            console.say("Enter the disk password once on the next restart. "
+                        "Later normal starts will unlock automatically.")
     c.finish_setup(guardian, password)
     console.say("\nSetup complete. The boot menu takes the administrator's password.")
     console.say("Starting the login screen.\n")
@@ -1756,6 +1784,10 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("--quiet", action="store_true",
                    help="stay silent and succeed even when the portal is unreachable")
     s.set_defaults(func=cmd_sync)
+
+    s = sub.add_parser("disk-tpm", help="check or enroll automatic encrypted-disk unlock")
+    s.add_argument("action", choices=("status", "enroll"), default="status", nargs="?")
+    s.set_defaults(func=cmd_disk_tpm)
 
     s = sub.add_parser(
         "setup", help="text-mode first-boot setup (fallback for the GUI wizard)")

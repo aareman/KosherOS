@@ -679,3 +679,42 @@ def test_the_place_names_are_text_not_markup():
     win = window()
     assert not win.tz_row.get_use_markup()
     assert all(not r.get_use_markup() for r in rows(win.tz_list) if hasattr(r, "zone"))
+
+
+def test_tpm_is_optional_and_scheduling_clears_the_password(monkeypatch):
+    monkeypatch.setattr(setup, "_run_async", lambda work, done, error: done(work()))
+    win = window()
+    status = {"encrypted": True, "supported": True, "recovery_saved": True,
+              "message": "Encrypted", "tpm": {"available": True, "pending": False,
+              "enrolled": False, "message": "Automatic unlock is optional."}}
+    win.client.disk_security = lambda: status
+    seen = []
+    def configure(password, enabled):
+        seen.append((password, enabled))
+        status["tpm"]["pending"] = enabled
+    win.client.setup_disk_tpm = configure
+    win._go("disk")
+    assert win.next.get_sensitive(), "TPM must not be required to finish setup"
+    assert win.tpm_save.get_visible() and not win.tpm_choice.get_active()
+    win.tpm_choice.set_active(True)
+    win.tpm_password.set_text("disk-test-password")
+    win._save_tpm_choice()
+    assert seen == [("disk-test-password", True)]
+    assert win.tpm_password.get_text() == ""
+    assert win.tpm_choice.get_active()
+    win.tpm_choice.set_active(False)
+    win._save_tpm_choice()
+    assert seen[-1] == ("", False)
+
+
+def test_no_tpm_keeps_encryption_and_recovery_available(monkeypatch):
+    monkeypatch.setattr(setup, "_run_async", lambda work, done, error: done(work()))
+    win = window()
+    win.client.disk_security = lambda: {"encrypted": True, "supported": True,
+        "recovery_saved": True, "message": "Encrypted", "tpm": {"available": False,
+        "message": "This computer needs its disk password."}}
+    win._go("disk")
+    assert win.disk_status.get_title() == "Disk encrypted"
+    assert win.next.get_sensitive()
+    assert not win.tpm_choice.get_visible()
+    assert "disk password" in win.tpm_status.get_subtitle()

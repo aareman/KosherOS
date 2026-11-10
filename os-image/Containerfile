@@ -649,7 +649,7 @@ RUN passwd -l root \
     && grep -q '^SUB_UID_COUNT 65536' /etc/login.defs \
     && systemctl mask systemd-resolved.service debug-shell.service \
     && systemctl enable sshd.service \
-    && systemctl enable kosherd.service kosher-firewall.service kosher-dns.service \
+    && systemctl enable kosher-tpm-enroll.service kosherd.service kosher-firewall.service kosher-dns.service \
     # The key remapper is not enabled here: it is a switch under Advanced
     # (#230), off on a new install, and kosherd enables and starts it when
     # an administrator turns it on. Even then it remaps nothing until a
@@ -814,7 +814,9 @@ RUN grep -q '^DEFAULT_HOSTNAME=kosheros' /usr/lib/os-release \
     && echo "identity ok"
 
 # bootc images must pass a container lint.
-RUN test -x /usr/sbin/cryptsetup \
+RUN test -x /usr/sbin/systemd-cryptenroll \
+    && test -x /usr/bin/tpm2_pcrread \
+    && test -x /usr/sbin/cryptsetup \
     && test -x /usr/sbin/growpart \
     && test -x /usr/sbin/resize2fs
 RUN bootc container lint

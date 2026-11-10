@@ -73,6 +73,15 @@ class DaemonClient:
     def disk_security(self) -> dict:
         return json.loads(self._call("Setup", "DiskSecurity")[0])
 
+    def setup_disk_tpm(self, password: str, enabled: bool) -> None:
+        self._call("Setup", "SetupDiskTpm", "(sb)", password, enabled)
+
+    def disk_unlock_status(self) -> dict:
+        return json.loads(self._call("System", "DiskUnlockStatus")[0])
+
+    def enroll_disk_tpm(self, password: str) -> None:
+        self._call("System", "EnrollDiskTpm", "(s)", password)
+
     def prepare_disk_recovery(self, disk_password: str) -> str:
         return self._call("Setup", "PrepareDiskRecovery", "(s)", disk_password)[0]
 

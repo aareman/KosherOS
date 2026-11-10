@@ -242,6 +242,13 @@ class DemoClient:
     def disk_security(self):
         return {"encrypted": True, "supported": True, "recovery_saved": True,
                 "message": "The system disk is encrypted; its recovery key has been saved."}
+    def disk_unlock_status(self):
+        return {"available": True, "pending": False, "enrolled": True,
+                "message": "Automatic unlock is enrolled. Keep the saved recovery key."}
+    def setup_disk_tpm(self, *a):
+        raise ValueError("This computer is already set up.")
+    def enroll_disk_tpm(self, *a):
+        return None
     def prepare_disk_recovery(self, *a):
         raise ValueError("This computer is already set up.")
     def confirm_disk_recovery(self, *a):

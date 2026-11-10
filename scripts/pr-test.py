@@ -465,7 +465,7 @@ class Machine:
     """The test disk booted with a screen, ssh on a free port, and QMP."""
 
     def __init__(self, overlay: Path, outdir: Path, key: Path, gl: bool,
-                 console: str = "desktop-console.log", mem: int = 4096):
+                 console: str = "desktop-console.log", mem: int = 4096, tpm: bool = False):
         self.outdir = outdir
         outdir.mkdir(parents=True, exist_ok=True)
         self.key = key
@@ -481,6 +481,39 @@ class Machine:
                     "-display", "egl-headless"]
         else:
             qemu = ["qemu-system-x86_64", "-device", "virtio-vga", "-display", "none"]
+        self.tpm_proc = None
+        if tpm:
+            # Explicit opt-in: normal PR machines retain their existing BIOS
+            # path. TPM acceptance uses persistent state plus Microsoft-enrolled
+            # Secure Boot firmware, on an isolated overlay only.
+            code = Path(os.environ.get("KOSHER_OVMF_CODE", "/usr/share/OVMF/OVMF_CODE_4M.ms.fd"))
+            template = Path(os.environ.get("KOSHER_OVMF_VARS", "/usr/share/OVMF/OVMF_VARS_4M.ms.fd"))
+            if not code.is_file() or not template.is_file() or not shutil.which("swtpm"):
+                raise StageError("TPM tests need swtpm and Secure Boot OVMF firmware "
+                                 "(KOSHER_OVMF_CODE and KOSHER_OVMF_VARS)")
+            variables = outdir / "efi-vars.fd"
+            if not variables.exists():
+                shutil.copyfile(template, variables)
+            state = outdir / "tpm-state"
+            state.mkdir(exist_ok=True)
+            control = self.sockdir / "tpm.sock"
+            self.tpm_proc = LEFTOVERS.start([
+                "swtpm", "socket", "--tpm2", "--tpmstate", f"dir={state}",
+                "--ctrl", f"type=unixio,path={control}", "--flags", "not-need-init"],
+                stdout=(outdir / "swtpm.log").open("w"), stderr=subprocess.STDOUT)
+            for _ in range(100):
+                if control.exists():
+                    break
+                if self.tpm_proc.poll() is not None:
+                    raise StageError("Software TPM failed to start")
+                time.sleep(0.05)
+            else:
+                raise StageError("Software TPM did not create its socket")
+            qemu += ["-machine", "q35,smm=on", "-global", "driver=cfi.pflash01,property=secure,value=on",
+                     "-drive", f"if=pflash,format=raw,unit=0,readonly=on,file={code}",
+                     "-drive", f"if=pflash,format=raw,unit=1,file={variables}",
+                     "-chardev", f"socket,id=chrtpm,path={control}",
+                     "-tpmdev", "emulator,id=tpm0,chardev=chrtpm", "-device", "tpm-tis,tpmdev=tpm0"]
         cmd = qemu + [
             "-enable-kvm", "-cpu", "host", "-m", str(mem), "-smp", "4",
             "-drive", f"file={overlay},if=virtio",
@@ -571,6 +604,8 @@ class Machine:
             self._stop()
         finally:
             LEFTOVERS.stop(self.proc)
+            if self.tpm_proc is not None:
+                LEFTOVERS.stop(self.tpm_proc)
             shutil.rmtree(self.sockdir, ignore_errors=True)
 
     def _stop(self) -> None:

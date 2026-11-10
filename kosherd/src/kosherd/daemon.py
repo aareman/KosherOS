@@ -30,7 +30,7 @@ from . import (BUS_NAME, OBJECT_PATH, access, appaccess, appkinds, apps, auth,
 from .apply import apply_policy
 from .apps import AppError
 from .guardian import Guardian, GuardianError
-from .policy import INSPECTED_MODES, MODES, Policy, PolicyError, UserPolicy
+from .policy import INSPECTED_MODES, PROXIED_MODES, MODES, Policy, PolicyError, UserPolicy
 from .session import SessionStore
 
 # A machine name for the SSH list: labels of letters, digits and hyphens,
@@ -229,6 +229,11 @@ INTROSPECTION_XML = """
       <arg direction="in" type="i" name="uid"/>
       <arg direction="in" type="b" name="video_calls"/>
       <arg direction="in" type="s" name="extra_ports_json"/>
+      <arg direction="in" type="s" name="guardian_password"/>
+    </method>
+    <method name="SetLanHosts">
+      <arg direction="in" type="i" name="uid"/>
+      <arg direction="in" type="as" name="hosts"/>
       <arg direction="in" type="s" name="guardian_password"/>
     </method>
     <method name="SetSsh">
@@ -513,6 +518,16 @@ INTROSPECTION_XML = """
       <arg direction="in" type="s" name="guardian_password"/>
       <arg direction="in" type="s" name="grub_password"/>
     </method>
+    <method name="DiskSecurity">
+      <arg direction="out" type="s" name="status_json"/>
+    </method>
+    <method name="PrepareDiskRecovery">
+      <arg direction="in" type="s" name="disk_password"/>
+      <arg direction="out" type="s" name="recovery_key"/>
+    </method>
+    <method name="ConfirmDiskRecovery">
+      <arg direction="in" type="s" name="recovery_key"/>
+    </method>
     <method name="NetworkStatus">
       <arg direction="out" type="s" name="status_json"/>
     </method>
@@ -574,6 +589,7 @@ IN_BACKGROUND = frozenset({"CheckUpdate", "DeploymentStatus", "ListChannels",
                            "SetChannel", "Rollback", "TryImage", "ReturnToKept",
                            "RunAutoUpdate",
                            "SearchYouTubeChannels",
+                           "DiskSecurity", "PrepareDiskRecovery", "ConfirmDiskRecovery",
                            "TailscaleStatus", "TailscaleSignIn", "TailscaleSignOut"})
 # SetTailscaleEnabled is not here although it waits on systemctl: it
 # changes the policy, which only the main loop may do.
@@ -1170,6 +1186,12 @@ class Daemon:
 
     def _apply_mct(self) -> None:
         try:
+            from . import desktoplimits
+
+            desktoplimits.apply(self.policy)
+        except Exception:  # noqa: BLE001 - desktop limits must not block network enforcement
+            log.exception("desktop limits could not be applied")
+        try:
             from .mct import apply_malcontent
 
             apply_malcontent(self.policy)
@@ -1396,7 +1418,7 @@ class Daemon:
             status["services"][service] = result.stdout.strip() or "unknown"
 
         needed = {
-            "kosher-mitm.service": any(u.mode in INSPECTED_MODES
+            "kosher-mitm.service": any(u.mode in PROXIED_MODES
                                        for u in self.policy.effective_users()),
             "kosher-dns.service": True,
             "kosher-search.service": any(
@@ -1857,6 +1879,19 @@ class Daemon:
         user.video_calls = bool(video_calls)
         user.extra_ports = sorted(set(ports))
         self._save_and_apply()
+
+    def impl_SetLanHosts(self, uid: int, hosts: list[str], _guardian_pw: str):
+        """Explicit permission for named home-network web devices (F6)."""
+        from .webguard import normalize_lan_hosts
+
+        user = self._managed(uid)
+        try:
+            normalized = normalize_lan_hosts(hosts)
+        except ValueError as error:
+            raise PolicyError(str(error)) from None
+        user.lan_hosts = normalized
+        self._save_and_apply()
+        return None
 
     def impl_SetSsh(self, uid: int, anywhere: bool, hosts_json: str, _guardian_pw: str):
         """SSH to other machines (#257): the listed ones, or anywhere. An
@@ -3492,11 +3527,13 @@ class Daemon:
     # ---- Network ---------------------------------------------------------
 
     def impl_SetCaptiveMode(self, uid: int, minutes: int):
-        if not 1 <= minutes <= 60:
-            raise PolicyError("captive window must be 1-60 minutes")
+        self._managed(uid)
+        if not 1 <= minutes <= nft.MAX_CAPTIVE_MINUTES:
+            raise PolicyError(f"captive window must be 1-{nft.MAX_CAPTIVE_MINUTES} minutes")
         res = subprocess.run(
-            ["nft", "add", "element", "inet", "kosher", "captive",
-             f"{{ {uid} timeout {minutes}m }}"],
+            ["nft", "-f", "-"],
+            input="".join(f"add element inet kosher {name} {{ {uid} timeout {minutes}m }}\n"
+                          for name in ("captive", "captive_marks")),
             capture_output=True, text=True,
         )
         if res.returncode != 0:
@@ -3811,9 +3848,41 @@ class Daemon:
             raise PolicyError(str(e))
         return None
 
+    def impl_DiskSecurity(self):
+        from . import disksecurity
+
+        try:
+            return GLib.Variant("(s)", (json.dumps(disksecurity.inspect()),))
+        except disksecurity.DiskError as exc:
+            raise PolicyError(str(exc)) from None
+
+    def impl_PrepareDiskRecovery(self, disk_password: str):
+        from . import disksecurity
+
+        try:
+            disksecurity.grow_root(passphrase=disk_password)
+            return GLib.Variant("(s)", (disksecurity.prepare(disk_password),))
+        except disksecurity.DiskError as exc:
+            raise PolicyError(str(exc)) from None
+
+    def impl_ConfirmDiskRecovery(self, recovery_key: str):
+        from . import disksecurity
+
+        try:
+            disksecurity.confirm(recovery_key)
+        except disksecurity.DiskError as exc:
+            raise PolicyError(str(exc)) from None
+        return None
+
     def impl_FinishSetup(self, guardian_password: str, grub_password: str):
         if not any(u.admin for u in self.policy.users):
             raise PolicyError("create the administrator account first")
+        from . import disksecurity
+
+        try:
+            disksecurity.require_ready()
+        except disksecurity.DiskError as exc:
+            raise PolicyError(str(exc)) from None
         if guardian_password:
             self.guardian.set_password(guardian_password)
             self.policy.guardian_enabled = True

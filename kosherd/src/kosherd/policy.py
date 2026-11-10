@@ -17,6 +17,8 @@ from pathlib import Path
 
 import jsonschema
 
+from . import webguard
+
 POLICY_PATH = Path("/var/lib/kosher/policy.json")
 SCHEMA_PATH = Path("/usr/share/kosher/policy.schema.json")
 
@@ -31,6 +33,9 @@ MODES = ("none", "whitelist", "dnsfilter", "filtered", "unfiltered")
 
 # Modes whose traffic is decrypted so content can be judged (see mitm/).
 INSPECTED_MODES = ("filtered",)
+# Basic and whitelist accounts also pass through the proxy, which checks
+# HTTP Host / TLS SNI without decrypting their HTTPS.
+PROXIED_MODES = ("filtered", "dnsfilter", "whitelist")
 
 # Modes that get safe search forced on them. dnsfilter cannot read the
 # connection, so its safe search is done in DNS; filtered gets it in the
@@ -217,7 +222,8 @@ DEVELOPER_REGISTRIES = (
     # build reaches: the flake registry, nixpkgs as a tarball from GitHub,
     # and devbox's package search.
     "cache.nixos.org",
-    "channels.nixos.org",         # the flake registry (nixpkgs = github:NixOS/nixpkgs)
+    "channels.nixos.org",         # channel/flake tarball entry point
+    "releases.nixos.org",         # channels.nixos.org redirects tarball downloads here
     "api.github.com",             # a flake's branch -> commit lookup
     "codeload.github.com",        # where github.com sends an archive download
     "devenv.cachix.org",
@@ -231,7 +237,13 @@ DEVELOPER_REGISTRIES = (
     "edgedl.me.gvt1.com",         # Google's download host (Antigravity)
     # Container image registries, for rootless podman: Docker Hub (not
     # hub.docker.com, which is a site), Quay, Microsoft's (every
-    # devcontainer image), Red Hat's; Fedora's and GitHub's are above.
+    # devcontainer image), Red Hat's, Fedora's and GitHub's. The last two
+    # are also machine update hosts, but need explicit developer permission
+    # now that a personal whitelist does not inherit machine web access.
+    "registry.fedoraproject.org",
+    "cdn.registry.fedoraproject.org",
+    "ghcr.io",
+    "pkg-containers.githubusercontent.com",
     "docker.io",
     "registry-1.docker.io",
     "auth.docker.io",
@@ -260,6 +272,9 @@ class UserPolicy:
     # account, merged with `whitelist` when the filter is rendered. A
     # parent picks "Torah study" instead of typing thirty hosts.
     whitelist_bundles: list[str] = field(default_factory=list)
+    # A separate administrator permission for web access to LAN devices;
+    # approving an Internet site never authorizes DNS rebinding to the LAN.
+    lan_hosts: list[str] = field(default_factory=list)
     # Which installed apps this account may run, as an allow-list. The
     # older shape of app control; kosherd turns it into `blocked_apps` on
     # start-up once it can see what is installed, and malcontent honours
@@ -341,6 +356,8 @@ class UserPolicy:
             d["whitelist"] = self.whitelist
         if self.whitelist_bundles:
             d["whitelist_bundles"] = self.whitelist_bundles
+        if self.lan_hosts:
+            d["lan_hosts"] = webguard.normalize_lan_hosts(self.lan_hosts)
         if self.rules:
             d["rules"] = self.rules
         if self.blocked_categories:
@@ -407,6 +424,9 @@ class GuestPolicy:
     mode: str = "whitelist"
     whitelist: list[str] = field(default_factory=list)
     whitelist_bundles: list[str] = field(default_factory=list)
+    # A separate administrator permission for web access to LAN devices;
+    # approving an Internet site never authorizes DNS rebinding to the LAN.
+    lan_hosts: list[str] = field(default_factory=list)
     rules: list[dict] = field(default_factory=list)
     blocked_categories: list[str] = field(default_factory=list)
     # The guest gets the same settings as anyone else. Without these a
@@ -430,6 +450,8 @@ class GuestPolicy:
             d["whitelist"] = self.whitelist
         if self.whitelist_bundles:
             d["whitelist_bundles"] = self.whitelist_bundles
+        if self.lan_hosts:
+            d["lan_hosts"] = webguard.normalize_lan_hosts(self.lan_hosts)
         if self.rules:
             d["rules"] = self.rules
         if self.blocked_categories:
@@ -513,6 +535,7 @@ class Policy:
                 uid=self.guest.uid, username=GUEST_USERNAME,
                 mode=self.guest.mode, whitelist=list(self.guest.whitelist),
                 whitelist_bundles=list(self.guest.whitelist_bundles),
+                lan_hosts=list(self.guest.lan_hosts),
                 # The guest installs nothing and is wiped at sign-out;
                 # what it may run is the approved list, like any account
                 # in no group.
@@ -597,6 +620,7 @@ class Policy:
                     admin=u.get("admin", False),
                     whitelist=list(u.get("whitelist", [])),
                     whitelist_bundles=list(u.get("whitelist_bundles", [])),
+                    lan_hosts=webguard.normalize_lan_hosts(u.get("lan_hosts", [])),
                     apps=list(u.get("apps", [])),
                     can_install_apps=u.get("can_install_apps", True),
                     app_access=u.get("app_access") or None,
@@ -641,6 +665,7 @@ class Policy:
                 mode=guest_doc.get("mode", "whitelist"),
                 whitelist=list(guest_doc.get("whitelist", [])),
                 whitelist_bundles=list(guest_doc.get("whitelist_bundles", [])),
+                lan_hosts=webguard.normalize_lan_hosts(guest_doc.get("lan_hosts", [])),
                 rules=list(guest_doc.get("rules", [])),
                 blocked_categories=list(guest_doc.get("blocked_categories", [])),
                 media_level=guest_doc.get("media_level", DEFAULT_MEDIA_LEVEL),
@@ -672,6 +697,11 @@ def validate(doc: dict) -> None:
         jsonschema.validate(doc, _schema_cache)
     except jsonschema.ValidationError as e:
         raise PolicyError(f"invalid policy: {e.message}") from e
+    try:
+        for account in [*doc.get("users", []), doc.get("guest", {})]:
+            webguard.normalize_lan_hosts(account.get("lan_hosts", []))
+    except ValueError as e:
+        raise PolicyError(f"invalid policy: {e}") from e
 
 
 def load(path: Path = POLICY_PATH) -> Policy:

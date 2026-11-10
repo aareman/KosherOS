@@ -51,6 +51,7 @@ def test_the_archive_is_a_cpio_the_initramfs_can_unpack(img):
     names = _listing(img)
     assert ".buildstamp" in names
     assert "etc/anaconda/conf.d/90-kosheros.conf" in names
+    assert "usr/share/kosher/installer-encryption.py" in names
     assert "usr/share/anaconda/pixmaps/kosheros/kosheros.css" in names
     assert "usr/share/anaconda/pixmaps/kosheros/sidebar-logo.png" in names
     assert "TRAILER!!!" not in names
@@ -73,6 +74,8 @@ def test_the_dropin_points_anaconda_at_our_stylesheet(img, tmp_path):
     sheet = conf["User Interface"]["custom_stylesheet"]
     assert sheet == "/usr/share/anaconda/pixmaps/kosheros/kosheros.css"
     assert (tmp_path / sheet.lstrip("/")).is_file()
+    assert (tmp_path / "usr/share/kosher/installer-encryption.py").read_bytes() == \
+        (ROOT / "scripts/installer-encryption.py").read_bytes()
 
 
 def test_the_installer_is_one_question_and_a_button(img, tmp_path):
@@ -85,13 +88,13 @@ def test_the_installer_is_one_question_and_a_button(img, tmp_path):
     assert hidden == {"KeyboardSpoke", "LangsupportSpoke", "DatetimeSpoke",
                       "NetworkSpoke", "SourceSpoke", "SoftwareSelectionSpoke"}
     assert "StorageSpoke" not in hidden, "the disk is the one question that must be asked"
-    # And what "Automatic" in that spoke makes: the plain ext4 root the
+    # And what "Automatic" in that spoke makes: the ext4 root the
     # kickstart used to write, now that it writes no partitioning (#134).
     storage = conf["Storage"]
     assert storage["default_scheme"] == "PLAIN"
     assert storage["file_system_type"] == "ext4"
     assert storage.getboolean("swap_is_recommended") is False
-    assert "/ (min 1 GiB, max 70 GiB)" in storage["default_partitioning"]
+    assert storage["default_partitioning"].strip() == "/ (min 1 GiB)"
     assert "/home" not in storage["default_partitioning"]
     # Each hidden spoke is one the kickstart or the module list has answered.
     kickstart = (ROOT / "os-image/iso-config.toml").read_text()

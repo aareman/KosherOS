@@ -17,6 +17,8 @@ edits take effect without a restart.
 
 from __future__ import annotations
 
+import asyncio
+import socket
 import base64
 import hashlib
 import hmac
@@ -50,6 +52,7 @@ try:
     from kosherd import usage as usage_mod
     from kosherd import videocheck as videocheck_mod
     from kosherd import vision as vision_mod
+    from kosherd import webguard
     from kosherd.uidmap import UidLookup
     from kosherd.urlrules import BLOCK, BYPASS, decide, parse_rules
 except ImportError:  # pragma: no cover - only when interpreters differ
@@ -75,6 +78,7 @@ except ImportError:  # pragma: no cover - only when interpreters differ
     from kosherd import usage as usage_mod
     from kosherd import videocheck as videocheck_mod
     from kosherd import vision as vision_mod
+    from kosherd import webguard
     from kosherd.uidmap import UidLookup
     from kosherd.urlrules import BLOCK, BYPASS, decide, parse_rules
 
@@ -178,14 +182,9 @@ def is_bare_address(host: str | None) -> bool:
     category, so a request made by address used to be judged by nothing
     and let through; that was finding F3 of the security review (#33).
     """
-    host = (host or "").strip().strip("[]")
-    if not host:
-        return True
-    try:
-        ipaddress.ip_address(host)
-    except ValueError:
-        return False
-    return True
+    # Share canonicalization with name-only modes: legacy IPv4 spellings
+    # and Unicode forms that IDNA turns into addresses are not DNS names.
+    return not webguard.hostname((host or "").strip().strip("[]"))
 
 
 def host_in(host: str | None, names) -> bool:
@@ -208,6 +207,7 @@ def host_in(host: str | None, names) -> bool:
 # uid: the firewall sends their web to their own listener (#123), and the
 # proxy judges it as this one identity.
 BUILDER_UID = -2
+CHANNEL_SEARCH_UID = -3
 
 
 def _fail_closed_entry() -> dict:
@@ -234,6 +234,9 @@ class PolicyCache:
         self._known: set[int] = set()
         self._by_port: dict[int, int] = {}
         self._rules: dict[int, list] = {}
+        self._modes: dict[int, str] = {}
+        self._allowed_hosts: dict[int, tuple] = {}
+        self._lan_hosts: dict[int, tuple] = {}
         self._blocked: dict[int, list] = {}
         self._media: dict[int, str] = {}
         self._cover: dict[int, str] = {}
@@ -261,6 +264,18 @@ class PolicyCache:
             # fault, which is what to go and fix.
             log.warning("no policy for uid=%s; applying the fail-closed floor", uid)
         return known
+
+    def mode_for(self, uid: int | None) -> str:
+        self._refresh()
+        return self._modes.get(uid, "none")
+
+    def allowed_hosts_for(self, uid: int | None) -> tuple:
+        self._refresh()
+        return self._allowed_hosts.get(uid, ())
+
+    def lan_hosts_for(self, uid: int | None) -> tuple:
+        self._refresh()
+        return self._lan_hosts.get(uid, ())
 
     def rules_for(self, uid: int | None):
         if not self._is_known(uid):
@@ -329,6 +344,9 @@ class PolicyCache:
             return
 
         rules: dict[int, list] = {}
+        modes: dict[int, str] = {}
+        allowed_hosts: dict[int, tuple] = {}
+        lan_hosts: dict[int, tuple] = {}
         blocked: dict[int, list] = {}
         media: dict[int, str] = {}
         cover: dict[int, str] = {}
@@ -340,13 +358,17 @@ class PolicyCache:
         build_developers: list[dict] | None = None
         for uid_text, raw in doc.items():
             try:
-                uid = BUILDER_UID if uid_text == "builder" else int(uid_text)
+                uid = (BUILDER_UID if uid_text == "builder" else
+                       CHANNEL_SEARCH_UID if uid_text == "channel-search" else int(uid_text))
                 # Older files were {uid: [rules]}; current ones carry
                 # categories too.
                 entry = raw if isinstance(raw, dict) else {"rules": raw}
                 if entry.get("port") is not None:
                     by_port[int(entry["port"])] = uid
                 rules[uid] = parse_rules(entry.get("rules", []))
+                modes[uid] = entry.get("mode", "filtered")
+                allowed_hosts[uid] = tuple(entry.get("allowed_hosts", ()))
+                lan_hosts[uid] = tuple(webguard.normalize_lan_hosts(entry.get("lan_hosts", ())))
                 blocked[uid] = list(entry.get("blocked_categories", []))
                 media[uid] = entry.get("media_level", "none")
                 cover[uid] = entry.get("cover_style", "frost")
@@ -365,6 +387,9 @@ class PolicyCache:
                     build_developers = buildsources_mod.load_developers(entry["developers"])
             except Exception as e:  # noqa: BLE001 - one bad entry must not break all
                 log.error("bad entry for uid %s: %s", uid_text, e)
+        self._modes = modes
+        self._allowed_hosts = allowed_hosts
+        self._lan_hosts = lan_hosts
         self._rules = rules
         self._blocked = blocked
         self._media = media
@@ -942,6 +967,160 @@ class KosherFilter:
         self.usage = usage_mod.Tally("proxy")
         self._flusher = None
 
+    def _mode(self, uid) -> str:
+        # Small unit-test policies predate modes; installed PolicyCache
+        # always has mode_for and refuses identities absent from its file.
+        return getattr(self.policy, "mode_for", lambda _uid: "filtered")(uid)
+
+    def _client_uid(self, client):
+        port = self._listener_port(type("Connection", (), {"client_conn": client})())
+        uid = self.policy.uid_for_listener_port(port)
+        if uid is not None:
+            return uid
+        # Legacy/regular-mode test listeners carry no custom port in the
+        # rules file. The kernel socket owner is still authoritative.
+        peer = getattr(client, "peername", None)
+        local = getattr(client, "sockname", None)
+        if peer and local:
+            return self.uids.uid_for_connection(peer[0], peer[1], local[0], local[1])
+        return None
+
+    def _name_refusal(self, uid, host: str) -> str:
+        name = webguard.hostname(host)
+        if not name:
+            if not self._lan_permission(uid, host):
+                return "no DNS hostname"
+            name = host.strip("[]").lower()
+        mode = self._mode(uid)
+        if mode == "whitelist":
+            if not webguard.host_in(name, self.policy.allowed_hosts_for(uid)):
+                return "not on this account's approved sites"
+        elif mode == "dnsfilter":
+            if self._blocked_categories_of(name, uid):
+                return "blocked category"
+        else:
+            return "no name-check policy"
+        return ""
+
+    def _permit_upstream(self, server, host: str, port: int, lan: bool, client=None) -> None:
+        # Connect to the approved name itself, not an address supplied by
+        # the client together with somebody else's Host/SNI.
+        if not getattr(server, "connected", False):
+            server.address = (host, port)
+        if not hasattr(self, "_upstream_permissions"):
+            self._upstream_permissions = OrderedDict()
+            self._client_permissions = OrderedDict()
+            self._private_upstreams = OrderedDict()
+        self._upstream_permissions[server.id] = (host, lan)
+        self._upstream_permissions.move_to_end(server.id)
+        if client is not None:
+            key = (id(client), host, port)
+            self._client_permissions[key] = lan
+            self._client_permissions.move_to_end(key)
+        # Failed connections do not necessarily get server_disconnected.
+        # Eviction refuses an old pending connection rather than weakening it.
+        for cache in (self._upstream_permissions, self._client_permissions):
+            while len(cache) > 4096:
+                cache.popitem(last=False)
+
+    def _lan_permission(self, uid, host: str, url: str = "") -> bool:
+        # Independent from all web/category/allow rules. A permitted public
+        # website must not turn into access to the router after DNS rebinding.
+        named = getattr(self.policy, "lan_hosts_for", lambda _uid: ())(uid)
+        return webguard.lan_permitted(host, named)
+
+    def tls_clienthello(self, data) -> None:
+        uid = self._client_uid(data.context.client)
+        mode = self._mode(uid)
+        if mode == "filtered":
+            return
+        hello = data.client_hello
+        host = hello.sni or ""
+        # An explicit private-address device permission is the only no-SNI
+        # exception (a NAS reached by its numeric HTTPS address).
+        if not host and self._lan_permission(uid, data.context.server.address[0]):
+            host = data.context.server.address[0]
+        reason = self._name_refusal(uid, host)
+        # ECH hides the name that must be checked. Refuse its offer (also
+        # GREASE), rather than approving the public cover name.
+        if any(kind == 0xfe0d for kind, _body in hello.extensions):
+            reason = "encrypted ClientHello is unavailable with hostname filtering"
+        if hello.alpn_protocols and not any(p in (b"http/1.1", b"h2") for p in hello.alpn_protocols):
+            reason = "not an HTTPS protocol"
+        if reason:
+            data.context.client.error = reason
+            data.context.server.error = reason
+            # Passthrough attempts an upstream connection immediately; its
+            # error closes it before forwarding even the ClientHello. Do
+            # not fall back to TLS interception for a refused SNI.
+            data.ignore_connection = True
+            return
+        server = data.context.server
+        host = webguard.hostname(host) or host.strip("[]")
+        self._permit_upstream(server, host, server.address[1], self._lan_permission(uid, host), data.context.client)
+        data.ignore_connection = True
+
+    async def server_connect(self, data) -> None:
+        # Pin the result we checked so a second DNS lookup cannot rebind
+        # a public name to a router or a loopback service between check and
+        # connect. The hook runs before mitmproxy opens its upstream socket.
+        server = data.server
+        if server.error:
+            return
+        if not server.address:
+            server.error = "no upstream destination"
+            return
+        uid = self._client_uid(data.client)
+        if self._mode(uid) == "none":
+            server.error = "no policy for this listener"
+            return
+        host, port = server.address
+        permissions = getattr(self, "_upstream_permissions", {}).get(server.id)
+        if permissions is None:
+            key = (id(data.client), host, port)
+            by_client = getattr(self, "_client_permissions", {})
+            if key in by_client:
+                permissions = (host, by_client[key])
+        if self._mode(uid) in ("whitelist", "dnsfilter") and not permissions:
+            server.error = "no approved HTTP Host or TLS SNI"
+            return
+        lan = bool(permissions and permissions[0] == host and permissions[1])
+        try:
+            address = ipaddress.ip_address(host)
+            addresses = [str(address)]
+        except ValueError:
+            try:
+                answers = await asyncio.get_running_loop().getaddrinfo(
+                    host, port, type=socket.SOCK_STREAM)
+                addresses = list(dict.fromkeys(row[4][0] for row in answers))
+            except OSError:
+                server.error = "hostname could not be resolved"
+                return
+        if any(webguard.local_service_address(a) for a in addresses):
+            server.error = "local-service destination is never a LAN device"
+            return
+        if not addresses or (not lan and any(webguard.nonpublic_address(a) for a in addresses)):
+            server.error = "private-network destination requires an explicit site permission"
+            return
+        private = any(webguard.nonpublic_address(a) for a in addresses)
+        if not hasattr(self, "_private_upstreams"):
+            self._private_upstreams = OrderedDict()
+        key = (id(data.client), host, port)
+        self._private_upstreams[key] = private
+        self._private_upstreams.move_to_end(key)
+        while len(self._private_upstreams) > 4096:
+            self._private_upstreams.popitem(last=False)
+        server.address = (addresses[0], port)
+
+    def server_disconnected(self, data) -> None:
+        getattr(self, "_upstream_permissions", {}).pop(data.server.id, None)
+
+    def client_disconnected(self, client) -> None:
+        for name in ("_client_permissions", "_private_upstreams"):
+            cache = getattr(self, name, {})
+            for key in [key for key in cache if key[0] == id(client)]:
+                cache.pop(key, None)
+
     def _blocked_categories_of(self, host: str, uid) -> set:
         """The categories this account blocks that `host` is in; none for
         a name Tailscale needs while it is set up (#211). Only the
@@ -1100,10 +1279,60 @@ class KosherFilter:
     def _request(self, flow: http.HTTPFlow) -> None:
         # Everything reaching this proxy belongs to a filtered user: only
         # their traffic is redirected here.
-        _force_safesearch(flow)
-
         uid = self._uid_of(flow)
         flow.metadata["kosher_uid"] = uid
+        mode = self._mode(uid)
+        if mode == "none":
+            self._block(flow, flow.request.pretty_url, " because its account has no policy", why="identity")
+            return
+        # Before URL allow/bypass rules: permitting a website is never a
+        # grant for it to become another resolver (F4).
+        if webguard.doh_request(flow.request.path, flow.request.headers):
+            self._block(flow, flow.request.pretty_url, " because encrypted DNS is not allowed", why="encrypted-dns")
+            return
+        host = flow.request.pretty_host or ""
+        if mode in ("dnsfilter", "whitelist"):
+            reason = self._name_refusal(uid, host)
+            if reason:
+                self._block(flow, flow.request.pretty_url, " because " + reason, why="hostname")
+                return
+            flow.metadata["kosher_name_only"] = True
+        server = getattr(flow, "server_conn", None)
+        if server is not None:
+            port = getattr(flow.request, "port", None) or (443 if flow.request.pretty_url.startswith("https:") else 80)
+            lan = self._lan_permission(uid, host, flow.request.pretty_url)
+            private = getattr(self, "_private_upstreams", {}).get((id(flow.client_conn), host, port), False)
+            peer = getattr(server, "peername", None)
+            if peer:
+                private = private or webguard.nonpublic_address(peer[0])
+            if private and not lan:
+                self._block(flow, flow.request.pretty_url, " because private-network access needs an explicit site permission", why="private-network")
+                return
+            self._permit_upstream(server, host, port, lan, flow.client_conn)
+            # The HTTP layer derives its connection target from request.host
+            # after this hook. Updating only server_conn.address is lost in
+            # transparent/reverse mode when Host differs from the address.
+            flow.request.host = host
+        if mode in ("dnsfilter", "whitelist"):
+            return
+        _force_safesearch(flow)
+
+        if uid == CHANNEL_SEARCH_UID:
+            # The unprivileged channel finder is given no general network
+            # access: exact HTTPS origin, method and API path. Checking the
+            # URL's authority also refuses a misleading Host header/port.
+            try:
+                target = urlsplit(flow.request.pretty_url)
+                permitted = (target.scheme == "https" and target.hostname == "www.youtube.com"
+                             and target.port in (None, 443) and target.username is None
+                             and flow.request.pretty_host == "www.youtube.com"
+                             and target.path == "/youtubei/v1/search"
+                             and flow.request.method == "POST")
+            except ValueError:
+                permitted = False
+            if not permitted:
+                self._refuse(flow, 403, "channel search may only ask YouTube for channels")
+            return
 
         # A Nix build is held to the strictest developer account's filter
         # (#199); bare addresses are refused below as for everyone.
@@ -1205,6 +1434,13 @@ class KosherFilter:
             # to inspect, so nothing to hold.
             flow.response.stream = True
             return
+        content_type = (flow.response.headers.get("content-type") or "").lower()
+        if content_type.split(";", 1)[0].strip() == "application/dns-message":
+            self._block(flow, flow.request.pretty_url, " because encrypted DNS is not allowed", why="encrypted-dns")
+            return
+        if flow.metadata.get("kosher_name_only"):
+            flow.response.stream = True
+            return
         if flow.metadata.get("kosher_bypass"):
             # A bypass rule (#273): through as it came, body unread.
             flow.response.stream = True
@@ -1242,7 +1478,7 @@ class KosherFilter:
         # loop for up to the detection deadline per picture, and every other
         # connection on the machine stood still with it.
         uid = flow.metadata.get("kosher_uid")
-        if uid is None:
+        if uid is None or flow.metadata.get("kosher_name_only"):
             return
         if getattr(flow.response, "stream", False):
             return  # let through as it arrived; there is no body to read

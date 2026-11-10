@@ -20,14 +20,16 @@
 # For repeat VM rehearsals that may wipe everything unattended, use
 # os-image/iso-config-unattended.toml (just iso-unattended).
 #
-# What "Automatic" in that spoke produces — a plain ext4 root and nothing
+# What "Automatic" in that spoke produces — an ext4 root and nothing
 # else, no swap, no separate /home — is set in the installer's product
-# configuration (scripts/brand-iso.py, [Storage]), the same shape the
-# kickstart used to write. Anaconda caps the root at 70 GiB and leaves the
-# rest of a larger disk unallocated; the installed system grows the root
-# into that space on its first boot: bootc's growpart unit, which the image
-# lets run on real hardware as well as in a VM (see
-# files/usr/lib/systemd/system/bootc-generic-growpart.service.d, #113).
+# configuration (scripts/brand-iso.py, [Storage]). Its native encryption
+# checkbox is selected before the UI opens, so Anaconda asks for a disk
+# passphrase. No partitioning is pre-answered and nothing starts erasing
+# until the person confirms the disk. The same shape the
+# kickstart used to write, without Anaconda's 70 GiB maximum: a new root
+# takes the available space while the installer holds its passphrase.
+# First-boot recovery setup also extends an existing plain ext4-in-LUKS
+# root if necessary, honoring /etc/kosher/keep-disk-layout.
 #
 # Language, keyboard and time zone are answered here; the spokes for them
 # (and for network, source and software, which an offline bootc install
@@ -41,9 +43,12 @@ keyboard us
 lang en_US.UTF-8
 reboot --eject
 
-%pre --interpreter=/bin/bash --log=/tmp/kosher-pre.log
+%pre --interpreter=/bin/bash --erroronfail --log=/tmp/kosher-pre.log
 # Pick the disk when there is only one to pick.
-set -u
+set -eu
+# The helper arrives in product.img. Changing the UI default, rather than
+# adding an autopart command, preserves the mandatory disk confirmation.
+python3 /usr/share/kosher/installer-encryption.py
 out=/tmp/kosher-disk.ks
 : > "$out"
 

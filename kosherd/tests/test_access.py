@@ -175,6 +175,8 @@ def test_the_guardian_gate_covers_every_filter_weakening_method():
                 "SetAdBlockAllowed",
                 # Beyond the web: video calls and extra ports widen reach.
                 "SetNetworkAccess",
+                # Home-network websites are a separate device permission.
+                "SetLanHosts",
                 # SSH to other machines (#257): a tunnel the filter cannot read.
                 "SetSsh",
                 # Developer tools: the Nix daemon and the registries, directly.

@@ -108,17 +108,17 @@ custom_stylesheet = {STYLESHEET}
 # leaving Installation Destination.
 hidden_spokes =
 """ + "".join(f"    {spoke}\n" for spoke in HIDDEN_SPOKES) + """
-# What "Automatic" in Installation Destination produces: a plain ext4 root
+# What "Automatic" in Installation Destination produces: an ext4 root
 # and nothing else — no swap, no separate /home — the shape the kickstart
 # used to write with autopart before #134 took the partitioning out of it
-# (a complete kickstart installs without a click). The 70 GiB cap is
-# Anaconda's; the installed system grows the root on its first boot.
+# (a complete kickstart installs without a click). No 70 GiB cap: allocate
+# available space while Anaconda already holds the encryption passphrase.
 [Storage]
 default_scheme = PLAIN
 file_system_type = ext4
 swap_is_recommended = False
 default_partitioning =
-    / (min 1 GiB, max 70 GiB)
+    / (min 1 GiB)
 """
 
 
@@ -154,6 +154,8 @@ def stage(out: Path, src: Path = BRANDING, version: str = VERSION) -> list[Path]
 
     write(".buildstamp", buildstamp(version).encode())
     write("etc/anaconda/conf.d/90-kosheros.conf", ANACONDA_DROPIN.encode())
+    write("usr/share/kosher/installer-encryption.py",
+          (ROOT / "scripts/installer-encryption.py").read_bytes())
     write(f"{PIXMAPS}/kosheros.css", CSS.encode())
     write(FEDORA_STYLESHEET, CSS.encode())
     logo = Image.open(src / "logo.png").convert("RGBA")

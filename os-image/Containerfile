@@ -178,6 +178,7 @@ RUN dnf -y install dnsmasq nftables python3-gobject python3-jsonschema python3-p
     # Same for search: the front end and the engine behind it run as one
     # unprivileged user and are given only what they filter with.
     && useradd -r -s /usr/sbin/nologin -d /var/lib/kosher-search kosher-search \
+    && useradd -r -s /usr/sbin/nologin -d /nonexistent kosher-ytsearch \
     # Both services may drop an "ask for this page" request into the
     # spool; neither may read it back. See tmpfiles.d/kosher.conf.
     && groupadd -r kosher-spool \
@@ -801,6 +802,9 @@ RUN grep -q '^DEFAULT_HOSTNAME=kosheros' /usr/lib/os-release \
     && echo "identity ok"
 
 # bootc images must pass a container lint.
+RUN test -x /usr/sbin/cryptsetup \
+    && test -x /usr/sbin/growpart \
+    && test -x /usr/sbin/resize2fs
 RUN bootc container lint
 
 # --- The version, where bootc reads it ---------------------------------------

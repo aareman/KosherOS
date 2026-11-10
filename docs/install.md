@@ -91,7 +91,26 @@ KosherOS uses the whole of the disk it was installed on. The installer itself se
 
 ## 6. Set up your family and test
 
+The installer selects **Encrypt my data** in Installation Destination.
+Leave it selected and choose a disk passphrase when Anaconda asks. Keep
+that passphrase: the computer asks for it before starting KosherOS. The
+disk still waits for your destination choice and confirmation before
+anything is erased. Its automatic root partition uses the available space.
+
 The first start runs the KosherOS setup wizard. Follow it to create the administrator account and review the optional guardian password and device-security steps. Connect to your network when requested.
+
+For an encrypted disk, setup asks for the installer passphrase and makes
+a separate recovery key. Write all eight groups somewhere outside this
+computer, then enter the key from your written copy to verify that it
+opens the disk. The wizard clears the displayed key after verification;
+it cannot show it again later. Your original disk passphrase still works.
+An interrupted setup can resume, and generating another unsaved recovery
+key does not remove the original passphrase.
+
+If the disk is unencrypted, setup says so. An update cannot encrypt an
+existing installation in place: back up the files and reinstall with
+encryption to protect the on-disk filter settings. Keep Secure Boot on
+and protect the firmware and boot menu as described by the wizard.
 
 Start with a sample account and a few tasks: open the Store, try a site you normally use, review the account's settings in My Filter, and check Protection in the admin app. Add family accounts and choose their settings as you become comfortable with the system.
 

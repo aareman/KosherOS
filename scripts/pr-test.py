@@ -501,6 +501,7 @@ class Machine:
         return ["ssh", "-i", str(self.key), "-p", str(self.port),
                 "-o", "StrictHostKeyChecking=no", "-o", "UserKnownHostsFile=/dev/null",
                 "-o", "LogLevel=ERROR", "-o", "ConnectTimeout=5", "-o", "BatchMode=yes",
+                "-o", "IdentitiesOnly=yes",
                 "root@127.0.0.1"]
 
     def sh(self, script: str, timeout: int = 120, input: str | None = None) -> tuple[int, str]:
@@ -1000,7 +1001,7 @@ def desktop_scripts(st: Stage, vm: Machine, tree: Path, gl: bool, sh) -> None:
 # come out even. A suite not listed counts as a minute.
 SUITE_SECONDS = {"10-core": 12, "20-enforcement": 32, "30-apps": 61, "40-guest": 9,
                  "50-inspect": 16, "60-persistence": 77, "70-categories": 22,
-                 "80-hardening": 51, "90-developer": 93}
+                 "80-hardening": 51, "85-services": 30, "90-developer": 93}
 
 # Waits that only make a failing check slower, cut short in the fast run.
 # --full leaves them as they are. Each one is listed in the report.

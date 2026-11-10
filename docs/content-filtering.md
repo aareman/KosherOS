@@ -29,9 +29,11 @@ settle the question:
 | the bad-language list | words replaced with a milder one | milliseconds |
 | the pictures and video on the page | what is hidden or covered | see [pictures and video](media-filtering.md) |
 
-The other modes do less. *Basic protection* has the resolver and nothing
-more. *Approved sites only* reaches a list of sites and nothing else.
-*No internet* reaches nothing.
+The other modes do less. *Basic protection* checks categories at the
+resolver and checks the HTTP hostname or TLS server name before connecting.
+*Approved sites only* checks that name against the account's list. Both
+leave HTTPS encrypted; they cannot inspect its contents or an encrypted
+HTTP Host that differs from its TLS name. *No internet* reaches nothing.
 
 ## Which ports an account may use
 
@@ -71,12 +73,33 @@ proxy could not read them:
   account's page says that this is the one channel the filter cannot read.
   Below port 1024 an account gets only NTP, and QUIC stays refused.
 
-A *Basic protection* account has no proxy, so for it the web is ports 80
-and 443 to anywhere, plus the same named protocols. *Approved sites only*
-and *No internet* allow nothing beyond the approved sites.
+A *Basic protection* account uses the proxy on 80/443 to check names,
+without decrypting HTTPS, plus the same named direct protocols. Approved
+sites are checked by name per account, even when two sites share an IP.
+Connections without a hostname, or with an encrypted TLS ClientHello, are
+refused; managed browsers are configured not to send ECH or its GREASE
+offer. A private address explicitly listed as a home-network device can
+be used without a hostname in Basic protection.
 
-The package registries developer tools fetch from are reachable from every
-account, and the image points each tool at the filter's certificate;
+Direct mail, high UDP and extra ports do not open the home network.
+Printing and mDNS retain their limited permissions, as do an account's
+explicit SSH-machine list and approved Syncthing service. An explicit
+permission under Home network websites can permit a printer or NAS by
+exact hostname or private address. The account's normal site/category
+checks still apply. Ordinary whitelist entries and URL allow/bypass rules
+never grant private-network access. Loopback remains refused even for an
+explicitly permitted device name. The proxy
+checks and pins DNS answers before connecting, including mixed public
+and private answers. Encrypted DNS request shapes are refused even on an
+allowed or bypassed page.
+
+For Approved sites only, use the device's DNS name in both its approved
+sites and its home-network list. From a terminal, `kosherctl lan-sites UID
+printer.home.arpa` sets that account's device list; `kosherctl lan-sites UID
+none` clears it. Adding a device needs the guardian password when enabled.
+
+The package registries developer tools fetch from are available when
+Developer tools is enabled for the account, and the image points each tool at the filter's certificate;
 [what works](supported.md#developer-tools) has the table.
 
 ### Developer tools

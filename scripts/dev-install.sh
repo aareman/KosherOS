@@ -45,6 +45,7 @@ install -D -m 0644 "$repo/policy/schema/policy.schema.json" /usr/share/kosher/po
 
 echo "== installing system files"
 cp -rv "$repo/os-image/files/usr/." /usr/
+systemd-sysusers /usr/lib/sysusers.d/kosher-ytsearch.conf
 cp -rv "$repo/os-image/files/etc/kosher" /etc/
 install -D -m 0644 "$repo/os-image/files/etc/polkit-1/rules.d/49-kosher-admin.rules" \
     /etc/polkit-1/rules.d/49-kosher-admin.rules

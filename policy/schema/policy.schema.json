@@ -221,6 +221,9 @@
         },
         "calm": {
           "$ref": "#/$defs/calm"
+        },
+        "lan_hosts": {
+          "$ref": "#/$defs/lanHosts"
         }
       }
     },
@@ -635,6 +638,9 @@
         },
         "calm": {
           "$ref": "#/$defs/calm"
+        },
+        "lan_hosts": {
+          "$ref": "#/$defs/lanHosts"
         }
       }
     },
@@ -642,7 +648,7 @@
       "type": "object",
       "additionalProperties": false,
       "default": {},
-      "description": "Calmer versions of the addictive sites (#179), enforced by the proxy and a script it injects into these pages: a feed page ends after a set number of items with ads, sidebars and recommendations stripped, and a direct link to a post renders as the post alone — no comments, no navigation, no links back into the site. Login flows are never touched. Empty means off.",
+      "description": "Calmer versions of the addictive sites (#179), enforced by the proxy and a script it injects into these pages: a feed page ends after a set number of items with ads, sidebars and recommendations stripped, and a direct link to a post renders as the post alone \u2014 no comments, no navigation, no links back into the site. Login flows are never touched. Empty means off.",
       "properties": {
         "enabled": {
           "type": "boolean",
@@ -715,6 +721,17 @@
           "description": "Seven strings of 24 characters, Monday first, one character per hour of the day starting at midnight: 1 = may be signed in, 0 = may not. Absent means always allowed."
         }
       }
+    },
+    "lanHosts": {
+      "type": "array",
+      "maxItems": 128,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 253
+      },
+      "description": "Independent permission for web access to exact LAN device hostnames or private IP addresses. No URL, port or wildcard. Normal site/mode checks still apply."
     }
   }
 }

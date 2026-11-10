@@ -1,3 +1,4 @@
 {
-  "DnsOverHttpsMode": "off"
+  "DnsOverHttpsMode": "off",
+  "EncryptedClientHelloEnabled": false
 }

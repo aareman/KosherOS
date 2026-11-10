@@ -85,7 +85,7 @@ as a baseline; per-account differences happen at the packet layer. There
 are three resolver instances. The family one answers filtered and
 whitelist accounts, the proxy and the system. Basic protection
 (`dnsfilter`) accounts get one of their own that adds the categories they
-block, since nothing else can stop those for them. Unfiltered accounts get
+block; the proxy also checks the requested hostname. Unfiltered accounts get
 a plain one. The ad list is rendered into all three. A category a filtered
 account blocks is never blocked in DNS: the proxy needs the site's real
 address to show the page that says why.
@@ -97,8 +97,8 @@ owning uid:
 | Mode | In the admin app | Enforcement |
 |---|---|---|
 | `none` | No internet | loopback and LAN printing only; everything else refused |
-| `whitelist` | Approved sites only | only addresses in the whitelist sets, which dnsmasq fills as it resolves approved names, so browsing by bare address is blocked for free |
-| `dnsfilter` | Basic protection | 80, 443 and the named mail ports, only to addresses its own resolver handed out (so not by bare address) and never to the home network, behind family DNS, its category blocks and evasion blocking |
+| `whitelist` | Approved sites only | HTTP Host and TLS SNI must be on this account's approved list; shared IP addresses grant no additional sites |
+| `dnsfilter` | Basic protection | category checks at DNS and on HTTP Host/TLS SNI; HTTPS stays encrypted; named mail ports retain DNS-derived address limits |
 | `filtered` | Filtered internet | every TCP connection diverted into the account's own proxy listener |
 | `unfiltered` | No filtering | open |
 
@@ -107,11 +107,49 @@ DNS over TLS, QUIC and a set of DNS-over-HTTPS resolver addresses,
 including the unfiltered public resolvers. The browsers are also told to
 leave DNS over HTTPS off: Firefox by its policy file, and Chromium, Chrome,
 Edge and Brave by a managed policy in the place each one's Flatpak reads.
+The same browser policies disable Encrypted ClientHello, including its
+GREASE offer, because these modes must see the requested hostname.
 Rootless containers do not
 escape any of this: a user's network namespace reaches the host through an
 ordinary process owned by that user, so the uid rules still match. A
-captive-portal window, for hotel and airport Wi-Fi, is a set element with a
-timeout.
+captive-portal window, for hotel and airport Wi-Fi, permits only HTTP and
+HTTPS for at most ten minutes; DNS continues through the local resolver.
+Connections admitted by that exception are marked so they cannot stay
+open beyond its expiry. Other protocols keep the account's usual limits.
+
+Basic protection and approved-sites mode reject TLS without an approved
+hostname or with an encrypted ClientHello. Basic protection also permits
+an explicitly listed private-address device without a hostname. They keep the origin's certificate and do
+not decrypt HTTPS. This cannot inspect an encrypted HTTP Host that differs
+from SNI (domain fronting), or the contents of an approved site's tunnel;
+use Filtered internet when request/content inspection is required. The
+proxy resolves the approved name itself and pins the checked address, so
+supplying another destination or changing DNS to a private address does
+not turn it into a LAN relay.
+
+Changing an account's filtering mode, approved names, name-only category
+permissions or LAN-device permissions closes existing proxy connections.
+An encrypted passthrough stream cannot learn new rules from later HTTP
+requests, so it must reconnect under the new policy. Picture, text and
+ordinary filtered-page rule changes still reload without restarting the
+proxy.
+
+Account-initiated direct network connections are tied to the policy revision that admitted
+them. Applying a policy closes their network access in both directions;
+applications using direct mail, SSH or UDP may need to reconnect. Local
+and proxied connections retain their separate permission checks. Deploy
+this change by booting the updated image so all direct flows are tracked.
+
+The supervised modes refuse private-network direct mail, high UDP and
+extra-port traffic. Printing and mDNS, explicit SSH-machine permissions,
+and the approved Syncthing service keep their own permissions. To allow a
+printer or NAS through the web proxy, add its exact hostname or private
+address under Home network websites. The account's ordinary site/category
+rules still apply. A whitelist entry or URL allow/bypass rule alone never
+grants a private upstream connection, so an approved Internet site cannot
+rebind to the router. Loopback and local daemon endpoints remain refused
+even with a device permission. Proxy listener ports are restricted to
+their own account and root, so an account cannot borrow another policy.
 
 ## Filtered mode
 
@@ -140,8 +178,10 @@ safety comes from the daemon's decision rather than from hiding the store.
 The Store asks the daemon what this account may have, asks it to install,
 and shows progress streamed back over D-Bus.
 
-What an account may have is one rule, asked by the Store, by the installer
-and by malcontent, so what cannot be installed cannot be run either:
+The Store, its install service and compatible desktop launchers share one
+app rule. It controls Store installation and GNOME's app menus, not the
+execution of every program on disk. Other launchers and directly started
+programs still meet the account's network filter:
 
 1. **Blocks first.** Single apps and kinds of app a parent has blocked
    apply whatever else says. The kinds are the Store's own shelves,
@@ -159,6 +199,15 @@ and by malcontent, so what cannot be installed cannot be run either:
    violence up to mild. A short list of filter-circumvention tools, Tor
    launchers and VPN clients, is refused the same way. An app the index
    does not know is refused too, so being offline fails closed.
+
+For a non-administrator with an app list or app blocks, GNOME's command
+prompt and user-switch control are disabled, and the system terminal
+launchers are hidden. Developer tools exempts the account from those
+desktop restrictions. Root writes a dconf database and locks per account;
+the session selects its profile at sign-in, so the first application of
+these restrictions needs a new sign-in. These are desktop controls, not an
+execution sandbox; the advanced desktop is not GNOME and does not enforce
+its lockdown keys.
 
 The app index is parsed once per catalogue download on a worker thread and
 cached, so neither the Store nor a policy change waits on a forty-megabyte
@@ -186,6 +235,21 @@ strictest filter among the accounts with developer tools on (and only the
 known source hosts nixpkgs fetches from, plus any an administrator added,
 when one of those accounts is on approved sites only), and a terminal tool installed this way gets a launcher in the app grid that
 opens a terminal running it.
+
+The Nix daemon has a read-only system and home view, a private temporary
+directory and a bounded capability set. It retains the mount and user
+switching capabilities its own build sandbox needs. Builds fail if that
+sandbox cannot start; they never silently fall back to an unsandboxed
+build. `/nix` is mounted with `nosuid,nodev`. The early store-copy service
+has separate filesystem, network and capability limits; it permits the
+SELinux transition `restorecon` needs to label the copied store.
+
+Finding a YouTube channel to approve runs in a short-lived sandbox as
+`kosher-ytsearch`. The firewall lets that identity use the family resolver
+and its dedicated proxy listener only. The proxy admits a POST to the
+YouTube channel-search endpoint and refuses everything else. The helper
+has no capabilities, cannot write the system or read homes, and has time,
+memory and output limits. Root receives only the bounded channel list.
 
 A Nix app that draws with OpenGL or Vulkan brings its own graphics loader,
 which looks for the drivers in `/run/opengl-driver`, as on NixOS. KosherOS

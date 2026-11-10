@@ -91,7 +91,10 @@ def test_the_pre_script_chooses_one_disk_and_declines_two(kickstart, tmp_path):
     bin_dir.mkdir()
     (bin_dir / "findmnt").write_text("#!/bin/sh\necho /dev/sdb1\n")
     (bin_dir / "lsblk").write_text("#!/bin/sh\necho sdb\n")
-    for tool in ("findmnt", "lsblk"):
+    # The encryption helper changes an installer UI file, not disks. Its
+    # behavior is tested in test_installer_encryption.py.
+    (bin_dir / "python3").write_text("#!/bin/sh\nexit 0\n")
+    for tool in ("findmnt", "lsblk", "python3"):
         (bin_dir / tool).chmod(0o755)
 
     def disk(name: str, removable: str, sectors: int) -> None:

@@ -7,7 +7,7 @@ accountsservice. kosherd writes one per managed user so that:
   kosherd;
 - admins keep installation rights (kosherd itself installs system-wide).
 
-What an account may run is the same rule as what it may install
+What a compatible launcher offers is the same rule as what it may install
 (appaccess.decide): the approved list or the whole store, minus blocked
 kinds and blocked apps. It is enforced as a malcontent blocklist of every
 installed app the rule refuses, refreshed on every policy apply and after
@@ -21,7 +21,7 @@ import logging
 from dataclasses import dataclass, field
 from typing import Iterable
 
-from . import appaccess
+from . import appaccess, desktoplimits
 from .policy import Policy, UserPolicy
 
 log = logging.getLogger(__name__)
@@ -82,8 +82,10 @@ def filter_spec(user: UserPolicy, installed: list[tuple[str, str]],
     # Hide the admin app from people who cannot use it: left in the app grid
     # it invites someone to open it and meet a password prompt they can never
     # satisfy, which reads as broken rather than "not for you".
-    return FilterSpec(user.uid, False, False, blocklist,
-                      list(ADMIN_ONLY_PROGRAMS))
+    paths = list(ADMIN_ONLY_PROGRAMS)
+    if desktoplimits.restricted(user):
+        paths.extend(desktoplimits.TERMINALS)
+    return FilterSpec(user.uid, False, False, blocklist, paths)
 
 
 def specs_for(policy: Policy, installed: list[tuple[str, str]],

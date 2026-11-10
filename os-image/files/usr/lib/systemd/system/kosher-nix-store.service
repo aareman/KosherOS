@@ -13,6 +13,30 @@ Before=nix.mount
 
 [Service]
 Type=oneshot
+ProtectSystem=strict
+# PID1 creates the destination before the read/write exception is mounted.
+StateDirectory=nix
+ReadWritePaths=/var/lib/nix
+ProtectHome=yes
+# This precedes local-fs.target. PrivateTmp=yes would order it after
+# systemd-tmpfiles-setup and create a boot cycle; isolated tmpfs needs no
+# such dependency.
+TemporaryFileSystem=/tmp:rw,nosuid,nodev,noexec /var/tmp:rw,nosuid,nodev,noexec
+PrivateNetwork=yes
+# Fedora SELinux requires the restorecon executable to transition from
+# init_t to setfiles_t. NNP forbids that transition. The commands are
+# fixed, system-owned programs; the capability/filesystem limits remain.
+NoNewPrivileges=no
+CapabilityBoundingSet=CAP_CHOWN CAP_DAC_OVERRIDE CAP_FOWNER CAP_FSETID CAP_MAC_ADMIN
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+RestrictNamespaces=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+SystemCallArchitectures=native
 ExecStart=/usr/bin/mkdir -p /var/lib/nix
 ExecStart=/usr/bin/cp -a --no-clobber --no-preserve=context /nix/. /var/lib/nix/
 ExecStart=/usr/sbin/restorecon -R /var/lib/nix

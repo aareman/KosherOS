@@ -88,8 +88,8 @@ class _Response:
     def __init__(self, body):
         self.body = body
 
-    def read(self):
-        return self.body
+    def read(self, size=-1):
+        return self.body if size < 0 else self.body[:size]
 
     def __enter__(self):
         return self
@@ -105,8 +105,8 @@ def test_the_search_asks_for_channels_only(monkeypatch):
         sent.update(json.loads(request.data))
         return _Response(json.dumps(_answer(_renderer(TORAH, "TorahAnytime"))).encode())
 
-    monkeypatch.setattr(ytsearch.urllib.request, "urlopen", urlopen)
-    assert ytsearch.search_channels("  torah anytime ")[0]["id"] == TORAH
+    monkeypatch.setattr(ytsearch, "_open", urlopen)
+    assert ytsearch._fetch_channels("  torah anytime ")[0]["id"] == TORAH
     assert sent["query"] == "torah anytime"
     assert sent["params"] == ytsearch.CHANNELS_ONLY
 
@@ -115,8 +115,8 @@ def test_an_empty_query_never_reaches_youtube(monkeypatch):
     def urlopen(*_a, **_k):
         raise AssertionError("asked YouTube for nothing")
 
-    monkeypatch.setattr(ytsearch.urllib.request, "urlopen", urlopen)
-    assert ytsearch.search_channels("   ") == []
+    monkeypatch.setattr(ytsearch, "_open", urlopen)
+    assert ytsearch._fetch_channels("   ") == []
 
 
 @pytest.mark.parametrize("failure,words", [
@@ -128,16 +128,16 @@ def test_a_failed_search_says_why_in_words(monkeypatch, failure, words):
     def urlopen(*_a, **_k):
         raise failure
 
-    monkeypatch.setattr(ytsearch.urllib.request, "urlopen", urlopen)
+    monkeypatch.setattr(ytsearch, "_open", urlopen)
     with pytest.raises(ytsearch.SearchError, match=words):
-        ytsearch.search_channels("torah")
+        ytsearch._fetch_channels("torah")
 
 
 def test_an_unreadable_answer_is_a_search_error(monkeypatch):
-    monkeypatch.setattr(ytsearch.urllib.request, "urlopen",
+    monkeypatch.setattr(ytsearch, "_open",
                         lambda *_a, **_k: _Response(b"<html>consent</html>"))
     with pytest.raises(ytsearch.SearchError, match="unreadable"):
-        ytsearch.search_channels("torah")
+        ytsearch._fetch_channels("torah")
 
 
 # ---- the daemon -------------------------------------------------------------

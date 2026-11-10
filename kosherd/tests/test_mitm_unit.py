@@ -44,3 +44,4 @@ def test_the_far_end_is_reached_only_for_an_allowed_request():
     # blocked site that was slow or unreachable failed the connection, and
     # the browser sat on a blank page instead of getting the block page.
     assert "--set connection_strategy=lazy" in UNIT
+    assert "--set upstream_cert=false" in UNIT

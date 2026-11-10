@@ -57,17 +57,28 @@ def test_evasion_block_kills_dot_quic_doh():
     assert "1.1.1.1" in out and "8.8.8.8/31" in out
 
 
-def test_whitelist_mode_only_reaches_wl_and_sys_sets():
+def test_whitelist_mode_has_no_shared_address_web_exception():
     out = rendered()
     wl = out.split("chain mode_whitelist")[1].split("chain")[0]
-    assert "ip daddr @wl4 tcp dport { 80, 443 } accept" in wl
-    assert "ip daddr @sys4 tcp dport { 80, 443 } accept" in wl
+    assert "@wl4" not in wl
+    assert "@sys4" not in wl
     rules = [line.strip() for line in wl.splitlines() if line.strip() and line.strip() != "}"]
     assert rules[-1] == "reject"
 
 
 def test_system_uids_unrestricted():
     assert "meta skuid < 1000 accept" in rendered()
+
+
+def test_kernel_ipv6_neighbor_discovery_precedes_uid_dispatch_and_lan_guard():
+    output = rendered().split("chain output")[1].split("chain input")[0]
+    rule = ("ip6 hoplimit 255 icmpv6 type { nd-neighbor-solicit, "
+            "nd-neighbor-advert, nd-router-solicit } icmpv6 code 0 accept")
+    assert rule in output
+    assert output.index(rule) < output.index("ip6 daddr { fc00::/7, fe80::/10, ff00::/8 }")
+    assert output.index(rule) < output.index("meta skuid vmap")
+    assert "nd-router-advert" not in output
+    assert "meta l4proto { icmp, ipv6-icmp } accept" not in output
 
 
 def test_established_accepted_before_uid_dispatch():
@@ -109,7 +120,7 @@ def test_inspect_mode_redirects_web_to_mitmproxy():
     ports = nft.mitm_ports(pol)
     for uid in inspected:
         assert f"meta skuid {uid} tcp dport != {{ 21, 22, 25, 53, 110, 143, 465, 587, 993, 22000, 22067 }} redirect to :{ports[uid]}" in out
-    assert len(set(ports.values())) == len(inspected), "ports must be distinct"
+    assert len(set(ports.values())) == len(ports), "ports must be distinct"
     # inspected users still get the filtered egress policy and evasion block
     for uid in inspected:
         assert f"{uid} : jump mode_filtered" in out
@@ -117,7 +128,7 @@ def test_inspect_mode_redirects_web_to_mitmproxy():
     assert "meta skuid { 0, 989, 988 } return" in out
 
 
-def test_no_mitm_redirect_without_filtered_users():
+def test_name_only_modes_reach_the_proxy_on_web_ports_only():
     """Nobody filtered means no traffic is decrypted at all."""
     pol = Policy.from_dict(json.loads(EXAMPLE.read_text()))
     for user in pol.users:
@@ -125,7 +136,8 @@ def test_no_mitm_redirect_without_filtered_users():
             user.mode = "whitelist"
     pol.guest.mode = "whitelist"
     out = nft.render(pol, dns_uid=989, mitm_uid=988)
-    assert "redirect to :3" not in out  # no per-user proxy port at all
+    assert "redirect to :3" in out
+    assert "tcp dport !=" not in out
 
 
 # -- the five modes -----------------------------------------------------------

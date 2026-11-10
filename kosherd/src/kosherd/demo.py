@@ -239,6 +239,20 @@ class DemoClient:
     def existing_accounts(self): return []
     def create_first_admin(self, *a): return 1000
     def finish_setup(self, *a): return None
+    def disk_security(self):
+        return {"encrypted": True, "supported": True, "recovery_saved": True,
+                "message": "The system disk is encrypted; its recovery key has been saved."}
+    def disk_unlock_status(self):
+        return {"available": True, "pending": False, "enrolled": True,
+                "message": "Automatic unlock is enrolled. Keep the saved recovery key."}
+    def setup_disk_tpm(self, *a):
+        raise ValueError("This computer is already set up.")
+    def enroll_disk_tpm(self, *a):
+        return None
+    def prepare_disk_recovery(self, *a):
+        raise ValueError("This computer is already set up.")
+    def confirm_disk_recovery(self, *a):
+        raise ValueError("This computer is already set up.")
     def unlock(self): return None
     def lock(self): return None
     def session_status(self): return True, 3600, True
@@ -441,6 +455,12 @@ class DemoClient:
         u["video_calls"] = bool(video_calls)
         u["extra_ports"] = sorted(set(int(p) for p in extra_ports))
         self._change(uid, "SetNetworkAccess", [uid, bool(video_calls), u["extra_ports"]])
+
+    def set_lan_hosts(self, uid, hosts, pw=""):
+        from .webguard import normalize_lan_hosts
+
+        self._user(uid)["lan_hosts"] = normalize_lan_hosts(hosts)
+        self._change(uid, "SetLanHosts", [uid, self._user(uid)["lan_hosts"]])
 
     def set_ssh(self, uid, anywhere, hosts, pw=""):
         u = self._user(uid)

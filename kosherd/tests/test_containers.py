@@ -207,8 +207,9 @@ def test_the_tools_inside_a_container_are_pointed_at_it():
 
 def test_the_image_registries_are_reachable_from_a_developer_account():
     for host in ("registry-1.docker.io", "auth.docker.io", "quay.io", "mcr.microsoft.com",
-                 "*.data.mcr.microsoft.com", "ghcr.io", "*.fedoraproject.org"):
-        assert host in DEVELOPER_REGISTRIES or host in ("ghcr.io", "*.fedoraproject.org"), host
+                 "*.data.mcr.microsoft.com", "ghcr.io", "pkg-containers.githubusercontent.com",
+                 "registry.fedoraproject.org"):
+        assert host in DEVELOPER_REGISTRIES, host
     assert "hub.docker.com" not in DEVELOPER_REGISTRIES, "a site, not a registry"
     # The machine's own registry stays in the system set; the developer
     # registries are the developer account's (#123), through its own list.

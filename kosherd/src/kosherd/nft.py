@@ -8,9 +8,9 @@ Design (see docs/architecture.md):
   UIDs fall through to mode_none — FAIL CLOSED.
 - DNS from every human user is redirected to the local dnsmasq (127.0.0.1:53)
   in the nat/output hook, so nobody can pick their own resolver.
-- Whitelist mode only allows destinations in the @wl4/@wl6 sets, which dnsmasq
-  populates as it resolves whitelisted domains (nftset= directives). Direct-IP
-  browsing is therefore blocked for free.
+- Whitelist and basic modes send web traffic through a name-check listener:
+  HTTP Host / TLS SNI is checked before forwarding, without decrypting HTTPS.
+  An address shared by an approved and an unapproved name grants nothing.
 - evasion_block kills DoT (853), QUIC/HTTP3 (udp 443 — also DoH3/ECH), and a
   curated list of DoH-on-tcp-443 provider IPs.
 - The supervised modes are DEFAULT-DENY (issue #33, F1). A filtered account's
@@ -21,9 +21,8 @@ Design (see docs/architecture.md):
   proxy) and the account's own extra_ports; what still reaches the mode
   chain is refused. An account with developer tools on may also use SSH
   to the major git hosts (GIT_SSH_HOSTS, the @git4/@git6 sets). dnsfilter,
-  which has no proxy, allows 80/443 and the same named protocols to
-  addresses its own resolver handed out, never to the LAN, and refuses
-  other TCP. Loopback is
+  uses name-only web checks on 80/443 and permits named direct protocols to
+  addresses its resolver handed out. Other TCP is refused. Loopback is
   never redirected. UDP cannot be inspected, so it is a decision: NTP, and
   high ports for video calls (UserPolicy.video_calls, on by default).
 """
@@ -35,7 +34,7 @@ import ipaddress
 from . import devenvproxy
 from . import syncthing as st
 from .dns import SAFESEARCH_ADDRESSES
-from .policy import INSPECTED_MODES, UNFILTERED_MODES, Policy
+from .policy import INSPECTED_MODES, PROXIED_MODES, UNFILTERED_MODES, Policy
 
 SAFESEARCH_ELEMENTS = tuple(sorted(set(SAFESEARCH_ADDRESSES.values())))
 
@@ -70,18 +69,27 @@ MITM_PORT_BASE = 30000
 # addresses and DoH blocked, no picture scoring — rather than to an
 # address set nobody can keep honest. Below the per-user ports, fixed.
 BUILDER_PORT = 29999
+# A temporary Wi-Fi sign-in permits web traffic, never an arbitrary tunnel.
+MAX_CAPTIVE_MINUTES = 10
+# Label connections admitted by the exception; their mark holds the uid,
+# so both outbound traffic and inbound replies can check that uid's expiry.
+DIRECT_LABEL = 126  # direct connections belong to one applied policy revision
+CAPTIVE_LABEL = 127  # nft label numbers are bit indices (0-127)
 
 
 def mitm_ports(policy: Policy) -> dict[int, int]:
     """uid -> the proxy port that user's web traffic is redirected to.
 
-    Sequential from MITM_PORT_BASE in uid order. Rendered into the nft
+    Sequential from MITM_PORT_BASE: inspected users in uid order, then
+    name-only users in uid order. Rendered into the nft
     ruleset, the proxy's rules file and its listener list from this one
     function, so the three can never disagree.
     """
     inspected = sorted(u.uid for u in policy.effective_users()
                        if u.mode in INSPECTED_MODES)
-    return {uid: MITM_PORT_BASE + i for i, uid in enumerate(inspected)}
+    names = sorted(u.uid for u in policy.effective_users()
+                   if u.mode in PROXIED_MODES and u.mode not in INSPECTED_MODES)
+    return {uid: MITM_PORT_BASE + i for i, uid in enumerate(inspected + names)}
 
 # The KosherOS search front end (the page users get) and the metasearch
 # engine behind it. Only the front end filters, so the backend must not be
@@ -104,6 +112,10 @@ OPEN_DNS_PORT = 5354
 # dnsfilter account may open a connection to (#189).
 DNSFILTER_DNS_PORT = 5356
 
+# A root daemon delegates YouTube metadata fetching to this restricted
+# service identity. The proxy admits one endpoint, not arbitrary web.
+CHANNEL_SEARCH_PORT = 29998
+
 # Private and link-local IPv6, which @lan4 does not cover.
 LAN6 = ("fc00::/7", "fe80::/10")
 
@@ -124,6 +136,12 @@ DEFAULT_DOH_BLOCK4 = (
     "94.140.14.0/24",   # adguard-dns
     "94.140.15.0/24",
 )
+
+# Official public resolver addresses, in addition to HTTP shape checks.
+# developers.cloudflare.com/1.1.1.1/ip-addresses/
+# developers.google.com/speed/public-dns/docs/using
+DEFAULT_DOH_BLOCK6 = ("2606:4700:4700::1111", "2606:4700:4700::1001",
+                      "2001:4860:4860::8888", "2001:4860:4860::8844")
 
 LAN4 = ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "169.254.0.0/16")
 
@@ -272,6 +290,7 @@ def _extras(user) -> tuple[int, ...]:
 
 def render(policy: Policy, *, dns_uid: int, mitm_uid: int | None = None,
            search_uid: int | None = None, build_gid: int | None = None,
+           channel_search_uid: int | None = None,
            subids: dict[int, list[tuple[int, int]]] | None = None,
            doh_block4: tuple[str, ...] = DEFAULT_DOH_BLOCK4,
            syncthing: dict | None = None) -> str:
@@ -296,6 +315,21 @@ def render(policy: Policy, *, dns_uid: int, mitm_uid: int | None = None,
     """
     subids = subids or {}
     syncthing = syncthing or {}
+
+    # Before every loopback/system-user shortcut. This worker may resolve
+    # through the family resolver and reach only its own proxy listener.
+    # Its socket UID survives a transparent redirect, so all other
+    # destinations (including other local proxy/resolver ports) fail closed.
+    channel_redirect = (
+        f"        meta skuid {channel_search_uid} tcp dport 443 redirect to :{CHANNEL_SEARCH_PORT}\n"
+        if channel_search_uid is not None else "")
+    channel_guard = (
+        f"        meta skuid {channel_search_uid} ip daddr 127.0.0.1 tcp dport {CHANNEL_SEARCH_PORT} accept\n"
+        f"        meta skuid {channel_search_uid} ip6 daddr ::1 tcp dport {CHANNEL_SEARCH_PORT} accept\n"
+        f"        meta skuid {channel_search_uid} ip daddr 127.0.0.1 udp dport 53 accept\n"
+        f"        meta skuid {channel_search_uid} ip daddr 127.0.0.1 tcp dport 53 accept\n"
+        f"        meta skuid {channel_search_uid} reject\n"
+        if channel_search_uid is not None else "")
 
     def owner(uid: int) -> list[str]:
         """The uid and its blocks, as nft set elements."""
@@ -322,6 +356,7 @@ def render(policy: Policy, *, dns_uid: int, mitm_uid: int | None = None,
     # proxy that is meant to judge it.
     build_loopback = (
         f"        meta skgid {build_gid} ip daddr 127.0.0.0/8 tcp dport {BUILDER_PORT} accept\n"
+        f"        meta skgid {build_gid} ip6 daddr ::1 tcp dport {BUILDER_PORT} accept\n"
         f"        meta skgid {build_gid} ip daddr 127.0.0.1 udp dport 53 accept\n"
         f"        meta skgid {build_gid} ip daddr 127.0.0.1 tcp dport 53 accept\n"
         f'        meta skgid {build_gid} oif "lo" reject\n'
@@ -350,8 +385,10 @@ def render(policy: Policy, *, dns_uid: int, mitm_uid: int | None = None,
         # out for its own service and refused for everything else in the
         # output chain) and the account's own extra ports.
         web_redirect = "".join(
-            f"        meta skuid {owner_match(uid)} tcp dport != {{ {_ports(53, *DIRECT_TCP_PORTS, *SERVER_FIRST_TCP_PORTS, *SYNCTHING_TCP, *_extras(by_uid.get(uid)))} }} "
-            f"redirect to :{port}\n"
+            (f"        meta skuid {owner_match(uid)} tcp dport != {{ {_ports(53, *DIRECT_TCP_PORTS, *SERVER_FIRST_TCP_PORTS, *SYNCTHING_TCP, *_extras(by_uid.get(uid)))} }} "
+             if by_uid[uid].mode in INSPECTED_MODES else
+             f"        meta skuid {owner_match(uid)} tcp dport {{ 80, 443 }} ")
+            + f"redirect to :{port}\n"
             for uid, port in ports.items())
     else:
         web_redirect = ""
@@ -359,9 +396,10 @@ def render(policy: Policy, *, dns_uid: int, mitm_uid: int | None = None,
     # Per-account exceptions, before the mode dispatch: the extra ports an
     # administrator granted, and the accounts whose video calls are off.
     supervised = [u for u in policy.effective_users() if u.mode in ("filtered", "dnsfilter")]
-    per_user = "".join(
+    extra_ports = "".join(
         f"        meta skuid {owner_match(u.uid)} tcp dport {{ {_ports(*u.extra_ports)} }} accept\n"
         for u in supervised if u.extra_ports)
+    per_user = ""
     # Git over SSH to the major hosts for the accounts with developer
     # tools on — to those addresses only, never port 22 at large.
     # Whitelist accounts too: the hosts are the same few, and git is what
@@ -507,7 +545,7 @@ def render(policy: Policy, *, dns_uid: int, mitm_uid: int | None = None,
         )
     else:
         open_dns = ""
-    dnsfilter_tcp = _ports(80, 443, *DIRECT_TCP_PORTS)
+    dnsfilter_tcp = _ports(*DIRECT_TCP_PORTS)
     mitm_exempt = f", {mitm_uid}" if mitm_uid is not None else ""
     search_exempt = f", {search_uid}" if search_uid is not None else ""
     # Loopback is otherwise wide open (see the output chain), which is what
@@ -531,6 +569,41 @@ def render(policy: Policy, *, dns_uid: int, mitm_uid: int | None = None,
         f"        ip6 daddr ::1 {proto} dport {OPEN_DNS_PORT} meta skuid >= {UID_MIN} reject\n"
         for proto in ("udp", "tcp")
     )
+
+    # Loopback listeners carry an identity. Directly visiting somebody
+    # else's port must not let an account borrow that person's policy.
+    proxy_guard = "".join(
+        f"        ip daddr 127.0.0.0/8 tcp dport {port} meta skuid != {{ 0, {', '.join(owner(uid))} }} reject\n"
+        f"        ip6 daddr ::1 tcp dport {port} meta skuid != {{ 0, {', '.join(owner(uid))} }} reject\n"
+        for uid, port in ports.items())
+    if build_gid is not None:
+        proxy_guard += (f"        ip daddr 127.0.0.0/8 tcp dport {BUILDER_PORT} "
+                        f"meta skgid != {build_gid} meta skuid != 0 reject\n"
+                        f"        ip6 daddr ::1 tcp dport {BUILDER_PORT} "
+                        f"meta skgid != {build_gid} meta skuid != 0 reject\n")
+    if channel_search_uid is not None:
+        proxy_guard += (
+            f"        ip daddr 127.0.0.0/8 tcp dport {CHANNEL_SEARCH_PORT} "
+            f"meta skuid != {{ 0, {channel_search_uid} }} reject\n"
+            f"        ip6 daddr ::1 tcp dport {CHANNEL_SEARCH_PORT} "
+            f"meta skuid != {{ 0, {channel_search_uid} }} reject\n")
+    held_lan = [u for u in policy.effective_users() if u.mode not in UNFILTERED_MODES]
+    lan_guard = ""
+    if held_lan:
+        elems = ", ".join(e for u in held_lan for e in owner(u.uid))
+        lan_guard = (f"        meta skuid {{ {elems} }} ip daddr @lan4 reject\n"
+                     f"        meta skuid {{ {elems} }} ip daddr {{ 100.64.0.0/10, 224.0.0.0/4, 240.0.0.0/4 }} reject\n"
+                     f"        meta skuid {{ {elems} }} ip6 daddr {{ {', '.join((*LAN6, 'ff00::/8'))} }} reject\n")
+
+    # Only NEW direct flows receive this revision. Never refresh an old
+    # connection's mark: doing so would let established traffic outlive a
+    # policy change. Loopback/proxy traffic is handled before these rules.
+    generation = policy.revision + 1
+    if not 0 < generation < 2**32:
+        raise ValueError("policy revision exceeds connection-mark capacity")
+    direct_marks = "".join(
+        f"        meta skuid {owner_match(u.uid)} ct state new ct mark set {generation} ct label set {DIRECT_LABEL}\n"
+        for u in policy.effective_users())
 
     return f"""#!/usr/sbin/nft -f
 # Rendered by kosherd from policy revision {policy.revision}. DO NOT EDIT.
@@ -558,6 +631,7 @@ table {TABLE} {{
         typeof {SYNCTHING_CGROUP};
     }}
 {_set_block("doh4", "ipv4_addr", doh_block4, interval=True)}
+{_set_block("doh6", "ipv6_addr", DEFAULT_DOH_BLOCK6, interval=True)}
 {_set_block("lan4", "ipv4_addr", LAN4, interval=True)}
     # Every address the dnsfilter resolver handed out (its nftset=/#/ line),
     # and the safe-search addresses it answers from its own records, which
@@ -566,6 +640,9 @@ table {TABLE} {{
 {_set_block("dns6", "ipv6_addr")}
     # UIDs granted a temporary captive-portal window (element timeout).
 {_set_block("captive", "uid", timeout=True)}
+    # Same uid/timeouts, typed as marks so INPUT can look up the conntrack
+    # owner without a local socket uid. SetCaptiveMode updates both atomically.
+{_set_block("captive_marks", "mark", timeout=True)}
 
     chain dns_redirect {{
         type nat hook output priority dstnat; policy accept;
@@ -578,13 +655,16 @@ table {TABLE} {{
         # Never redirect the resolver's or the proxy's own traffic, or they
         # would loop back into themselves.
         meta skuid {{ 0, {dns_uid}{mitm_exempt}{search_exempt} }} return
-{build_redirect}{open_dns}        udp dport 53 redirect to :53
+{channel_redirect}{build_redirect}{open_dns}        udp dport 53 redirect to :53
         tcp dport 53 redirect to :53
+        # DNS still goes to the local resolver above. A portal's HTTP/TLS
+        # must reach the portal itself, including one on the local network.
+        meta skuid @captive tcp dport {{ 80, 443 }} return
 {syncthing_nat}{ssh_nat}{web_redirect}    }}
 
     chain output {{
         type filter hook output priority filter; policy accept;
-{build_loopback}{backend_guard}{open_dns_guard}{syncthing_gui}{devenv_guard}        oif "lo" accept
+{channel_guard}{build_loopback}{proxy_guard}{backend_guard}{open_dns_guard}{syncthing_gui}{devenv_guard}        oif "lo" accept
         # A packet the nat rules just redirected (DNS to the resolver, web to
         # the proxy) already has a loopback DESTINATION here, but this hook
         # still sees the interface of its original route — so `oif "lo"`
@@ -596,12 +676,20 @@ table {TABLE} {{
         # of inbound ones, e.g. an admin ssh session). A filtered user cannot
         # INITIATE anything with this: their first SYN/datagram is dispatched
         # below and rejected before any conntrack entry goes ESTABLISHED.
-        ct state established,related accept
+        # Expiry also closes connections opened during the window, before
+        # the established shortcut can keep a long-lived stream alive.
+        ct label {CAPTIVE_LABEL} ct mark != @captive_marks reject
+        meta skuid @captive tcp dport {{ 80, 443 }} ct mark set meta skuid ct label set {CAPTIVE_LABEL} accept
+        ct label {DIRECT_LABEL} ct mark != {generation} reject
+{direct_marks}        ct state established,related accept
 {nix_build}        meta skuid < {UID_MIN} accept
-        meta skuid @captive accept
+        # Kernel-generated IPv6 neighbor discovery has no socket UID.
+        # Without this, even root cannot discover a next-hop neighbor.
+        # Only on-link control messages; this host sends no router adverts.
+        ip6 hoplimit 255 icmpv6 type {{ nd-neighbor-solicit, nd-neighbor-advert, nd-router-solicit }} icmpv6 code 0 accept
         # LAN basics every mode keeps: DHCP, mDNS, printing.
         jump local_services
-{per_user}{vmap_rule}        # Unknown human users: fail closed.
+{per_user}{lan_guard}{extra_ports}{vmap_rule}        # Unknown human users: fail closed.
         jump mode_none
     }}
 
@@ -611,6 +699,10 @@ table {TABLE} {{
     chain input {{
         type filter hook input priority filter; policy drop;
         iif "lo" accept
+        # A controlled peer must not keep delivering bytes after expiry,
+        # even if it ignores the lack of acknowledgements from this host.
+        ct label {CAPTIVE_LABEL} ct mark != @captive_marks drop
+        ct label {DIRECT_LABEL} ct mark != {generation} drop
         ct state established,related accept
         ct state invalid drop
         meta l4proto {{ icmp, ipv6-icmp }} accept
@@ -636,10 +728,8 @@ table {TABLE} {{
 
     chain mode_whitelist {{
         jump evasion_block
-        ip daddr @wl4 tcp dport {{ 80, 443 }} accept
-        ip6 daddr @wl6 tcp dport {{ 80, 443 }} accept
-        ip daddr @sys4 tcp dport {{ 80, 443 }} accept
-        ip6 daddr @sys6 tcp dport {{ 80, 443 }} accept
+        # HTTP Host / TLS SNI are checked by the account's proxy listener.
+        # No shared-address exception: the system list belongs to services.
         reject
     }}
 
@@ -707,6 +797,7 @@ table {TABLE} {{
         udp dport 853 reject
         udp dport 443 reject
         ip daddr @doh4 reject
+        ip6 daddr @doh6 reject
     }}
 }}
 """

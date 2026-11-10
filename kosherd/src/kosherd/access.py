@@ -46,6 +46,12 @@ ACTIONS = {
     "ExistingAccounts": ACTION_READ_CONFIG,
     "CreateFirstAdmin": ACTION_MANAGE_USERS,
     "FinishSetup": ACTION_MANAGE_USERS,
+    "DiskSecurity": ACTION_READ_CONFIG,
+    "DiskUnlockStatus": ACTION_READ_CONFIG,
+    "EnrollDiskTpm": ACTION_MANAGE_USERS,
+    "SetupDiskTpm": ACTION_MANAGE_USERS,
+    "PrepareDiskRecovery": ACTION_MANAGE_USERS,
+    "ConfirmDiskRecovery": ACTION_MANAGE_USERS,
     # Getting the new machine online from the wizard. First-boot only like
     # the rest of this block; afterwards Wi-Fi is GNOME Settings' job, which
     # the everyday polkit rule lets an administrator use.
@@ -125,6 +131,7 @@ ACTIONS = {
     # Beyond the web: video calls (UDP the filter cannot read) and extra
     # ports. Opening either widens what the account reaches.
     "SetNetworkAccess": ACTION_MANAGE_FILTER,
+    "SetLanHosts": ACTION_MANAGE_FILTER,
     # SSH to other machines (#257): a tunnel the filter cannot read, to
     # the listed machines or anywhere. Widens what the account reaches.
     "SetSsh": ACTION_MANAGE_FILTER,
@@ -287,14 +294,14 @@ ACTIONS = {
 }
 
 # Methods that can weaken the filter: guardian password required when enabled.
-GUARDIAN_GATED = frozenset({
+GUARDIAN_GATED = frozenset({"EnrollDiskTpm",
     "SetFilterMode", "SetWhitelist", "SetWhitelistBundles", "SetUrlRules", "SetBlockedCategories", "ApplyProfile", "SaveProfile", "DeleteProfile", "ApproveRequest", "AllowUrl", "BypassUrl", "GrantUrl", "EditList",
     "SetUserAdmin",
     "SetMediaLevel",
     "SetLanguageFilter", "SetYouTube", "SetCalm",
     "SetGuestConfig", "DisableGuardian", "Enrol", "Unenrol",
     "SetAdBlock", "SetAdBlockAllowed", "SetTimeLimits", "SetChannel", "TryImage", "Rollback",
-    "SetNetworkAccess", "SetSsh",
+    "SetNetworkAccess", "SetSsh", "SetLanHosts",
     "SetDeveloperTools", "SetSshIn", "SetBuildSources",
     "SetBootMenuPassword",
     "SetUserAppAccess", "SetUserBlockedAppKinds", "SetUserBlockedApps",
@@ -305,6 +312,7 @@ GUARDIAN_GATED = frozenset({
 # First-boot only; closed forever once setup is stamped complete.
 SETUP_METHODS = frozenset({"IsComplete", "AdminExists", "ExistingAccounts",
                            "CreateFirstAdmin", "FinishSetup",
+                           "DiskSecurity", "PrepareDiskRecovery", "ConfirmDiskRecovery", "SetupDiskTpm",
                            "NetworkStatus", "ListWifi", "ConnectWifi"})
 # Readable forever: the wizard and the apps ask these on every start.
 SETUP_READS = frozenset({"IsComplete", "AdminExists"})
@@ -333,7 +341,7 @@ CHANGES = frozenset({
     "SetLanguageFilter", "SetYouTube", "SetCalm", "SetUserAdmin", "SetLayout",
     "SetCoverStyle", "SetAdBlock", "SetAdBlockAllowed", "SetTimeLimits", "SetNetworkAccess",
     "SetDeveloperTools", "SetSshIn",
-    "SetBuildSources",
+    "SetBuildSources", "SetLanHosts",
     "SetBootMenuPassword", "SetGuestConfig", "CreateUser",
     "AdoptUser", "RemoveUser", "ResetPassword", "SetUserApps", "RemoveApp", "RemoveUnusedApps",
     "InstallAppFor", "ApproveApp",
@@ -366,12 +374,13 @@ PER_USER = frozenset({
     "ApplyProfile", "SaveProfile", "AllowUrl", "BypassUrl", "GrantUrl", "SetMediaLevel",
     "SetLanguageFilter", "SetYouTube", "SetCalm", "SetUserAdmin", "SetLayout",
     "SetCoverStyle", "SetTimeLimits", "SetNetworkAccess", "SetDeveloperTools", "SetSshIn", "InstallAppFor",
-    "RemoveUser", "ResetPassword", "SetUserApps",
+    "RemoveUser", "ResetPassword", "SetUserApps", "SetLanHosts",
     "SetUserCanInstall", "SetUserAppAccess", "SetUserBlockedAppKinds",
     "SetUserBlockedApps", "SetCaptiveMode", "SetUserAppApproval", "SetSyncthingLan",
 })
 # Changes whose arguments are secrets or too big to be worth keeping.
 NO_ARGS_LOGGED = frozenset({"SetGuardianPassword", "DisableGuardian", "SetBootMenuPassword",
+                            "PrepareDiskRecovery", "ConfirmDiskRecovery", "SetupDiskTpm", "EnrollDiskTpm",
                             "Enrol", "EditList", "SetWhitelist",
                             "SetUrlRules"})
 

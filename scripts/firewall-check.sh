@@ -98,8 +98,10 @@ want "and unreachable again when removed"      no  "$(reach whitelist)"
 
 echo "the captive-portal window:"
 nft add element inet kosher captive "{ $(uid none) timeout 1m }"
+nft add element inet kosher captive_marks "{ $(uid none) timeout 1m }"
 want "an open window lets a stopped account out" yes "$(reach none)"
 nft delete element inet kosher captive "{ $(uid none) }"
+nft delete element inet kosher captive_marks "{ $(uid none) }"
 want "and closing it stops them again"           no  "$(reach none)"
 
 echo "unknown users:"

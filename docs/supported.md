@@ -34,7 +34,9 @@ are; tools that carry their own certificate bundle are pointed at the
 system bundle by environment the image sets for every account, in login
 shells (`/etc/profile.d/kosher-ca.sh`) and in the desktop session
 (`/etc/environment.d/50-kosher-ca.conf`). The registries they fetch from
-are reachable from every account, including whitelist‑only ones.
+are reachable by accounts with Developer tools enabled, including
+whitelist accounts with that switch. Machine update/CDN domains are not
+implicit browsing permissions for an approved-sites account.
 
 | Tool | Made to work by | Registry reachable |
 |---|---|---|
@@ -170,7 +172,7 @@ What an account gets by its kind of internet, before any group:
 |---|---|---|---|---|---|
 | Filtered internet (the default for a new account) | adult, gambling, dating, social, video and more blocked | immodest hidden | replaced | strict; entertainment, gaming, music and Shorts blocked | chosen by the parent |
 | Approved sites only | only an approved list of sites | none from the web | replaced | none | chosen by the parent |
-| Basic protection | known bad sites blocked at DNS, safe search forced | shown | left alone | moderate | can install approved apps |
+| Basic protection | known bad sites blocked at DNS and by requested hostname, safe search forced | shown | left alone | moderate | can install approved apps |
 | No internet | nothing | none from the web | replaced | none | chosen by the parent |
 | No filtering | open | shown | left alone | open | can install approved apps |
 | The first administrator | adult, gambling, dating and filter bypasses blocked | shown | left alone | open | can install approved apps |
@@ -194,6 +196,7 @@ are off until a parent sets them. See [time limits](time-limits.md).
 |---|---|
 | Architecture | x86_64 (Intel or AMD). Apple Silicon and other ARM computers are not supported. |
 | Firmware | UEFI and legacy BIOS; Secure Boot works out of the box through Fedora's signed shim. |
+| Disk protection | New installs default to encrypted system data with a verified recovery key. Optional TPM2 unlock requires measured UEFI Secure Boot; legacy BIOS and unsupported TPMs use a disk passphrase. See [installation](install.md#6-set-up-your-family-and-test). |
 | Memory and disk | see the provisional [system requirements](install.md#system-requirements) in the installation guide. |
 | Picture checking | About 50 ms per picture on a current laptop CPU, 200–300 ms on four cores, near the limit on two: the filter hides pictures instead of checking them when the machine cannot keep up, and says so. See [pictures and video](media-filtering.md#running-on-the-familys-own-computer). |
 | The advanced desktop (niri, Hyprland or Umbriel) | needs a real GPU; it does not run in a VM without one. |

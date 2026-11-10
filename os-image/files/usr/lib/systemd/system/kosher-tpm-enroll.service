@@ -1,0 +1,16 @@
+[Unit]
+Description=Finish optional encrypted-disk automatic unlock
+After=local-fs.target
+Before=kosherd.service
+ConditionPathExists=/var/lib/kosher/tpm/pending.json
+ConditionPathExists=/var/lib/kosher/setup-complete
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 -m kosherd.tpmunlock
+UMask=0077
+PrivateTmp=yes
+ProtectHome=yes
+
+[Install]
+WantedBy=multi-user.target

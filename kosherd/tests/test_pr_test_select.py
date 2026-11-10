@@ -39,6 +39,8 @@ def test_the_filter_runs_the_filtering_suites_and_the_block_page():
 def test_what_changes_power_on_to_setup_is_a_fresh_install():
     for path in ("os-image/files/usr/lib/bootupd/grub2-static/configs.d/09_kosheros_theme.cfg",
                  "os-image/files/usr/lib/systemd/system/kosher-firstboot.service",
+                 "os-image/files/usr/lib/systemd/system/kosher-nix-store.service",
+                 "os-image/files/usr/lib/systemd/system/nix.mount",
                  "setup-app/src/koshersetup/app.py", "os-image/dev-config.toml"):
         sel = select([path])
         assert sel.boot, path

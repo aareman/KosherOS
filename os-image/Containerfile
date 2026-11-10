@@ -183,6 +183,7 @@ RUN dnf -y install dnsmasq nftables python3-gobject python3-jsonschema python3-p
     # Same for search: the front end and the engine behind it run as one
     # unprivileged user and are given only what they filter with.
     && useradd -r -s /usr/sbin/nologin -d /var/lib/kosher-search kosher-search \
+    && useradd -r -s /usr/sbin/nologin -d /nonexistent kosher-ytsearch \
     # Both services may drop an "ask for this page" request into the
     # spool; neither may read it back. See tmpfiles.d/kosher.conf.
     && groupadd -r kosher-spool \
@@ -648,7 +649,7 @@ RUN passwd -l root \
     && grep -q '^SUB_UID_COUNT 65536' /etc/login.defs \
     && systemctl mask systemd-resolved.service debug-shell.service \
     && systemctl enable sshd.service \
-    && systemctl enable kosherd.service kosher-firewall.service kosher-dns.service \
+    && systemctl enable kosher-tpm-enroll.service kosherd.service kosher-firewall.service kosher-dns.service \
     # The key remapper is not enabled here: it is a switch under Advanced
     # (#230), off on a new install, and kosherd enables and starts it when
     # an administrator turns it on. Even then it remaps nothing until a
@@ -813,6 +814,11 @@ RUN grep -q '^DEFAULT_HOSTNAME=kosheros' /usr/lib/os-release \
     && echo "identity ok"
 
 # bootc images must pass a container lint.
+RUN test -x /usr/sbin/systemd-cryptenroll \
+    && test -x /usr/bin/tpm2_pcrread \
+    && test -x /usr/sbin/cryptsetup \
+    && test -x /usr/sbin/growpart \
+    && test -x /usr/sbin/resize2fs
 RUN bootc container lint
 
 # --- The version, where bootc reads it ---------------------------------------

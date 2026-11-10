@@ -23,9 +23,9 @@ import re
 from dataclasses import dataclass, field
 
 SUITES = ["10-core", "20-enforcement", "30-apps", "35-syncthing", "40-guest", "50-inspect",
-          "60-persistence", "70-categories", "80-hardening", "90-developer"]
+          "60-persistence", "70-categories", "80-hardening", "85-services", "90-developer"]
 FILTER_SUITES = ["10-core", "20-enforcement", "35-syncthing", "50-inspect", "70-categories",
-                 "80-hardening"]
+                 "80-hardening", "85-services"]
 DESKTOP_PARTS = {"session", "filter"}
 
 # Lines of os-image/Containerfile that can change power-on to setup.
@@ -78,6 +78,8 @@ RULES = [
     (r"^os-image/files/usr/lib/bootupd/", BOOT, "the bootloader"),
     (r"^os-image/files/usr/lib/bootc/", BOOT, "the kernel arguments"),
     (r"^os-image/files/usr/lib/systemd/system/kosher-firstboot", BOOT, "first-boot setup"),
+    (r"^os-image/files/usr/lib/systemd/system/(kosher-nix-store\.service|nix\.mount)",
+     BOOT, "the Nix store before local filesystems are ready"),
     (r"^os-image/files/usr/bin/kosher-setup-session$", BOOT, "first-boot setup"),
     (r"^os-image/files/etc/gdm/", BOOT, "the login screen at first boot"),
     (r"^os-image/files/usr/share/plymouth/|^branding/", BOOT, "the boot splash and menu"),

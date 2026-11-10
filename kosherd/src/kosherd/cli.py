@@ -67,6 +67,24 @@ def cmd_log(args) -> int:
     return 0
 
 
+def cmd_disk_tpm(args) -> int:
+    c = _client()
+    status = c.disk_unlock_status()
+    print(status["message"])
+    if args.action == "enroll":
+        if not status["available"]:
+            return 1
+        console = _Console()
+        if not console.secret_terminal():
+            print("TPM enrollment needs a direct terminal for the disk password.", file=sys.stderr)
+            return 1
+        if c.guardian_enabled():
+            c.verify_guardian(console.ask_secret("Guardian password: "))
+        c.enroll_disk_tpm(console.ask_secret("Disk password or saved recovery key: "))
+        print("Automatic unlock enrolled for this boot. Keep your recovery key.")
+    return 0
+
+
 def cmd_status(args) -> int:
     pol = _client().get_policy()
     print(f"policy revision {pol['revision']} (source: {pol['source']}, "
@@ -247,6 +265,23 @@ def cmd_build_sources(args) -> int:
         wanted = [h for h in extra if h not in hosts]
     c.set_build_sources(wanted, _guardian_pw(args))
     print("Nix builds may also download from: " + (", ".join(wanted) or "nothing else"))
+    return 0
+
+
+def cmd_lan_sites(args) -> int:
+    client = _client()
+    if args.hosts:
+        hosts = [] if args.hosts == ["none"] else args.hosts
+        client.set_lan_hosts(args.uid, hosts, _guardian_pw(args))
+        print("Home network websites: " + (", ".join(hosts) or "none"))
+        return 0
+    policy = client.get_policy()
+    accounts = [*policy.get("users", []), policy.get("guest", {})]
+    user = next((u for u in accounts if u.get("uid") == args.uid), None)
+    if user is None:
+        print(f"uid {args.uid} is not managed", file=sys.stderr)
+        return 1
+    print("Home network websites: " + (", ".join(user.get("lan_hosts", [])) or "none"))
     return 0
 
 
@@ -1022,6 +1057,17 @@ class _Console:
     def say(self, text: str = "") -> None:
         print(text, flush=True)
 
+    @staticmethod
+    def secret_terminal() -> bool:
+        return _isatty(sys.stdin) and _isatty(sys.stdout)
+
+    def say_secret(self, text: str) -> None:
+        # The setup-session fallback can pipe stdout through tee/journald.
+        # A recovery key must never reach that log, even on a broken console.
+        if not self.secret_terminal():
+            raise RuntimeError("Disk recovery setup needs a terminal that does not write to a log.")
+        print(text, flush=True)
+
     def ask(self, prompt: str) -> str:
         # The flush is the whole point: without it the prompt waits in the
         # buffer while readline blocks, and nothing appears.
@@ -1113,6 +1159,13 @@ def cmd_setup(args) -> int:
             print("--username requires --password-stdin", file=sys.stderr)
             return 1
         password = sys.stdin.readline().rstrip("\n")
+        disk = c.disk_security()
+        if disk.get("supported") and not disk.get("recovery_saved"):
+            print("Run interactive setup first to save and verify the encrypted disk's recovery key.",
+                  file=sys.stderr)
+            return 1
+        if not disk.get("encrypted"):
+            print(disk["message"], file=sys.stderr)
         if args.timezone:
             from kosherd import timezones
 
@@ -1137,6 +1190,11 @@ def cmd_setup(args) -> int:
     if exists:
         console.say(f"The administrator account '{who}' already exists; "
                     "continuing with the remaining steps.\n")
+        while True:
+            password = console.ask_secret("Boot menu password (setup cannot recover the earlier password): ")
+            if len(password) >= 6 and password == console.ask_secret("Confirm boot menu password: "):
+                break
+            console.say("  At least 6 characters, and both must match.")
     else:
         _ask_timezone(console)
         console.say("Create the administrator account for this computer.")
@@ -1184,6 +1242,39 @@ def cmd_setup(args) -> int:
                 break
             console.say("  At least 6 characters, and both must match.")
 
+    disk = c.disk_security()
+    console.say("\n" + disk["message"])
+    if disk.get("supported") and not disk.get("recovery_saved"):
+        if not console.secret_terminal():
+            console.say("Disk recovery setup needs a direct terminal. Run setup on the "
+                        "computer's console or use the graphical wizard.")
+            return 1
+        while True:
+            try:
+                key = c.prepare_disk_recovery(console.ask_secret("Disk password from the installer: "))
+                break
+            except Exception as error:  # show the daemon's deliberately secret-free error
+                console.say(str(error))
+        console.say("\nWrite down this disk recovery key and keep it outside this computer:")
+        console.say_secret(key)
+        key = ""
+        while True:
+            try:
+                c.confirm_disk_recovery(console.ask_secret("Enter the key from your written copy: "))
+                break
+            except Exception as error:
+                console.say(str(error))
+        console.say("The saved recovery key was verified. Your original disk password still works.")
+    tpm = disk.get("tpm", {})
+    if tpm.get("available"):
+        console.say("\n" + tpm["message"])
+        if console.ask("Use automatic TPM unlock? [y/N]: ").strip().lower() == "y":
+            if not console.secret_terminal():
+                console.say("TPM enrollment needs a direct terminal. Run setup on this computer.")
+                return 1
+            c.setup_disk_tpm(console.ask_secret("Disk password or saved recovery key: "), True)
+            console.say("Enter the disk password once on the next restart. "
+                        "Later normal starts will unlock automatically.")
     c.finish_setup(guardian, password)
     console.say("\nSetup complete. The boot menu takes the administrator's password.")
     console.say("Starting the login screen.\n")
@@ -1465,6 +1556,12 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("--guardian-password")
     s.set_defaults(func=cmd_developer_tools)
 
+    s = sub.add_parser("lan-sites", help="home-network web devices an account may reach")
+    s.add_argument("uid", type=int)
+    s.add_argument("hosts", nargs="*", help="exact device names or addresses; 'none' clears")
+    s.add_argument("--guardian-password")
+    s.set_defaults(func=cmd_lan_sites)
+
     s = sub.add_parser("ssh-in",
                        help="may an account with developer tools be signed in to over SSH, "
                             "with a key")
@@ -1688,6 +1785,10 @@ def main(argv: list[str] | None = None) -> int:
                    help="stay silent and succeed even when the portal is unreachable")
     s.set_defaults(func=cmd_sync)
 
+    s = sub.add_parser("disk-tpm", help="check or enroll automatic encrypted-disk unlock")
+    s.add_argument("action", choices=("status", "enroll"), default="status", nargs="?")
+    s.set_defaults(func=cmd_disk_tpm)
+
     s = sub.add_parser(
         "setup", help="text-mode first-boot setup (fallback for the GUI wizard)")
     s.add_argument("--username", help="run non-interactively for this admin")
@@ -1705,7 +1806,8 @@ def main(argv: list[str] | None = None) -> int:
 
     s = sub.add_parser("captive", help="open a temporary captive-portal window")
     s.add_argument("uid", type=int)
-    s.add_argument("minutes", type=int, nargs="?", default=5)
+    s.add_argument("minutes", type=int, choices=range(1, 11), nargs="?", default=5,
+                   help="web-only sign-in window, 1-10 minutes (default: 5)")
     s.set_defaults(func=cmd_captive)
 
     s = sub.add_parser("tailscale", help="this computer's Tailscale sign-in")

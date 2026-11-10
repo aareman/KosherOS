@@ -1,8 +1,8 @@
 """KosherOS first-boot wizard.
 
-Six steps: welcome, an optional internet connection (Wi-Fi, through
+Seven steps: welcome, an optional internet connection (Wi-Fi, through
 kosherd), the time zone, administrator account, protection (guardian + boot password),
-and a firmware checklist for the things an OS cannot enforce about its own
+disk recovery, and a firmware checklist for the things an OS cannot enforce about its own
 hardware. Runs full-screen on first boot; kosherd closes the
 setup API permanently once this finishes.
 """
@@ -228,7 +228,11 @@ class Window(Adw.ApplicationWindow):
 
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         box.append(header)
-        box.append(self.stack)
+        # Long recovery/TPM forms must fit a 768-pixel laptop. Keep the
+        # navigation outside the scroll area so Continue stays reachable.
+        box.append(Gtk.ScrolledWindow(child=self.stack, vexpand=True,
+                                      hscrollbar_policy=Gtk.PolicyType.NEVER,
+                                      vscrollbar_policy=Gtk.PolicyType.AUTOMATIC))
         box.append(actions)
         self.toasts.set_child(box)
 
@@ -237,6 +241,7 @@ class Window(Adw.ApplicationWindow):
         self.stack.add_named(self._timezone_page(), "timezone")
         self.stack.add_named(self._admin_page(), "admin")
         self.stack.add_named(self._protect_page(), "protect")
+        self.stack.add_named(self._disk_page(), "disk")
         self.stack.add_named(self._firmware_page(), "firmware")
         self.stack.add_named(self._working_page(), "working")
         # Tab moves between FIELDS. Without this it stops on every row's
@@ -251,7 +256,11 @@ class Window(Adw.ApplicationWindow):
             exists, who = self.client.admin_exists()
         except Exception:  # noqa: BLE001 - treat as "not yet"
             exists, who = False, ""
+        self._resuming = exists
         if exists:
+            self.grub_switch.set_subtitle("Setup cannot recover the administrator password you "
+                                          "typed earlier. Set a boot menu password below.")
+            self.grub_pw.entry.set_title("Boot menu password")
             self.toast(f"Administrator account '{who}' already exists — continuing")
             self._go("protect")
         else:
@@ -653,6 +662,150 @@ class Window(Adw.ApplicationWindow):
         _tab_goes_to(self.grub_pw.confirm, lambda: self.next)
         return box
 
+    def _disk_page(self) -> Gtk.Widget:
+        box, group = _page(
+            "Protect your disk recovery key",
+            "A recovery key opens an encrypted disk if its usual unlock stops "
+            "working. Keep a written copy somewhere outside this computer.")
+        self._disk_ready = False
+        self._tpm_available = False
+        self.disk_status = Adw.ActionRow(title="Checking the system disk…",
+                                       subtitle_lines=5)
+        group.add(self.disk_status)
+        self.disk_password = Adw.PasswordEntryRow(title="Disk password from the installer")
+        group.add(self.disk_password)
+        self.disk_prepare = Gtk.Button(label="Create recovery key", halign=Gtk.Align.START)
+        self.disk_prepare.connect("clicked", lambda _b: self._prepare_recovery())
+        box.append(self.disk_prepare)
+        self.disk_key = Gtk.Label(selectable=True, wrap=True, xalign=0)
+        self.disk_key.add_css_class("monospace")
+        box.append(self.disk_key)
+        self.disk_confirm = Adw.PasswordEntryRow(title="Enter the key from your written copy")
+        group.add(self.disk_confirm)
+        self.disk_verify = Gtk.Button(label="Verify saved key", halign=Gtk.Align.START)
+        self.disk_verify.connect("clicked", lambda _b: self._verify_recovery())
+        box.append(self.disk_verify)
+        self.disk_ack = Gtk.CheckButton(label="I have read the disk protection information above")
+        self.disk_ack.connect("toggled", lambda _b: self._revalidate())
+        box.append(self.disk_ack)
+        self.tpm_status = Adw.ActionRow(title="Automatic disk unlock", subtitle_lines=5)
+        group.add(self.tpm_status)
+        self.tpm_choice = Gtk.CheckButton(label="Use this computer’s TPM to unlock the disk")
+        box.append(self.tpm_choice)
+        self.tpm_password = Adw.PasswordEntryRow(title="Disk password or saved recovery key")
+        group.add(self.tpm_password)
+        self.tpm_save = Gtk.Button(label="Save unlock choice", halign=Gtk.Align.START)
+        self.tpm_save.connect("clicked", lambda _b: self._save_tpm_choice())
+        box.append(self.tpm_save)
+        for widget in (self.tpm_status, self.tpm_choice, self.tpm_password, self.tpm_save):
+            widget.set_visible(False)
+        self._disk_controls()
+        return box
+
+    def _disk_controls(self, *, prepare=False, verify=False, acknowledge=False) -> None:
+        self.disk_password.set_visible(prepare)
+        self.disk_prepare.set_visible(prepare)
+        self.disk_key.set_visible(verify)
+        self.disk_confirm.set_visible(verify)
+        self.disk_verify.set_visible(verify)
+        self.disk_ack.set_visible(acknowledge)
+
+    def _refresh_disk(self) -> None:
+        self._disk_ready = False
+        self._disk_controls()
+        self.disk_status.set_title("Checking the system disk…")
+        self._revalidate()
+
+        def loaded(status):
+            self.disk_status.set_title("Disk encrypted" if status["encrypted"] else "Disk not encrypted")
+            self.disk_status.set_subtitle(status["message"])
+            self._disk_ready = bool(status.get("recovery_saved"))
+            tpm = status.get("tpm", {})
+            self._tpm_available = bool(tpm.get("available"))
+            self.tpm_status.set_visible(bool(status["supported"]))
+            self.tpm_status.set_subtitle(tpm.get("message", "Automatic unlock is unavailable."))
+            for widget in (self.tpm_choice, self.tpm_password, self.tpm_save):
+                widget.set_visible(bool(tpm.get("available") and self._disk_ready))
+            self.tpm_choice.set_active(bool(tpm.get("pending") or tpm.get("enrolled")))
+            self._disk_controls(prepare=bool(status["supported"] and not self._disk_ready),
+                                acknowledge=not status["supported"])
+            if self._disk_ready:
+                self.disk_status.set_subtitle("Your recovery key was saved and verified. "
+                                             "Keep that copy outside this computer.")
+            self._revalidate()
+
+        def failed(error):
+            self.disk_status.set_title("The disk could not be checked")
+            self.disk_status.set_subtitle(_error_text(error) + " Go back and try again.")
+            self._revalidate()
+
+        _run_async(self.client.disk_security, loaded, failed)
+
+    def _prepare_recovery(self) -> None:
+        password = self.disk_password.get_text()
+        if not password:
+            self.toast("Enter the disk password you chose in the installer")
+            return
+        self.disk_password.set_text("")
+        self.disk_prepare.set_sensitive(False)
+
+        def done(key):
+            self.disk_prepare.set_sensitive(True)
+            self.disk_key.set_text(key)
+            self.disk_status.set_subtitle("Write down all eight groups. This key will not "
+                                         "be shown again after you verify your copy. "
+                                         "Your original disk password still works.")
+            self._disk_controls(verify=True)
+
+        def failed(error):
+            self.disk_prepare.set_sensitive(True)
+            self.toast(_error_text(error))
+
+        _run_async(lambda: self.client.prepare_disk_recovery(password), done, failed)
+
+    def _verify_recovery(self) -> None:
+        key = self.disk_confirm.get_text()
+        self.disk_confirm.set_text("")
+        self.disk_verify.set_sensitive(False)
+
+        def done(_result):
+            self.disk_verify.set_sensitive(True)
+            self.disk_key.set_text("")
+            self._disk_ready = True
+            self._disk_controls()
+            self.disk_status.set_subtitle("Your saved key opens the encrypted disk. "
+                                         "Keep it somewhere safe outside this computer.")
+            for widget in (self.tpm_choice, self.tpm_password, self.tpm_save):
+                widget.set_visible(self._tpm_available)
+            self._revalidate()
+
+        def failed(error):
+            self.disk_verify.set_sensitive(True)
+            self.toast(_error_text(error))
+
+        _run_async(lambda: self.client.confirm_disk_recovery(key), done, failed)
+
+    def _save_tpm_choice(self) -> None:
+        password = self.tpm_password.get_text()
+        enabled = self.tpm_choice.get_active()
+        if enabled and not password:
+            self.toast("Enter your disk password or saved recovery key")
+            return
+        self.tpm_password.set_text("")
+        self.tpm_save.set_sensitive(False)
+        self.next.set_sensitive(False)
+
+        def done(_result):
+            self.tpm_save.set_sensitive(True)
+            self._refresh_disk()
+
+        def failed(error):
+            self.tpm_save.set_sensitive(True)
+            self._revalidate()
+            self.toast(_error_text(error))
+
+        _run_async(lambda: self.client.setup_disk_tpm(password, enabled), done, failed)
+
     def _firmware_page(self) -> Gtk.Widget:
         box, group = _page(
             "One last step, outside KosherOS",
@@ -704,9 +857,9 @@ class Window(Adw.ApplicationWindow):
 
     # Back goes to the PREVIOUS page. Not to the welcome page, which is what
     # it did, and not past the account step once the account exists.
-    PAGES = ("welcome", "network", "timezone", "admin", "protect", "firmware")
+    PAGES = ("welcome", "network", "timezone", "admin", "protect", "disk", "firmware")
     PREVIOUS = {"network": "welcome", "timezone": "network", "admin": "timezone",
-                "firmware": "protect"}
+                "disk": "protect", "firmware": "disk"}
 
     def _go(self, name: str) -> None:
         self.stack.set_visible_child_name(name)
@@ -714,11 +867,13 @@ class Window(Adw.ApplicationWindow):
         self.next.set_visible(True)
         self.next.set_sensitive(True)
         self.next.set_label({"welcome": "Get Started", "network": "Skip for now",
-                             "timezone": "Continue", "admin": "Create Account", "protect": "Continue",
+                             "timezone": "Continue", "admin": "Create Account", "protect": "Continue", "disk": "Continue",
                              "firmware": "Finish"}[name])
         self._revalidate()
         if name == "network":
             self._refresh_network()
+        if name == "disk":
+            self._refresh_disk()
         if name == "timezone":
             self._tz_guess()
         # Put the keyboard where the person will type next — and on the
@@ -746,8 +901,10 @@ class Window(Adw.ApplicationWindow):
                 and self.admin_pw.valid()
         if page == "protect":
             return (not self.guardian_switch.get_active() or self.guardian_pw.valid()) \
-                and (not self.grub_switch.get_active() or self._grub_untouched()
+                and (not self.grub_switch.get_active() or (self._grub_untouched() and not self._resuming)
                      or self.grub_pw.valid())
+        if page == "disk":
+            return self._disk_ready or (self.disk_ack.get_visible() and self.disk_ack.get_active())
         return True
 
     def _grub_untouched(self) -> bool:
@@ -769,6 +926,10 @@ class Window(Adw.ApplicationWindow):
         elif page == "admin":
             self._create_admin()
         elif page == "protect":
+            self._go("disk")
+        elif page == "disk":
+            if not self._page_valid():
+                return
             self._go("firmware")
         else:
             self._finish()
@@ -807,6 +968,9 @@ class Window(Adw.ApplicationWindow):
             guardian = self.guardian_pw.text()
         if self.grub_switch.get_active():
             if self._grub_untouched():
+                if self._resuming:
+                    self.toast("Enter a boot menu password before finishing setup")
+                    return
                 grub = self.admin_pw.text()       # the administrator's own
             elif self.grub_pw.valid():
                 grub = self.grub_pw.text()

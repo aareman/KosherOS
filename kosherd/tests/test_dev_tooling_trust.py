@@ -77,7 +77,8 @@ def test_the_profile_script_is_valid_sh():
     ("pip", "pypi.org"), ("pip", "files.pythonhosted.org"), ("uv", "astral.sh"),
     ("gem", "rubygems.org"), ("cargo", "crates.io"), ("cargo", "static.rust-lang.org"),
     ("deno", "deno.land"), ("deno", "jsr.io"), ("go", "proxy.golang.org"),
-    ("nix", "cache.nixos.org"), ("nix", "channels.nixos.org"), ("nix", "codeload.github.com"),
+    ("nix", "cache.nixos.org"), ("nix", "channels.nixos.org"),
+    ("nix", "releases.nixos.org"), ("nix", "codeload.github.com"),
     ("devenv", "devenv.cachix.org"), ("devbox", "search.devbox.sh"),
 ])
 def test_each_tools_registry_is_reachable_from_a_developer_account(tool, domain):

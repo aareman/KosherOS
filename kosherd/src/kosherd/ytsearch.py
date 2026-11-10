@@ -6,9 +6,10 @@ channels used to stop. This asks YouTube the same question its own search
 page asks, limited to channels, and hands back what a person can recognise
 next to what the filter matches on.
 
-It runs inside kosherd rather than the admin app: the daemon's traffic is
-not filtered, while the administrator's own account may be — and a search
-for channels to allow should not itself be refused by the YouTube limits.
+kosherd asks a short-lived sandbox to do the network work. Its dedicated
+user can reach only the proxy's channel-search listener, which admits
+this one YouTube endpoint. Neither fetching nor parsing YouTube's answer
+runs as root; the administrator's own YouTube limits do not affect it.
 
 YouTube's web client needs no API key for this. Its answer is an internal
 format, so the parsing is by shape and forgiving: a renderer it does not
@@ -18,8 +19,13 @@ recognise is skipped, never an error.
 from __future__ import annotations
 
 import json
+import os
+import subprocess
+import sys
+import tempfile
 import urllib.error
 import urllib.request
+from pathlib import Path
 
 __all__ = ["SearchError", "parse_channels", "search_channels"]
 
@@ -31,16 +37,101 @@ CLIENT = {"clientName": "WEB", "clientVersion": "2.20250101.00.00",
 # The "Type: Channel" filter on YouTube's search page.
 CHANNELS_ONLY = "EgIQAg=="
 MAX_DEPTH = 32
+SERVICE_USER = "kosher-ytsearch"
+MAX_QUERY = 256
+MAX_RESPONSE = 2 * 1024 * 1024
+MAX_RESULT = 64 * 1024
+RUNTIME_DIR = Path("/run/kosherd")
+
+# Kept together so the live acceptance check can start the same sandbox
+# with a harmless probe. Nix's own sandbox is different: unlike this
+# helper it needs mount namespaces, ownership changes and build users.
+SANDBOX = (
+    "ProtectSystem=strict", "ProtectHome=yes", "PrivateTmp=yes",
+    "PrivateDevices=yes", "NoNewPrivileges=yes", "CapabilityBoundingSet=",
+    "ProtectKernelTunables=yes", "ProtectKernelModules=yes",
+    "ProtectKernelLogs=yes", "ProtectControlGroups=yes", "ProtectClock=yes",
+    "RestrictNamespaces=yes", "RestrictSUIDSGID=yes", "LockPersonality=yes",
+    "MemoryDenyWriteExecute=yes", "SystemCallArchitectures=native",
+    "RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6", "UMask=0077",
+    "MemoryMax=128M", "TasksMax=16", "LimitFSIZE=65536", "RuntimeMaxSec=20",
+)
 
 
 class SearchError(Exception):
     """YouTube could not be asked, or its answer could not be read."""
 
 
-def search_channels(query: str, limit: int = 20, timeout: float = 15.0) -> list[dict]:
+def search_channels(query: str) -> list[dict]:
+    """Ask the unprivileged sandbox. No network parsing in the daemon."""
+    query = _query(query)
+    if not query:
+        return []
+    argv = ["systemd-run", "--quiet", "--pipe", "--wait", "--collect",
+            "--service-type=exec", f"--uid={SERVICE_USER}", f"--gid={SERVICE_USER}",
+            "--property=Requires=kosher-mitm.service",
+            "--property=After=kosher-firewall.service kosher-mitm.service",
+            *(f"--property={p}" for p in SANDBOX),
+            "/usr/bin/python3", "-I", "-m", "kosherd.ytsearch", "--worker"]
+    # Regular files, not an unbounded communicate() pipe: LimitFSIZE also
+    # bounds a compromised helper's output before the root daemon reads it.
+    # /tmp's user_tmp_t label cannot be handed to PID1 on Fedora SELinux.
+    # kosherd's existing root-only runtime directory has the service label.
+    with (tempfile.TemporaryFile(dir=RUNTIME_DIR) as output,
+          tempfile.TemporaryFile(dir=RUNTIME_DIR) as errors):
+        try:
+            result = subprocess.run(argv, input=json.dumps({"query": query}),
+                                    text=True, stdout=output, stderr=errors, timeout=25)
+        except (OSError, subprocess.TimeoutExpired) as e:
+            raise SearchError("the channel search service could not finish") from e
+        output.seek(0)
+        data = output.read(MAX_RESULT + 1)
+    if len(data) > MAX_RESULT:
+        raise SearchError("the channel search service returned too much data")
+    if not data and result.returncode:
+        raise SearchError("the channel search could not start")
+    try:
+        doc = json.loads(data)
+        if isinstance(doc, dict) and isinstance(doc.get("error"), str):
+            raise SearchError(doc["error"][:512])
+        channels = doc["channels"]
+        if result.returncode != 0 or not isinstance(channels, list) or len(channels) > 20:
+            raise ValueError("bad result")
+        for channel in channels:
+            if (not isinstance(channel, dict) or not isinstance(channel.get("id"), str)
+                    or not channel["id"].startswith("UC")
+                    or not isinstance(channel.get("title"), str)
+                    or any(k not in {"id", "title", "handle", "subscribers"}
+                           or not isinstance(v, str) or len(v) > 1024
+                           for k, v in channel.items())):
+                raise ValueError("bad channel")
+        return channels
+    except (ValueError, TypeError, KeyError) as e:
+        raise SearchError("the channel search service sent an unreadable answer") from e
+
+
+def _query(query: str) -> str:
+    if not isinstance(query, str) or len(query) > MAX_QUERY:
+        raise SearchError(f"a channel search must be at most {MAX_QUERY} characters")
+    return query.strip()
+
+
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
+def _open(request, *, timeout):
+    # The fixed HTTPS endpoint must not send the helper to another site,
+    # and environment proxy variables cannot supply a second route out.
+    return urllib.request.build_opener(_NoRedirect(), urllib.request.ProxyHandler({})).open(
+        request, timeout=timeout)
+
+
+def _fetch_channels(query: str, limit: int = 20, timeout: float = 15.0) -> list[dict]:
     """Channels matching `query`, best first: each has `id` (UC…),
     `title`, and when YouTube says so `handle` (@…) and `subscribers`."""
-    query = (query or "").strip()
+    query = _query(query)
     if not query:
         return []
     body = json.dumps({"context": {"client": CLIENT}, "query": query,
@@ -49,8 +140,11 @@ def search_channels(query: str, limit: int = 20, timeout: float = 15.0) -> list[
         SEARCH_URL, data=body,
         headers={"Content-Type": "application/json", "User-Agent": "Mozilla/5.0"})
     try:
-        with urllib.request.urlopen(request, timeout=timeout) as response:
-            doc = json.loads(response.read())
+        with _open(request, timeout=timeout) as response:
+            data = response.read(MAX_RESPONSE + 1)
+            if len(data) > MAX_RESPONSE:
+                raise SearchError("YouTube's search sent too much data")
+            doc = json.loads(data)
     except urllib.error.HTTPError as e:
         raise SearchError(f"YouTube's search answered HTTP {e.code}") from e
     except (urllib.error.URLError, OSError) as e:
@@ -59,6 +153,26 @@ def search_channels(query: str, limit: int = 20, timeout: float = 15.0) -> list[
     except ValueError as e:
         raise SearchError(f"YouTube's search sent something unreadable: {e}") from e
     return parse_channels(doc)[:limit]
+
+
+def worker() -> int:
+    """The only network entry point. Refuse accidental execution as root."""
+    try:
+        if os.getuid() == 0:
+            raise SearchError("the channel search helper must not run as root")
+        raw = sys.stdin.buffer.read(4097)
+        if len(raw) > 4096:
+            raise SearchError("the channel search request is too large")
+        doc = json.loads(raw)
+        channels = _fetch_channels(_query(doc["query"]))
+        result = json.dumps({"channels": channels})
+        if len(result.encode()) > MAX_RESULT:
+            raise SearchError("YouTube's search sent too much channel data")
+        print(result)
+        return 0
+    except (SearchError, ValueError, TypeError, KeyError, RecursionError) as e:
+        print(json.dumps({"error": str(e)[:512]}))
+        return 1
 
 
 def parse_channels(doc) -> list[dict]:
@@ -115,3 +229,7 @@ def _text(node) -> str:
         return node["simpleText"]
     return "".join(run.get("text", "") for run in node.get("runs") or []
                    if isinstance(run, dict))
+
+
+if __name__ == "__main__":
+    raise SystemExit(worker() if sys.argv[1:] == ["--worker"] else 2)

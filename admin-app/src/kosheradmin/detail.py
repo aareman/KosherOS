@@ -437,9 +437,9 @@ class UserDetailPage(Adw.NavigationPage):
         # there — fifteen toggles that change nothing. The approved list
         # takes their place.
         if user["mode"] == "whitelist":
-            return [self._mode_group(user), self._network_group(user), self._ssh_group(user), self._approved_sites_group(user),
+            return [self._mode_group(user), self._network_group(user), self._lan_group(user), self._ssh_group(user), self._approved_sites_group(user),
                     self._pages_group(user)]
-        return [self._mode_group(user), self._network_group(user), self._ssh_group(user), self._categories_group(user),
+        return [self._mode_group(user), self._network_group(user), self._lan_group(user), self._ssh_group(user), self._categories_group(user),
                 self._pages_group(user)]
 
     def _approved_sites_group(self, user: dict) -> Adw.PreferencesGroup:
@@ -617,6 +617,32 @@ class UserDetailPage(Adw.NavigationPage):
         group.add(ports_row)
         hint_under(group, ("Allow additional ports for specific apps. Leave blank unless an app "
             "needs an extra connection. SSH has its own setting below."))
+        return group
+
+    def _lan_group(self, user: dict) -> Adw.PreferencesGroup:
+        group = Adw.PreferencesGroup(
+            title="Home network websites",
+            description="Allow web pages on particular home-network devices, such as a printer "
+                        "or a NAS. This does not open file sharing or SSH.")
+        if user["mode"] not in ("filtered", "dnsfilter", "whitelist"):
+            group.add(Adw.ActionRow(title="Unavailable in this mode",
+                                   subtitle="Unfiltered accounts already have access; no-internet "
+                                            "accounts cannot browse these pages.", subtitle_lines=2))
+            return group
+        row = Adw.EntryRow(title="These devices", show_apply_button=True,
+                           text=", ".join(user.get("lan_hosts", [])))
+
+        def save(entry):
+            hosts = [host.strip() for host in entry.get_text().split(",") if host.strip()]
+            self._gated(lambda password: self.win.client.set_lan_hosts(user["uid"], hosts, password),
+                        f"{user['username']}: home network websites "
+                        + (", ".join(hosts) if hosts else "cleared"))
+
+        row.connect("apply", save)
+        group.add(row)
+        hint_under(group, "Exact device names or addresses, separated by commas: printer.home.arpa, "
+                         "192.168.1.20. Website rules still apply. Approved-sites accounts must "
+                         "use a device name and also approve that name. Leave blank for no access.")
         return group
 
     def _ssh_group(self, user: dict) -> Adw.PreferencesGroup:
@@ -1392,7 +1418,7 @@ class UserDetailPage(Adw.NavigationPage):
 
     # What each choice of app access means, under the row (see hint_under).
     ACCESS_HINTS = {
-        "approved": "Only apps approved under Apps in the sidebar are available.",
+        "approved": "Only apps approved under Apps in the sidebar are offered by the Store.",
         "store": ("Available Flathub apps, subject to the blocks below. Apps rated for adult "
             "content, bad language, gambling, drugs or graphic violence need individual "
             "approval."),
@@ -1411,8 +1437,8 @@ class UserDetailPage(Adw.NavigationPage):
                      "and install anything from nixpkgs, reach the package "
                      "registries (npm, PyPI, crates.io, GitHub) directly, and use "
                      "git over SSH with GitHub, GitLab, Codeberg and Bitbucket. Its "
-                     "web filter still applies to everything it downloads. Off, the "
-                     "Store is the only way to install.",
+                     "web filter still applies to everything it downloads. It also opens "
+                     "the desktop's terminal and command prompt.",
             subtitle_lines=6,
             active=bool(user.get("developer_tools", False)))
 
@@ -1523,7 +1549,11 @@ class UserDetailPage(Adw.NavigationPage):
         self.blocked_apps: list[str] = sorted(user.get("blocked_apps") or [])
         self._kinds_saved = sorted(self.blocked_kinds)
 
-        installs_group = Adw.PreferencesGroup(title="App access")
+        installs_group = Adw.PreferencesGroup(
+            title="Store and desktop apps",
+            description="The Store limits installations. Classic and Tiling hide apps "
+                        "from their menus; this does not stop every program from running "
+                        "another way. The account's network filter still applies.")
         installs = Adw.SwitchRow(title="Can install apps",
                                  subtitle="From the KosherOS Store, within the limits below",
                                  active=user.get("can_install_apps", True))
@@ -1554,8 +1584,8 @@ class UserDetailPage(Adw.NavigationPage):
 
         kinds_group = Adw.PreferencesGroup(
             title="Blocked app categories",
-            description=("These categories are blocked in both app lists. Installed apps in these "
-                "categories are hidden from this account."))
+            description=("The Store refuses these categories. Installed apps in these "
+                "categories are hidden from Classic and Tiling app menus."))
         self.kind_rows: dict[str, Adw.SwitchRow] = {}
         for key in appkinds.KIND_KEYS:
             row = Adw.SwitchRow(title=appkinds.label(key), active=key in self.blocked_kinds,
@@ -1566,9 +1596,9 @@ class UserDetailPage(Adw.NavigationPage):
             kinds_group.add(row)
 
         self.blocked_apps_group = Adw.PreferencesGroup(
-            title="Blocked apps",
-            description=("These apps are blocked for this account, even if approved elsewhere. Search "
-                "by name to add an app."))
+            title="Apps refused by the Store and hidden from menus",
+            description=("These apps are refused by the Store and hidden from Classic and Tiling "
+                "app menus, even if approved elsewhere. Search by name to add an app."))
         self.blocked_list = Gtk.ListBox(selection_mode=Gtk.SelectionMode.NONE)
         self.blocked_list.add_css_class("boxed-list")
         self.blocked_apps_group.add(self.blocked_list)
@@ -1746,9 +1776,9 @@ class UserDetailPage(Adw.NavigationPage):
         # only fix was a terminal, which is not a fix.
         captive = Adw.ActionRow(
             title="Allow Wi-Fi sign-in",
-            subtitle="Opens this account's connection for 10 minutes so a "
-                     "hotel or airport sign-in page can load. Filtering "
-                     "resumes on its own.",
+            subtitle="Lets this account open web pages for 10 minutes so a "
+                     "hotel or airport sign-in page can load. Other connections "
+                     "keep their limits, and the window closes on its own.",
             subtitle_lines=3, activatable=True)
         captive.add_suffix(Gtk.Image(icon_name="network-wireless-symbolic"))
         captive.connect("activated", lambda _r: self.win.call(

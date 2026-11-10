@@ -87,11 +87,54 @@ If the computer has more than one eligible disk, open **Installation Destination
 
 After you confirm the destination and start installation, keep the computer plugged in and wait for completion. On restart, remove the USB when prompted or once installation has finished, so the computer boots from its internal disk.
 
-KosherOS uses the whole of the disk it was installed on. The installer itself sets aside 70 GB; the first start after installation extends that to the rest of the disk, so a larger drive is not left half empty.
+KosherOS uses the whole of the disk it was installed on. Automatic partitioning uses the available space; recovery setup can also grow a supported encrypted root when the disk has been expanded.
 
 ## 6. Set up your family and test
 
+The installer selects **Encrypt my data** in Installation Destination.
+Leave it selected and choose a disk passphrase when Anaconda asks. Keep
+that passphrase: it unlocks the disk during the initial starts and remains
+a fallback after automatic unlock is enabled. The
+disk still waits for your destination choice and confirmation before
+anything is erased. Its automatic root partition uses the available space.
+
 The first start runs the KosherOS setup wizard. Check the time zone it shows (it guesses from your internet connection; search for your city if it is wrong), then create the administrator account and review the optional guardian password and device-security steps. Connect to your network when requested.
+
+For an encrypted disk, setup asks for the installer passphrase and makes
+a separate recovery key. Write all eight groups somewhere outside this
+computer, then enter the key from your written copy to verify that it
+opens the disk. The wizard clears the displayed key after verification;
+it cannot show it again later. Your original disk passphrase still works.
+An interrupted setup can resume, and generating another unsaved recovery
+key does not remove the original passphrase.
+
+After verifying the recovery key, a supported computer offers **Use this
+computer’s TPM to unlock the disk**. This is optional. Select it, enter the
+disk password or recovery key, and choose **Save unlock choice**. Finish
+setup, then restart and enter the disk password once more. This lets
+KosherOS enroll the final boot configuration, including its new boot-menu
+password. Subsequent unchanged boots unlock automatically. Without a
+supported TPM and measured Secure Boot, the disk stays encrypted and asks
+for its passphrase at startup.
+
+Keep the recovery key even when automatic unlock works. Changing firmware,
+Secure Boot settings, boot options, or the OS deployment can make the TPM
+refuse automatic unlock. Enter the saved passphrase or recovery key to
+start the computer. After confirming that the change was intended, an
+administrator can run `kosherctl disk-tpm enroll` to authorize the current
+boot; the guardian password is also required when configured.
+`kosherctl disk-tpm status` reports the enrollment. Do not re-enroll an
+unexpected boot change before investigating it.
+
+Automatic unlock is bound to this computer. Moving the disk to another
+laptop, clearing the TPM, or booting another operating system requires the
+saved passphrase or recovery key. It does not encrypt an existing plain
+disk.
+
+If the disk is unencrypted, setup says so. An update cannot encrypt an
+existing installation in place: back up the files and reinstall with
+encryption to protect the on-disk filter settings. Keep Secure Boot on
+and protect the firmware and boot menu as described by the wizard.
 
 Start with a sample account and a few tasks: open the Store, try a site you normally use, review the account's settings in My Filter, and check Protection in the admin app. Add family accounts and choose their settings as you become comfortable with the system.
 

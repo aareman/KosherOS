@@ -1606,6 +1606,33 @@ def test_wifi_sign_in_opens_a_window_for_the_account():
     assert opened == {"uid": 1001, "minutes": 10}
 
 
+def test_app_limits_explain_the_store_and_desktop_boundary():
+    page, _w, _u = _detail()
+    text = " ".join(_texts(page))
+    assert "The Store limits installations" in text
+    assert "does not stop every program" in text
+    assert "network filter still applies" in text
+
+
+def test_home_network_sites_save_a_separate_device_permission():
+    saved = []
+
+    class Recording(FakeClient):
+        def set_lan_hosts(self, uid, hosts, password):
+            saved.append((uid, hosts, password))
+
+    win = FakeWindow(Recording())
+    user = a_user(mode="whitelist")
+    win.policy = {"revision": 1, "users": [user], "guardian": {"enabled": False},
+                  "guest": {"enabled": False}, "adblock": {"enabled": True}}
+    page = detail.UserDetailPage(win, user)
+    row = _row_named(page, "These devices")
+    row.set_text("printer.home.arpa, 192.168.1.20")
+    row.emit("apply")
+    drain()
+    assert saved == [(1001, ["printer.home.arpa", "192.168.1.20"], "")]
+
+
 def test_an_unfiltered_account_is_not_offered_a_wifi_window():
     page, _w, _u = _detail(mode="unfiltered")
     assert not _row_named(page, "Allow Wi-Fi sign-in").get_sensitive()
@@ -2896,7 +2923,8 @@ def test_developer_tools_are_a_switch_that_is_off_by_default():
     win, page = _detail_for(a_user(mode="filtered"))
     row = _row_named(page, "Developer tools")
     assert not row.get_active()
-    assert "Store is the only way" in row.get_subtitle()
+    assert "install anything from nixpkgs" in row.get_subtitle()
+    assert "terminal and command prompt" in row.get_subtitle()
 
 
 def test_switching_developer_tools_on_calls_the_daemon():

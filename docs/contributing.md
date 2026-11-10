@@ -241,3 +241,23 @@ kosherctl log -g youtube   # the filter services' recent journal, filtered by a 
 
 There is no `sudo` and no root shell on an installed KosherOS, so a report
 will never be asked to run anything that needs one.
+
+
+### TPM acceptance
+
+`scripts/tpm-test.py` boots a new overlay with a software TPM and Secure Boot
+firmware, creates a disposable LUKS container, and checks enrollment,
+normal-restart unlocking, refusal after a changed boot measurement, and
+both password and recovery fallback. The input disk is never written.
+It needs `swtpm` from the dev shell and Microsoft-enrolled OVMF firmware.
+Set `KOSHER_OVMF_CODE` and `KOSHER_OVMF_VARS` when those are not at the
+Ubuntu `/usr/share/OVMF/OVMF_*_4M.ms.fd` paths.
+
+```sh
+python3 scripts/tpm-test.py --disk build/pr-test/RUN/machine.qcow2 \
+  --key ~/.cache/kosher-pr-test/id_ed25519 --out build/tpm-acceptance
+```
+
+Use a new output directory for each run. This container-level test does
+not replace a fresh encrypted-root installation, setup enrollment, and
+password-free boot test on the built image.

@@ -81,6 +81,10 @@ class FakeClient:
     def finish_setup(self, guardian, grub):
         pass
 
+    def disk_security(self):
+        return {"encrypted": False, "supported": False, "recovery_saved": False,
+                "message": "This system disk is not encrypted."}
+
     # -- first-boot network: offline, with a Wi-Fi card, two networks in range
     status = {"online": False, "kind": "", "name": "", "wifi_hardware": True}
 
@@ -112,11 +116,47 @@ def test_the_setup_window_builds():
     assert page(window()) == "welcome"
 
 
+def test_plain_disk_information_requires_acknowledgement(monkeypatch):
+    monkeypatch.setattr(setup, "_run_async", lambda work, done, error: done(work()))
+    win = window()
+    win._go("disk")
+    assert win.disk_status.get_title() == "Disk not encrypted"
+    assert not win.next.get_sensitive()
+    win.disk_ack.set_active(True)
+    assert win.next.get_sensitive()
+    win._advance()
+    assert page(win) == "firmware"
+
+
+def test_recovery_key_is_cleared_after_verifying_the_written_copy(monkeypatch):
+    monkeypatch.setattr(setup, "_run_async", lambda work, done, error: done(work()))
+    win = window()
+    win.client.disk_security = lambda: {"encrypted": True, "supported": True,
+        "recovery_saved": False, "message": "This system disk is encrypted."}
+    seen = {}
+    key = "01234567-" * 7 + "01234567"
+    win.client.prepare_disk_recovery = lambda password: seen.setdefault("password", password) and key
+    win.client.confirm_disk_recovery = lambda value: seen.setdefault("key", value)
+    win._go("disk")
+    assert not win.next.get_sensitive()
+    win.disk_password.set_text("installer-passphrase")
+    win._prepare_recovery()
+    assert seen["password"] == "installer-passphrase"
+    assert win.disk_password.get_text() == ""
+    assert win.disk_key.get_text() == key
+    assert not win.next.get_sensitive()
+    win.disk_confirm.set_text(key)
+    win._verify_recovery()
+    assert seen["key"] == key
+    assert win.disk_key.get_text() == "" and win.disk_confirm.get_text() == ""
+    assert win.next.get_sensitive()
+
+
 def test_back_goes_to_the_previous_page_not_the_start():
     win = window()
     win._go("firmware")
     win._back()
-    assert page(win) == "protect", "Back from the last page must go one page back"
+    assert page(win) == "disk", "Back from the last page must go one page back"
     win._go("admin")
     win._back()
     assert page(win) == "timezone"
@@ -136,6 +176,10 @@ def test_an_interrupted_wizard_resumes_past_the_account_step():
     # second administrator.
     win = window(admin="abba")
     assert page(win) == "protect"
+    assert not win.next.get_sensitive(), "the earlier administrator password is no longer in memory"
+    win.grub_pw.entry.set_text("new-boot-password")
+    win.grub_pw.confirm.set_text("new-boot-password")
+    assert win.next.get_sensitive()
 
 
 def test_password_strength_words():
@@ -635,3 +679,51 @@ def test_the_place_names_are_text_not_markup():
     win = window()
     assert not win.tz_row.get_use_markup()
     assert all(not r.get_use_markup() for r in rows(win.tz_list) if hasattr(r, "zone"))
+
+
+def test_tpm_is_optional_and_scheduling_clears_the_password(monkeypatch):
+    monkeypatch.setattr(setup, "_run_async", lambda work, done, error: done(work()))
+    win = window()
+    status = {"encrypted": True, "supported": True, "recovery_saved": True,
+              "message": "Encrypted", "tpm": {"available": True, "pending": False,
+              "enrolled": False, "message": "Automatic unlock is optional."}}
+    win.client.disk_security = lambda: status
+    seen = []
+    def configure(password, enabled):
+        seen.append((password, enabled))
+        status["tpm"]["pending"] = enabled
+    win.client.setup_disk_tpm = configure
+    win._go("disk")
+    assert win.next.get_sensitive(), "TPM must not be required to finish setup"
+    assert win.tpm_save.get_visible() and not win.tpm_choice.get_active()
+    win.tpm_choice.set_active(True)
+    win.tpm_password.set_text("disk-test-password")
+    win._save_tpm_choice()
+    assert seen == [("disk-test-password", True)]
+    assert win.tpm_password.get_text() == ""
+    assert win.tpm_choice.get_active()
+    win.tpm_choice.set_active(False)
+    win._save_tpm_choice()
+    assert seen[-1] == ("", False)
+
+
+def test_no_tpm_keeps_encryption_and_recovery_available(monkeypatch):
+    monkeypatch.setattr(setup, "_run_async", lambda work, done, error: done(work()))
+    win = window()
+    win.client.disk_security = lambda: {"encrypted": True, "supported": True,
+        "recovery_saved": True, "message": "Encrypted", "tpm": {"available": False,
+        "message": "This computer needs its disk password."}}
+    win._go("disk")
+    assert win.disk_status.get_title() == "Disk encrypted"
+    assert win.next.get_sensitive()
+    assert not win.tpm_choice.get_visible()
+    assert "disk password" in win.tpm_status.get_subtitle()
+
+
+def test_disk_recovery_and_tpm_controls_can_scroll_on_a_small_laptop():
+    win = window()
+    disk_page = win.stack.get_child_by_name("disk")
+    scroller = disk_page.get_ancestor(Gtk.ScrolledWindow)
+    assert scroller is not None
+    assert scroller.get_policy()[1] == Gtk.PolicyType.AUTOMATIC
+    assert win.next.get_ancestor(Gtk.ScrolledWindow) is None, "Continue must remain outside the form"

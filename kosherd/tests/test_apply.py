@@ -177,7 +177,8 @@ def test_category_blocks_are_written_for_the_dnsfilter_resolver_only(env, tmp_pa
 def test_proxy_runs_only_while_someone_is_inspected(env):
     apply_policy(policy_with("filtered", "whitelist"))
     assert env.matching("restart", "kosher-mitm.service")
-    assert not env.matching("stop", "kosher-mitm.service")
+    # Its first listener assignment also closes any stale proxy instance.
+    assert env.index_of("stop", "kosher-mitm.service") < env.index_of("nft", "-f", "kosher.nft")
 
 
 def test_a_change_the_proxy_reads_from_its_file_does_not_restart_it(env):
@@ -187,12 +188,147 @@ def test_a_change_the_proxy_reads_from_its_file_does_not_restart_it(env):
     first = policy_with("filtered")
     apply_policy(first)
     assert len(env.matching("restart", "kosher-mitm.service")) == 1
+    stops = len(env.matching("stop", "kosher-mitm.service"))
     first.users[0].media_level = "all"
     first.users[0].rules = [{"action": "block", "pattern": "example.com"}]
     apply_policy(first)
     assert len(env.matching("restart", "kosher-mitm.service")) == 1
+    assert len(env.matching("stop", "kosher-mitm.service")) == stops
     assert len(env.matching("restart", "kosher-search.service")) == 1
     assert len(env.matching("restart", "kosher-searxng.service")) == 1
+
+
+def test_swapping_listener_owners_stops_proxy_before_new_firewall(env, tmp_path):
+    policy = policy_with("filtered", "whitelist")
+    apply_policy(policy)
+    assert {uid: entry["port"] for uid, entry in rules_written(tmp_path).items()} == {
+        "1000": 30000, "1001": 30001}
+    env.calls.clear()
+    policy.users[0].mode, policy.users[1].mode = "whitelist", "filtered"
+    apply_policy(policy)
+    assert {uid: entry["port"] for uid, entry in rules_written(tmp_path).items()} == {
+        "1000": 30001, "1001": 30000}
+    assert env.index_of("nft", "--check") < env.index_of("stop", "kosher-mitm.service")
+    assert env.index_of("stop", "kosher-mitm.service") < env.index_of("nft", "-f", "kosher.nft")
+    assert env.index_of("nft", "-f", "kosher.nft") < env.index_of("restart", "kosher-mitm.service")
+
+
+def test_replacing_account_with_same_listener_count_stops_proxy_before_firewall(env, tmp_path):
+    policy = policy_with("filtered")
+    apply_policy(policy)
+    listen = (tmp_path / "mitm" / "listen.env").read_text()
+    env.calls.clear()
+    policy.users = [UserPolicy(uid=1005, username="replacement", mode="filtered")]
+    apply_policy(policy)
+    assert (tmp_path / "mitm" / "listen.env").read_text() == listen
+    assert env.index_of("stop", "kosher-mitm.service") < env.index_of("nft", "-f", "kosher.nft")
+    assert rules_written(tmp_path)["1005"]["port"] == 30000
+
+
+def test_failed_stop_preserves_old_firewall_and_listener_ownership(env, tmp_path, monkeypatch):
+    policy = policy_with("filtered")
+    apply_policy(policy)
+    old_firewall = apply_mod.NFT_RULESET_PATH.read_text()
+    old_rules = apply_mod.MITM_RULES_PATH.read_text()
+    failed = FakeRun(fail=["stop kosher-mitm.service"])
+    monkeypatch.setattr(apply_mod.subprocess, "run", failed)
+    policy.users[0].uid = 1005
+    with pytest.raises(ApplyError, match="before listener reassignment"):
+        apply_policy(policy)
+    assert not failed.matching("nft", "-f", "kosher.nft")
+    assert apply_mod.NFT_RULESET_PATH.read_text() == old_firewall
+    assert apply_mod.MITM_RULES_PATH.read_text() == old_rules
+
+
+@pytest.mark.parametrize("builder,channel", [(999, None), (None, 998), (999, 998)])
+def test_unchanged_privileged_listener_identities_do_not_stop_early(env, monkeypatch, builder, channel):
+    monkeypatch.setattr(apply_mod.nixdaemon, "build_gid", lambda: builder)
+    monkeypatch.setattr(apply_mod, "channel_search_uid", lambda: channel)
+    policy = policy_with("filtered")
+    apply_policy(policy)
+    env.calls.clear()
+    policy.users[0].media_level = "all"
+    apply_policy(policy)
+    assert not env.matching("stop", "kosher-mitm.service")
+
+
+@pytest.mark.parametrize("before,after", [("dnsfilter", "filtered"), ("whitelist", "filtered"),
+                                          ("filtered", "dnsfilter"), ("dnsfilter", "whitelist")])
+def test_mode_changes_close_existing_tls_even_when_the_port_is_unchanged(env, tmp_path, before, after):
+    policy = policy_with(before)
+    apply_policy(policy)
+    listen = (tmp_path / "mitm" / "listen.env").read_text()
+    stops = len(env.matching("stop", "kosher-mitm.service"))
+    policy.users[0].mode = after
+    apply_policy(policy)
+    assert (tmp_path / "mitm" / "listen.env").read_text() == listen
+    assert len(env.matching("restart", "kosher-mitm.service")) == 2
+    assert len(env.matching("stop", "kosher-mitm.service")) == stops
+
+
+def test_removing_a_whitelisted_name_closes_already_open_tls(env):
+    policy = policy_with("whitelist")
+    policy.users[0].whitelist = ["approved.example", "removed.example"]
+    apply_policy(policy)
+    policy.users[0].whitelist = ["approved.example"]
+    apply_policy(policy)
+    assert len(env.matching("restart", "kosher-mitm.service")) == 2
+
+
+def test_tightening_basic_categories_closes_already_open_tls(env):
+    policy = policy_with("dnsfilter")
+    apply_policy(policy)
+    policy.users[0].blocked_categories = ["adult"]
+    apply_policy(policy)
+    assert len(env.matching("restart", "kosher-mitm.service")) == 2
+
+
+@pytest.mark.parametrize("mode", ["filtered", "dnsfilter", "whitelist"])
+def test_removing_a_lan_device_closes_existing_upstream_streams(env, mode):
+    policy = policy_with(mode)
+    policy.users[0].lan_hosts = ["printer.local"]
+    apply_policy(policy)
+    policy.users[0].lan_hosts = []
+    apply_policy(policy)
+    assert len(env.matching("restart", "kosher-mitm.service")) == 2
+
+
+def test_visual_changes_do_not_restart_other_accounts_name_only_streams(env):
+    policy = policy_with("filtered", "dnsfilter", "whitelist")
+    apply_policy(policy)
+    for user in policy.users:
+        user.media_level = "all"
+        user.cover_style = "skin"
+        user.language_filter = "substitute"
+        user.calm = {"sites": {"x": {"mode": "single"}}}
+        user.rules = [{"action": "block", "pattern": "example.com/path"}]
+    # Filtered-mode categories are rechecked per HTTP request, not opaque
+    # TLS passthrough, so an ordinary category edit stays responsive too.
+    policy.users[0].blocked_categories = ["adult"]
+    apply_policy(policy)
+    assert len(env.matching("restart", "kosher-mitm.service")) == 1
+
+
+def test_reordering_name_permissions_does_not_restart_the_proxy(env):
+    policy = policy_with("whitelist")
+    policy.users[0].whitelist = ["a.example", "b.example"]
+    policy.users[0].lan_hosts = ["a.local", "b.local"]
+    apply_policy(policy)
+    policy.users[0].whitelist.reverse()
+    policy.users[0].lan_hosts.reverse()
+    apply_policy(policy)
+    assert len(env.matching("restart", "kosher-mitm.service")) == 1
+
+
+def test_failed_connection_policy_restart_does_not_claim_the_change_is_applied(env, monkeypatch):
+    policy = policy_with("dnsfilter")
+    apply_policy(policy)
+    failed = FakeRun(fail=["restart kosher-mitm.service"])
+    monkeypatch.setattr(apply_mod.subprocess, "run", failed)
+    policy.users[0].blocked_categories = ["adult"]
+    with pytest.raises(ApplyError, match="could not restart kosher-mitm"):
+        apply_policy(policy)
+    assert failed.matching("stop", "kosher-mitm.service")
 
 
 def test_a_new_listener_restarts_the_proxy(env):
@@ -220,8 +356,8 @@ def test_a_proxy_that_is_not_running_is_started(env, monkeypatch):
     assert stopped.matching("restart", "kosher-mitm.service")
 
 
-def test_proxy_is_stopped_when_nobody_is_filtered(env):
-    apply_policy(policy_with("whitelist", "none"))
+def test_proxy_is_stopped_when_nobody_needs_web_checks(env):
+    apply_policy(policy_with("unfiltered", "none"))
     assert env.matching("stop", "kosher-mitm.service")
     assert not env.matching("restart", "kosher-mitm.service")
 
@@ -248,7 +384,7 @@ def rules_written(tmp_path) -> dict:
     return json.loads((tmp_path / "mitm" / "rules.json").read_text())
 
 
-def test_only_inspected_users_rules_reach_the_proxy(tmp_path, monkeypatch):
+def test_content_rules_only_reach_inspected_users_but_all_web_gets_a_listener(tmp_path, monkeypatch):
     monkeypatch.setattr(apply_mod, "MITM_DIR", tmp_path / "mitm")
     monkeypatch.setattr(apply_mod, "MITM_RULES_PATH", tmp_path / "mitm" / "rules.json")
     monkeypatch.setattr(apply_mod, "SEARCH_DIR", tmp_path / "search")
@@ -267,18 +403,28 @@ def test_only_inspected_users_rules_reach_the_proxy(tmp_path, monkeypatch):
     # Every INSPECTED user is listed — including one with nothing set —
     # because the entry carries the port the proxy identifies them by. The
     # whitelist user is not: nothing of theirs reaches the proxy.
-    assert rules_written(tmp_path) == {
+    doc = rules_written(tmp_path)
+    named = doc.pop("1002")
+    assert named["mode"] == "whitelist"
+    assert named["port"] == 30002
+    assert named["rules"] == []
+    assert named["allowed_hosts"] == []
+    assert doc == {
         "1001": {"port": 30000, "rules": block, "blocked_categories": [],
                  "media_level": "none", "cover_style": "frost", "language_filter": "off",
-                 "youtube": {}, "calm": {}, "system_allowed": [],
+                 "youtube": {}, "calm": {}, "system_allowed": [], "lan_hosts": [],
                  "never_blocked": _NEVER_BLOCKED},
         "1003": {"port": 30001, "rules": [], "blocked_categories": [],
                  "media_level": "none", "cover_style": "frost", "language_filter": "off",
-                 "youtube": {}, "calm": {}, "system_allowed": [],
+                 "youtube": {}, "calm": {}, "system_allowed": [], "lan_hosts": [],
                  "never_blocked": _NEVER_BLOCKED}}
     listen = (tmp_path / "mitm" / "listen.env").read_text()
     assert listen == ("MITM_MODES=--mode transparent@127.0.0.1:30000 "
-                      "--mode transparent@127.0.0.1:30001\n")
+                      "--mode transparent@::1:30000 "
+                      "--mode transparent@127.0.0.1:30001 "
+                      "--mode transparent@::1:30001 "
+                      "--mode transparent@127.0.0.1:30002 "
+                      "--mode transparent@::1:30002\n")
 
 
 def test_guest_rules_reach_the_proxy(tmp_path, monkeypatch):
@@ -322,7 +468,7 @@ def test_restarts_clear_a_previous_failure_first(env):
 
 
 def test_stopping_the_proxy_needs_no_reset(env):
-    apply_policy(policy_with("whitelist"))
+    apply_policy(policy_with("none"))
     assert env.matching("stop", "kosher-mitm.service")
     assert not env.matching("reset-failed", "kosher-mitm.service")
 
@@ -349,7 +495,7 @@ def test_categories_alone_are_enough_to_reach_the_proxy(tmp_path, monkeypatch):
     assert rules_written(tmp_path) == {
         "1001": {"port": 30000, "rules": [], "blocked_categories": ["adult"],
                  "media_level": "none", "cover_style": "frost", "language_filter": "off",
-                 "youtube": {}, "calm": {}, "system_allowed": [],
+                 "youtube": {}, "calm": {}, "system_allowed": [], "lan_hosts": [],
                  "never_blocked": _NEVER_BLOCKED}}
 
 

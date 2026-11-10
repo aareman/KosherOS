@@ -228,7 +228,11 @@ class Window(Adw.ApplicationWindow):
 
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         box.append(header)
-        box.append(self.stack)
+        # Long recovery/TPM forms must fit a 768-pixel laptop. Keep the
+        # navigation outside the scroll area so Continue stays reachable.
+        box.append(Gtk.ScrolledWindow(child=self.stack, vexpand=True,
+                                      hscrollbar_policy=Gtk.PolicyType.NEVER,
+                                      vscrollbar_policy=Gtk.PolicyType.AUTOMATIC))
         box.append(actions)
         self.toasts.set_child(box)
 

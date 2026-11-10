@@ -718,3 +718,12 @@ def test_no_tpm_keeps_encryption_and_recovery_available(monkeypatch):
     assert win.next.get_sensitive()
     assert not win.tpm_choice.get_visible()
     assert "disk password" in win.tpm_status.get_subtitle()
+
+
+def test_disk_recovery_and_tpm_controls_can_scroll_on_a_small_laptop():
+    win = window()
+    disk_page = win.stack.get_child_by_name("disk")
+    scroller = disk_page.get_ancestor(Gtk.ScrolledWindow)
+    assert scroller is not None
+    assert scroller.get_policy()[1] == Gtk.PolicyType.AUTOMATIC
+    assert win.next.get_ancestor(Gtk.ScrolledWindow) is None, "Continue must remain outside the form"

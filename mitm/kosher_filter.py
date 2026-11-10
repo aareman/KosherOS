@@ -2481,18 +2481,15 @@ class KosherFilter:
         the request's own identity headers (the browser's agent, where it
         came from), never its cookies: the files are public, and the
         proxy's connection is its own, outside the account's filter."""
-        import urllib.request
-
         url = flow.request.pretty_url
         carried = ("user-agent", "referer", "origin", "accept", "accept-language")
         base = {k: v for k, v in flow.request.headers.items() if k.lower() in carried}
+        peer = getattr(getattr(flow, "server_conn", None), "peername", None)
+        uid = flow.metadata.get("kosher_uid")
 
         def fetch(start: int, end: int) -> bytes:
-            request = urllib.request.Request(url, headers={**base, "Range": f"bytes={start}-{end}"})
-            with urllib.request.urlopen(request, timeout=10) as response:
-                if response.status != 206:
-                    raise OSError(f"the source answered a range with HTTP {response.status}")
-                return response.read()
+            return webguard.fetch_range(url, peer, base, start, end,
+                                        lan=self._lan_permission(uid, flow.request.pretty_host))
 
         return fetch
 

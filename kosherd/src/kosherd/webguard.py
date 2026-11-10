@@ -120,3 +120,59 @@ def local_service_address(value: str) -> bool:
     if getattr(address, "ipv4_mapped", None) is not None:
         address = address.ipv4_mapped
     return address.is_loopback or address.is_unspecified or address.is_multicast
+
+
+def fetch_range(url: str, peer, headers: dict, start: int, end: int, *, lan: bool = False) -> bytes:
+    """Fetch only from the validated connection's numeric peer, without redirects.
+
+    The media worker must not perform a second DNS lookup or follow a new
+    destination outside server_connect's checks. TLS still verifies the
+    original hostname; cookies and proxy-environment settings are not used.
+    """
+    import http.client
+    import ssl
+    from urllib.parse import urlsplit
+
+    parts = urlsplit(url)
+    if parts.scheme not in ("http", "https") or not parts.hostname or parts.username is not None:
+        raise OSError("invalid video source")
+    port = parts.port or (443 if parts.scheme == "https" else 80)
+    if not peer or len(peer) < 2 or peer[1] != port:
+        raise OSError("video source has no validated peer")
+    try:
+        address = str(ipaddress.ip_address(peer[0]))
+    except ValueError as exc:
+        raise OSError("video peer is not a numeric address") from exc
+    if local_service_address(address) or (nonpublic_address(address) and not lan):
+        raise OSError("video source is not an approved network destination")
+    if start < 0 or end < start:
+        raise OSError("invalid video range")
+
+    class PinnedConnection(http.client.HTTPConnection):
+        default_port = 443 if parts.scheme == "https" else 80
+
+        def connect(self):
+            self.sock = socket.create_connection((address, port), timeout=self.timeout)
+            if parts.scheme == "https":
+                try:
+                    self.sock = ssl.create_default_context().wrap_socket(
+                        self.sock, server_hostname=parts.hostname)
+                except BaseException:
+                    self.sock.close()
+                    raise
+
+    connection = PinnedConnection(parts.hostname, port, timeout=10)
+    try:
+        path = parts.path or "/"
+        if parts.query:
+            path += "?" + parts.query
+        connection.request("GET", path, headers={**headers, "Range": f"bytes={start}-{end}"})
+        response = connection.getresponse()
+        if response.status != 206:
+            raise OSError(f"the source answered a range with HTTP {response.status}")
+        data = response.read(end - start + 2)
+        if len(data) > end - start + 1:
+            raise OSError("the source exceeded the requested range")
+        return data
+    finally:
+        connection.close()

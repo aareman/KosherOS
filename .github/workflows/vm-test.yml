@@ -137,9 +137,10 @@ jobs:
             echo "nothing the image is built from changed, but :edge ($have) is behind master's image (${last::12}): building"
           fi
           version="$(python3 scripts/version.py show)"
-          # ghcr now and then refuses one push with "User cannot be
-          # authenticated" though the same token pushed the layers before
-          # it (train run 42705079027), and a cache push that fails fails
+          # Builds that write the same new layers at once (a base bump: two
+          # trains and master's Checks on 2026-11-09) get "User cannot be
+          # authenticated" from ghcr for one push, though the same token
+          # pushed the layers before it, and a cache push that fails fails
           # the build. Another go is cheap: the layers built so far are
           # still on the runner.
           for try in 1 2 3; do

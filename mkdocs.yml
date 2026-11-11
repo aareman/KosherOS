@@ -96,3 +96,11 @@ markdown_extensions:
           class: mermaid
           format: !!python/name:pymdownx.superfences.fence_code_format
   - pymdownx.highlight
+  # For blog posts: [^1] footnotes, ~~struck~~ text, ??? collapsed blocks
+  # and :name: emoji.
+  - footnotes
+  - pymdownx.tilde
+  - pymdownx.details
+  - pymdownx.emoji:
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg

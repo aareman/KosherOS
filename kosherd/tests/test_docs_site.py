@@ -41,7 +41,10 @@ def test_the_front_page_is_the_landing_template_and_everything_it_names_exists()
         if target in generated:
             continue
         if target.endswith("/"):
-            assert (ROOT / "docs" / (target[:-1] + ".md")).is_file(), target
+            # A page is NAME.md, or NAME/index.md for a section such as the blog.
+            page = ROOT / "docs" / (target[:-1] + ".md")
+            section = ROOT / "docs" / target / "index.md"
+            assert page.is_file() or section.is_file(), target
         else:
             assert (ROOT / "docs" / target).is_file(), target
     for asset in ("docs/stylesheets/home.css", "docs/javascripts/home.js", "docs/images/hero.jpg"):

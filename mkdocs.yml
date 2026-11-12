@@ -47,6 +47,7 @@ nav:
   - Try on a spare computer: install.md
   - What works: supported.md
   - Releases: releases.md
+  - Blog: blog/index.md
   - How it is built:
       - Architecture: architecture.md
       - Content filtering: content-filtering.md
@@ -66,6 +67,17 @@ nav:
   - Notes:
       - A standalone filter?: standalone.md
 
+plugins:
+  - search
+  # Posts are docs/blog/posts/*.md. One with `draft: true` in its front
+  # matter shows under `just docs serve` and is left out of a build, so a
+  # post can sit in the repository while it is being written.
+  - blog:
+      post_date_format: long
+      post_url_format: "{slug}"
+      archive: false
+      categories: false
+
 extra_css:
   - stylesheets/brand.css
 
@@ -84,3 +96,11 @@ markdown_extensions:
           class: mermaid
           format: !!python/name:pymdownx.superfences.fence_code_format
   - pymdownx.highlight
+  # For blog posts: [^1] footnotes, ~~struck~~ text, ??? collapsed blocks
+  # and :name: emoji.
+  - footnotes
+  - pymdownx.tilde
+  - pymdownx.details
+  - pymdownx.emoji:
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg

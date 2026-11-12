@@ -220,7 +220,10 @@ After a merge, CI gives the commit its version, publishes the image on the
 
 The site is MkDocs with the Material theme. Pages are Markdown under
 `docs/`, the navigation is in `mkdocs.yml`, and `just docs serve` previews
-it. The Releases and Third-party pages are generated at build time; do not
+it at <http://127.0.0.1:8010/KosherOS/>. `devenv up -d docs` runs the same
+preview behind the shell, and `devenv processes down` stops it. Blog posts
+are files in `docs/blog/posts/`; one with `draft: true` in its front matter
+shows in the preview and is left out of the published site. The Releases and Third-party pages are generated at build time; do not
 edit them by hand.
 
 The readme is for GitHub and the site is for everyone else, so they are

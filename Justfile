@@ -191,7 +191,8 @@ portal-run:
         PYTHONPATH=src python3 -m uvicorn kosherportal.main:app --reload --port 8000
 
 # The docs site as GitHub Pages publishes it, into site/; `just docs serve`
-# serves it with live reload instead.
+# serves it with live reload instead, at http://127.0.0.1:8010/KosherOS/
+# (`devenv up docs` runs the same thing as a devenv process).
 [group('apps')]
 docs MODE="build":
     python3 scripts/build-docs.py --{{MODE}}

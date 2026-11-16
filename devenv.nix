@@ -177,6 +177,11 @@ in
     exec = "${config.devenv.root}/scripts/install-hooks.sh";
   };
 
+  # The docs site with live reload, at http://127.0.0.1:8010/KosherOS/ —
+  # `devenv up docs`, or `devenv up -d docs` to leave it running behind the
+  # shell. The same command as `just docs serve`.
+  processes.docs.exec = "cd ${config.devenv.root} && python3 scripts/build-docs.py --serve";
+
   enterShell = ''
     echo "kosher-linux dev shell — try: just test | just render | just fedora-vm"
   '';

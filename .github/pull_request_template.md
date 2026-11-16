@@ -1,5 +1,12 @@
 Closes #
 
+<!--
+First pull request to KosherOS? Read CLA.md and add this line, with your
+name, in place of this comment:
+
+I have read the KosherOS Contributor Licence Agreement and I agree to it. — Your Name
+-->
+
 ## Release note
 <!--
 What a person running KosherOS should know, for the weekly release

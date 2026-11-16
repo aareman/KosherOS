@@ -218,8 +218,8 @@ firewall, resolver and proxy. They do not establish that the system is ready for
 daily use: long sessions on a booted machine and the real update-rollback path still need
 validation. [Testing](docs/testing.md) explains what each layer proves and what it does not.
 
-The remaining work includes a stronger tzniut classifier, a live desktop ISO, deployment
-hardening and the licence file. Channels and a release installer build already
+The remaining work includes a stronger tzniut classifier, a live desktop ISO and deployment
+hardening. Channels and a release installer build already
 exist. See [deployment](docs/deployment.md), [licensing](docs/licensing.md) and the
 [open issues][issues-url] for details and current work.
 
@@ -234,7 +234,8 @@ never need to understand any of this to be protected by it.
 1. Start from an issue, or open one.
 2. Branch from `master`, run `just test` before and after, and add a test for what you changed.
 3. Commit in small, focused steps, with a subject that says what changed for the person running KosherOS.
-4. Open a pull request that links the issue.
+4. Open a pull request that links the issue. In your first one, agree to the
+   [contributor licence agreement](CLA.md).
 
 Things that are always welcome without asking first: a site or word the shipped lists miss, a
 sentence in the apps that a parent would not understand, a claim in these docs that a booted
@@ -244,8 +245,11 @@ has the setup, the loops, the commit conventions and what CI does;
 
 ## Licence
 
-KosherOS is intended to be released under the **GNU Affero General Public License v3.0 or
-later**. The `LICENSE` file is not committed yet; the reasoning, the trademark plan for the
+Copyright © 2026 Avi Areman and the KosherOS contributors.
+
+KosherOS is released under the **GNU Affero General Public License v3.0 or later**; the text
+is in [LICENSE](LICENSE). Contributions are accepted under the
+[contributor licence agreement](CLA.md). The reasoning, the trademark plan for the
 KosherOS name, and the licence of every shipped list are set out in
 [docs/licensing.md](docs/licensing.md) and [THIRD-PARTY.md](THIRD-PARTY.md). *Fedora* is a
 trademark of Red Hat; KosherOS is a Fedora Remix and is not endorsed by the Fedora Project.

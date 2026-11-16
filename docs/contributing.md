@@ -189,18 +189,18 @@ while the product is at 0.x. The major never moves on its own. And it is
 what the release notes are generated from, so write it for the person
 running KosherOS, not for whoever wrote the code.
 
-Sign off your commits with `git commit -s` to say you have the right to
-contribute the work under the project's licence, as the
-[Developer Certificate of Origin](https://developercertificate.org/)
-describes. [Licensing](licensing.md) says what the licence is and why there
-is no contributor licence agreement.
-
 ## Pull requests
 
 1. Branch from `master`.
 2. Run `just test` before and after, and add the test for your change.
 3. Open the pull request against `master`, linking the issue and on the
    milestone. A draft is fine while work continues.
+4. In your first pull request, agree to the
+   [contributor licence agreement](https://github.com/aareman/KosherOS/blob/master/CLA.md) by adding the line it gives to
+   the description. You keep the copyright in your work, and the agreement
+   gives the project a licence to it that includes the right to change the
+   project's licence later. [Licensing](licensing.md) says what the
+   licence is and why the agreement is there.
 
 On a pull request, CI runs the unit suites with coverage, byte-compiles
 every app, and runs shellcheck over every script. It does not build the OS

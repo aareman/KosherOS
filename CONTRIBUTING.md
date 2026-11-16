@@ -14,10 +14,11 @@ The short version:
    written for the person running KosherOS, for example
    `fix(youtube): the rules cover its API hosts, not only its site`.
    A `feat` moves the minor version; anything else moves the patch.
-5. **Sign off your commits** with `git commit -s`. KosherOS is intended to
-   be released under AGPL-3.0-or-later, and the sign-off is the
-   [Developer Certificate of Origin](https://developercertificate.org/).
-   There is no contributor licence agreement.
+5. **Agree to the contributor licence agreement** in your first pull
+   request. KosherOS is released under AGPL-3.0-or-later, and
+   [CLA.md](CLA.md) says what rights you give the project in what you
+   contribute and the line to add to the pull request. You keep your
+   copyright.
 6. **Open a pull request** against `master` that links its issue with
    `Closes #N` and is on the milestone.
    Fill in its **Release note**: one sentence a person running KosherOS

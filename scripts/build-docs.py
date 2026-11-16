@@ -3,7 +3,7 @@
 
     scripts/build-docs.py            # write docs/index.md, docs/releases.md, copy the logo
     scripts/build-docs.py --build    # ...and run mkdocs build
-    scripts/build-docs.py --serve    # ...and run mkdocs serve
+    scripts/build-docs.py --serve    # ...and run mkdocs serve, on port 8010 (KOSHER_DOCS_PORT)
 
 Two pages are generated rather than written:
 
@@ -30,8 +30,10 @@ Both are ignored by git; the site is rebuilt by the docs job in
 from __future__ import annotations
 
 import json
+import os
 import re
 import shutil
+import socket
 import subprocess
 import sys
 from pathlib import Path
@@ -255,7 +257,18 @@ def main(argv=None) -> int:
     if "--build" in args:
         return subprocess.run(["mkdocs", "build", "--strict"], cwd=ROOT).returncode
     if "--serve" in args:
-        return subprocess.run(["mkdocs", "serve"], cwd=ROOT).returncode
+        # A port of its own: mkdocs' default, 8000, is the portal's
+        # (`just portal-run`), and whichever started second died in a
+        # traceback. The same goes for a second preview, so that one says
+        # where the first is instead.
+        port = int(os.environ.get("KOSHER_DOCS_PORT", "8010"))
+        url = f"http://127.0.0.1:{port}/KosherOS/"
+        with socket.socket() as probe:
+            if probe.connect_ex(("127.0.0.1", port)) == 0:
+                print(f"Port {port} is in use; if that is the docs preview, it is at {url}")
+                return 1
+        return subprocess.run(["mkdocs", "serve", "-a", f"127.0.0.1:{port}"],
+                              cwd=ROOT).returncode
     return 0
 
 

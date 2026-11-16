@@ -94,3 +94,25 @@
   font-weight: 600;
   letter-spacing: 0.01em;
 }
+
+/* The Blog link in the top bar (overrides/partials/header.html). On a
+   phone the bar has no room for it and the drawer's list carries it. */
+.ko-header-link {
+  margin: 0 0.6rem;
+  padding: 0.2rem 0.7rem;
+  border: 1px solid currentColor;
+  border-radius: 1rem;
+  color: inherit;
+  font-size: 0.7rem;
+  font-weight: 600;
+  opacity: 0.85;
+  white-space: nowrap;
+}
+.ko-header-link:hover {
+  opacity: 1;
+}
+@media screen and (max-width: 59.9844em) {
+  .ko-header-link {
+    display: none;
+  }
+}

@@ -1,8 +1,9 @@
 # Licensing, and what the lists permit
 
-*No licence is committed yet. The repository has no `LICENSE` file. This
-page records the intent, the licence of every list the filter imports, and
-the files still to add. It is not legal advice.*
+*KosherOS is released under AGPL-3.0-or-later, and the text is in the
+repository's `LICENSE` file. This page records the intent, the agreement
+contributors make, the licence of every list the filter imports, and the
+files still to add. It is not legal advice.*
 
 ## Intent
 
@@ -31,24 +32,30 @@ third-party setup awkward.
 
 ## The licence
 
-**AGPL-3.0-or-later for the code, a Developer Certificate of Origin for
+**AGPL-3.0-or-later for the code, a contributor licence agreement for
 contributions, and a trademark on the name.** Each piece does one job.
 
 | Piece | What it does |
 |---|---|
 | AGPL-3.0-or-later | nobody can close it, including behind a network service, which the plain GPL would permit |
-| DCO, not a CLA | a contributor certifies they wrote what they submitted, in one line of the commit message. No paperwork, no rights assignment |
+| contributor licence agreement | a contributor keeps their copyright and gives the project a licence to their work that includes the right to change the project's licence later |
 | trademark on "KosherOS" | a fork may use the code but must rebrand |
 
 AGPL fits the third requirement rather than fighting it. Setting KosherOS
 up for other families is permitted outright, and the only obligation that
 travels with it is passing along the source, which is a URL.
 
-A contributor licence agreement exists to let the project owner relicense
-contributed code, which only matters if there is a proprietary version to
-sell. There is not one planned, so a CLA would be friction on exactly the
-developers this project wants, in exchange for an option it does not
-intend to use.
+Contributions come in under the [contributor licence agreement](https://github.com/aareman/KosherOS/blob/master/CLA.md).
+The contributor keeps the copyright in their work and grants the project a
+licence to it, and that licence includes the right to publish the work
+under other terms. Without it, every contribution would be fixed under
+AGPL for good, and changing the project's licence later would need the
+consent of each person who had ever contributed, or a rewrite of their
+code. The agreement gives that right to the project's maintainer and to
+nobody else; everyone else receives the code under AGPL. A version already
+published under AGPL stays available under AGPL whatever happens later.
+Agreeing takes one line in the description of a contributor's first pull
+request.
 
 The trademark protects families rather than revenue. A sloppy or malicious
 fork calling itself KosherOS, with the filter quietly weakened, would be
@@ -123,7 +130,6 @@ the "powered by Fedora" attribution.
 
 ## Files still to add
 
-- `LICENSE`, AGPL-3.0-or-later
 - SPDX headers across the source tree
 - the remaining gaps in the third-party audit, where a component is marked
   "see upstream" rather than with its exact licence

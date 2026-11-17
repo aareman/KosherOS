@@ -336,6 +336,29 @@
           "type": "boolean",
           "default": true,
           "description": "Tell the people signed in, once per version, when a downloaded update is ready for a restart. Absent means on."
+        },
+        "apps": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "schedule": {
+              "enum": [
+                "off",
+                "daily",
+                "weekly",
+                "biweekly",
+                "monthly"
+              ],
+              "default": "off"
+            },
+            "mode": {
+              "enum": [
+                "update",
+                "notify"
+              ],
+              "default": "update"
+            }
+          }
         }
       }
     },
@@ -643,7 +666,7 @@
       "type": "object",
       "additionalProperties": false,
       "default": {},
-      "description": "Calmer versions of the addictive sites (#179), enforced by the proxy and a script it injects into these pages: a feed page ends after a set number of items with ads, sidebars and recommendations stripped, and a direct link to a post renders as the post alone — no comments, no navigation, no links back into the site. Login flows are never touched. Empty means off.",
+      "description": "Calmer versions of the addictive sites (#179), enforced by the proxy and a script it injects into these pages: a feed page ends after a set number of items with ads, sidebars and recommendations stripped, and a direct link to a post renders as the post alone \u2014 no comments, no navigation, no links back into the site. Login flows are never touched. Empty means off.",
       "properties": {
         "enabled": {
           "type": "boolean",

@@ -847,7 +847,7 @@ class DemoClient:
         self._change(None, "Reboot", [])
 
     def set_auto_updates(self, schedule, notify):
-        self.policy["updates"] = {"auto": schedule, "notify": bool(notify)}
+        self.policy.setdefault("updates", {}).update(auto=schedule, notify=bool(notify))
         self._change(None, "SetAutoUpdates", [schedule, bool(notify)])
 
     def auto_update_status(self):
@@ -859,6 +859,21 @@ class DemoClient:
 
     def run_auto_update(self, now=False):
         return {"result": "none"}
+
+    def set_auto_app_updates(self, schedule, mode):
+        self.policy.setdefault("updates", {})["apps"] = {"schedule": schedule, "mode": mode}
+        self._change(None, "SetAutoAppUpdates", [schedule, mode])
+
+    def auto_app_update_status(self):
+        settings = (self.policy.get("updates") or {}).get("apps") or {}
+        return {"schedule": settings.get("schedule", "off"),
+                "mode": settings.get("mode", "update"), "running": False}
+
+    def run_auto_app_update(self, now=False):
+        return {"result": "started"}
+
+    def pending_app_updates(self):
+        return {}
 
     def pending_update(self):
         return {}

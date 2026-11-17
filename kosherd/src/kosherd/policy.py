@@ -471,6 +471,8 @@ class Policy:
     # in are told once when a downloaded update waits for a restart.
     auto_updates: str = DEFAULT_AUTO_UPDATES
     update_notify: bool = True
+    app_update_schedule: str = "off"
+    app_update_mode: str = "update"
     # Features the administrator turns on for the whole computer (#220),
     # off on a new install. None until kosherd's start decides for a
     # computer that had them before there was a switch (daemon.py).
@@ -571,7 +573,9 @@ class Policy:
             "adblock": {"enabled": self.adblock,
                         **({"allowed": list(self.adblock_allowed)}
                            if self.adblock_allowed else {})},
-            "updates": {"auto": self.auto_updates, "notify": self.update_notify},
+            "updates": {"auto": self.auto_updates, "notify": self.update_notify,
+                        "apps": {"schedule": self.app_update_schedule,
+                                 "mode": self.app_update_mode}},
             **({"advanced": self.advanced()} if self.advanced() else {}),
             **({"custom_profiles": list(self.custom_profiles)}
                if self.custom_profiles else {}),
@@ -629,6 +633,8 @@ class Policy:
             adblock_allowed=list(doc.get("adblock", {}).get("allowed", [])),
             auto_updates=(doc.get("updates") or {}).get("auto", DEFAULT_AUTO_UPDATES),
             update_notify=bool((doc.get("updates") or {}).get("notify", True)),
+            app_update_schedule=((doc.get("updates") or {}).get("apps") or {}).get("schedule", "off"),
+            app_update_mode=((doc.get("updates") or {}).get("apps") or {}).get("mode", "update"),
             tailscale=(doc.get("advanced") or {}).get("tailscale"),
             syncthing=(doc.get("advanced") or {}).get("syncthing"),
             keyd=(doc.get("advanced") or {}).get("keyd"),

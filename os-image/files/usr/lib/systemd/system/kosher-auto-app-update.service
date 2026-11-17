@@ -1,0 +1,9 @@
+[Unit]
+Description=Check or install Store app updates on their own schedule
+After=kosherd.service network-online.target
+Wants=network-online.target
+Requires=kosherd.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/kosherctl updates run --apps --quiet

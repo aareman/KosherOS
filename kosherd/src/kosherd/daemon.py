@@ -448,6 +448,20 @@ INTROSPECTION_XML = """
       <arg direction="in" type="b" name="now"/>
       <arg direction="out" type="s" name="result_json"/>
     </method>
+    <method name="SetAutoAppUpdates">
+      <arg direction="in" type="s" name="schedule"/>
+      <arg direction="in" type="s" name="mode"/>
+    </method>
+    <method name="AutoAppUpdateStatus">
+      <arg direction="out" type="s" name="status_json"/>
+    </method>
+    <method name="RunAutoAppUpdate">
+      <arg direction="in" type="b" name="now"/>
+      <arg direction="out" type="s" name="result_json"/>
+    </method>
+    <method name="PendingAppUpdates">
+      <arg direction="out" type="s" name="pending_json"/>
+    </method>
     <method name="PendingUpdate">
       <arg direction="out" type="s" name="pending_json"/>
     </method>
@@ -580,7 +594,7 @@ KEYD_UNIT_PATH = "/org/freedesktop/systemd1/unit/keyd_2eservice"
 # Tailscale's calls wait on its control server the same way.
 IN_BACKGROUND = frozenset({"CheckUpdate", "DeploymentStatus", "ListChannels",
                            "SetChannel", "Rollback", "TryImage", "ReturnToKept",
-                           "RunAutoUpdate",
+                           "RunAutoUpdate", "RunAutoAppUpdate",
                            "SearchYouTubeChannels",
                            "TailscaleStatus", "TailscaleSignIn", "TailscaleSignOut"})
 # SetTailscaleEnabled is not here although it waits on systemctl: it
@@ -781,6 +795,7 @@ class Daemon:
         self.policy = policy_mod.load()
         self.guardian = Guardian()
         self.sessions = SessionStore()
+        self._auto_apps_lock = threading.Lock()
         self.app_manager = apps.AppManager(self._on_app_progress, self._on_app_finished)
         self.connection: Gio.DBusConnection | None = None
         # The clock behind the time limits: fed logind's sessions once a
@@ -854,6 +869,10 @@ class Daemon:
             self._apply_auto_timer(self.policy.auto_updates)
         except PolicyError:
             log.exception("could not set the automatic update timer")
+        try:
+            self._apply_app_update_timer(self.policy.app_update_schedule)
+        except PolicyError:
+            log.exception("could not set the automatic app update timer")
         threading.Thread(target=self._sync_pending, name="pending-update",
                          daemon=True).start()
         # The tailnet forward follows tailscaled, not the policy, so it is
@@ -3136,6 +3155,162 @@ class Daemon:
             "pending": (updates.pending_update(state, updates.boot_id())
                         if updates.staged_on_disk() else None),
         }),))
+
+    def _apply_app_update_timer(self, schedule: str) -> None:
+        from . import appupdates, updates
+
+        verb = "enable" if schedule in updates.SCHEDULE_DAYS else "disable"
+        try:
+            res = subprocess.run(["systemctl", verb, "--now", appupdates.TIMER],
+                                 capture_output=True, text=True, timeout=60)
+        except (OSError, subprocess.SubprocessError) as e:
+            raise PolicyError(f"could not {verb} the app update timer: {e}") from e
+        if res.returncode:
+            raise PolicyError(f"could not {verb} the app update timer: "
+                              f"{(res.stderr or res.stdout).strip()}")
+
+    def impl_SetAutoAppUpdates(self, schedule: str, mode: str):
+        from . import appupdates
+
+        if schedule not in policy_mod.AUTO_UPDATE_SCHEDULES or mode not in appupdates.MODES:
+            raise PolicyError("choose a known app update schedule and update or notify")
+        before = (self.policy.app_update_schedule, self.policy.app_update_mode)
+        try:
+            self._apply_app_update_timer(schedule)
+            self.policy.app_update_schedule, self.policy.app_update_mode = schedule, mode
+            policy_mod.save(self.policy)
+        except Exception:
+            self.policy.app_update_schedule, self.policy.app_update_mode = before
+            try:
+                self._apply_app_update_timer(before[0])
+            except PolicyError:
+                log.exception("could not restore the app update timer")
+            raise
+        if self.connection:
+            self.connection.emit_signal(
+                None, OBJECT_PATH, "org.kosherlinux.Daemon1.Profiles", "PolicyChanged",
+                GLib.Variant("(i)", (self.policy.revision,)))
+        return None
+
+    def impl_AutoAppUpdateStatus(self):
+        from . import appupdates, updates
+
+        state = appupdates.load_state()
+        schedule = self.policy.app_update_schedule
+        return GLib.Variant("(s)", (json.dumps({
+            "schedule": schedule, "mode": self.policy.app_update_mode,
+            "running": self._auto_apps_lock.locked(),
+            "last_success": state.get("last_success"),
+            "last_attempt": state.get("last_attempt"),
+            "last_error": state.get("last_error"),
+            "next_due": updates.next_due(schedule, state.get("last_success")),
+        }),))
+
+    def impl_PendingAppUpdates(self, *, _uid: int):
+        from . import appupdates
+
+        enabled = (self.policy.app_update_schedule != "off"
+                   and self.policy.app_update_mode == "notify")
+        pending = appupdates.notice(appupdates.load_state(), _uid) if enabled else {}
+        return GLib.Variant("(s)", (json.dumps(pending),))
+
+    def impl_RunAutoAppUpdate(self, now: bool = False):
+        """Start one due app run, independently of bootc or its schedule."""
+        import time
+        from . import appupdates, updates
+
+        if not self._auto_apps_lock.acquire(blocking=False):
+            return GLib.Variant("(s)", (json.dumps(
+                {"result": "skipped", "reason": "app updates are already running"}),))
+        try:
+            state = appupdates.load_state()
+            on_battery, battery = self._power()
+            settings = (self.policy.app_update_schedule, self.policy.app_update_mode)
+            stamp = time.time()
+            skip = updates.skip_reason(settings[0], state, stamp, force=bool(now),
+                                       metered=updates.is_metered(self._metered()),
+                                       on_battery=on_battery, battery=battery,
+                                       busy=bool(self.app_manager.pending))
+            if skip:
+                self._auto_apps_lock.release()
+                return GLib.Variant("(s)", (json.dumps({"result": "skipped", "reason": skip}),))
+            # Snapshot the account list; the worker rechecks current authority
+            # before each operation. No worker mutates the policy.
+            uids = sorted({u.uid for u in self.policy.users if u.uid > 0})
+            thread = threading.Thread(target=self._auto_app_updates,
+                                      args=(state, stamp, settings, uids),
+                                      name="auto-app-updates", daemon=True)
+            thread.start()
+        except Exception:
+            self._auto_apps_lock.release()
+            raise
+        return GLib.Variant("(s)", (json.dumps({"result": "started"}),))
+
+    def _auto_app_updates(self, state: dict, stamp: float, settings: tuple, uids: list) -> None:
+        from . import appupdates, updates
+
+        errors = []
+        state["last_attempt"] = stamp
+
+        def enabled() -> bool:
+            return settings == (self.policy.app_update_schedule, self.policy.app_update_mode)
+
+        def run(entries: list, uid=None) -> list:
+            remaining = []
+            for entry in entries:
+                if settings[1] == "notify":
+                    remaining.append(entry)
+                    continue
+                on_battery, battery = self._power()
+                if (not enabled() or (uid is not None and self.policy.user(uid) is None)
+                        or updates.is_metered(self._metered())
+                        or updates.battery_too_low(on_battery, battery)):
+                    raise PolicyError("app updates paused after settings, network or battery changed")
+                try:
+                    kw = {} if uid is None else {"uid": uid, "as_root": not self._developer(uid)}
+                    self.app_manager.update(entry["ref"], **kw).result(timeout=7200)
+                    if uid is not None:
+                        self._forget_nix_update(uid, entry["ref"])
+                except Exception as e:
+                    errors.append(f"{entry['ref']}: {e}")
+                    remaining.append(entry)
+            return remaining
+
+        try:
+            appupdates.save_state(state)
+            try:
+                state["flatpak"] = run(apps.refresh_updates(strict=True))
+            except Exception as e:
+                errors.append(f"Flatpak: {e}")
+            accounts = state.setdefault("accounts", {})
+            for uid in uids:
+                if not enabled():
+                    raise PolicyError("app update settings changed; remaining work stopped")
+                if self.policy.user(uid) is None:
+                    accounts.pop(str(uid), None)
+                    continue
+                try:
+                    accounts[str(uid)] = run(self._check_nix_updates(uid), uid)
+                except Exception as e:
+                    errors.append(f"Account {uid}: {e}")
+            if not enabled():
+                raise PolicyError("app update settings changed; remaining work stopped")
+            if errors:
+                state["last_error"] = "; ".join(errors)
+            else:
+                state["last_success"] = stamp
+                state.pop("last_error", None)
+            appupdates.save_state(state)
+        except Exception as e:
+            state["last_error"] = str(e)
+            try:
+                appupdates.save_state(state)
+            except OSError:
+                log.exception("could not save automatic app update status")
+        finally:
+            if state.get("last_error"):
+                log.warning("automatic app updates: %s", state["last_error"])
+            self._auto_apps_lock.release()
 
     def impl_PendingUpdate(self):
         """The update waiting for a restart, for the mark in every

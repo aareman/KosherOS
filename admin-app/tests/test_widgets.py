@@ -178,6 +178,14 @@ class FakeClient:
             raise RuntimeError(self._overrides["auto_refuse"])
         self.calls.append(("set_auto_updates", schedule, notify))
 
+    def auto_app_update_status(self):
+        return self._overrides.get("app_auto_status", {"schedule": "off", "mode": "update"})
+
+    def set_auto_app_updates(self, schedule, mode):
+        if self._overrides.get("app_auto_refuse"):
+            raise RuntimeError(self._overrides["app_auto_refuse"])
+        self.calls.append(("set_auto_app_updates", schedule, mode))
+
     def disconnect_signals(self, subscription):
         self.disconnected = subscription
 
@@ -3564,3 +3572,54 @@ def test_skin_paints_only_the_skin_and_frost_covers_the_whole_figure():
 def test_no_example_pictures_where_pictures_are_not_filtered():
     _page, _w, preview = _media_preview(mode="unfiltered")
     assert preview is None
+
+
+# -- app updates use an independent schedule below system updates (#78) --
+
+def test_app_update_controls_follow_system_updates_and_save_independently():
+    win = FakeWindow()
+    win.policy["updates"] = {"auto": "monthly", "notify": False,
+                             "apps": {"schedule": "daily", "mode": "notify"}}
+    page = computer.UpdatesPage(win)
+    drain()
+    widgets = list(_walk(page.prefs))
+    assert widgets.index(page.auto_group) < widgets.index(page.app_auto_group)
+    group = page.app_auto_group
+    assert computer.AUTO_SCHEDULES[group.schedule_row.get_selected()] == "daily"
+    assert group.mode_row.get_selected() == 1
+    group.mode_row.set_selected(0)
+    drain()
+    assert ("set_auto_app_updates", "daily", "update") in win.client.calls
+    assert win.policy["updates"]["auto"] == "monthly"
+    page.auto_group.schedule_row.set_selected(0)
+    drain()
+    assert win.policy["updates"]["apps"] == {"schedule": "daily", "mode": "update"}
+    group.schedule_row.set_selected(0)
+    drain()
+    assert group.mode_row.get_sensitive()
+    assert win.policy["updates"]["auto"] == "off"
+
+
+def test_refused_app_update_settings_restore_both_controls():
+    win = FakeWindow(FakeClient(app_auto_refuse="not authorized"))
+    group = computer.AutoAppUpdatesGroup(win)
+    drain()
+    group.schedule_row.set_selected(1)
+    drain()
+    assert computer.AUTO_SCHEDULES[group.schedule_row.get_selected()] == "off"
+    assert group.schedule_row.get_sensitive()
+    assert group.mode_row.get_sensitive()
+    assert any("not authorized" in t for t in win.toasts)
+
+
+def test_notification_only_can_be_selected_before_enabling_app_updates():
+    win = FakeWindow()
+    group = computer.AutoAppUpdatesGroup(win)
+    drain()
+    assert group.schedule == "off"
+    group.mode_row.set_selected(1)
+    drain()
+    assert ("set_auto_app_updates", "off", "notify") in win.client.calls
+    group.schedule_row.set_selected(1)
+    drain()
+    assert ("set_auto_app_updates", "daily", "notify") in win.client.calls

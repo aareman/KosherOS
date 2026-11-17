@@ -264,6 +264,10 @@ ACTIONS = {
     "SetAutoUpdates": ACTION_APPLY_UPDATES,
     "AutoUpdateStatus": ACTION_READ_CONFIG,
     "RunAutoUpdate": ACTION_APPLY_UPDATES,
+    "SetAutoAppUpdates": ACTION_APPLY_UPDATES,
+    "AutoAppUpdateStatus": ACTION_READ_CONFIG,
+    "RunAutoAppUpdate": ACTION_APPLY_UPDATES,
+    "PendingAppUpdates": ACTION_READ_OWN,
     # Whether an update waits for a restart, for the mark in every
     # person's panel. Says nothing about anybody's filter, and is answered
     # from kosherd's own note, so any account may ask without a password.
@@ -319,7 +323,7 @@ UID_AWARE = frozenset({"Unlock", "Lock", "Status", "VerifyGuardian", "InstallApp
                        # depends on who is asking.
                        "ListInstalled", "UpdateApp", "RemoveApp",
                        # ...and whether one of them has a newer build.
-                       "ListAppUpdates", "CheckAppUpdates", "UpdateAllApps"})
+                       "ListAppUpdates", "CheckAppUpdates", "UpdateAllApps", "PendingAppUpdates"})
 
 # Calls that change how the machine is set up, written to the activity log
 # with the admin who made them so "who changed this?" has an answer. Reads,
@@ -351,7 +355,7 @@ CHANGES = frozenset({
     # longest-lived of the three.
     "SetChannel",
     # And how often it fetches updates on its own.
-    "SetAutoUpdates",
+    "SetAutoUpdates", "SetAutoAppUpdates",
     # A test build put on the machine, and the return from it.
     "TryImage", "ReturnToKept",
     # Joining a tailnet and leaving it.

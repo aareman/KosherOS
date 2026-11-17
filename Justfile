@@ -420,10 +420,10 @@ iso: _sudo build (_bib "anaconda-iso" "os-image/iso-config.toml" image "bootiso"
     python3 scripts/brand-iso.py build/bootiso/install.iso
     @echo "Copy the KosherOS-*.iso in build/bootiso onto a USB stick or Ventoy, or: just boot-iso"
 
-# The installer ISO with Fedora's web installer (#316), from the local
-# image as it stands (`just build` first for a fresh one). One question,
-# the disk, and the installed machine follows CHANNEL for its updates.
 # image-builder labels its working store, which needs real root: sudo.
+# The installed machine follows CHANNEL for its updates. This uses the
+# local image as it stands; `just build` first for a fresh one.
+# The installer ISO with Fedora's web installer (#316): one question, the disk.
 [group('install media')]
 iso-web CHANNEL="stable": _sudo
     rm -rf build/installer/os-image && mkdir -p build/installer/out

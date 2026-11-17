@@ -1008,6 +1008,37 @@ def _apps_tab(**kw):
     return page, win, user
 
 
+def test_app_approval_search_stays_above_the_list_after_refresh():
+    win = FakeWindow()
+    page = computer.AppsPage(win)
+    drain()
+    for _ in range(2):
+        widgets = list(_walk(page.prefs))
+        assert widgets.index(page.search_group) < widgets.index(page.group)
+        assert page.search_entry.get_title() == "Search all apps"
+        page.refresh()
+        drain()
+    assert not win.toasts
+
+
+def test_account_app_search_precedes_blocks_and_inventory_starts_collapsed():
+    page, _w, _u = _apps_tab(
+        blocked_apps=[f"org.example.App{i}" for i in range(50)],
+        installed=[{"ref": "org.example.Reader", "name": "Reader", "approved": True,
+                    "kind": "utilities", "rating": {}}])
+    widgets = list(_walk(page.stack.get_child_by_name("apps")))
+    groups = [w for w in widgets if isinstance(w, Adw.PreferencesGroup)]
+    assert groups[0] is page.blocked_apps_group
+    assert widgets.index(page.block_entry) < widgets.index(page.blocked_list)
+    assert widgets.index(page.block_results) < widgets.index(page.blocked_list)
+    assert len(_rows(page.blocked_list)) == 50
+    assert "Reader" not in {r.get_title() for r in _rows(page.blocked_list)}
+    assert not page.installed_expander.get_expanded()
+    page.installed_expander.set_expanded(True)
+    drain()
+    assert "Reader" in {r.get_title() for r in _rows(page.apps_list)}
+
+
 def test_the_apps_tab_offers_the_approved_list_or_the_whole_store():
     page, _w, _u = _apps_tab()
     combo = _row_named(page, "Available apps")

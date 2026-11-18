@@ -48,6 +48,9 @@ RUN sed -i -e 's/^NAME=.*/NAME="KosherOS"/' -e 's/^PRETTY_NAME=.*/PRETTY_NAME="K
 COPY branding.css /usr/share/cockpit/branding/fedora/branding.css
 RUN rm -f /usr/share/cockpit/branding/fedora/logo.png
 COPY --from=branding logo.png /usr/share/cockpit/branding/fedora/logo.png
+# "Use entire disk" first and selected; dual-boot only behind a link.
+COPY patch-webui.py /tmp/patch-webui.py
+RUN python3 /tmp/patch-webui.py && rm /tmp/patch-webui.py
 
 # --- what lorax would do to make Anaconda run ---------------------------------
 RUN echo "install:x:0:0:root:/root:/usr/libexec/anaconda/run-anaconda" >> /etc/passwd \

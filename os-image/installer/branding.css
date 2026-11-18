@@ -36,6 +36,13 @@
         display: none;
     }
 
+    /* "Destination is encrypted: Unlock" is for keeping what is on the
+       disk, which only the advanced ways do; it waits behind the same
+       link (patch-webui.py adds it, and removes it once clicked). */
+    [class$="-scenario-group"]:has([id$="-scenario-advanced"]) .pf-v6-c-alert {
+        display: none;
+    }
+
     /* Encryption stays off by default, but we say we recommend it, and
        why, in place of "disk-based encryption … new partitions". */
     #disk-encryption-encrypt-devices + .pf-v6-c-check__label::after {

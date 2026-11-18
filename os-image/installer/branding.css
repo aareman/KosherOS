@@ -30,6 +30,29 @@
     .feedback-section {
         display: none;
     }
+
+    /* "Hostname: transient, will use DHCP" means nothing to a family. */
+    .pf-v6-c-description-list__group:has(#anaconda-screen-review-target-system-hostname) {
+        display: none;
+    }
+
+    /* Encryption stays off by default, but we say we recommend it, and
+       why, in place of "disk-based encryption … new partitions". */
+    #disk-encryption-encrypt-devices + .pf-v6-c-check__label::after {
+        content: " (strongly recommended)";
+        font-weight: bold;
+    }
+
+    .pf-v6-c-form__section:has(#disk-encryption-encrypt-devices) .pf-v6-c-content p,
+    .pf-v6-c-form__section:has(#disk-encryption-encrypt-devices) p.pf-v6-c-content--p {
+        font-size: 0;
+    }
+
+    .pf-v6-c-form__section:has(#disk-encryption-encrypt-devices) .pf-v6-c-content p::after,
+    .pf-v6-c-form__section:has(#disk-encryption-encrypt-devices) p.pf-v6-c-content--p::after {
+        content: "If this computer is lost or stolen, nobody can read what is on it without the password.";
+        font-size: var(--pf-t--global--font--size--body--default, 14px);
+    }
 }
 
 :not(.pf-v6-theme-dark) .anaconda {

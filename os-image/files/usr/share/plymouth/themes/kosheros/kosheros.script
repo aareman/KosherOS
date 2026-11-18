@@ -98,7 +98,10 @@ fun display_password_callback(prompt_text, bullet_count) {
     fill.sprite.SetOpacity(0);
     status.sprite = NULL;
 
-    label.image = Image.Text(prompt_text, 0.9, 0.9, 0.95);
+    # systemd asks "Please enter passphrase for disk luks-3f2a…", which
+    # names a device nobody has heard of. The only password asked for this
+    # early is the one chosen for the disk when KosherOS was installed.
+    label.image = Image.Text("Type the disk password to start KosherOS", 0.9, 0.9, 0.95);
     label.sprite = Sprite(label.image);
     label.sprite.SetPosition(
         screen_width / 2 - label.image.GetWidth() / 2, bar.y, 4);

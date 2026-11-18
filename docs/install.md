@@ -87,16 +87,16 @@ If the computer has more than one eligible disk, open **Installation Destination
 
 After you confirm the destination and start installation, keep the computer plugged in and wait for completion. On restart, remove the USB when prompted or once installation has finished, so the computer boots from its internal disk.
 
-KosherOS uses the whole of the disk it was installed on. Automatic partitioning uses the available space; recovery setup can also grow a supported encrypted root when the disk has been expanded.
+KosherOS uses the whole of the disk it was installed on. The installer itself sets aside 70 GB; the first start after installation extends that to the rest of the disk, so a larger drive is not left half empty.
 
 ## 6. Set up your family and test
 
-The installer selects **Encrypt my data** in Installation Destination.
-Leave it selected and choose a disk passphrase when Anaconda asks. Keep
-that passphrase: it unlocks the disk during the initial starts and remains
-a fallback after automatic unlock is enabled. The
-disk still waits for your destination choice and confirmation before
-anything is erased. Its automatic root partition uses the available space.
+Encrypting the disk is off unless you choose it, and we strongly
+recommend it: if the computer is lost or stolen, nobody can read what is
+on it without the password. Tick the installer's encryption box when you
+choose the disk, and pick a disk password. Keep that password: the
+computer asks for it at every start until automatic unlock is set up, and
+it still works afterwards.
 
 The first start runs the KosherOS setup wizard. Check the time zone it shows (it guesses from your internet connection; search for your city if it is wrong), then create the administrator account and review the optional guardian password and device-security steps. Connect to your network when requested.
 
@@ -132,8 +132,8 @@ saved passphrase or recovery key. It does not encrypt an existing plain
 disk.
 
 If the disk is unencrypted, setup says so. An update cannot encrypt an
-existing installation in place: back up the files and reinstall with
-encryption to protect the on-disk filter settings. Keep Secure Boot on
+existing installation in place: to encrypt it later, back up the files
+and reinstall with encryption ticked. Keep Secure Boot on
 and protect the firmware and boot menu as described by the wizard.
 
 Start with a sample account and a few tasks: open the Store, try a site you normally use, review the account's settings in My Filter, and check Protection in the admin app. Add family accounts and choose their settings as you become comfortable with the system.

@@ -464,7 +464,8 @@ its own.
 
 ### Encrypted disks and optional TPM unlock
 
-New installations default to LUKS2 encryption for the system data. The
+Encryption is a choice in the installer: off by default, and recommended
+beside the box. An encrypted installation uses LUKS2 for the system data. The
 administrator chooses the installer passphrase and verifies a separate
 recovery key during setup. Neither credential is removed when TPM unlock
 is enabled. The EFI and boot partitions remain readable so firmware can

@@ -54,7 +54,10 @@ fun show_status(text) {
     status.sprite.SetPosition(
         screen_width / 2 - status.image.GetWidth() / 2, status.y, 3);
 }
-show_status("Starting KosherOS…");
+# Plain ASCII: this line and the password prompt are drawn in the
+# initramfs, whose text plugin (FreeType, no Pango) shows "…" and "•" as
+# empty boxes. Later messages are drawn after the switch to the real root.
+show_status("Starting KosherOS...");
 
 # --- progress ----------------------------------------------------------------
 ticks = 0;
@@ -87,34 +90,45 @@ fun message_callback(text) {
 }
 Plymouth.SetMessageFunction(message_callback);
 
+# Status updates are systemd's unit names as each one starts
+# ("sys-kernel-config.mount"). They are not for a family; only our own
+# sentences, through the message channel above, reach the screen.
 fun update_status_callback(text) {
-    show_status(text);
 }
 Plymouth.SetUpdateStatusFunction(update_status_callback);
 
 # --- password prompt (LUKS) --------------------------------------------------
+# Created here, at the top level, so they are global. A variable first
+# assigned inside a function is local to it: the prompt's sprites used to
+# be freed as the callback returned, and the prompt never showed.
+prompt.y = bar.y;
+prompt.label = NULL;
+prompt.dots = NULL;
+
 fun display_password_callback(prompt_text, bullet_count) {
     track.sprite.SetOpacity(0);
     fill.sprite.SetOpacity(0);
     status.sprite = NULL;
 
-    label.image = Image.Text(prompt_text, 0.9, 0.9, 0.95);
-    label.sprite = Sprite(label.image);
-    label.sprite.SetPosition(
-        screen_width / 2 - label.image.GetWidth() / 2, bar.y, 4);
+    # systemd asks "Please enter passphrase for disk luks-3f2a…", which
+    # names a device nobody has heard of. The only password asked for this
+    # early is the one chosen for the disk when KosherOS was installed.
+    words = Image.Text("Type the disk password to start KosherOS", 0.9, 0.9, 0.95);
+    prompt.label = Sprite(words);
+    prompt.label.SetPosition(screen_width / 2 - words.GetWidth() / 2, prompt.y, 4);
 
     bullets = "";
-    for (i = 0; i < bullet_count; i++) bullets += "•";
-    dots.image = Image.Text(bullets, 0.9, 0.9, 0.95);
-    dots.sprite = Sprite(dots.image);
-    dots.sprite.SetPosition(
-        screen_width / 2 - dots.image.GetWidth() / 2, bar.y + 30, 4);
+    for (i = 0; i < bullet_count; i++) bullets += "*";
+    if (bullet_count == 0) bullets = " ";
+    typed = Image.Text(bullets, 0.9, 0.9, 0.95);
+    prompt.dots = Sprite(typed);
+    prompt.dots.SetPosition(screen_width / 2 - typed.GetWidth() / 2, prompt.y + 30, 4);
 }
 Plymouth.SetDisplayPasswordFunction(display_password_callback);
 
 fun display_normal_callback() {
-    label.sprite = NULL;
-    dots.sprite = NULL;
+    prompt.label = NULL;
+    prompt.dots = NULL;
     track.sprite.SetOpacity(1);
     fill.sprite.SetOpacity(1);
 }

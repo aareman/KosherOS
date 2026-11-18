@@ -96,6 +96,37 @@ for that version, which `kosherctl updates notify off` or the switch on
 the Updates page turns off. Restart on the mark asks for an
 administrator's password on any other account.
 
+**App updates have their own schedule.** Under Automatic updates on the Admin
+Updates page, **App updates** offers Off, Daily, Weekly, Every 2 weeks and
+Monthly. Choose **Install automatically** or **Notify; update manually**.
+The app schedule starts off. It can match the system schedule or differ
+from it, and either schedule can stay on while the other is off.
+
+Scheduled app checks cover the computer's Flatpak apps and each managed
+account's installed Nix apps, using the same update queue as the Store.
+They wait on metered connections and batteries below 40%. Failed checks
+or updates remain due for retry at the next daily run. Automatic installs
+never restart the computer or close an open app. Open the app again to
+use its new version.
+
+In notification mode, each signed-in account receives a notice for new
+available app builds, including only its own Nix apps. The session helper
+checks for notices at sign-in and every 30 minutes; a build already
+announced is not announced again. Install the updates from the Store's
+Updates page. Off stops scheduled app checks and their notices; manual
+checks and updates still work in the Store.
+
+The terminal controls are independent too:
+
+```sh
+kosherctl updates auto monthly                 # system updates
+kosherctl updates auto weekly --apps          # app updates
+kosherctl updates mode update --apps          # install app updates automatically
+kosherctl updates mode notify --apps          # announce app updates instead
+kosherctl updates auto off --apps             # stop scheduled app checks
+kosherctl updates --apps                      # settings and last run
+```
+
 ## Installing
 
 `just release-iso` pulls the stable image from the public registry and

@@ -23,6 +23,7 @@ UpdateReady signal); nothing here runs bootc.
 from __future__ import annotations
 
 import logging
+import json
 import os
 import threading
 from pathlib import Path
@@ -118,6 +119,37 @@ class UpdateNotice:
             return
         if found:
             self._ids.add(found)
+
+
+class AppUpdateNotice:
+    """One quiet notice per offered app build, without a restart action."""
+
+    def __init__(self, notify, told: Path):
+        self._notify, self._told = notify, told
+
+    def pending_answer(self, answer: dict | None) -> None:
+        offered = set((answer or {}).get("updates", []))
+        if not offered:
+            return
+        try:
+            seen = set(json.loads(self._told.read_text()))
+        except (OSError, ValueError, TypeError):
+            seen = set()
+        fresh = offered - seen
+        if not fresh:
+            return
+        count = len(fresh)
+        try:
+            self._notify("App updates are available",
+                         f"{count} app{'s have' if count != 1 else ' has'} an update. "
+                         "Open the Store's Updates page when you are ready.", [])
+        except Exception as e:
+            log.warning("could not show the app update notice: %s", e)
+            return
+        # Retain builds still offered and a bounded history of older ones.
+        keep = max(0, 1024 - len(offered))
+        remembered = sorted(offered) + (sorted(seen - offered)[-keep:] if keep else [])
+        remember(self._told, json.dumps(remembered))
 
 
 SNI_XML = """
@@ -290,6 +322,7 @@ def main() -> int:  # pragma: no cover - needs a session bus and a system bus
     notice: UpdateNotice | None = None
     indicator = Indicator(session, lambda: notice.activate())
     notice = UpdateNotice(send, indicator.set, reboot, told_path())
+    app_notice = AppUpdateNotice(send, told_path().with_name("app-updates-notified"))
 
     session.signal_subscribe(
         "org.freedesktop.Notifications", "org.freedesktop.Notifications", "ActionInvoked",
@@ -302,6 +335,10 @@ def main() -> int:  # pragma: no cover - needs a session bus and a system bus
             notice.pending_answer(client.pending_update())
         except GLib.Error as e:
             log.info("could not ask kosherd: %s", e.message)
+        try:
+            app_notice.pending_answer(client.pending_app_updates())
+        except GLib.Error as e:
+            log.info("could not ask for app updates: %s", e.message)
         return True
 
     refresh()

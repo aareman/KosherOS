@@ -1318,6 +1318,11 @@ def _when(stamp) -> str:
 def cmd_updates(args) -> int:
     """Automatic updates (#19): the schedule, the notice, and the run the
     timer starts."""
+    if getattr(args, "apps", False):
+        return cmd_app_updates(args)
+    if args.action == "mode":
+        print("mode is for app updates; add --apps", file=sys.stderr)
+        return 2
     c = _client()
     value = (args.value or "").strip().lower()
     if args.action == "run":
@@ -1364,6 +1369,44 @@ def cmd_updates(args) -> int:
     pending = st.get("pending")
     if pending:
         print(f"waiting for a restart: {pending.get('version') or 'an update'}")
+    return 0
+
+
+def cmd_app_updates(args) -> int:
+    c = _client()
+    value = (args.value or "").strip().lower()
+    if args.action == "run":
+        result = c.run_auto_app_update(now=args.now)
+        if not args.quiet:
+            print("App update check started." if result.get("result") == "started" else
+                  f"Not checking apps: {result.get('reason', 'check failed')}")
+        return 0
+    st = c.auto_app_update_status()
+    if args.action == "auto" and value:
+        if value not in AUTO_WORDS:
+            print("choose off, daily, weekly, biweekly or monthly", file=sys.stderr)
+            return 2
+        c.set_auto_app_updates(value, st.get("mode", "update"))
+        print(f"App update schedule: {AUTO_WORDS[value]}")
+        return 0
+    if args.action == "mode" and value:
+        if value not in ("update", "notify"):
+            print("choose update or notify", file=sys.stderr)
+            return 2
+        c.set_auto_app_updates(st.get("schedule", "off"), value)
+        print("App updates install automatically." if value == "update" else
+              "App updates are announced; install them from the Store.")
+        return 0
+    if args.action == "notify":
+        print("use --apps mode notify, or --apps auto off to stop scheduled checks", file=sys.stderr)
+        return 2
+    print(f"App update schedule: {st.get('schedule', 'off')}")
+    print(f"When available: {st.get('mode', 'update')}")
+    print(f"Last successful run: {_when(st.get('last_success'))}")
+    if st.get("running"):
+        print("App updates are running.")
+    if st.get("last_error"):
+        print(f"Last run did not finish: {st['last_error']}")
     return 0
 
 
@@ -1725,9 +1768,9 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("action", choices=["enable", "set-password", "disable"])
     s.set_defaults(func=cmd_guardian)
 
-    s = sub.add_parser("updates", help="automatic OS updates: how often, and the notice")
+    s = sub.add_parser("updates", help="automatic system and app update schedules")
     s.add_argument("action", nargs="?", default="status",
-                   choices=["status", "auto", "notify", "run"])
+                   choices=["status", "auto", "notify", "run", "mode"])
     s.add_argument("value", nargs="?", default="",
                    help="with 'auto': off, daily, weekly, biweekly or monthly; "
                         "with 'notify': on or off")
@@ -1735,6 +1778,8 @@ def main(argv: list[str] | None = None) -> int:
                    help="with 'run': check even when the next check is not due yet")
     s.add_argument("--quiet", action="store_true",
                    help="with 'run': say nothing (the timer's way)")
+    s.add_argument("--apps", action="store_true",
+                   help="manage app updates independently of system updates; mode: update or notify")
     s.set_defaults(func=cmd_updates)
 
     s = sub.add_parser("update", help="check for or apply OS updates")

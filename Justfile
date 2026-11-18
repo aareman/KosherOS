@@ -428,7 +428,7 @@ iso: _sudo build (_bib "anaconda-iso" "os-image/iso-config.toml" image "bootiso"
 iso-web CHANNEL="stable": _sudo
     rm -rf build/installer/os-image && mkdir -p build/installer/out
     podman save -q --format oci-dir -o build/installer/os-image {{image}}
-    podman build --build-context osimage=build/installer/os-image \
+    podman build --build-context osimage=build/installer/os-image --build-context branding=branding \
         --build-arg TARGET=ghcr.io/aareman/kosher-linux:{{CHANNEL}} \
         -t localhost/kosher-installer:dev os-image/installer
     rm -rf build/installer/os-image

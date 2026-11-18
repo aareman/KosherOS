@@ -36,6 +36,19 @@ COPY interactive-defaults.ks /usr/share/anaconda/interactive-defaults.ks
 RUN sed -i "s|@TARGET@|${TARGET}|" /usr/share/anaconda/interactive-defaults.ks \
     && ! grep -q @TARGET@ /usr/share/anaconda/interactive-defaults.ks
 
+# Its name. The web UI titles every page with os-release's PRETTY_NAME and
+# shows "Pre-release" unless the buildstamp says final; ID stays fedora, so
+# Anaconda's Fedora profile and Cockpit's branding folder still apply.
+RUN sed -i -e 's/^NAME=.*/NAME="KosherOS"/' -e 's/^PRETTY_NAME=.*/PRETTY_NAME="KosherOS"/' \
+        /usr/lib/os-release \
+    && printf '[Main]\nProduct=KosherOS\nVersion=%s\nIsFinal=True\nBugURL=https://github.com/aareman/KosherOS/issues\n' \
+        "$(. /usr/lib/os-release && echo "$VERSION_ID")" > /.buildstamp
+# Its look: colours and logo, in Cockpit's branding for Fedora.
+# (logo.png there is a link into Fedora's pixmaps; replaced, not written through.)
+COPY branding.css /usr/share/cockpit/branding/fedora/branding.css
+RUN rm -f /usr/share/cockpit/branding/fedora/logo.png
+COPY --from=branding logo.png /usr/share/cockpit/branding/fedora/logo.png
+
 # --- what lorax would do to make Anaconda run ---------------------------------
 RUN echo "install:x:0:0:root:/root:/usr/libexec/anaconda/run-anaconda" >> /etc/passwd \
     && echo "install::14438:0:99999:7:::" >> /etc/shadow \

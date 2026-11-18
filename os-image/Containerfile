@@ -568,6 +568,14 @@ RUN true \
     && rsvg-convert -w 200 -h 8 /usr/share/kosher/branding/bar-fill.svg \
          -o /usr/share/plymouth/themes/kosheros/bar-fill.png \
     && plymouth-set-default-theme kosheros \
+    # The splash in the initramfs too (#316). Fedora's bootc base leaves
+    # Plymouth out of it, so on an encrypted disk the password was asked
+    # for on a bare text console, before the splash existed. With the
+    # module added (dracut.conf.d/60-kosheros-plymouth.conf) and rhgb on
+    # the command line, the theme draws the prompt from the first second.
+    && kver="$(ls /usr/lib/modules)" \
+    && dracut --force --kver "$kver" "/usr/lib/modules/$kver/initramfs.img" \
+    && lsinitrd "/usr/lib/modules/$kver/initramfs.img" | grep -q 'plymouth/themes/kosheros/kosheros.script' \
     # bootc images have no /etc/default/grub; create it for the menu title.
     # (The timeout GRUB actually uses is set in the static config,
     # configs.d/09_kosheros_quiet.cfg; this file is documentation.)
@@ -584,7 +592,9 @@ RUN true \
     # console at loglevel 3 and no cursor makes that moment a plain dark
     # screen, which is the most a kernel console can be asked to be.
     && mkdir -p /usr/lib/bootc/kargs.d \
-    && printf 'kargs = ["quiet", "loglevel=3", "vt.global_cursor_default=0", "rd.udev.log_level=3", "udev.log_priority=3"]\n' \
+    # rhgb: Plymouth draws the splash only when asked to; without it the
+    # boot showed Plymouth's text mode, and a disk password prompt in it.
+    && printf 'kargs = ["rhgb", "quiet", "loglevel=3", "vt.global_cursor_default=0", "rd.udev.log_level=3", "udev.log_priority=3"]\n' \
          > /usr/lib/bootc/kargs.d/10-kosheros.toml \
     # The three device-security checks an operating system can answer for.
     # GNOME's Device Security panel reports fwupd's Host Security ID, and

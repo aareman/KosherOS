@@ -252,7 +252,7 @@ def test_the_boot_splash_speaks_in_sentences_not_unit_names():
     containerfile = (ROOT / "os-image/Containerfile").read_text()
     assert "systemd.show_status" not in containerfile.split("kargs = [")[1].split("]")[0]
     script = (ROOT / "os-image/files/usr/share/plymouth/themes/kosheros/kosheros.script").read_text()
-    assert 'show_status("Starting KosherOS…");' in script
+    assert 'show_status("Starting KosherOS...");' in script
     units = ROOT / "os-image/files/usr/lib/systemd/system"
     said = {}
     for conf in units.glob("*.service.d/10-kosheros-splash.conf"):
@@ -264,3 +264,27 @@ def test_the_boot_splash_speaks_in_sentences_not_unit_names():
     for unit, words in said.items():
         assert words.endswith("…") and "service" not in words.lower(), (unit, words)
         assert words[0].isupper(), words
+
+
+def test_the_disk_password_is_asked_on_the_splash():
+    """An encrypted disk asked for its password on a bare text console:
+    Plymouth was not in the initramfs and nothing asked for the splash.
+    Both are fixed, and the prompt names no device."""
+    containerfile = (ROOT / "os-image/Containerfile").read_text()
+    kargs = containerfile.split("kargs = [")[1].split("]")[0]
+    assert '"rhgb"' in kargs
+    assert "dracut --force" in containerfile
+    assert "plymouth/themes/kosheros/kosheros.script" in containerfile
+    conf = ROOT / "os-image/files/usr/lib/dracut/dracut.conf.d/60-kosheros-plymouth.conf"
+    assert 'add_dracutmodules+=" plymouth "' in conf.read_text()
+    script = (ROOT / "os-image/files/usr/share/plymouth/themes/kosheros/kosheros.script").read_text()
+    prompt = script.split("fun display_password_callback")[1].split("Plymouth.Set")[0]
+    assert "Image.Text(prompt_text" not in prompt
+    assert "disk password" in prompt
+    # Drawn in the initramfs, where the FreeType text plugin has no "•".
+    assert "•" not in prompt
+    # Sprites made only inside a callback are local and vanish on return.
+    assert "prompt.label = NULL;" in script.split("fun display_password_callback")[0]
+    # systemd's unit names ("sys-kernel-config.mount") never reach the screen.
+    status = script.split("fun update_status_callback")[1].split("}")[0]
+    assert "show_status" not in status

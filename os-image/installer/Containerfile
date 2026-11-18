@@ -1,0 +1,77 @@
+# The installer ISO with Anaconda's web UI (#316): the installer's own root
+# filesystem, which `image-builder build bootc-generic-iso` turns into a live
+# ISO. `just iso-web` builds it. The GTK installer it replaces came out of
+# bootc-image-builder's anaconda-iso, which is retired.
+#
+# KosherOS itself travels inside, as an OCI layout at /usr/share/kosher/os-image,
+# so an install needs no network, as before. The installed machine records
+# TARGET as where its updates come from: a channel on the public registry.
+#
+# Shaped after image-builder's own example (osbuild/image-builder,
+# doc/20-advanced/20-bootc/10-isos.md); the steps under "what lorax would
+# do" are from there.
+ARG BASE=ghcr.io/aareman/kosher-base-fedora-bootc:44-20261116@sha256:59e159096baadc0a598f2f6e45de37fa9a6e969ba5a052d4d927f217320e834c
+FROM ${BASE}
+
+ARG TARGET=ghcr.io/aareman/kosher-linux:stable
+
+RUN dnf -y install \
+        anaconda anaconda-install-img-deps anaconda-dracut anaconda-webui \
+        dracut-config-generic dracut-network net-tools \
+        grub2-efi-x64-cdboot plymouth \
+        cockpit-ws cockpit-bridge firefox gnome-kiosk mesa-dri-drivers \
+        default-fonts-core-sans jq \
+        # image-builder runs these inside this root to make the ISO
+        xorrisofs squashfs-tools \
+    && dnf clean all
+
+RUN mkdir -p /boot/efi && cp -ra /usr/lib/efi/*/*/EFI /boot/efi
+
+# The boot menu: one entry, straight into the web UI.
+COPY iso.yaml /usr/lib/image-builder/bootc/iso.yaml
+
+# What the installer asks, what it answers itself, and what it installs.
+COPY 90-kosheros.conf /etc/anaconda/conf.d/90-kosheros.conf
+COPY interactive-defaults.ks /usr/share/anaconda/interactive-defaults.ks
+RUN sed -i "s|@TARGET@|${TARGET}|" /usr/share/anaconda/interactive-defaults.ks \
+    && ! grep -q @TARGET@ /usr/share/anaconda/interactive-defaults.ks
+
+# Its name. The web UI titles every page with os-release's PRETTY_NAME and
+# shows "Pre-release" unless the buildstamp says final; ID stays fedora, so
+# Anaconda's Fedora profile and Cockpit's branding folder still apply.
+RUN sed -i -e 's/^NAME=.*/NAME="KosherOS"/' -e 's/^PRETTY_NAME=.*/PRETTY_NAME="KosherOS"/' \
+        /usr/lib/os-release \
+    && printf '[Main]\nProduct=KosherOS\nVersion=%s\nIsFinal=True\nBugURL=https://github.com/aareman/KosherOS/issues\n' \
+        "$(. /usr/lib/os-release && echo "$VERSION_ID")" > /.buildstamp
+# Its look: colours and logo, in Cockpit's branding for Fedora.
+# (logo.png there is a link into Fedora's pixmaps; replaced, not written through.)
+COPY branding.css /usr/share/cockpit/branding/fedora/branding.css
+RUN rm -f /usr/share/cockpit/branding/fedora/logo.png
+COPY --from=branding logo.png /usr/share/cockpit/branding/fedora/logo.png
+# "Use entire disk" first and selected; dual-boot only behind a link.
+COPY patch-webui.py /tmp/patch-webui.py
+RUN python3 /tmp/patch-webui.py && rm /tmp/patch-webui.py
+
+# --- what lorax would do to make Anaconda run ---------------------------------
+RUN echo "install:x:0:0:root:/root:/usr/libexec/anaconda/run-anaconda" >> /etc/passwd \
+    && echo "install::14438:0:99999:7:::" >> /etc/shadow \
+    && passwd -d root
+RUN mv /usr/share/anaconda/list-harddrives-stub /usr/bin/list-harddrives \
+    && mv /etc/yum.repos.d /etc/anaconda.repos.d \
+    && ln -s /lib/systemd/system/anaconda.target /etc/systemd/system/default.target \
+    && rm -v /usr/lib/systemd/system-generators/systemd-gpt-auto-generator \
+    && ln -sfn /usr/lib/systemd/system/anaconda-shell@.service /usr/lib/systemd/system/autovt@.service \
+    && mkdir -p /usr/lib/systemd/logind.conf.d \
+    && printf '[Login]\nReserveVT=2\n' > /usr/lib/systemd/logind.conf.d/anaconda-shell.conf
+# The web UI's browser runs as root in a kiosk; pipewire refuses root by default.
+RUN for unit in service socket; do \
+        mkdir -p /etc/systemd/user/pipewire.$unit.d \
+        && printf '[Unit]\nConditionUser=\n' > /etc/systemd/user/pipewire.$unit.d/allowroot.conf; \
+    done
+RUN mkdir -p "$(realpath /root)" \
+    && kernel=$(kernel-install list --json pretty | jq -r '.[] | select(.has_kernel == true) | .version') \
+    && DRACUT_NO_XATTR=1 dracut --force --zstd --reproducible --no-hostonly --add anaconda \
+        "/usr/lib/modules/${kernel}/initramfs.img" "${kernel}"
+
+# Last, so a rebuild of KosherOS reuses every layer above.
+COPY --from=osimage . /usr/share/kosher/os-image

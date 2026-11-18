@@ -420,6 +420,32 @@ iso: _sudo build (_bib "anaconda-iso" "os-image/iso-config.toml" image "bootiso"
     python3 scripts/brand-iso.py build/bootiso/install.iso
     @echo "Copy the KosherOS-*.iso in build/bootiso onto a USB stick or Ventoy, or: just boot-iso"
 
+# image-builder labels its working store, which needs real root: sudo.
+# The installed machine follows CHANNEL for its updates. This uses the
+# local image as it stands; `just build` first for a fresh one.
+# The installer ISO with Fedora's web installer (#316): one question, the disk.
+[group('install media')]
+iso-web CHANNEL="stable": _sudo
+    rm -rf build/installer/os-image && mkdir -p build/installer/out
+    podman save -q --format oci-dir -o build/installer/os-image {{image}}
+    podman build --build-context osimage=build/installer/os-image --build-context branding=branding \
+        --build-arg TARGET=ghcr.io/aareman/kosher-linux:{{CHANNEL}} \
+        -t localhost/kosher-installer:dev os-image/installer
+    rm -rf build/installer/os-image
+    mkdir -p build/podman-home/.config/containers
+    printf '{"default":[{"type":"insecureAcceptAnything"}]}' > build/podman-home/.config/containers/policy.json
+    sudo env HOME="$PWD/build/podman-home" "$(command -v podman)" pull \
+        "containers-storage:[overlay@{{env_var("HOME")}}/.local/share/containers/storage]localhost/kosher-installer:dev"
+    sudo env HOME="$PWD/build/podman-home" "$(command -v podman)" run --rm --privileged \
+        --security-opt label=type:unconfined_t \
+        -v /var/lib/containers/storage:/var/lib/containers/storage \
+        -v ./build/installer/out:/output \
+        ghcr.io/osbuild/image-builder-cli:latest build \
+        --bootc-ref localhost/kosher-installer:dev --bootc-default-fs ext4 \
+        --output-dir /output bootc-generic-iso
+    sudo chown -R "$USER:" build/installer/out
+    @find build/installer/out -name '*.iso' -printf 'ISO: %p\n'
+
 # DEV ONLY: an ISO that wipes every attached disk without asking, so a VM
 # rehearsal needs no clicking. Never give this one to anyone.
 [group('install media')]

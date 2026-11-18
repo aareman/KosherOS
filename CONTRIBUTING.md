@@ -1,6 +1,12 @@
 # Contributing to KosherOS
 
 The full guide is on the site: [How to contribute](https://aareman.github.io/KosherOS/contributing/).
+
+When discussing filtered material, describe the category and behavior in
+neutral terms without quoting sensitive content. Be clear about the problem
+and its fix. [AGENTS.md](AGENTS.md) gives the guidance for automated agents;
+the same care applies to contributions and review discussions.
+
 The short version:
 
 1. **Start from an issue.** If there is no issue for what you want to do,

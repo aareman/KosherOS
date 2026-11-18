@@ -1,0 +1,73 @@
+/* KosherOS: replaces Cockpit's Fedora branding in the installer only
+   (the web UI is a Cockpit page and takes its colours and logo from here).
+   The navy is the boot splash's, as in the old installer's theme. */
+#badge {
+    inline-size: 225px;
+    block-size: 80px;
+    background-image: url("logo.png");
+    background-size: contain;
+    background-repeat: no-repeat;
+}
+
+#brand::before {
+    content: "KosherOS";
+}
+
+.anaconda {
+    --brand-default-light: #6f8fc4;
+    --brand-default: #2b4a7e;
+    --brand-default-dark: #0d1729;
+
+    .logo {
+        background-image: url("logo.png");
+        /* the web UI turns Fedora's logo white; ours is a painting */
+        filter: none;
+        mix-blend-mode: normal;
+        border-radius: 25%;
+    }
+
+    /* The feedback box points at Fedora's forum. */
+    .feedback-section {
+        display: none;
+    }
+
+    /* "Hostname: transient, will use DHCP" means nothing to a family. */
+    .pf-v6-c-description-list__group:has(#anaconda-screen-review-target-system-hostname) {
+        display: none;
+    }
+
+    /* "Destination is encrypted: Unlock" is for keeping what is on the
+       disk, which only the advanced ways do; it waits behind the same
+       link (patch-webui.py adds it, and removes it once clicked). */
+    [class$="-scenario-group"]:has([id$="-scenario-advanced"]) .pf-v6-c-alert {
+        display: none;
+    }
+
+    /* Encryption stays off by default, but we say we recommend it, and
+       why, in place of "disk-based encryption … new partitions". */
+    #disk-encryption-encrypt-devices + .pf-v6-c-check__label::after {
+        content: " (strongly recommended)";
+        font-weight: bold;
+    }
+
+    .pf-v6-c-form__section:has(#disk-encryption-encrypt-devices) .pf-v6-c-content p,
+    .pf-v6-c-form__section:has(#disk-encryption-encrypt-devices) p.pf-v6-c-content--p {
+        font-size: 0;
+    }
+
+    .pf-v6-c-form__section:has(#disk-encryption-encrypt-devices) .pf-v6-c-content p::after,
+    .pf-v6-c-form__section:has(#disk-encryption-encrypt-devices) p.pf-v6-c-content--p::after {
+        content: "If this computer is lost or stolen, nobody can read what is on it without the password.";
+        font-size: var(--pf-t--global--font--size--body--default, 14px);
+    }
+}
+
+:not(.pf-v6-theme-dark) .anaconda {
+    --pf-t--global--color--brand--default: var(--brand-default);
+    --pf-t--global--color--brand--hover: var(--brand-default-dark);
+}
+
+.pf-v6-theme-dark .anaconda {
+    --pf-t--global--color--brand--default: var(--brand-default-light);
+    --pf-t--global--color--brand--hover: var(--brand-default);
+}

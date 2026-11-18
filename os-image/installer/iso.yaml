@@ -1,0 +1,7 @@
+label: "KosherOS-Installer"
+grub2:
+  timeout: 5
+  entries:
+    - name: "Install KosherOS"
+      linux: ${kernelpath} ${root} inst.webui quiet rhgb
+      initrd: ${initrdpath}

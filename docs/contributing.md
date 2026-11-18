@@ -167,6 +167,15 @@ thing and stop. Avoid slogans, paired fragments, invented metaphors and
 warnings on every option. Read the finished screen back before you send
 it.
 
+**Discuss sensitive material with care.** Describe the category, the behavior
+and the result without quoting restricted terms or passages. Use neutral
+examples where they demonstrate the same problem. If a regression test needs
+the original input, keep it in the fixture and refer to the test or file in
+the discussion. Preserve accurate filter data and meaningful tests; keep
+explanations appropriate without making them vague. This applies to issue
+reports, reviews, commit messages, screenshots and user-facing text as well
+as conversation with automated agents.
+
 ## Commits
 
 Commit in small, focused steps as the work lands, rather than one commit at

@@ -1571,7 +1571,6 @@ class UserDetailPage(Adw.NavigationPage):
                 "by name to add an app."))
         self.blocked_list = Gtk.ListBox(selection_mode=Gtk.SelectionMode.NONE)
         self.blocked_list.add_css_class("boxed-list")
-        self.blocked_apps_group.add(self.blocked_list)
         self.block_entry = Adw.EntryRow(title="Block an app", margin_top=6)
         self.block_entry.set_show_apply_button(True)
         self.block_entry.connect("apply", lambda _e: self._search_to_block(user))
@@ -1581,22 +1580,24 @@ class UserDetailPage(Adw.NavigationPage):
                                          visible=False)
         self.block_results.add_css_class("boxed-list")
         self.blocked_apps_group.add(self.block_results)
+        self.blocked_apps_group.add(self.blocked_list)
         self._render_blocked(user)
 
-        self.apps_group = Adw.PreferencesGroup(
-            title="Installed apps",
-            description="Turn on a switch to block an app for this account. "
-                        "Uninstalling removes it from the whole computer.")
+        self.apps_group = Adw.PreferencesGroup()
+        self.installed_expander = Adw.ExpanderRow(
+            title="All installed apps",
+            subtitle="View app access or uninstall an app for everyone")
+        self.apps_group.add(self.installed_expander)
         self.apps_list = Gtk.ListBox(selection_mode=Gtk.SelectionMode.NONE)
         self.apps_list.add_css_class("boxed-list")
         self.apps_list.append(Adw.ActionRow(title="Loading…"))
-        self.apps_group.add(self.apps_list)
+        self.installed_expander.add_row(self.apps_list)
         self._load_apps(user)
         # Syncthing's group only while the computer has it switched on (#220).
         syncthing = ([self._syncthing_group(user)]
                      if (self.win.policy.get("advanced") or {}).get("syncthing") else [])
-        return [installs_group, self._developer_group(user), *syncthing, kinds_group,
-                self.blocked_apps_group, self.apps_group]
+        return [self.blocked_apps_group, installs_group, self._developer_group(user),
+                *syncthing, kinds_group, self.apps_group]
 
     # -- kinds --
 

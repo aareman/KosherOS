@@ -580,13 +580,13 @@ class AppsPage(_Page):
         self.search_entry: Adw.EntryRow | None = None
         self.approved: list[dict] = []
         self.installed: set[str] = set()
-        # With fifty-odd apps approved, the search that adds another one is
-        # a long scroll below them. Focusing it scrolls it into view.
+        # Keep the header shortcut available while scrolling the approved list.
         add = Gtk.Button(label="Add Apps…", valign=Gtk.Align.CENTER)
         add.add_css_class("suggested-action")
         add.connect("clicked", lambda _b: self.search_entry
                     and self.search_entry.grab_focus())
         self.header.pack_end(add)
+        self._build_search()
         self.refresh()
 
     def refresh(self) -> None:
@@ -598,8 +598,6 @@ class AppsPage(_Page):
             self.approved, self.installed = result
             self.win.catalog_count = len(self.approved)
             self._render_approved()
-            if self.search_group is None:
-                self._build_search()
 
         run_async(load, on_done, lambda e: self.win.toast(error_text(e)))
 
@@ -612,7 +610,7 @@ class AppsPage(_Page):
                 "apps that would otherwise be excluded by their content rating."))
         if not self.approved:
             row = Adw.ActionRow(title="No apps approved yet",
-                                subtitle="Search below to approve apps")
+                                subtitle="Search above to approve apps")
             row.set_sensitive(False)
             group.add(row)
         for app in self.approved:
@@ -632,9 +630,6 @@ class AppsPage(_Page):
             group.add(row)
         self.group = group
         self.prefs.add(group)
-        if self.search_group is not None:
-            self.prefs.remove(self.search_group)
-            self.prefs.add(self.search_group)
 
     def _build_search(self) -> None:
         group = Adw.PreferencesGroup(

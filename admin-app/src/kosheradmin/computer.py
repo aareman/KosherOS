@@ -580,13 +580,13 @@ class AppsPage(_Page):
         self.search_entry: Adw.EntryRow | None = None
         self.approved: list[dict] = []
         self.installed: set[str] = set()
-        # With fifty-odd apps approved, the search that adds another one is
-        # a long scroll below them. Focusing it scrolls it into view.
+        # Keep the header shortcut available while scrolling the approved list.
         add = Gtk.Button(label="Add Apps…", valign=Gtk.Align.CENTER)
         add.add_css_class("suggested-action")
         add.connect("clicked", lambda _b: self.search_entry
                     and self.search_entry.grab_focus())
         self.header.pack_end(add)
+        self._build_search()
         self.refresh()
 
     def refresh(self) -> None:
@@ -598,8 +598,6 @@ class AppsPage(_Page):
             self.approved, self.installed = result
             self.win.catalog_count = len(self.approved)
             self._render_approved()
-            if self.search_group is None:
-                self._build_search()
 
         run_async(load, on_done, lambda e: self.win.toast(error_text(e)))
 
@@ -612,7 +610,7 @@ class AppsPage(_Page):
                 "apps that would otherwise be excluded by their content rating."))
         if not self.approved:
             row = Adw.ActionRow(title="No apps approved yet",
-                                subtitle="Search below to approve apps")
+                                subtitle="Search above to approve apps")
             row.set_sensitive(False)
             group.add(row)
         for app in self.approved:
@@ -632,9 +630,6 @@ class AppsPage(_Page):
             group.add(row)
         self.group = group
         self.prefs.add(group)
-        if self.search_group is not None:
-            self.prefs.remove(self.search_group)
-            self.prefs.add(self.search_group)
 
     def _build_search(self) -> None:
         group = Adw.PreferencesGroup(
@@ -735,6 +730,8 @@ class UpdatesPage(_Page):
         self.prefs.add(group)
         self.auto_group = AutoUpdatesGroup(win)
         self.prefs.add(self.auto_group)
+        self.app_auto_group = AutoAppUpdatesGroup(win)
+        self.prefs.add(self.app_auto_group)
         self._subscription: int | None = None
         self.connect("shown", lambda _p: self._listen())
         self.connect("hidden", lambda _p: self._stop_listening())
@@ -1030,7 +1027,7 @@ class AutoUpdatesGroup(Adw.PreferencesGroup):
         self.status: dict | None = None
 
         self.schedule_row = Adw.ComboRow(
-            title="Download updates",
+            title="Download system updates",
             model=Gtk.StringList.new([AUTO_LABELS[s] for s in AUTO_SCHEDULES]),
             selected=AUTO_SCHEDULES.index(self.schedule), subtitle_lines=2)
         self.schedule_row.connect("notify::selected", self._on_schedule)
@@ -1069,7 +1066,7 @@ class AutoUpdatesGroup(Adw.PreferencesGroup):
 
         def done(_r) -> None:
             self.schedule, self.notify = schedule, notify
-            self.win.policy["updates"] = {"auto": schedule, "notify": notify}
+            self.win.policy.setdefault("updates", {}).update(auto=schedule, notify=notify)
             self._settle()
             self.win.toast("Automatic updates are off" if schedule == "off" else
                            f"Updates download {AUTO_LABELS[schedule].lower()}")
@@ -1093,6 +1090,80 @@ class AutoUpdatesGroup(Adw.PreferencesGroup):
         self.notify_row.set_sensitive(True)
         self.schedule_row.set_subtitle(auto_words({**(self.status or {}),
                                                    "schedule": self.schedule}))
+
+
+class AutoAppUpdatesGroup(Adw.PreferencesGroup):
+    """The app schedule below system updates, saved independently."""
+
+    def __init__(self, win):
+        super().__init__(title="App updates", description=(
+            "Choose a separate schedule for apps from the Store. Checks wait on metered "
+            "connections or a low battery. Apps already open can keep running; "
+            "open them again to use the new version."))
+        self.win = win
+        settings = (win.policy.get("updates") or {}).get("apps") or {}
+        self.schedule = settings.get("schedule", "off")
+        self.mode = settings.get("mode", "update")
+        self.status = {}
+        self.schedule_row = Adw.ComboRow(
+            title="Check for app updates",
+            model=Gtk.StringList.new([AUTO_LABELS[s] for s in AUTO_SCHEDULES]),
+            selected=AUTO_SCHEDULES.index(self.schedule), subtitle_lines=2)
+        self.mode_row = Adw.ComboRow(
+            title="When app updates are available",
+            model=Gtk.StringList.new(["Install automatically", "Notify; update manually"]),
+            selected=(0 if self.mode == "update" else 1))
+        self.add(self.schedule_row)
+        self.add(self.mode_row)
+        self.schedule_row.connect("notify::selected", self._changed)
+        self.mode_row.connect("notify::selected", self._changed)
+        self._settle()
+        run_async(win.client.auto_app_update_status, self._loaded,
+                  lambda e: self.schedule_row.set_subtitle(error_text(e)))
+
+    def _loaded(self, status):
+        self.status = status
+        self._settle()
+
+    def _changed(self, _row, _param):
+        schedule = AUTO_SCHEDULES[self.schedule_row.get_selected()]
+        mode = ("update", "notify")[self.mode_row.get_selected()]
+        if (schedule, mode) == (self.schedule, self.mode):
+            return
+        self.schedule_row.set_sensitive(False)
+        self.mode_row.set_sensitive(False)
+
+        def done(_r):
+            self.schedule, self.mode = schedule, mode
+            self.win.policy.setdefault("updates", {})["apps"] = {
+                "schedule": schedule, "mode": mode}
+            self._settle()
+            self.win.toast("App update settings saved")
+
+        def failed(error):
+            self._settle()
+            self.win.toast(error_text(error))
+
+        run_async(lambda: self.win.client.set_auto_app_updates(schedule, mode), done, failed)
+
+    def _settle(self):
+        self.schedule_row.handler_block_by_func(self._changed)
+        self.mode_row.handler_block_by_func(self._changed)
+        self.schedule_row.set_selected(AUTO_SCHEDULES.index(self.schedule))
+        self.mode_row.set_selected(("update", "notify").index(self.mode))
+        self.schedule_row.handler_unblock_by_func(self._changed)
+        self.mode_row.handler_unblock_by_func(self._changed)
+        self.schedule_row.set_sensitive(True)
+        # Choose notification-only mode before enabling a persistent timer:
+        # its first tick may be immediate.
+        self.mode_row.set_sensitive(True)
+        if self.schedule == "off":
+            text = "Check and update apps manually in the Store."
+        elif self.status.get("running"):
+            text = "Checking or updating apps in the background."
+        else:
+            text = auto_words({**self.status, "schedule": self.schedule})
+        self.schedule_row.set_subtitle(text)
 
 
 CHANNEL_INTRO = "Stable is recommended for everyday use."

@@ -170,3 +170,26 @@ def test_an_update_is_queued_like_an_install_and_reported_on_the_same_signals():
     manager._worker.join(timeout=5)
     assert ("org.example.App", 50, "Updating…") in seen
     assert done == [("org.example.App", True, "")]
+
+
+def test_update_completion_waits_for_the_job_and_releases_the_same_ref_for_another_account(manager, monkeypatch):
+    gate = threading.Event()
+    monkeypatch.setattr(manager, "_do_update", lambda ref: gate.wait(5))
+    first = manager.update("org.a.A")
+    assert not first.done()
+    gate.set()
+    assert first.result(timeout=5) is None
+    assert "org.a.A" not in manager.pending
+    assert manager.update("org.a.A").result(timeout=5) is None
+
+
+def test_update_completion_reports_failure_without_stalling_the_queue(manager, monkeypatch):
+    def fail(ref):
+        raise AppError("update failed")
+    monkeypatch.setattr(manager, "_do_update", fail)
+    result = manager.update("org.a.A")
+    with pytest.raises(AppError, match="update failed"):
+        result.result(timeout=5)
+    assert "org.a.A" not in manager.pending
+    monkeypatch.setattr(manager, "_do_update", lambda ref: None)
+    assert manager.update("org.b.B").result(timeout=5) is None

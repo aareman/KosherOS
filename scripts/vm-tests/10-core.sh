@@ -272,6 +272,42 @@ kosherctl updates auto weekly >/dev/null
 check_contains "kosherd answers any account about a waiting update without bootc" "{" \
     python3 -c 'from kosherd.client import DaemonClient; import json; print(json.dumps(DaemonClient().pending_update()))'
 
+section "Independent app update schedule (#78)"
+app_timer=kosher-auto-app-update.timer
+check "app update checks start off" 1 systemctl is-active --quiet "$app_timer"
+check_contains "app checks are off even when forced" "automatic updates are off" \
+    kosherctl updates run --apps --now
+# Future last_success prevents these configuration checks from downloading
+# anything if a persistent timer's daily tick happens while it is enabled.
+app_state=/var/lib/kosher/auto-app-update.json
+app_state_backup=$(mktemp)
+app_state_existed=0
+if [ -f "$app_state" ]; then
+    cp -a "$app_state" "$app_state_backup"
+    app_state_existed=1
+fi
+printf '{"last_success":4102444800}\n' > "$app_state"
+kosherctl updates auto off >/dev/null
+kosherctl updates auto daily --apps >/dev/null
+check "app timer starts while system timer stays off" 0 systemctl is-active --quiet "$app_timer"
+check "system timer remains off" 1 systemctl is-active --quiet "$timer"
+kosherctl updates mode notify --apps >/dev/null
+check_contains "notification-only mode is saved" "When available: notify" kosherctl updates --apps
+kosherctl updates auto monthly >/dev/null
+check "system timer can run alongside app timer" 0 systemctl is-active --quiet "$timer"
+check_contains "the app schedule stays daily" "App update schedule: daily" kosherctl updates --apps
+kosherctl updates auto off --apps >/dev/null
+check "turning app checks off stops only their timer" 1 systemctl is-active --quiet "$app_timer"
+check "system timer is still running" 0 systemctl is-active --quiet "$timer"
+kosherctl updates mode update --apps >/dev/null
+kosherctl updates auto weekly >/dev/null
+if [ "$app_state_existed" = 1 ]; then
+    cp -a "$app_state_backup" "$app_state"
+else
+    rm -f "$app_state"
+fi
+rm -f "$app_state_backup"
+
 # Staging, without a restart. The harness's registry (10.0.2.2) is trusted
 # again for this alone, and the image this machine runs is pushed to its
 # own tag once more with one label added: a new image with the same

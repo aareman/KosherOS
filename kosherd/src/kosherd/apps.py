@@ -33,6 +33,7 @@ from __future__ import annotations
 import json
 import logging
 import threading
+from concurrent.futures import Future
 from collections import deque
 from pathlib import Path
 from typing import Callable
@@ -659,7 +660,7 @@ def resolve_remote_ref(app_id: str) -> str:
     return matches[0].format_ref()
 
 
-def refresh_updates() -> list[dict]:
+def refresh_updates(*, strict: bool = False) -> list[dict]:
     """Ask the remote what is new, then say what can be updated.
 
     `available_updates` reads what flatpak already knows, and flatpak only
@@ -670,15 +671,21 @@ def refresh_updates() -> list[dict]:
     it decides anything.
     """
     if Flatpak is None:
+        if strict:
+            raise AppError("Flatpak update support is unavailable")
         return []
     installation = Flatpak.Installation.new_system(None)
     for step in ("update_remote_sync", "drop_caches"):
         method = getattr(installation, step, None)
         if method is None:
+            if strict:
+                raise AppError(f"Flatpak cannot {step}")
             continue
         try:
             method(REMOTE, None) if step == "update_remote_sync" else method(None)
         except Exception as e:  # noqa: BLE001 - a stale answer beats no answer
+            if strict:
+                raise AppError(f"could not refresh {REMOTE}: {e}") from e
             log.warning("could not refresh %s before listing updates: %s", REMOTE, e)
     return available_updates()
 
@@ -754,7 +761,7 @@ class AppManager:
         self._on_progress = on_progress
         self._on_finished = on_finished
         self._lock = threading.Lock()
-        self._queue: deque[tuple[str, object]] = deque()
+        self._queue: deque[tuple[str, object, Future]] = deque()
         self._pending: set[str] = set()   # queued or running
         self._running: str | None = None
         self._worker: threading.Thread | None = None
@@ -791,13 +798,13 @@ class AppManager:
         """Queue the removal of every leftover runtime (unused_refs)."""
         self._enqueue(CLEANUP_REF, self._do_remove_unused)
 
-    def update(self, ref: str, *, uid: int | None = None, as_root: bool = False) -> None:
+    def update(self, ref: str, *, uid: int | None = None, as_root: bool = False) -> Future:
         """Bring one installed app up to the remote's build. Queued like an
         install, reported on the same signals."""
         if accountapps.is_account_app(ref):
-            self._enqueue(ref, self._nix_work(accountapps.upgrade, uid, as_root))
+            return self._enqueue(ref, self._nix_work(accountapps.upgrade, uid, as_root))
         else:
-            self._enqueue(ref, self._do_update)
+            return self._enqueue(ref, self._do_update)
 
     def _nix_work(self, action, uid: int | None, as_root: bool = False):
         """A queue job for a per-account app: the action, as the account —
@@ -813,12 +820,13 @@ class AppManager:
                 raise AppError(str(e)) from e
         return work
 
-    def _enqueue(self, ref: str, work) -> None:
+    def _enqueue(self, ref: str, work) -> Future:
+        completed = Future()
         with self._lock:
             if ref in self._pending:
                 raise AppError(f"{ref} is already in progress")
             self._pending.add(ref)
-            self._queue.append((ref, work))
+            self._queue.append((ref, work, completed))
             # The job being worked on is no longer in the queue, so count it
             # too — otherwise the first waiting job reports "0 ahead".
             position = len(self._queue) + (1 if self._running else 0)
@@ -828,13 +836,15 @@ class AppManager:
         if position > 1:
             self._on_progress(ref, 0, f"Queued ({position - 1} ahead)")
 
+        return completed
+
     def _drain(self) -> None:
         while True:
             with self._lock:
                 if not self._queue:
                     self._worker = None
                     return
-                ref, work = self._queue.popleft()
+                ref, work, completed = self._queue.popleft()
                 self._running = ref
             try:
                 work(ref)
@@ -844,8 +854,10 @@ class AppManager:
                 message = getattr(e, "message", None) or str(e)
                 log.error("%s failed: %s", ref, message)
                 self._finish(ref, False, message)
+                completed.set_exception(AppError(message))
             else:
                 self._finish(ref, True, "")
+                completed.set_result(None)
 
     def _finish(self, ref: str, ok: bool, error: str) -> None:
         with self._lock:

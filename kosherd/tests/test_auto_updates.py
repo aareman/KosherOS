@@ -30,7 +30,8 @@ def test_the_default_is_weekly_with_the_notice_on():
     p = Policy()
     assert (p.auto_updates, p.update_notify) == ("weekly", True)
     doc = p.to_dict()
-    assert doc["updates"] == {"auto": "weekly", "notify": True}
+    assert doc["updates"] == {"auto": "weekly", "notify": True,
+                              "apps": {"schedule": "off", "mode": "update"}}
 
 
 def test_an_older_policy_without_the_setting_reads_as_the_default():

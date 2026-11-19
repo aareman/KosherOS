@@ -555,6 +555,18 @@ class DaemonClient:
         """One automatic run (the timer's); `now` skips "not due yet"."""
         return json.loads(self._call("System", "RunAutoUpdate", "(b)", bool(now))[0])
 
+    def set_auto_app_updates(self, schedule: str, mode: str) -> None:
+        self._call("System", "SetAutoAppUpdates", "(ss)", schedule, mode)
+
+    def auto_app_update_status(self) -> dict:
+        return json.loads(self._call("System", "AutoAppUpdateStatus")[0])
+
+    def run_auto_app_update(self, now: bool = False) -> dict:
+        return json.loads(self._call("System", "RunAutoAppUpdate", "(b)", bool(now))[0])
+
+    def pending_app_updates(self) -> dict:
+        return json.loads(self._call("System", "PendingAppUpdates")[0])
+
     def pending_update(self) -> dict:
         """The update waiting for a restart, {} when none. Any account."""
         return json.loads(self._call("System", "PendingUpdate")[0])

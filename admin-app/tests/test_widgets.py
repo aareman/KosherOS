@@ -178,6 +178,14 @@ class FakeClient:
             raise RuntimeError(self._overrides["auto_refuse"])
         self.calls.append(("set_auto_updates", schedule, notify))
 
+    def auto_app_update_status(self):
+        return self._overrides.get("app_auto_status", {"schedule": "off", "mode": "update"})
+
+    def set_auto_app_updates(self, schedule, mode):
+        if self._overrides.get("app_auto_refuse"):
+            raise RuntimeError(self._overrides["app_auto_refuse"])
+        self.calls.append(("set_auto_app_updates", schedule, mode))
+
     def disconnect_signals(self, subscription):
         self.disconnected = subscription
 
@@ -1006,6 +1014,37 @@ def _apps_tab(**kw):
     page.stack.set_visible_child_name("apps")
     drain()
     return page, win, user
+
+
+def test_app_approval_search_stays_above_the_list_after_refresh():
+    win = FakeWindow()
+    page = computer.AppsPage(win)
+    drain()
+    for _ in range(2):
+        widgets = list(_walk(page.prefs))
+        assert widgets.index(page.search_group) < widgets.index(page.group)
+        assert page.search_entry.get_title() == "Search all apps"
+        page.refresh()
+        drain()
+    assert not win.toasts
+
+
+def test_account_app_search_precedes_blocks_and_inventory_starts_collapsed():
+    page, _w, _u = _apps_tab(
+        blocked_apps=[f"org.example.App{i}" for i in range(50)],
+        installed=[{"ref": "org.example.Reader", "name": "Reader", "approved": True,
+                    "kind": "utilities", "rating": {}}])
+    widgets = list(_walk(page.stack.get_child_by_name("apps")))
+    groups = [w for w in widgets if isinstance(w, Adw.PreferencesGroup)]
+    assert groups[0] is page.blocked_apps_group
+    assert widgets.index(page.block_entry) < widgets.index(page.blocked_list)
+    assert widgets.index(page.block_results) < widgets.index(page.blocked_list)
+    assert len(_rows(page.blocked_list)) == 50
+    assert "Reader" not in {r.get_title() for r in _rows(page.blocked_list)}
+    assert not page.installed_expander.get_expanded()
+    page.installed_expander.set_expanded(True)
+    drain()
+    assert "Reader" in {r.get_title() for r in _rows(page.apps_list)}
 
 
 def test_the_apps_tab_offers_the_approved_list_or_the_whole_store():
@@ -3592,3 +3631,54 @@ def test_skin_paints_only_the_skin_and_frost_covers_the_whole_figure():
 def test_no_example_pictures_where_pictures_are_not_filtered():
     _page, _w, preview = _media_preview(mode="unfiltered")
     assert preview is None
+
+
+# -- app updates use an independent schedule below system updates (#78) --
+
+def test_app_update_controls_follow_system_updates_and_save_independently():
+    win = FakeWindow()
+    win.policy["updates"] = {"auto": "monthly", "notify": False,
+                             "apps": {"schedule": "daily", "mode": "notify"}}
+    page = computer.UpdatesPage(win)
+    drain()
+    widgets = list(_walk(page.prefs))
+    assert widgets.index(page.auto_group) < widgets.index(page.app_auto_group)
+    group = page.app_auto_group
+    assert computer.AUTO_SCHEDULES[group.schedule_row.get_selected()] == "daily"
+    assert group.mode_row.get_selected() == 1
+    group.mode_row.set_selected(0)
+    drain()
+    assert ("set_auto_app_updates", "daily", "update") in win.client.calls
+    assert win.policy["updates"]["auto"] == "monthly"
+    page.auto_group.schedule_row.set_selected(0)
+    drain()
+    assert win.policy["updates"]["apps"] == {"schedule": "daily", "mode": "update"}
+    group.schedule_row.set_selected(0)
+    drain()
+    assert group.mode_row.get_sensitive()
+    assert win.policy["updates"]["auto"] == "off"
+
+
+def test_refused_app_update_settings_restore_both_controls():
+    win = FakeWindow(FakeClient(app_auto_refuse="not authorized"))
+    group = computer.AutoAppUpdatesGroup(win)
+    drain()
+    group.schedule_row.set_selected(1)
+    drain()
+    assert computer.AUTO_SCHEDULES[group.schedule_row.get_selected()] == "off"
+    assert group.schedule_row.get_sensitive()
+    assert group.mode_row.get_sensitive()
+    assert any("not authorized" in t for t in win.toasts)
+
+
+def test_notification_only_can_be_selected_before_enabling_app_updates():
+    win = FakeWindow()
+    group = computer.AutoAppUpdatesGroup(win)
+    drain()
+    assert group.schedule == "off"
+    group.mode_row.set_selected(1)
+    drain()
+    assert ("set_auto_app_updates", "off", "notify") in win.client.calls
+    group.schedule_row.set_selected(1)
+    drain()
+    assert ("set_auto_app_updates", "daily", "notify") in win.client.calls

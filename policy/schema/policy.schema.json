@@ -339,6 +339,29 @@
           "type": "boolean",
           "default": true,
           "description": "Tell the people signed in, once per version, when a downloaded update is ready for a restart. Absent means on."
+        },
+        "apps": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "schedule": {
+              "enum": [
+                "off",
+                "daily",
+                "weekly",
+                "biweekly",
+                "monthly"
+              ],
+              "default": "off"
+            },
+            "mode": {
+              "enum": [
+                "update",
+                "notify"
+              ],
+              "default": "update"
+            }
+          }
         }
       }
     },

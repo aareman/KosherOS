@@ -1,0 +1,12 @@
+[Unit]
+Description=Check for app updates on the administrator's schedule
+# kosherd enables this when updates.apps.schedule is not off.
+
+[Timer]
+OnCalendar=daily
+RandomizedDelaySec=4h
+FixedRandomDelay=true
+Persistent=true
+
+[Install]
+WantedBy=timers.target

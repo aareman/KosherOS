@@ -1,0 +1,9 @@
+#!/usr/bin/python3
+"""Give a human session its root-owned GNOME desktop profile."""
+import os
+
+from kosherd.desktoplimits import selected_profile
+
+profile = selected_profile(os.getuid())
+if profile is not None:
+    print(f"DCONF_PROFILE={profile}")

@@ -212,6 +212,7 @@ cloud VM, `just dev-install` installs the stack into it, and
 | `60-persistence` | revisions advance, the policy stays root-only, a restarted daemon rebuilds enforcement, sessions do not survive a restart |
 | `70-categories` | the category list is loaded, blocking reaches the right layer for the right accounts, unblocking restores access |
 | `80-hardening` | the protections the red-team review asked for, asserted from a supervised account: every port through the proxy, no browsing by bare address, DoH blocked by shape, the LAN limited, the boot menu and disk protected, consoles closed, images verified. Each line carries its finding number, and a red line is information: the suite is the acceptance test as each fix lands | The `[N]` lines are the October re-audit's findings (developer tooling, the page filter, image trust), measured the same way |
+| `85-services` | N9: the channel-search helper runs without root or capabilities, cannot write system files or use another loopback listener, and its proxy admits only channel search; the store units have no boot cycle, SELinux relabeling works, the mount is `nosuid,nodev`, and a fresh Nix derivation builds with sandbox fallback disabled | |
 ## The boot test
 
 Every other test exercises a system that is already up. `just test-boot`

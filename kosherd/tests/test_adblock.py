@@ -143,7 +143,9 @@ CHROMIUM_POLICIES = (
 
 @pytest.mark.parametrize("path", CHROMIUM_POLICIES)
 def test_chromium_based_browsers_keep_doh_off(path):
-    assert json.loads((FILES / path).read_text())["DnsOverHttpsMode"] == "off"
+    policy = json.loads((FILES / path).read_text())
+    assert policy["DnsOverHttpsMode"] == "off"
+    assert policy["EncryptedClientHelloEnabled"] is False
 
 
 @pytest.mark.parametrize("app", [
@@ -398,3 +400,8 @@ def test_a_built_in_host_cannot_be_disallowed_and_the_list_is_shown(monkeypatch,
     assert "*.online-metrix.net" in out and "fp.shop-check.example" in out
     assert _adblock("allow") == 2, "nothing named"
     assert _adblock("allow", "not a host") == 2
+
+
+def test_firefox_keeps_hostname_checks_visible_without_ech_grease():
+    policy = json.loads((FILES / "etc/firefox/policies/policies.json").read_text())["policies"]
+    assert policy["DisableEncryptedClientHello"] is True

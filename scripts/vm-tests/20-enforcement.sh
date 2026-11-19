@@ -31,7 +31,17 @@ check "non-whitelisted site is blocked"         1 fetch_as wlkid https://www.wik
 # address fails on the certificate anyway, so this passed for two wrong
 # reasons at once.
 other=$(resolve4 wikipedia.org)
-check "direct-IP browsing is blocked (http://$other/)" 1 fetch_as wlkid "http://$other/"
+proxy_refuses_address() {
+    local reply
+    [ -n "$1" ] || return 1
+    reply=$(as wlkid curl -sS --max-time 15 -w '\n%{http_code}' "http://$1/") || return 1
+    [ "$(printf '%s\n' "$reply" | tail -1)" = 403 ] &&
+        printf '%s' "$reply" | grep -q 'KosherOS'
+}
+# Name-aware HTTP now returns an explicit block page. curl exits zero for
+# that valid HTTP response; require our 403 instead of a socket failure.
+assert_that "direct-IP browsing gets the proxy's block page (http://$other/)" \
+    proxy_refuses_address "$other"
 check_contains "whitelist set is populated"     "elements" nft list set inet kosher wl4
 
 section "Fail closed"

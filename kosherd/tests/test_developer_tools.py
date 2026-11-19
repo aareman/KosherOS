@@ -214,6 +214,7 @@ def test_the_proxy_gets_a_builder_identity(monkeypatch, tmp_path):
     assert builder["rules"] == []
     modes = (tmp_path / "listen.env").read_text()
     assert f"transparent@127.0.0.1:{nft.BUILDER_PORT}" in modes
+    assert f"transparent@::1:{nft.BUILDER_PORT}" in modes
 
 
 def test_without_nix_the_proxy_has_no_builder_identity(monkeypatch, tmp_path):

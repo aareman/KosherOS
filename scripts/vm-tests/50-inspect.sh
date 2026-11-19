@@ -107,6 +107,10 @@ media_before=$(kosherctl get-policy 2>/dev/null | python3 -c '
 import json, sys
 u = [u for u in json.load(sys.stdin)["users"] if u["uid"] == int(sys.argv[1])]
 print(u[0].get("media_level", "") if u else "")' "$uid")
+lan_before=$(kosherctl get-policy | python3 -c '
+import json, sys
+u = next(u for u in json.load(sys.stdin)["users"] if u["uid"] == int(sys.argv[1]))
+print(json.dumps(u.get("lan_hosts", [])))' "$uid")
 if ip netns add picsite && ip link add vpicsite type veth peer name vpicsitep \
         && ip link set vpicsitep netns picsite \
         && ip addr add 192.0.2.1/24 dev vpicsite && ip link set vpicsite up \
@@ -136,6 +140,19 @@ http.server.ThreadingHTTPServer(("192.0.2.2", 80), H).serve_forever()
         runuser -u wlkid -- curl -sS --max-time 15 -o /dev/null -D - -e "$2" "$1" \
             | grep -qi '^x-kosheros: image-hidden'
     }
+    shown() {
+        runuser -u wlkid -- python3 - "$1" "$2" <<'PICTURE'
+import sys, urllib.request
+request = urllib.request.Request(sys.argv[1], headers={"Referer": sys.argv[2]})
+with urllib.request.urlopen(request, timeout=15) as response:
+    assert response.status == 200
+    assert response.read() == b"\xff\xd8\xff\xe0" + b"\x00" * 6000 + b"\xff\xd9"
+PICTURE
+    }
+    # Site rules never confer private-network access. Grant only this
+    # controlled fixture device, then restore the account's original list.
+    check "the picture fixture has explicit device permission" 0 \
+        kctl lan-sites "$uid" 192.0.2.2
     kctl media "$uid" all >/dev/null
     kctl rules "$uid" clear >/dev/null
     kctl rules "$uid" allow 192.0.2.2 >/dev/null
@@ -146,8 +163,8 @@ http.server.ThreadingHTTPServer(("192.0.2.2", 80), H).serve_forever()
     kctl rules "$uid" pictures "192.0.2.2/gallery/*" >/dev/null
     kctl rules "$uid" allow 192.0.2.2 >/dev/null
     sleep 2
-    check "with pictures allowed on the folder, its picture is shown" 1 \
-        hidden http://192.0.2.2/gallery/p.jpg http://192.0.2.2/gallery/rings
+    check "with pictures allowed on the folder, its picture is shown" 0 \
+        shown http://192.0.2.2/gallery/p.jpg http://192.0.2.2/gallery/rings
     check "a picture outside the folder is still hidden" 0 \
         hidden http://192.0.2.2/other/p.jpg http://192.0.2.2/other/page
     check_contains "the folder's page asks for its full address with its pictures" \
@@ -157,6 +174,13 @@ else
     bad "could not make the test site for pictures"
 fi
 cleanup_picns
+python3 - "$uid" "$lan_before" <<'RESTORE_LAN'
+import json, sys
+from kosherd.client import DaemonClient
+client = DaemonClient()
+client.unlock()
+client.set_lan_hosts(int(sys.argv[1]), json.loads(sys.argv[2]))
+RESTORE_LAN
 kctl rules "$uid" clear >/dev/null
 [ -n "$media_before" ] && kctl media "$uid" "$media_before" >/dev/null
 

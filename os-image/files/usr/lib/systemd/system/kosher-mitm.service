@@ -43,6 +43,7 @@ ExecStartPre=/usr/bin/install -m 0644 \
 ExecStart=/usr/bin/env mitmdump \
     $MITM_MODES \
     --set connection_strategy=lazy \
+    --set upstream_cert=false \
     --set confdir=/var/lib/kosher-mitm \
     --set block_global=false \
     --set termlog_verbosity=warn \

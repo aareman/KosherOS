@@ -42,15 +42,15 @@ def test_nothing_is_degraded_when_everything_runs(monkeypatch):
     assert status["degraded"] == []
 
 
-def test_the_proxy_being_down_only_matters_if_somebody_is_inspected(monkeypatch):
-    # A house where nobody is in filtered mode does not need the proxy, and
-    # reporting it as a fault would train people to ignore the report.
+def test_the_proxy_being_down_matters_for_every_proxied_mode(monkeypatch):
+    # Basic/approved-sites accounts now need their Host/SNI checked too;
+    # a down proxy blocks their web and must be reported.
     users = [UserPolicy(uid=1001, username="a", mode="dnsfilter")]
     def run(argv, **kw):
         state = "failed" if "kosher-mitm.service" in argv else "active"
         return type("R", (), {"stdout": state, "returncode": 0})()
     status = _daemon(users, run, monkeypatch)
-    assert "kosher-mitm.service" not in status["degraded"]
+    assert "kosher-mitm.service" in status["degraded"]
 
 
 def test_the_picture_state_is_read_from_what_the_proxy_published(

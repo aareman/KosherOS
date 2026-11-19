@@ -55,7 +55,30 @@ PY
 if [ -z "$target" ]; then
     skip "every approved app is already installed; cannot test a fresh install"
 else
-    out=$(as wlkid flatpak install --system -y flathub "$target" 2>&1)
+    # This tests install authorization, independently of the site's network
+    # permission. A whitelist refusal before Flatpak reaches polkit cannot
+    # establish whether installation itself was denied.
+    out=$(python3 - "$uid" "$target" <<'CHECK_INSTALL' 2>&1
+import pwd, subprocess, sys
+from kosherd.client import DaemonClient
+uid, target = int(sys.argv[1]), sys.argv[2]
+client = DaemonClient()
+client.unlock()
+original = next(u['mode'] for u in client.get_policy()['users'] if u['uid'] == uid)
+user = pwd.getpwuid(uid)
+prefix = ['runuser', '-u', user.pw_name, '--', 'env',
+          'HOME=' + user.pw_dir, 'USER=' + user.pw_name, 'LOGNAME=' + user.pw_name]
+try:
+    client.set_filter_mode(uid, 'unfiltered')
+    subprocess.run([*prefix, 'curl', '-fsS', '--max-time', '30', '-o', '/dev/null',
+                    'https://dl.flathub.org/repo/summary.idx'], check=True)
+    result = subprocess.run([*prefix, 'flatpak', 'install', '--system', '-y',
+                             'flathub', target], capture_output=True, text=True, timeout=120)
+    print(result.stdout + result.stderr)
+finally:
+    client.set_filter_mode(uid, original)
+CHECK_INSTALL
+)
     case "$out" in
         *"not allowed"*)
             ok "a user cannot install system-wide ($target)" ;;

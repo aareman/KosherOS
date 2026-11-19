@@ -27,6 +27,7 @@
     "DNSOverHTTPS": {
       "Enabled": false,
       "Locked": true
-    }
+    },
+    "DisableEncryptedClientHello": true
   }
 }

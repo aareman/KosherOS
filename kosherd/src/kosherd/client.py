@@ -70,6 +70,24 @@ class DaemonClient:
     def finish_setup(self, guardian_password: str, grub_password: str) -> None:
         self._call("Setup", "FinishSetup", "(ss)", guardian_password, grub_password)
 
+    def disk_security(self) -> dict:
+        return json.loads(self._call("Setup", "DiskSecurity")[0])
+
+    def setup_disk_tpm(self, password: str, enabled: bool) -> None:
+        self._call("Setup", "SetupDiskTpm", "(sb)", password, enabled)
+
+    def disk_unlock_status(self) -> dict:
+        return json.loads(self._call("System", "DiskUnlockStatus")[0])
+
+    def enroll_disk_tpm(self, password: str) -> None:
+        self._call("System", "EnrollDiskTpm", "(s)", password)
+
+    def prepare_disk_recovery(self, disk_password: str) -> str:
+        return self._call("Setup", "PrepareDiskRecovery", "(s)", disk_password)[0]
+
+    def confirm_disk_recovery(self, recovery_key: str) -> None:
+        self._call("Setup", "ConfirmDiskRecovery", "(s)", recovery_key)
+
     # Session — one polkit prompt, then a sliding-timeout admin session
     def unlock(self) -> None:
         self._call("Session", "Unlock")
@@ -241,6 +259,9 @@ class DaemonClient:
         and which extra TCP ports the account may open directly."""
         self._call("Profiles", "SetNetworkAccess", "(ibss)", uid, bool(video_calls),
                    json.dumps([int(p) for p in extra_ports]), guardian_password)
+
+    def set_lan_hosts(self, uid: int, hosts: list[str], guardian_password: str = "") -> None:
+        self._call("Profiles", "SetLanHosts", "(iass)", uid, list(hosts), guardian_password)
 
     def set_ssh(self, uid: int, anywhere: bool, hosts: list[str],
                 guardian_password: str = "") -> None:

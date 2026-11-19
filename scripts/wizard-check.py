@@ -13,12 +13,15 @@ the D-Bus client is stubbed. If this passes, what remains untested is only
 systemd's wiring of /dev/console, which the script fix addresses and the
 boot verifies.
 """
-import os, pty, signal, sys, time
+import os, pty, signal, subprocess, sys, tempfile, time
 signal.alarm(40)
 sys.path.insert(0, "kosherd/src")
 
 import json
-RECORD = "/tmp/wizard-record.json"
+record_dir = tempfile.TemporaryDirectory(prefix="kosher-wizard-check-")
+RECORD = os.path.join(record_dir.name, "record.json")
+ENCRYPTED = "--encrypted" in sys.argv
+RECOVERY_KEY = "-".join(["0123abcd"] * 8)
 created = {}
 
 class FakeClient:
@@ -36,8 +39,21 @@ class FakeClient:
         created.update(username=username, full_name=full_name,
                        password=password)
         return 1000
+    def disk_security(self):
+        return {"encrypted": ENCRYPTED, "supported": ENCRYPTED,
+                "recovery_saved": False,
+                "message": "Disk encrypted" if ENCRYPTED else "Disk not encrypted"}
+    def prepare_disk_recovery(self, password):
+        assert password == "installer-disk-password"
+        created["recovery_prepared"] = True
+        return RECOVERY_KEY
+    def confirm_disk_recovery(self, key):
+        assert key == RECOVERY_KEY
+        created["recovery_confirmed"] = True
     def finish_setup(self, guardian, grub):
-        created.update(guardian=guardian)
+        if ENCRYPTED:
+            assert created.get("recovery_confirmed"), "finished without verified recovery"
+        created.update(guardian=guardian, grub=grub)
         with open(RECORD, "w") as fh:
             json.dump(created, fh)
 
@@ -96,6 +112,11 @@ steps = [
     (b"Confirm password: ",  "boot-test-pw-1"),
     (b"guardian password",   "n"),
 ]
+if ENCRYPTED:
+    steps += [
+        (b"Disk password from the installer: ", "installer-disk-password"),
+        (b"Enter the key from your written copy: ", RECOVERY_KEY),
+    ]
 ok = True
 for needle, answer in steps:
     if not expect(needle):
@@ -114,12 +135,24 @@ if ok:
     assert created.get("username") == "boot-test-admin", created
     assert created.get("password") == "boot-test-pw-1", created
     assert created.get("guardian") == "", created
-    # A city typed in lower case names its zone; nonsense was asked again.
     assert created.get("timezone") == "Asia/Jerusalem", created
+    assert created.get("grub") == "boot-test-pw-1", created
+    if ENCRYPTED:
+        assert created.get("recovery_prepared") and created.get("recovery_confirmed"), created
+        assert transcript.count(RECOVERY_KEY.encode()) == 1, "recovery confirmation echoed"
+        assert b"installer-disk-password" not in transcript, "disk password echoed"
     # The passwords were read with echo OFF: they must not be in what the
     # terminal displayed.
     assert b"boot-test-pw-1" not in transcript, "password echoed in the clear"
-    print("E2E OK: every prompt shown, every answer read, time zone set,")
-    print("        account created, guardian declined, password never echoed.")
+    print("E2E OK: every prompt shown, every answer read, account created,")
+    print("        guardian declined, password never echoed.")
+    if ENCRYPTED:
+        print("        encrypted disk recovery displayed once and verified without echo.")
+    else:
+        # Run the encrypted conversation too, through the same real pty.
+        signal.alarm(0)
+        result = subprocess.run([sys.executable, __file__, "--encrypted"], timeout=45)
+        if result.returncode:
+            sys.exit(result.returncode)
 else:
     sys.exit(1)

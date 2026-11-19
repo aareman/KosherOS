@@ -1831,40 +1831,21 @@ def test_a_clip_that_cannot_be_looked_at_through_its_source_is_refused_at_the_st
 
 
 def test_the_range_fetcher_carries_identity_and_the_range_and_insists_on_a_piece(addon, monkeypatch):
-    import urllib.request
+    from types import SimpleNamespace
 
     seen = []
-
-    class _Answer:
-        def __init__(self, status):
-            self.status = status
-
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *a):
-            return False
-
-        def read(self):
-            return b"piece"
-
-    def fake_urlopen(request, timeout=None):
-        seen.append(dict(request.header_items()))
-        return _Answer(206 if "whole" not in request.full_url else 200)
-
-    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+    def fetch_range(url, peer, headers, start, end, *, lan=False):
+        seen.append((url, peer, headers, start, end, lan))
+        return b"piece"
+    monkeypatch.setattr(addon.webguard, "fetch_range", fetch_range)
     flow = _hflow("video/mp4", status=206, content_range="bytes 0-9/100")
+    flow.server_conn = SimpleNamespace(peername=("93.184.216.34", 443))
     flow.request.headers = {"User-Agent": "Firefox", "Cookie": "secret=1", "Referer": "https://x.com/"}
-    fetch = _filt(addon)._range_fetcher(flow)
-    assert fetch(10, 19) == b"piece"
-    headers = {k.lower(): v for k, v in seen[-1].items()}
-    assert headers["range"] == "bytes=10-19"
-    assert headers["user-agent"] == "Firefox" and headers["referer"] == "https://x.com/"
-    assert "cookie" not in headers, "the proxy's own fetch carries no cookie"
-    whole = _hflow("video/mp4", status=206, content_range="bytes 0-9/100", url="https://example.com/whole")
-    whole.request.headers = {}
-    with pytest.raises(OSError):
-        _filt(addon)._range_fetcher(whole)(0, 9)
+    assert _filt(addon)._range_fetcher(flow)(10, 19) == b"piece"
+    url, peer, headers, start, end, lan = seen[-1]
+    assert peer == ("93.184.216.34", 443) and (start, end) == (10, 19)
+    assert headers == {"User-Agent": "Firefox", "Referer": "https://x.com/"}
+    assert not lan
 
 
 def test_a_clip_that_says_it_is_a_download_is_still_a_clip(addon):

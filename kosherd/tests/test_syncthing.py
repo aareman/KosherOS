@@ -237,12 +237,7 @@ def test_a_whitelist_account_is_not_opened_by_anothers_syncthing():
             assert "@git4" in rule or "@git6" in rule, rule
     # Its own chain is unchanged: only its list and the system list.
     assert chain(out, "mode_whitelist") == [
-        "jump evasion_block",
-        "ip daddr @wl4 tcp dport { 80, 443 } accept",
-        "ip6 daddr @wl6 tcp dport { 80, 443 } accept",
-        "ip daddr @sys4 tcp dport { 80, 443 } accept",
-        "ip6 daddr @sys6 tcp dport { 80, 443 } accept",
-        "reject",
+        "jump evasion_block", "reject",
     ]
 
 

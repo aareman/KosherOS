@@ -1,0 +1,3 @@
+# Try enrolled TPM tokens before asking for the disk password.
+# The LUKS header specifies the required measured-boot policy.
+kargs = ["rd.luks.options=tpm2-device=auto"]

@@ -95,6 +95,7 @@ in
     pkgs.nftables # `nft --check` of rendered rulesets
     pkgs.shellcheck # the VM test suites and installer scripts
     # Fedora test VM (plain QEMU + cloud-init; no libvirt needed)
+    pkgs.swtpm # optional Secure Boot / encrypted-disk acceptance
     pkgs.qemu_kvm
     pkgs.cloud-utils # cloud-localds for the cloud-init seed
     # OS image builds

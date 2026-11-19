@@ -172,6 +172,10 @@ wl=$(id -u wlkid)
 dk=$(id -u dnskid)
 kctl set-mode "$wl" filtered >/dev/null
 kctl set-mode "$dk" dnsfilter >/dev/null
+kctl developer-tools "$wl" off >/dev/null
+kctl developer-tools "$dk" off >/dev/null
+kosherctl lan-sites "$wl" none --guardian-password "" >/dev/null
+kosherctl lan-sites "$dk" none --guardian-password "" >/dev/null
 kctl rules "$wl" clear >/dev/null
 # portquiz.net answers plain HTTP on every port, which makes it the one
 # deterministic probe for "web on a non-standard port".
@@ -235,18 +239,13 @@ assert_that "[F3] filtered account is blocked on a bare address" \
 # -- F4: encrypted DNS ---------------------------------------------------------------
 
 section "[F4] Encrypted DNS"
-# "By shape" means the proxy recognises a DoH request whatever the address,
-# so the probe must reach the proxy: a resolver the shipped NAME lists
-# already block (dns.nextdns.io answers 0.0.0.0 here) never gets there and
-# would pass for the wrong reason. Precondition: the host resolves.
-doh_host=cloudflare-dns.com
-doh_ip=$(resolve4 "$doh_host")
-if [ -z "$doh_ip" ] || [ "$doh_ip" = "0.0.0.0" ]; then
-    skip "[F4] DoH blocked by shape: $doh_host is already blocked by name here, so shape cannot be told apart"
-else
-    assert_that "[F4] DoH to a resolver the lists do not name ($doh_host) is blocked by shape" \
-        blocked_as wlkid "https://$doh_host/dns-query?dns=AAABAAABAAAAAAAAA2ZvbwA"
-fi
+# A controlled origin and real mitmdump prove what was refused and why.
+# The ordinary request must reach the same origin before/after the negative
+# probes; network failure or a category-list block cannot impersonate F4.
+assert_that "[F2/F4/F5/F6] controlled HTTP/TLS name, DoH and private-upstream checks" \
+    python3 "$(dirname "$0")/fixtures/webguard.py"
+assert_that "[F2/F5/F6] IPv6 proxy origin and hostname checks" \
+    env KOSHER_TEST_IPV6=1 python3 "$(dirname "$0")/fixtures/webguard.py"
 image_only "[F4] Firefox is told never to use DoH (config)" \
     && assert_that "[F4] Firefox is told never to use DoH (config)" firefox_doh_off
 image_only "[F4] Chromium is told never to use DoH (config)" \
@@ -261,56 +260,36 @@ image_only "[F4] the Chromium Flatpak reads that policy" \
 # -- F5 -------------------------------------------------------------------------------
 
 section "[F5] Whitelist checks names, not addresses"
-skip "[F5] needs the proxy's name-check mode; no deterministic probe against a shared CDN edge"
+# Measured by the shared-address Host/SNI fixture above, including no SNI/ECH.
 
 # -- F6: the LAN --------------------------------------------------------------------
 
 section "[F6] The LAN in filtered modes"
-# Measured, not grepped: the rules that refuse the LAN are not one line
-# naming @lan4 (they are the mode chains' own refusal, after the local
-# services are let through), so a grep for one failed while the LAN was in
-# fact closed. Find a web service on the LAN that root reaches, then ask
-# it the same thing as the supervised accounts. Judged by the answer, not
-# by a connection: a port the proxy takes in connects to the proxy, not to
-# the LAN.
-gw=$(ip -4 route show default | awk '{print $3; exit}')
-lan_url=""
-lan_code=""
-for p in 80 8080 5078 5077; do
-    [ -n "$gw" ] || break
-    code=$(curl -s -m 4 -o /dev/null -w '%{http_code}' "http://$gw:$p/" 2>/dev/null)
-    if [ -n "$code" ] && [ "$code" != 000 ]; then
-        lan_url="http://$gw:$p/"
-        lan_code=$code
-        break
-    fi
-done
-lan_reached_by() {
-    local out code
-    out=$(runuser -u "$1" -- curl -s -m 8 -w '\n__CODE__%{http_code}' "$lan_url" 2>/dev/null)
-    code=${out##*__CODE__}
-    [ "$code" = "$lan_code" ] && ! printf '%s' "$out" | grep -qi "KosherOS blocked"
-}
-if [ -z "$lan_url" ]; then
-    skip "[F6] supervised accounts are limited to local services on the LAN: no web service on the LAN answers root"
-else
-    check "[F6] a whitelist account cannot reach a web service on the LAN" 1 lan_reached_by wlkid
-    check "[F6] a dnsfilter account cannot reach a web service on the LAN" 1 lan_reached_by dnskid
-fi
+# A temporary network namespace supplies both positive controls itself;
+# no router service is assumed and an absent LAN target is a harness failure.
+assert_that "[F6] supervised LAN direct TCP/UDP is refused (IPv4 and IPv6)" \
+    python3 "$(dirname "$0")/fixtures/lan.py" wlkid dnskid
 
 # -- F7: the boot path ----------------------------------------------------------------
 
 section "[F7] The boot path"
 image_only "[F7] the boot menu is password-protected" \
     && assert_that "[F7] the boot menu is password-protected" grub_password_set
-# Encryption is the installer's job (#117). A development disk, made from
-# the image with a root ssh key in it, is never encrypted, so there the
-# check has nothing to say.
-if [ -s /root/.ssh/authorized_keys ]; then
-    skip "[F7] the disk is encrypted: a development disk is never encrypted; the installer's job (#117)"
-else
-    image_only "[F7] the disk is encrypted" \
-        && assert_that "[F7] the disk is encrypted" bash -c 'lsblk -rno TYPE | grep -q crypt'
+# Always inspect actual system ancestry. An SSH key must not skip a real
+# encrypted-installer rehearsal; only a known plaintext development disk
+# is exempt. An inspection error is a failed check, never a skip.
+if image_only "[F7] the system and policy disk are encrypted"; then
+    if encrypted=$(python3 -c 'from kosherd.disksecurity import inspect; print("yes" if inspect()["encrypted"] else "no")'); then
+        if [ "$encrypted" = yes ]; then
+            ok "[F7] the system and policy disk are encrypted"
+        elif [ -s /root/.ssh/authorized_keys ] && [ "${KOSHER_EXPECT_ENCRYPTED:-0}" != 1 ]; then
+            skip "[F7] plaintext development disk; run the encrypted installer acceptance separately (#117)"
+        else
+            bad "[F7] the system or policy disk is not encrypted"
+        fi
+    else
+        bad "[F7] could not inspect system-disk encryption"
+    fi
 fi
 image_only "[F7] no dracut shell on a failed boot" \
     && check_contains "[F7] no dracut shell on a failed boot" "rd.shell=0" cat /proc/cmdline
@@ -331,8 +310,13 @@ image_only "[F8] text consoles are not offered to accounts" \
 
 # -- F9 -------------------------------------------------------------------------------
 
-section "[F9] App list wording"
-skip "[F9] UI wording; not machine-checkable"
+section "[F9] Desktop app limits"
+check_contains "[F9] the restricted account's GNOME command prompt is disabled" "true" \
+    as_session wlkid bash -lc 'gsettings get org.gnome.desktop.lockdown disable-command-line'
+check_contains "[F9] that account cannot change the desktop restriction" "false" \
+    as_session wlkid bash -lc 'gsettings writable org.gnome.desktop.lockdown disable-command-line'
+check_contains "[F9] GNOME user switching is disabled for that account" "true" \
+    as_session wlkid bash -lc 'gsettings get org.gnome.desktop.lockdown disable-user-switching'
 
 # -- F10: image trust ------------------------------------------------------------------
 
@@ -406,7 +390,11 @@ check "[F13] the lockout survives a reboot (state under /var/lib)" 0 python3 -c 
 # -- F14 --------------------------------------------------------------------------------------
 
 section "[F14] Captive window scope"
-skip "[F14] decision still open on #33"
+kctl set-mode "$(id -u nokid)" none >/dev/null
+assert_that "[F14] the window admits web ports only and closes established connections at expiry" \
+    python3 "$(dirname "$0")/captive_probe.py" "$(id -u nokid)"
+check "[F14] the daemon refuses windows longer than ten minutes" 1 \
+    kosherctl captive "$(id -u nokid)" 11
 
 # -- N: since the September review (developer tooling, page filter, trust) --------
 # Numbered N1–N9 in the October comment on #33. Nix is only on the image,
@@ -471,5 +459,8 @@ sleep 2
 # family's list. GitHub alone hosts anything.
 check "[N2] a whitelist-only account cannot reach github.com directly" 1 \
     fetch_as wlkid https://github.com/
+
+assert_that "direct connections stop in both directions after policy change" \
+    python3 "$(dirname "$0")/fixtures/revocation.py"
 
 report

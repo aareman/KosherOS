@@ -221,6 +221,9 @@
         },
         "calm": {
           "$ref": "#/$defs/calm"
+        },
+        "lan_hosts": {
+          "$ref": "#/$defs/lanHosts"
         }
       }
     },
@@ -659,6 +662,9 @@
         },
         "calm": {
           "$ref": "#/$defs/calm"
+        },
+        "lan_hosts": {
+          "$ref": "#/$defs/lanHosts"
         }
       }
     },
@@ -739,6 +745,17 @@
           "description": "Seven strings of 24 characters, Monday first, one character per hour of the day starting at midnight: 1 = may be signed in, 0 = may not. Absent means always allowed."
         }
       }
+    },
+    "lanHosts": {
+      "type": "array",
+      "maxItems": 128,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 253
+      },
+      "description": "Independent permission for web access to exact LAN device hostnames or private IP addresses. No URL, port or wildcard. Normal site/mode checks still apply."
     }
   }
 }

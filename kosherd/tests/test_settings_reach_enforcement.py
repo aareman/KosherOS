@@ -14,6 +14,8 @@ mattering somewhere it is documented not to.
 """
 
 import json
+import tempfile
+from pathlib import Path
 
 import pytest
 
@@ -28,6 +30,8 @@ UID = 1001
 # Settings that deliberately do nothing in a given mode, and why. Anything
 # not listed here must reach enforcement.
 INERT = {
+    "lan_hosts": {"none": "no external web connections are allowed",
+                  "unfiltered": "an unfiltered account has no upstream restrictions"},
     "whitelist": {
         # The set only gates traffic in whitelist mode; elsewhere dnsmasq
         # is not asked to populate it.
@@ -77,6 +81,7 @@ INERT = {
 }
 
 EVERYTHING = {
+    "lan_hosts": ["printer.local"],
     "whitelist": ["chinuch.org"],
     "rules": [{"action": "block", "pattern": "example.com/x"}],
     "blocked_categories": ["adult"],
@@ -102,21 +107,19 @@ def rendered(mode: str) -> str:
              search_mod.render_policy(policy),
              timelimits.render_time_conf(policy)]
 
-    per_user = {}
-    for u in policy.effective_users():
-        if u.mode in ("filtered",) and (
-                u.rules or u.blocked_categories or u.media_level != "none"
-                or u.youtube or u.language_filter != "off"):
-            per_user[str(u.uid)] = {
-                "rules": u.rules, "blocked_categories": u.blocked_categories,
-                "media_level": u.media_level, "cover_style": u.cover_style,
-                "language_filter": u.language_filter, "youtube": u.youtube}
-    parts.append(json.dumps(per_user))
+    with tempfile.TemporaryDirectory() as directory, pytest.MonkeyPatch.context() as patch:
+        path = Path(directory)
+        patch.setattr(apply_mod, "MITM_DIR", path)
+        patch.setattr(apply_mod, "MITM_RULES_PATH", path / "rules.json")
+        patch.setattr(apply_mod.nixdaemon, "build_gid", lambda: None)
+        apply_mod.write_mitm_rules(policy, ())
+        parts.append((path / "rules.json").read_text())
     return "\n".join(parts)
 
 
 # What proves a setting reached enforcement, in the rendered artefacts.
 EVIDENCE = {
+    "lan_hosts": "printer.local",
     "whitelist": "chinuch.org",
     "rules": "example.com/x",
     "blocked_categories": "adult",

@@ -386,17 +386,17 @@ def _system_line(out, name):
     return next((l for l in out.splitlines() if l.startswith(f"nftset=/{name}/")), None)
 
 
-def test_whitelist_and_dnsfilter_reach_the_names_through_the_system_sets():
+def test_tailnet_names_remain_in_dns_sets_but_web_reaches_name_check_listeners():
     out = dns.render(_modes_policy(), SIGNED_IN_NAMES)
     for name in ("tailscale.com", "tail230de1.ts.net"):
         line = _system_line(out, name)
         assert line and "#sys4" in line and "#sys6" in line, out
     assert _system_line(out, "ts.net") is None
-    # and both modes accept the system sets on the web ports.
     rules = nft.render(_modes_policy(), dns_uid=990, mitm_uid=991)
-    for chain in ("mode_whitelist", "mode_dnsfilter"):
-        body = rules.split(f"chain {chain} {{", 1)[1].split("\n    }\n", 1)[0]
-        assert "ip daddr @sys4 tcp dport" in body and "ip6 daddr @sys6 tcp dport" in body
+    for uid in (1002, 1003):
+        assert f"meta skuid {uid} tcp dport {{ 80, 443 }} redirect" in rules
+    body = rules.split("chain mode_whitelist {", 1)[1].split("\n    }\n", 1)[0]
+    assert "@sys4" not in body and "@sys6" not in body
 
 
 def test_signed_out_the_names_are_in_no_set():
@@ -415,7 +415,9 @@ def test_the_proxy_is_told_the_names_for_every_filtered_account(tmp_path, monkey
     monkeypatch.setattr(apply_mod.nixdaemon, "build_gid", lambda: None)
     apply_mod.write_mitm_rules(_modes_policy(), SIGNED_IN_NAMES)
     doc = json.loads((tmp_path / "rules.json").read_text())
-    assert list(doc) == ["1001"]
+    assert list(doc) == ["1001", "1002", "1003"]
+    assert doc["1002"]["allowed_hosts"] == list(SIGNED_IN_NAMES)
+    assert doc["1003"]["lan_hosts"] == []  # tailnet service allowance is not LAN permission
     assert doc["1001"]["system_allowed"] == list(SIGNED_IN_NAMES)
     apply_mod.write_mitm_rules(_modes_policy(), ())
     assert json.loads((tmp_path / "rules.json").read_text())["1001"]["system_allowed"] == []

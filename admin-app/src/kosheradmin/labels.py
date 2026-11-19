@@ -526,6 +526,8 @@ def change_sentence(event: dict, users_by_uid: dict | None = None) -> tuple[str,
         what = f"App no longer approved ({arg(0)})"
     elif method == "SetCaptiveMode":
         what = f"{who}: Wi-Fi sign-in window opened for {arg(1)} minutes"
+    elif method == "SetLanHosts":
+        what = f"{who}: home network website permissions changed"
     elif method == "SetGuardianPassword":
         what = "Guardian password set"
     elif method == "DisableGuardian":

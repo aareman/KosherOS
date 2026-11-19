@@ -18,9 +18,9 @@ from pathlib import Path
 
 from . import categories as categories_mod
 from . import (buildsources, containers, dns, lists, mitmca, nft, nixdaemon,
-               paymentsecurity, sshin, syncthing, tailnet)
+               paymentsecurity, sshin, syncthing, tailnet, whitelists)
 from . import search as search_mod
-from .policy import INSPECTED_MODES, SAFESEARCH_MODES, UNFILTERED_MODES, Policy
+from .policy import DEVELOPER_REGISTRIES, INSPECTED_MODES, PROXIED_MODES, SAFESEARCH_MODES, UNFILTERED_MODES, Policy
 
 log = logging.getLogger(__name__)
 
@@ -74,6 +74,13 @@ def mitm_uid() -> int | None:
         return None
 
 
+def channel_search_uid() -> int | None:
+    try:
+        return pwd.getpwnam("kosher-ytsearch").pw_uid
+    except KeyError:
+        return None
+
+
 def write_mitm_rules(policy: Policy, tailnet_allowed: tuple[str, ...] | None = None) -> None:
     """Render what the unprivileged proxy needs: per-uid rules and categories.
 
@@ -89,13 +96,14 @@ def write_mitm_rules(policy: Policy, tailnet_allowed: tuple[str, ...] | None = N
     ports = nft.mitm_ports(policy)
     per_user = {}
     for user in policy.effective_users():
-        if user.mode not in INSPECTED_MODES:
+        if user.mode not in PROXIED_MODES:
             continue
         # Every inspected user is listed, even one with nothing configured:
         # the entry carries the port the proxy identifies them by. (The
         # proxy still fails closed for a port it has no entry for.)
         per_user[str(user.uid)] = {
             "port": ports[user.uid],
+            "lan_hosts": list(user.lan_hosts),
             "rules": user.rules,
             "blocked_categories": user.blocked_categories,
             "media_level": user.media_level,
@@ -110,7 +118,26 @@ def write_mitm_rules(policy: Policy, tailnet_allowed: tuple[str, ...] | None = N
             # the proxy; a key of its own so the reason is on record.
             "never_blocked": paymentsecurity.combined(policy.adblock_allowed),
         }
+        if user.mode not in INSPECTED_MODES:
+            # No content inspection or path rules in name-only modes. The
+            # family list is per account; machine update/CDN names are not
+            # web permissions for the person at the keyboard (F5).
+            entry = per_user[str(user.uid)]
+            entry.update(mode=user.mode, rules=[], media_level="none",
+                         language_filter="off", youtube={}, calm={},
+                         allowed_hosts=[*whitelists.effective(user),
+                                        *(DEVELOPER_REGISTRIES if user.developer_tools else ()),
+                                        *tailnet_allowed],
+                         lan_hosts=list(user.lan_hosts))
     listen_ports = sorted(ports.values())
+    if channel_search_uid() is not None:
+        per_user["channel-search"] = {
+            "port": nft.CHANNEL_SEARCH_PORT, "mode": "filtered",
+            "rules": [], "blocked_categories": [], "media_level": "none",
+            "cover_style": "frost", "language_filter": "off", "youtube": {},
+            "calm": {},
+        }
+        listen_ports.append(nft.CHANNEL_SEARCH_PORT)
     if nixdaemon.build_gid() is not None:
         # The Nix build users (#123): a supervised identity of their own,
         # with bare addresses and DoH refused and no picture or text
@@ -135,8 +162,8 @@ def write_mitm_rules(policy: Policy, tailnet_allowed: tuple[str, ...] | None = N
     _write_atomic(MITM_RULES_PATH, json.dumps(per_user, indent=2) + "\n", mode=0o644)
     # The listener list, one transparent mode per port. systemd splits the
     # unquoted $MITM_MODES on whitespace into separate arguments.
-    modes = " ".join(f"--mode transparent@127.0.0.1:{port}"
-                     for port in sorted(listen_ports))
+    modes = " ".join(f"--mode transparent@{host}:{port}"
+                     for port in sorted(listen_ports) for host in ("127.0.0.1", "::1"))
     # Beside the rules file (not a fixed path), so a relocated rules file in
     # a test or a future layout takes its listener list with it. Read by
     # kosher-mitm.service as EnvironmentFile.
@@ -268,6 +295,59 @@ def _file_stamp(path: Path) -> str:
         return ""
 
 
+def _connection_policy_stamp() -> str:
+    """What an already-open proxy stream cannot safely learn by rereading.
+
+    Name-only TLS is passed through after its first ClientHello. Removing
+    an approved host, tightening categories or switching to full inspection
+    must close that stream, even when the listener ports did not change.
+    A LAN permission also bounds existing upstream connections/downloads.
+    Ordinary filtered-page rules and visual settings remain live-reloaded.
+    """
+    doc = json.loads(MITM_RULES_PATH.read_text())
+    connections = {}
+    for uid, entry in doc.items():
+        mode = entry.get("mode", "filtered")
+        connection = {"mode": mode, "port": entry.get("port"),
+                      "lan_hosts": sorted(set(entry.get("lan_hosts", ())))}
+        if mode in PROXIED_MODES and mode not in INSPECTED_MODES:
+            for key in ("allowed_hosts", "blocked_categories", "system_allowed", "never_blocked"):
+                connection[key] = sorted(set(entry.get(key, ())))
+        connections[uid] = connection
+    return json.dumps(connections, sort_keys=True, separators=(",", ":"))
+
+
+def _listener_identities_changed(policy: Policy) -> bool:
+    """Whether nft would hand a listener to a different proxy identity.
+
+    Listener ports are allocated by mode and UID, so an account addition,
+    removal or mode change can reassign an existing port. The old proxy
+    must be stopped before nft permits its new owner to reach that port.
+    """
+    wanted = {port: str(uid) for uid, port in nft.mitm_ports(policy).items()}
+    if nixdaemon.build_gid() is not None:
+        wanted[nft.BUILDER_PORT] = "builder"
+    if channel_search_uid() is not None:
+        wanted[nft.CHANNEL_SEARCH_PORT] = "channel-search"
+    try:
+        doc = json.loads(MITM_RULES_PATH.read_text())
+    except FileNotFoundError:
+        doc = {}
+    except (OSError, ValueError):
+        return True
+    if not isinstance(doc, dict):
+        return True
+    previous = {}
+    for uid, entry in doc.items():
+        if not isinstance(entry, dict) or type(entry.get("port")) is not int:
+            return True
+        port = entry["port"]
+        if port in previous:
+            return True
+        previous[port] = uid
+    return previous != wanted
+
+
 def _restart_if_changed(service: str, fingerprint: str):
     """Restart `service` only when what it reads at start has changed since
     kosherd last started it, or when it is not running; otherwise leave it.
@@ -276,8 +356,10 @@ def _restart_if_changed(service: str, fingerprint: str):
     The proxy loads an image model, so each restart cost seconds before
     kosherd could answer, and for those seconds every account's web was
     down. Both re-read their policy file when it changes (rules.json,
-    policy.json); what they read only at start is the listener list and the
-    lists. The fingerprint of those is kept in STARTED_DIR.
+    policy.json). The proxy must additionally close TLS passthrough streams
+    when connection-level permissions change: those streams have no later
+    HTTP hooks. Listener/list and connection-policy fingerprints are kept
+    in STARTED_DIR.
     """
     stamp = STARTED_DIR / service
     running = subprocess.run(["systemctl", "is-active", "--quiet", service],
@@ -311,6 +393,7 @@ def apply_policy(policy: Policy) -> None:
         subids = {}
     ruleset = nft.render(policy, dns_uid=dnsmasq_uid(), mitm_uid=mitm_uid(),
                          search_uid=search_uid(), build_gid=nixdaemon.build_gid(),
+                         channel_search_uid=channel_search_uid(),
                          subids=subids, syncthing=syncthing.nft_inputs())
 
     # Syntax-check before touching the live ruleset or the boot file.
@@ -320,6 +403,14 @@ def apply_policy(policy: Policy) -> None:
         res = subprocess.run(["nft", "--check", "-f", check.name], capture_output=True, text=True)
         if res.returncode != 0:
             raise ApplyError(f"rendered ruleset failed nft --check: {res.stderr}")
+
+    if _listener_identities_changed(policy):
+        stopped = subprocess.run(["systemctl", "stop", MITM_SERVICE],
+                                 capture_output=True, text=True)
+        if stopped.returncode != 0:
+            # Keep both the live firewall and its boot copy unchanged: a
+            # new owner must never reach a port with the previous policy.
+            raise ApplyError(f"could not stop {MITM_SERVICE} before listener reassignment: {stopped.stderr}")
 
     _write_atomic(NFT_RULESET_PATH, ruleset, mode=0o600)
     res = subprocess.run(["nft", "-f", str(NFT_RULESET_PATH)], capture_output=True, text=True)
@@ -337,7 +428,7 @@ def apply_policy(policy: Policy) -> None:
     # because the build users' fetches go through it (#123): a stopped proxy
     # would refuse every build, not let it through.
     inspected = (any(u.mode == "filtered" for u in policy.effective_users())
-                 or nixdaemon.build_gid() is not None)
+                 or nixdaemon.build_gid() is not None or channel_search_uid() is not None)
     if inspected:
         # Inspection needs the machine to trust the proxy's CA, or every
         # HTTPS page would warn. Generated once, on first use.
@@ -345,11 +436,17 @@ def apply_policy(policy: Policy) -> None:
             mitmca.ensure_ca()
         except Exception:  # noqa: BLE001 - never leave the firewall unapplied
             log.exception("could not prepare the inspection CA")
+    proxied = inspected or any(u.mode in PROXIED_MODES for u in policy.effective_users())
     lists_now = _lists_fingerprint()
-    if inspected:
-        _restart_if_changed(MITM_SERVICE, "\n".join((
+    if proxied:
+        restarted = _restart_if_changed(MITM_SERVICE, "\n".join((
             _file_stamp(MITM_RULES_PATH.with_name("listen.env")), lists_now,
-            _file_stamp(mitmca.CA_PEM))))
+            _file_stamp(mitmca.CA_PEM), _connection_policy_stamp())))
+        if restarted is not None and restarted.returncode != 0:
+            # Do not report a tightened policy as applied while an old
+            # passthrough process might still own its accepted streams.
+            subprocess.run(["systemctl", "stop", MITM_SERVICE], capture_output=True, text=True)
+            raise ApplyError(f"could not restart {MITM_SERVICE}: {restarted.stderr}")
     else:
         subprocess.run(["systemctl", "stop", MITM_SERVICE], capture_output=True, text=True)
 

@@ -51,15 +51,16 @@ for d in "$stage"/pkg/*/; do
     name=$(basename "$d")
     dest=$($S python3 -c "import $name, os; print(os.path.dirname($name.__file__))" 2>/dev/null) \
         || { echo "  $name: not installed here, skipped"; continue; }
-    $S rsync -a --delete --exclude __pycache__ "$d" "$dest/"
+    $S rsync -a --chown=root:root --delete --exclude __pycache__ "$d" "$dest/"
     echo "  $name -> $dest"
 done
-$S rsync -a "$stage/files/usr/" /usr/
-$S rsync -a "$stage/files/etc/" /etc/
+$S rsync -a --chown=root:root "$stage/files/usr/" /usr/
+$S rsync -a --chown=root:root "$stage/files/etc/" /etc/
 $S install -m644 "$stage/policy.schema.json" /usr/share/kosher/policy.schema.json
-$S rsync -a "$stage/mitm/" /usr/share/kosher/mitm/
-$S rsync -a "$stage/branding/" /usr/share/kosher/branding/
+$S rsync -a --chown=root:root "$stage/mitm/" /usr/share/kosher/mitm/
+$S rsync -a --chown=root:root "$stage/branding/" /usr/share/kosher/branding/
 $S rm -rf "$stage"
+$S systemd-sysusers
 $S systemctl daemon-reload
 $S systemctl restart kosherd kosher-mitm kosher-search 2>&1 || true
 for unit in kosherd kosher-dns kosher-mitm kosher-search; do

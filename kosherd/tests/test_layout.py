@@ -664,3 +664,37 @@ def test_gnome_never_asks_the_family_for_a_donation():
     assert cp["org/gnome/settings-daemon/plugins/housekeeping"]["donation-reminder-enabled"] == "false"
     locks = (FILES / "etc/dconf/db/local.d/locks/10-kosheros-locks").read_text()
     assert "/org/gnome/settings-daemon/plugins/housekeeping/donation-reminder-enabled" in locks
+
+
+def test_asking_kosherd_has_a_deadline(monkeypatch):
+    """At sign-in the session waits for this step. A kosherd still starting
+    used to be waited for with no limit, until systemd killed the step at
+    30 seconds and every sign-in app had waited behind it."""
+    import time as time_mod
+    from kosherd import client as client_mod
+
+    asked = []
+
+    class Slow:
+        def my_layout(self, timeout_ms):
+            asked.append(timeout_ms)
+            raise RuntimeError("kosherd is still starting")
+
+    monkeypatch.setattr(client_mod, "DaemonClient", Slow)
+    started = time_mod.monotonic()
+    assert layout_mod.fetch_layout(deadline=0.3, delay=0.05) == layout_mod.DEFAULT_LAYOUT
+    assert time_mod.monotonic() - started < 2
+    assert asked and all(0 < t <= 300 for t in asked)
+
+
+def test_outside_gnome_kosherd_is_not_asked(monkeypatch, tmp_path):
+    from kosherd import client as client_mod
+
+    def never(*a, **k):
+        raise AssertionError("kosherd was asked under another compositor")
+
+    monkeypatch.setattr(client_mod, "DaemonClient", never)
+    monkeypatch.setenv("XDG_CURRENT_DESKTOP", "Umbriel")
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setattr(layout_mod, "seed_noctalia", lambda home: False)
+    assert layout_mod.main([]) == 0

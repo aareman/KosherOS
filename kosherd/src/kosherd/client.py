@@ -27,16 +27,18 @@ class DaemonClient:
         self._conn = Gio.bus_get_sync(Gio.BusType.SYSTEM, None)
         self._unlock_first = unlock_first
 
-    def _call(self, iface: str, method: str, signature: str | None = None, *args):
+    def _call(self, iface: str, method: str, signature: str | None = None, *args,
+              timeout_ms: int = GLib.MAXINT):
+        """`timeout_ms`: by default none, since polkit prompts block. A
+        caller that must not wait on a kosherd still starting, such as a
+        sign-in step, passes its own."""
         if self._unlock_first and needs_admin_session(method):
             self._unlock_first = False
             self.unlock()
         params = GLib.Variant(signature, args) if signature else None
         result = self._conn.call_sync(
             BUS_NAME, OBJECT_PATH, f"org.kosherlinux.Daemon1.{iface}", method,
-            params, None, Gio.DBusCallFlags.NONE,
-            GLib.MAXINT,  # polkit prompts block; never time out
-            None,
+            params, None, Gio.DBusCallFlags.NONE, timeout_ms, None,
         )
         return result.unpack() if result else ()
 
@@ -292,9 +294,9 @@ class DaemonClient:
             None, Gio.DBusSignalFlags.NONE, handler,
         )
 
-    def my_layout(self) -> str:
+    def my_layout(self, timeout_ms: int = GLib.MAXINT) -> str:
         """The calling user's own desktop layout (any active local user)."""
-        return self._call("Profiles", "GetMyLayout")[0]
+        return self._call("Profiles", "GetMyLayout", timeout_ms=timeout_ms)[0]
 
     def set_my_layout(self, layout: str) -> None:
         """Choose the calling user's own desktop (any active local user)."""

@@ -1079,7 +1079,17 @@ class KosherFilter:
         # Independent from all web/category/allow rules. A permitted public
         # website must not turn into access to the router after DNS rebinding.
         named = getattr(self.policy, "lan_hosts_for", lambda _uid: ())(uid)
-        return webguard.lan_permitted(host, named)
+        if webguard.lan_permitted(host, named):
+            return True
+        # The tailnet's own names, which every account may reach while
+        # Tailscale is set up (#211). They resolve to the tailnet's 100.x
+        # addresses, which count as private, so without this the private-
+        # network rule refused what #211 allows. Only the one tailnet's
+        # MagicDNS suffix: the other system-allowed names (Tailscale's own
+        # sites, payment hosts) are public and get no private access.
+        allowed = getattr(self.policy, "system_allowed_for", lambda _uid: ())(uid)
+        tailnet = tuple(n for n in allowed if n.startswith("*.") and n.endswith(".ts.net"))
+        return bool(tailnet) and host_in(webguard.hostname(host), tailnet)
 
     def tls_clienthello(self, data) -> None:
         uid = self._client_uid(data.context.client)

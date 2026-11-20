@@ -238,6 +238,29 @@ def test_category_exempt_payment_names_do_not_grant_private_network_access(addon
     assert f.server_conn.error
 
 
+def test_the_tailnets_own_names_reach_the_tailnet(addon, tmp_path):
+    """#211 lets every account reach the tailnet's names while Tailscale is
+    set up. They resolve to 100.x addresses, which count as private, and
+    the private-network rule refused them (a family's own machine on the
+    tailnet answered with the block page)."""
+    filt = filtering(addon, tmp_path, "filtered")
+    doc = json.loads(filt.policy.path.read_text())
+    doc["1001"]["system_allowed"] = ["login.tailscale.com", "*.tail1234.ts.net"]
+    filt.policy.path.write_text(json.dumps(doc))
+    f = flow("http://box.tail1234.ts.net/")
+    filt.request(f)
+    connect(filt, f, ["100.96.216.35"])
+    assert f.server_conn.error is None
+    # Another tailnet, Tailscale's public sites and the bare address do not.
+    for url, address in [("http://box.other5678.ts.net/", "100.64.0.9"),
+                         ("http://login.tailscale.com/", "192.168.1.1"),
+                         ("http://100.96.216.35/", "100.96.216.35")]:
+        f = flow(url)
+        filt.request(f)
+        connect(filt, f, [address])
+        assert f.server_conn.error, url
+
+
 def test_failed_connection_permission_caches_are_bounded_and_clients_clean_up(addon, tmp_path):
     filt = filtering(addon, tmp_path)
     client = object()

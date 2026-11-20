@@ -1173,9 +1173,38 @@ class KosherFilter:
         while len(self._private_upstreams) > 4096:
             self._private_upstreams.popitem(last=False)
         server.address = (addresses[0], port)
+        if (addresses[0], port) != (host, port):
+            # Remembered so server_connected can give the name back.
+            if not hasattr(self, "_pinned_names"):
+                self._pinned_names = OrderedDict()
+            self._pinned_names[server.id] = (host, port)
+            while len(self._pinned_names) > 4096:
+                self._pinned_names.popitem(last=False)
+
+    def server_connected(self, data) -> None:
+        """Name the connection after the site again once it is connected.
+
+        mitmproxy reuses an open upstream connection only for a request to
+        the same address, and allows five per site for each browser
+        connection. With the checked IP left in place, no request ever
+        matched an open connection: each one opened another, the sixth
+        waited for one to close, and busy sites (Next.js apps sending many
+        requests at once) sat on a spinner. The socket is already connected
+        to the address that was checked, so the name changes nothing about
+        where this connection goes.
+        """
+        name = getattr(self, "_pinned_names", {}).pop(data.server.id, None)
+        if name is not None:
+            # mitmproxy refuses `server.address = ...` on an open connection
+            # (it would redirect nothing, which is exactly why it is safe
+            # here). The field itself is plain data; the HTTP layer's reuse
+            # check reads it. test_webguard holds a Server that refuses the
+            # assignment the same way.
+            data.server.__dict__["address"] = name
 
     def server_disconnected(self, data) -> None:
         getattr(self, "_upstream_permissions", {}).pop(data.server.id, None)
+        getattr(self, "_pinned_names", {}).pop(data.server.id, None)
 
     def client_disconnected(self, client) -> None:
         for name in ("_client_permissions", "_private_upstreams"):

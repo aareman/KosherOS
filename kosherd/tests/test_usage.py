@@ -182,3 +182,45 @@ def test_the_demo_has_numbers_for_every_range():
     for name in ("today", "week", "month", "all"):
         assert out[name]["everyone"]["requests"] > 0, name
     assert out["all"]["everyone"]["requests"] > out["month"]["everyone"]["requests"]
+
+
+def test_week_and_month_carry_every_day_for_the_charts():
+    store = {"days": {}, "total": {}}
+    for back, requests, blocked in ((0, 10, 1), (2, 30, 0), (6, 40, 4), (20, 5, 0)):
+        entry = usage.empty()
+        entry.update(requests=requests, blocked=blocked, bytes_in=requests * 100)
+        store["days"].setdefault(_day(back), {})["1002"] = entry
+    other = usage.empty()
+    other["requests"] = 7
+    store["days"][_day(0)]["1003"] = other
+    # A malformed day or entry is drawn as nothing, not as an error.
+    store["days"][_day(1)] = {"1002": {"requests": -5, "blocked": "x"}, "1003": []}
+
+    out = usage.report(store, now=NOON)
+    week = out["week"]["daily"]
+    assert week["days"] == [_day(back) for back in range(6, -1, -1)]   # oldest first
+    assert [p["requests"] for p in week["everyone"]] == [40, 0, 0, 0, 30, 0, 17]
+    assert [p["blocked"] for p in week["people"]["1002"]] == [4, 0, 0, 0, 0, 0, 1]
+    assert [p["requests"] for p in week["people"]["1003"]] == [0, 0, 0, 0, 0, 0, 7]
+    assert week["everyone"][-1]["bytes_in"] == 1000
+    month = out["month"]["daily"]
+    assert len(month["days"]) == 30 and month["days"][-1] == _day(0)
+    assert sum(p["requests"] for p in month["everyone"]) == out["month"]["everyone"]["requests"]
+    # Today is one day and all time has no days to draw.
+    assert "daily" not in out["today"] and "daily" not in out["all"]
+    # Only numbers: no key that could carry an address.
+    assert set(week["everyone"][0]) == set(usage.DAILY)
+
+
+def test_each_range_carries_its_filter_time_buckets():
+    entry = usage.empty()
+    entry["requests"] = 3
+    entry["lat"][usage.bucket_of(1)] = 2
+    entry["lat"][usage.bucket_of(400)] = 1
+    store = {"days": {_day(0): {"1002": entry}}, "total": {"1002": {"requests": 3}}}
+    out = usage.report(store, now=NOON)
+    lat = out["today"]["everyone"]["lat"]
+    assert len(lat) == usage.BUCKETS and sum(lat) == 3
+    assert lat[usage.bucket_of(400)] == 1
+    # A total saved before buckets existed still answers, with empty ones.
+    assert out["all"]["people"]["1002"]["lat"] == [0] * usage.BUCKETS

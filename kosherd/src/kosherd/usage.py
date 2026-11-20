@@ -327,6 +327,9 @@ def summarise(entry: dict) -> dict:
     out["avg_ms"] = round(entry.get("lat_ms", 0) / count, 1) if count else None
     out["p50_ms"] = _percentile(lat, 0.50)
     out["p95_ms"] = _percentile(lat, 0.95)
+    # The buckets themselves, for the page's histogram. Older admin apps
+    # read only the keys above and ignore this one.
+    out["lat"] = [int(v) for v in lat] if len(lat) == BUCKETS else [0] * BUCKETS
     return out
 
 
@@ -345,22 +348,35 @@ def _percentile(lat: list[int], fraction: float) -> int | None:
     return LATENCY_BOUNDS_MS[i] if i < len(LATENCY_BOUNDS_MS) else SLOWEST_MS
 
 
+# What each day of a range's chart carries: enough to draw pages loaded
+# with the blocked share, and the data used, and nothing that names a site.
+DAILY = ("requests", "blocked", "bytes_in")
+
+
 def report(store: dict, now: float | None = None) -> dict:
     """{range: {"everyone": numbers, "people": {uid: numbers}}} for today,
-    the past week, the past month and all time."""
+    the past week, the past month and all time.
+
+    The week and the month also carry "daily": every day of the range,
+    oldest first, zero where nothing was counted, as
+    {"days": [iso date], "everyone": [{counter: n}], "people": {uid: [...]}}."""
     today = datetime.date.fromtimestamp(now if now is not None else time.time())
     out = {}
+    stored = store.get("days", {})
     for name, days in RANGES.items():
-        wanted = {(today - datetime.timedelta(days=i)).isoformat()
-                  for i in range(days)}
+        dates = [(today - datetime.timedelta(days=i)).isoformat()
+                 for i in reversed(range(days))]
+        wanted = set(dates)
         people: dict[str, dict] = {}
-        for day, entries in store.get("days", {}).items():
+        for day, entries in stored.items():
             if day not in wanted or not isinstance(entries, dict):
                 continue
             for uid, entry in entries.items():
                 if isinstance(entry, dict):
                     merge(people.setdefault(uid, empty()), entry)
         out[name] = _ranged(people)
+        if days > 1:
+            out[name]["daily"] = _daily(stored, dates, people)
     out["all"] = _ranged({uid: entry for uid, entry in store.get("total", {}).items()
                           if isinstance(entry, dict)})
     out["since"] = store.get("since")
@@ -373,3 +389,28 @@ def _ranged(people: dict[str, dict]) -> dict:
         merge(everyone, entry)
     return {"everyone": summarise(everyone),
             "people": {uid: summarise(entry) for uid, entry in people.items()}}
+
+
+def _daily(stored: dict, dates: list[str], people: dict) -> dict:
+    def point(entry) -> dict:
+        entry = entry if isinstance(entry, dict) else {}
+        return {name: _number(entry.get(name)) for name in DAILY}
+
+    everyone, per_person = [], {uid: [] for uid in people}
+    for day in dates:
+        entries = stored.get(day)
+        entries = entries if isinstance(entries, dict) else {}
+        total = {name: 0 for name in DAILY}
+        for uid, entry in entries.items():
+            numbers = point(entry)
+            for name in DAILY:
+                total[name] += numbers[name]
+        everyone.append(total)
+        for uid, series in per_person.items():
+            series.append(point(entries.get(uid)))
+    return {"days": dates, "everyone": everyone, "people": per_person}
+
+
+def _number(value) -> int:
+    return value if isinstance(value, int) and not isinstance(value, bool) \
+        and 0 < value <= MAX_COUNT else 0

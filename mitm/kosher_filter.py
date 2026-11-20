@@ -3278,6 +3278,19 @@ class KosherFilter:
                 self._count(flow, blocked=1)
             elif kind == activity_mod.VIDEO:
                 self._count(flow, videos=1)
+            if kind == activity_mod.BLOCK:
+                # What the browser was fetching (a page, a picture, a video,
+                # a script) and the page it was for, so the admin app can
+                # say which it was and where it came from.
+                request = getattr(flow, "request", None)
+                headers = getattr(request, "headers", None) or {}
+                dest = (headers.get("sec-fetch-dest") or "").lower()
+                if dest and "dest" not in fields:
+                    fields["dest"] = dest
+                if dest not in ("", "document") and "page" not in fields:
+                    page = self._page_of(flow)
+                    if page and page != fields.get("url"):
+                        fields["page"] = page
             activity_mod.record("proxy", kind, metadata.get("kosher_uid"),
                                 **fields)
         except Exception:  # noqa: BLE001 - the log is a convenience

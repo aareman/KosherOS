@@ -2140,6 +2140,27 @@ def test_hidden_pictures_are_one_line_per_page_not_per_picture(addon, tmp_path):
     assert len(events()) == 2
 
 
+def test_a_block_notes_what_the_browser_fetched_and_for_which_page(addon, tmp_path):
+    """The admin app shows a blocked picture as a picture, on its page."""
+    events = _activity_to(addon, tmp_path)
+    filt = addon.KosherFilter.__new__(addon.KosherFilter)
+    flow = _request_flow("https://cdn.example.org/p.png")
+    flow.request.headers["sec-fetch-dest"] = "image"
+    flow.request.headers["referer"] = "https://example.org/gallery?page=2"
+    filt._block(flow, "https://cdn.example.org/p.png", "", why="category:games")
+    page = _request_flow("https://example.com/games")
+    page.request.headers["sec-fetch-dest"] = "document"
+    filt._block(page, "https://example.com/games", "", why="category:games")
+    older = _request_flow("https://example.net/")
+    filt._block(older, "https://example.net/", "", why="category:games")
+    found = {e["url"]: e for e in events()}
+    assert found["https://cdn.example.org/p.png"]["dest"] == "image"
+    assert found["https://cdn.example.org/p.png"]["page"] == "https://example.org/gallery?page=2"
+    assert found["https://example.com/games"]["dest"] == "document"
+    assert "page" not in found["https://example.com/games"]
+    assert "dest" not in found["https://example.net/"], "a browser that did not say"
+
+
 def test_a_failed_note_never_fails_the_block(addon, tmp_path):
     addon.activity_mod.SPOOL_DIR = tmp_path / "nowhere"
     filt = addon.KosherFilter.__new__(addon.KosherFilter)

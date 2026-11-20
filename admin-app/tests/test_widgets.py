@@ -767,6 +767,13 @@ def a_feed(events, users=None, requests=()):
     return win, page
 
 
+def _feed_rows(page):
+    """The feed's own rows, not the detail rows inside an opened one."""
+    return [r for r in _rows(page.feed)
+            if not isinstance(r.get_ancestor(Adw.ExpanderRow), Adw.ExpanderRow)
+            or r.get_ancestor(Adw.ExpanderRow) is r]
+
+
 def test_the_feed_lists_people_as_filters_with_everyone_first():
     win, page = a_feed([], users=[a_user(), a_user(uid=1002, username="rivky")])
     rows = _children(page.people)
@@ -781,7 +788,7 @@ def test_a_quiet_day_says_so_rather_than_showing_nothing():
 
 def test_a_block_reads_in_the_familys_words_and_can_be_allowed():
     win, page = a_feed([an_event()])
-    rows = _rows(page.feed)
+    rows = _feed_rows(page)
     assert rows[0].get_title() == "Blocked roblox.com/games"
     assert "Games" in rows[0].get_subtitle()
     assert any(isinstance(b, Gtk.MenuButton) for b in _menu_buttons(rows[0]))
@@ -800,8 +807,8 @@ def _menu_buttons(widget, found=None):
 
 def test_a_block_by_an_admins_own_rule_is_not_offered_an_allow():
     win, page = a_feed([an_event(why="rule:youtube.com/shorts*")])
-    assert not _menu_buttons(_rows(page.feed)[0])
-    assert "a page rule" in _rows(page.feed)[0].get_subtitle()
+    assert not _menu_buttons(_feed_rows(page)[0])
+    assert "a page rule" in _feed_rows(page)[0].get_subtitle()
 
 
 def test_repeats_fold_into_one_line():
@@ -810,7 +817,7 @@ def test_repeats_fold_into_one_line():
     folded = feed.fold(events)
     assert len(folded) == 1 and folded[0]["times"] == 5
     win, page = a_feed(events)
-    assert "5 times" in _rows(page.feed)[0].get_subtitle()
+    assert "5 times" in _feed_rows(page)[0].get_subtitle()
 
 
 def test_every_kind_of_event_renders():
@@ -823,13 +830,13 @@ def test_every_kind_of_event_renders():
                        by_username="avi", method="SetFilterMode",
                        args=[1001, "dnsfilter"], guardian=True)]
     win, page = a_feed(events)
-    titles = [r.get_title() for r in _rows(page.feed)]
+    titles = [r.get_title() for r in _feed_rows(page)]
     assert titles == ["Blocked roblox.com/games",
                       "Hid pictures on shop.example/dress",
                       "Blocked video on tube.example/v",
                       "Blocked search: “bad words”",
                       "yosef: filter mode → DNS filter"]
-    change = _rows(page.feed)[-1]
+    change = _feed_rows(page)[-1]
     assert change.get_subtitle().startswith("avi, ")
     assert "guardian password given" in change.get_subtitle()
 
@@ -850,6 +857,97 @@ def test_narrowing_to_one_person_asks_the_daemon_for_them():
     drain()
     assert asked[-1] == 1001
     assert page.people.get_selected_row().uid == 1001
+
+
+def _badges(widget, found=None):
+    found = [] if found is None else found
+    child = widget.get_first_child()
+    while child is not None:
+        if child.has_css_class("kind-badge"):
+            found.append(child)
+        _badges(child, found)
+        child = child.get_next_sibling()
+    return found
+
+
+@pytest.mark.parametrize("event,kind", [
+    ({"dest": "document"}, "page"),
+    ({"dest": "iframe"}, "page"),
+    ({"dest": "image", "url": "https://cdn.example.com/a"}, "picture"),
+    ({"dest": "video"}, "video"),
+    ({"dest": "script"}, "part"),
+    ({"dest": "empty"}, "part"),
+    # Written before the filter noted what the browser fetched.
+    ({"url": "https://cdn.example.com/photo.JPG?w=200"}, "picture"),
+    ({"url": "https://media.example.com/clip.mp4"}, "video"),
+    ({"url": "https://example.com/games"}, "page"),
+    ({"why": "youtube:channel", "url": "https://video.example.com/watch?v=1"}, "video"),
+    ({"kind": "pictures", "why": ""}, "picture"),
+    ({"kind": "video", "why": ""}, "video"),
+    ({"kind": "search", "url": "", "text": "words"}, "search"),
+])
+def test_each_block_says_what_kind_of_thing_it_was(event, kind):
+    assert feed.blocked_kind(an_event(**event)) == kind
+
+
+def test_a_blocked_row_shows_its_kind_in_colour_icon_and_words():
+    now = int(time.time())
+    events = [an_event(t=now - 1, url="https://example.com/games", dest="document"),
+              an_event(t=now - 2, url="https://cdn.example.org/p.png", dest="image",
+                       page="https://example.org/gallery"),
+              an_event(t=now - 3, kind="video", url="https://video.example.net/v", why="")]
+    win, page = a_feed(events)
+    rows = _feed_rows(page)
+    badges = [_badges(r)[0] for r in rows]
+    assert [b.kind for b in badges] == ["page", "picture", "video"]
+    assert [b.has_css_class(c) for b, c in zip(badges, ("err", "warn", "acc"))] == [True] * 3
+    # Colour is never the only cue: the subtitle names the kind.
+    assert [r.get_subtitle().split(" · ")[0] for r in rows] == ["Page", "Picture", "Video"]
+    assert all(b.get_tooltip_text().startswith("Blocked: ") for b in badges)
+
+
+def _details(row):
+    return {r.get_title(): r.get_subtitle() for r in _rows(row) if r is not row}
+
+
+def test_opening_a_row_shows_the_whole_address_and_why():
+    long_url = "https://example.com/" + "/".join(f"part{i}" for i in range(30)) + "?q=1"
+    win, page = a_feed([an_event(url=long_url, why="category:games", dest="image",
+                                 page="https://example.org/article")])
+    row = _feed_rows(page)[0]
+    assert isinstance(row, Adw.ExpanderRow)
+    assert row.get_title_lines() == 1, "a long address is cut short until opened"
+    assert len(row.get_title()) < len(long_url)
+    row.set_expanded(True)
+    shown = _details(row)
+    assert shown["Address"] == long_url
+    assert shown["On the page"] == "https://example.org/article"
+    assert shown["What it was"] == "A picture"
+    assert shown["Why"] == "Games"
+    assert shown["Account"] == "yosef"
+    detail = next(r for r in _rows(row) if r is not row and r.get_title() == "Address")
+    assert detail.get_subtitle_selectable() and detail.get_subtitle_lines() == 0
+    # Allow is still on the row itself, not hidden inside it.
+    assert _menu_buttons(row)
+
+
+def test_repeats_say_since_when_and_old_records_still_open():
+    now = int(time.time())
+    events = [an_event(t=now - i * 60, url="https://example.com/x", why="")
+              for i in range(3)]
+    for event in events:
+        event.pop("why")
+    win, page = a_feed(events)
+    shown = _details(_feed_rows(page)[0])
+    assert "3 times since" in shown["When"]
+    assert shown["What it was"] == "A page"
+    assert "Why" not in shown and "On the page" not in shown
+
+
+def test_a_part_of_a_page_says_which_part():
+    shown = dict(feed.details(an_event(dest="script", url="https://example.com/a.js"),
+                              "part", ""))
+    assert shown["What it was"] == "Part of a page: a script"
 
 
 def test_yesterday_and_today_get_their_own_headings():
@@ -2854,7 +2952,7 @@ def test_a_time_event_reads_in_the_feed_and_on_the_overview():
     events = [an_event(t=now - 4, kind="time", url="", why="time:login"),
               an_event(t=now - 5, kind="time", url="", why="time:limit")]
     win, page = a_feed(events)
-    titles = [r.get_title() for r in _rows(page.feed)]
+    titles = [r.get_title() for r in _feed_rows(page)]
     assert titles == ["Refused a sign-in outside the allowed time",
                       "Signed out: today's time was used up"]
     page, _w, _u = _detail(activity=events)
@@ -3682,3 +3780,140 @@ def test_notification_only_can_be_selected_before_enabling_app_updates():
     group.schedule_row.set_selected(1)
     drain()
     assert ("set_auto_app_updates", "daily", "notify") in win.client.calls
+
+
+# -- usage charts ----------------------------------------------------------------
+
+def _charts(group):
+    from kosheradmin import charts
+
+    return [w for w in _descendants(group) if isinstance(w, charts.Columns)]
+
+
+def _paint(chart, width=600, height=150):
+    """Draw a chart onto an image, as GTK would: a drawing error fails here."""
+    import cairo
+
+    surface = cairo.ImageSurface(cairo.FORMAT_ARGB32, width, height)
+    chart._draw(chart, cairo.Context(surface), width, height)
+    return surface
+
+
+def _usage_page(rng, uid=-1):
+    win, restore = _real_window()
+    win.usage_range, win.usage_uid = rng, uid
+    win.go_to("usage")
+    drain()
+    return win, win.nav.get_visible_page(), restore
+
+
+def test_the_week_draws_each_day_loaded_and_blocked():
+    win, page, restore = _usage_page("week")
+    try:
+        data = win.client.usage()["week"]
+        internet, blocked = page._groups[0], page._groups[1]
+        [loaded] = _charts(internet)
+        [stopped] = _charts(blocked)
+        assert loaded.values == [p["requests"] for p in data["daily"]["everyone"]]
+        assert stopped.values == [p["blocked"] for p in data["daily"]["everyone"]]
+        assert len(loaded.values) == 7 and loaded.labels[-1] == "Today"
+        assert stopped.red and not loaded.red
+        # Exact numbers stay on the page: in the tooltip of each bar and in
+        # the rows under the chart.
+        assert loaded.tips[-1].endswith(f"{loaded.values[-1]:,} loaded")
+        assert _values(internet)["Pages and files loaded"] == f"{sum(loaded.values):,}"
+        # A screen reader hears the range, the busiest day and the total.
+        assert "Most on" in loaded.summary and f"{sum(loaded.values):,}" in loaded.summary
+        for chart in (loaded, stopped):
+            _paint(chart)
+    finally:
+        restore()
+
+
+def test_the_month_labels_a_day_a_week_apart():
+    win, page, restore = _usage_page("month", 1002)
+    try:
+        [loaded] = _charts(page._groups[0])
+        assert len(loaded.values) == 30
+        named = [label for label in loaded.labels if label]
+        assert named[-1] == "Today" and len(named) == 5
+        person = win.client.usage()["month"]["daily"]["people"]["1002"]
+        assert loaded.values == [p["requests"] for p in person]
+        _paint(loaded, 900, 150)
+    finally:
+        restore()
+
+
+@pytest.mark.parametrize("rng", ["today", "all"])
+def test_a_range_without_days_has_bars_beside_its_numbers(rng):
+    win, page, restore = _usage_page(rng)
+    try:
+        assert not _charts(page._groups[0]) and not _charts(page._groups[1])
+        rows = [r for r in _descendants(page._groups[1]) if isinstance(r, Adw.ActionRow)]
+        meters = [r.meter.fraction for r in rows]
+        assert max(meters) == 1.0 and all(0 <= m <= 1 for m in meters)
+        # Filter speed is a histogram of the buckets, with its numbers below.
+        [speed] = _charts(page._groups[2])
+        assert len(speed.values) == len(speed.labels) == 13 and speed.labels[-1] == "more"
+        assert speed.tips[0].startswith("Up to 1 ms: ")
+        assert "Half took no longer than" in speed.summary
+        _paint(speed)
+        # Each person has a bar for what they loaded, the busiest full.
+        people = [r for r in _descendants(page._groups[3])
+                  if isinstance(r, Adw.ActionRow) and hasattr(r, "meter")]
+        assert people and max(r.meter.fraction for r in people) == 1.0
+    finally:
+        restore()
+
+
+def test_an_account_the_filter_never_sees_has_no_charts():
+    win, restore = _real_window()
+    try:
+        shmuli = next(u for u in win.policy["users"] if u["username"] == "shmuli")
+        win.usage_range = "week"
+        win.show_usage(shmuli["uid"])
+        drain()
+        page = win.nav.get_visible_page()
+        assert not [c for g in page._groups for c in _charts(g)]
+    finally:
+        restore()
+
+
+def test_numbers_from_an_older_kosherd_still_show_without_charts():
+    """A kosherd from before the charts sends no days and no buckets."""
+    win, page, restore = _usage_page("week")
+    try:
+        old = win.client.usage()
+        for ranged in old.values():
+            if isinstance(ranged, dict):
+                ranged.pop("daily", None)
+                for numbers in [ranged.get("everyone") or {},
+                                *(ranged.get("people") or {}).values()]:
+                    numbers.pop("lat", None)
+        page.data = old
+        page._render()
+        assert not [c for g in page._groups for c in _charts(g)]
+        assert _values(page._groups[0])["Pages and files loaded"] != "0"
+    finally:
+        restore()
+
+
+def test_an_empty_week_draws_and_says_so():
+    from kosheradmin import charts
+
+    days = [f"2026-11-{d:02d}" for d in range(14, 21)]
+    chart = charts.Columns("Pages blocked each day", [0] * 7, [""] * 7, [""] * 7,
+                           empty="Nothing blocked")
+    assert chart.top == 1
+    _paint(chart)
+    assert charts.day_label(days[-1]) == "20 Nov"
+    assert charts.day_label(days[-1], long=True) == "Friday 20 November"
+
+
+def test_chart_axes_round_up_to_a_readable_top():
+    from kosheradmin import charts
+
+    assert [charts.nice_ceiling(v) for v in (0, 1, 3, 7, 42, 4900, 12000)] == \
+        [1, 1, 5, 10, 50, 5000, 20000]
+    assert [charts.short_count(n) for n in (900, 2500, 12000, 1_200_000)] == \
+        ["900", "2.5k", "12k", "1.2M"]

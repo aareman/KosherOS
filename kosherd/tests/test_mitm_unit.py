@@ -45,3 +45,11 @@ def test_the_far_end_is_reached_only_for_an_allowed_request():
     # the browser sat on a blank page instead of getting the block page.
     assert "--set connection_strategy=lazy" in UNIT
     assert "--set upstream_cert=false" in UNIT
+
+
+def test_a_stuck_filter_is_restarted_and_never_holds_a_restart():
+    """The filter stopped answering for a family and ignored SIGTERM for
+    45 seconds at the restart that finally cleared it."""
+    assert "WatchdogSec=90" in UNIT
+    assert "Restart=on-failure" in UNIT
+    assert "TimeoutStopSec=10" in UNIT

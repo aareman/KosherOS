@@ -159,21 +159,27 @@ def seed_noctalia(home: Path, seed: Path = NOCTALIA_SEED) -> bool:
     return True
 
 
-def fetch_layout(attempts: int = 5, delay: float = 1.0) -> str:
-    """Ask kosherd; fall back to the default rather than to no desktop."""
+def fetch_layout(deadline: float = 10.0, delay: float = 1.0) -> str:
+    """Ask kosherd; fall back to the default rather than to no desktop.
+
+    Within `deadline` seconds in all. The sign-in waits for this step, and
+    a call to a kosherd that is still starting used to wait with no limit
+    until systemd killed the step at 30 seconds, with every sign-in app
+    held behind it."""
     from .client import DaemonClient
 
     last = None
-    for _ in range(attempts):
+    end = time.monotonic() + deadline
+    while (left := end - time.monotonic()) > 0:
         try:
-            layout = DaemonClient().my_layout()
+            layout = DaemonClient().my_layout(timeout_ms=max(1, int(left * 1000)))
             if layout in LAYOUTS:
                 return layout
             log.warning("kosherd answered an unknown layout %r", layout)
             return DEFAULT_LAYOUT
         except Exception as e:  # noqa: BLE001 - the bus may not be up yet
             last = e
-            time.sleep(delay)
+            time.sleep(min(delay, max(0.0, end - time.monotonic())))
     log.warning("could not reach kosherd (%s); using the %s layout", last, DEFAULT_LAYOUT)
     return DEFAULT_LAYOUT
 
@@ -188,7 +194,6 @@ def main(argv=None) -> int:
     logging.basicConfig(level=logging.INFO, format="%(name)s: %(message)s",
                         stream=sys.stderr)
 
-    layout = args.layout or fetch_layout()
     compositor = running_compositor()
     if compositor is not None:
         # Not a GNOME session: nothing to write into GNOME Shell. Seed the
@@ -200,6 +205,8 @@ def main(argv=None) -> int:
             log.info("seeded Noctalia's configuration")
         return 0
 
+    # Only GNOME has a layout to write, so only GNOME asks kosherd.
+    layout = args.layout or fetch_layout()
     steps = plan(layout)
     if args.dry_run:
         for schema, key, value in steps:

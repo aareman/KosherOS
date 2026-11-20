@@ -3682,3 +3682,140 @@ def test_notification_only_can_be_selected_before_enabling_app_updates():
     group.schedule_row.set_selected(1)
     drain()
     assert ("set_auto_app_updates", "daily", "notify") in win.client.calls
+
+
+# -- usage charts ----------------------------------------------------------------
+
+def _charts(group):
+    from kosheradmin import charts
+
+    return [w for w in _descendants(group) if isinstance(w, charts.Columns)]
+
+
+def _paint(chart, width=600, height=150):
+    """Draw a chart onto an image, as GTK would: a drawing error fails here."""
+    import cairo
+
+    surface = cairo.ImageSurface(cairo.FORMAT_ARGB32, width, height)
+    chart._draw(chart, cairo.Context(surface), width, height)
+    return surface
+
+
+def _usage_page(rng, uid=-1):
+    win, restore = _real_window()
+    win.usage_range, win.usage_uid = rng, uid
+    win.go_to("usage")
+    drain()
+    return win, win.nav.get_visible_page(), restore
+
+
+def test_the_week_draws_each_day_loaded_and_blocked():
+    win, page, restore = _usage_page("week")
+    try:
+        data = win.client.usage()["week"]
+        internet, blocked = page._groups[0], page._groups[1]
+        [loaded] = _charts(internet)
+        [stopped] = _charts(blocked)
+        assert loaded.values == [p["requests"] for p in data["daily"]["everyone"]]
+        assert stopped.values == [p["blocked"] for p in data["daily"]["everyone"]]
+        assert len(loaded.values) == 7 and loaded.labels[-1] == "Today"
+        assert stopped.red and not loaded.red
+        # Exact numbers stay on the page: in the tooltip of each bar and in
+        # the rows under the chart.
+        assert loaded.tips[-1].endswith(f"{loaded.values[-1]:,} loaded")
+        assert _values(internet)["Pages and files loaded"] == f"{sum(loaded.values):,}"
+        # A screen reader hears the range, the busiest day and the total.
+        assert "Most on" in loaded.summary and f"{sum(loaded.values):,}" in loaded.summary
+        for chart in (loaded, stopped):
+            _paint(chart)
+    finally:
+        restore()
+
+
+def test_the_month_labels_a_day_a_week_apart():
+    win, page, restore = _usage_page("month", 1002)
+    try:
+        [loaded] = _charts(page._groups[0])
+        assert len(loaded.values) == 30
+        named = [label for label in loaded.labels if label]
+        assert named[-1] == "Today" and len(named) == 5
+        person = win.client.usage()["month"]["daily"]["people"]["1002"]
+        assert loaded.values == [p["requests"] for p in person]
+        _paint(loaded, 900, 150)
+    finally:
+        restore()
+
+
+@pytest.mark.parametrize("rng", ["today", "all"])
+def test_a_range_without_days_has_bars_beside_its_numbers(rng):
+    win, page, restore = _usage_page(rng)
+    try:
+        assert not _charts(page._groups[0]) and not _charts(page._groups[1])
+        rows = [r for r in _descendants(page._groups[1]) if isinstance(r, Adw.ActionRow)]
+        meters = [r.meter.fraction for r in rows]
+        assert max(meters) == 1.0 and all(0 <= m <= 1 for m in meters)
+        # Filter speed is a histogram of the buckets, with its numbers below.
+        [speed] = _charts(page._groups[2])
+        assert len(speed.values) == len(speed.labels) == 13 and speed.labels[-1] == "more"
+        assert speed.tips[0].startswith("Up to 1 ms: ")
+        assert "Half took no longer than" in speed.summary
+        _paint(speed)
+        # Each person has a bar for what they loaded, the busiest full.
+        people = [r for r in _descendants(page._groups[3])
+                  if isinstance(r, Adw.ActionRow) and hasattr(r, "meter")]
+        assert people and max(r.meter.fraction for r in people) == 1.0
+    finally:
+        restore()
+
+
+def test_an_account_the_filter_never_sees_has_no_charts():
+    win, restore = _real_window()
+    try:
+        shmuli = next(u for u in win.policy["users"] if u["username"] == "shmuli")
+        win.usage_range = "week"
+        win.show_usage(shmuli["uid"])
+        drain()
+        page = win.nav.get_visible_page()
+        assert not [c for g in page._groups for c in _charts(g)]
+    finally:
+        restore()
+
+
+def test_numbers_from_an_older_kosherd_still_show_without_charts():
+    """A kosherd from before the charts sends no days and no buckets."""
+    win, page, restore = _usage_page("week")
+    try:
+        old = win.client.usage()
+        for ranged in old.values():
+            if isinstance(ranged, dict):
+                ranged.pop("daily", None)
+                for numbers in [ranged.get("everyone") or {},
+                                *(ranged.get("people") or {}).values()]:
+                    numbers.pop("lat", None)
+        page.data = old
+        page._render()
+        assert not [c for g in page._groups for c in _charts(g)]
+        assert _values(page._groups[0])["Pages and files loaded"] != "0"
+    finally:
+        restore()
+
+
+def test_an_empty_week_draws_and_says_so():
+    from kosheradmin import charts
+
+    days = [f"2026-11-{d:02d}" for d in range(14, 21)]
+    chart = charts.Columns("Pages blocked each day", [0] * 7, [""] * 7, [""] * 7,
+                           empty="Nothing blocked")
+    assert chart.top == 1
+    _paint(chart)
+    assert charts.day_label(days[-1]) == "20 Nov"
+    assert charts.day_label(days[-1], long=True) == "Friday 20 November"
+
+
+def test_chart_axes_round_up_to_a_readable_top():
+    from kosheradmin import charts
+
+    assert [charts.nice_ceiling(v) for v in (0, 1, 3, 7, 42, 4900, 12000)] == \
+        [1, 1, 5, 10, 50, 5000, 20000]
+    assert [charts.short_count(n) for n in (900, 2500, 12000, 1_200_000)] == \
+        ["900", "2.5k", "12k", "1.2M"]

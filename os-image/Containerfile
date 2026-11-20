@@ -414,52 +414,64 @@ RUN flatpak remote-add --system --if-not-exists \
         flathub https://dl.flathub.org/repo/flathub.flatpakrepo
 
 # --- Static configuration (units, polkit, dbus, dnsmasq, baseline firewall) --
-COPY os-image/files/ /
+# certutil, so mkcert (which devenv runs for its proxy's https://*.localhost
+# names) can add its local CA to the account's own browser certificate
+# stores, Firefox's profiles and ~/.pki/nssdb, without root. Never the
+# system-wide store: one account's CA is trusted by that account alone.
+RUN dnf -y install nss-tools && dnf clean all && command -v certutil
 
-# Umbriel ships its own starter config at /usr/share/umbriel/config.toml,
-# headed "Copy this file to ~/.config/umbriel/config.toml": no shell at
-# startup, no help or settings keys, bare Super for the launcher. Copied
-# by hand, it replaced the KosherOS one whole and the desktop came up
-# black. The KosherOS config takes its place, so either copy is ours.
-RUN install -m 0644 /etc/xdg/umbriel/config.toml /usr/share/umbriel/config.toml \
-    && cmp /etc/xdg/umbriel/config.toml /usr/share/umbriel/config.toml
+# The splash and the initramfs, before the image's own files: they need
+# only the artwork, the theme and dracut's drop-in, and the initramfs is
+# one of the slowest steps. Placed here, a change to any other file under
+# os-image/files no longer rebuilds it.
+COPY branding/ /usr/share/kosher/branding/
+COPY os-image/files/usr/share/plymouth/themes/kosheros/ /usr/share/plymouth/themes/kosheros/
+COPY os-image/files/usr/lib/dracut/dracut.conf.d/60-kosheros-plymouth.conf /usr/lib/dracut/dracut.conf.d/
+# What the initramfs carries from the rest of the image, made here too: the
+# splash's logo (rasters.py makes it; the full run, below the version, also
+# writes the GRUB theme, which is named by the version) and the product
+# name without the version (it travels as initrd-release; the version is
+# added to the full name further down).
+RUN python3 /usr/share/kosher/branding/rasters.py --out /tmp/rasters --version 0 >/dev/null \
+    && install -D -m644 /tmp/rasters/usr/share/plymouth/themes/kosheros/logo.png \
+         /usr/share/plymouth/themes/kosheros/logo.png \
+    && rm -rf /tmp/rasters \
+    && . /usr/lib/os-release \
+    && sed -i \
+        -e 's/^NAME=.*/NAME="KosherOS"/' \
+        -e "s/^PRETTY_NAME=.*/PRETTY_NAME=\"KosherOS (powered by Fedora ${VERSION_ID})\"/" \
+        -e '/^VARIANT=/d' -e '/^VARIANT_ID=/d' -e '/^DEFAULT_HOSTNAME=/d' \
+        /usr/lib/os-release \
+    && printf 'VARIANT="KosherOS"\nVARIANT_ID=kosheros\nDEFAULT_HOSTNAME=kosheros\n' >> /usr/lib/os-release
+RUN true \
+    # The SVG is the older placeholder gradient, kept for anything still
+    # pointing at it. The GIMP sources travel in the repo, not in the image.
+    && install -D -m644 /usr/share/kosher/branding/wallpaper.svg \
+         /usr/share/backgrounds/kosheros/kosheros.svg \
+    && rm -f /usr/share/kosher/branding/*.xcf \
+    # Boot progress bar: Plymouth's script language cannot draw solid
+    # colours, so the bar is two images the theme scales.
+    && rsvg-convert -w 200 -h 8 /usr/share/kosher/branding/bar-track.svg \
+         -o /usr/share/plymouth/themes/kosheros/bar-track.png \
+    && rsvg-convert -w 200 -h 8 /usr/share/kosher/branding/bar-fill.svg \
+         -o /usr/share/plymouth/themes/kosheros/bar-fill.png \
+    && plymouth-set-default-theme kosheros \
+    # The splash in the initramfs too (#316). Fedora's bootc base leaves
+    # Plymouth out of it, so on an encrypted disk the password was asked
+    # for on a bare text console, before the splash existed. With the
+    # module added (dracut.conf.d/60-kosheros-plymouth.conf) and rhgb on
+    # the command line, the theme draws the prompt from the first second.
+    && kver="$(ls /usr/lib/modules)" \
+    && dracut --force --kver "$kver" "/usr/lib/modules/$kver/initramfs.img" \
+    && lsinitrd "/usr/lib/modules/$kver/initramfs.img" | grep -q 'plymouth/themes/kosheros/kosheros.script' \
+    && lsinitrd "/usr/lib/modules/$kver/initramfs.img" | grep -q 'plymouth/themes/kosheros/logo.png' \
+    # ...without every graphics driver's firmware (the boot loader reads
+    # all of it at every start): no amdgpu, and under 140 MB in all.
+    && ! lsinitrd "/usr/lib/modules/$kver/initramfs.img" | grep -q 'lib/firmware/amdgpu' \
+    && test "$(stat -c %s "/usr/lib/modules/$kver/initramfs.img")" -lt 146800640
 
-# Nix's own profile script exports NIX_SSL_CERT_FILE for the tools a Nix
-# shell brings (their curl, git, python carry nixpkgs' own cacert), and it
-# looks for the bundle at paths Fedora 44 no longer has — so it would fall
-# back to the shell's OWN cacert, which does not hold the filter's
-# certificate, and every download in a devenv shell on a filtered account
-# would fail with a certificate error. The system bundle goes first in its
-# list. (profile.d/kosher-ca.sh sets the same variable; this keeps nix.sh,
-# which runs after it, from overriding it.)
-RUN sed -i 's|^    if \[ -e /etc/ssl/certs/ca-certificates.crt \]; then|    if [ -e /etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem ]; then # KosherOS: the system bundle, with the filter CA\n        export NIX_SSL_CERT_FILE=/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem\n    elif [ -e /etc/ssl/certs/ca-certificates.crt ]; then|' \
-        /etc/profile.d/nix.sh \
-    && grep -q 'NIX_SSL_CERT_FILE=/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem' /etc/profile.d/nix.sh \
-    && sh -n /etc/profile.d/nix.sh \
-    && chmod 755 /usr/bin/devenv \
-    && grep -q '^!include /etc/nix/kosheros-users.conf' /etc/nix/nix.conf \
-    # Only root and the accounts with developer tools may run Nix (#214).
-    # The daemon's allowed-users is not enough: with a store of its own
-    # under ~ (`nix --store ~/x`), nix needs no daemon, and any account
-    # could build anything from nixpkgs. So the program, the namespace
-    # helper and the libraries (Nix has a C API Python could load) are
-    # root's and kosher-nix's alone; kosherd keeps that group to the
-    # developer accounts (nixdaemon.py). The gid is fixed in sysusers.d so
-    # an updated machine's group owns these files too. The other nix-*
-    # commands are links to /usr/bin/nix.
-    && systemd-sysusers /usr/lib/sysusers.d/kosher-nix.conf \
-    && test "$(getent group kosher-nix | cut -d: -f3)" = 850 \
-    # 1Password's groups (#234): kosherd makes /run/wrappers/bin/op setgid
-    # to onepassword-cli, the group the desktop app trusts. Fixed gids, and
-    # nobody in them.
-    && systemd-sysusers /usr/lib/sysusers.d/kosher-1password.conf \
-    && test "$(getent group onepassword-cli | cut -d: -f3)" = 851 \
-    && test "$(getent group onepassword | cut -d: -f3)" = 852 \
-    && test -z "$(getent group onepassword-cli | cut -d: -f4)" \
-    && chown root:850 /usr/bin/nix /usr/libexec/nix-nswrapper /usr/lib64/libnix*.so.* \
-    && chmod 0750 /usr/bin/nix /usr/libexec/nix-nswrapper /usr/lib64/libnix*.so.* \
-    && test -z "$(find /usr/bin /usr/libexec /usr/lib64 -maxdepth 1 -type f \( -name 'nix*' -o -name 'libnix*' \) -perm /o=rwx)"
-
+# Its one policy source is copied ahead of the rest for the same reason.
+COPY os-image/files/usr/share/kosher/selinux/ /usr/share/kosher/selinux/
 # SELinux: dnsmasq needs a netfilter netlink socket to feed the nft whitelist
 # sets (not covered by Fedora's stock dnsmasq policy).
 RUN true && \
@@ -509,78 +521,55 @@ RUN true && \
     test "$(matchpathcon -n /nix/store)" = system_u:object_r:var_lib_t:s0 && \
     test "$(matchpathcon -n /var/lib/nix/var/nix/daemon-socket)" = system_u:object_r:var_run_t:s0
 
-# --- Lockdown ----------------------------------------------------------------
-# Identity: KosherOS, powered by Fedora (Fedora Remix terms). ID stays
-# "fedora" — tooling keys off it; only the human-facing names change.
-# One version number for the whole product, passed in by the build
-# (KOSHER_VERSION, from scripts/version.py: the tag is the version). It names
-# the release in os-release, in the installer's welcome screen, in the ISO's
-# file name and in the image label at the end of this file; the daemon reads
-# it from /usr/share/kosher/VERSION. An empty one is a broken build, not a
-# build called "".
-ARG KOSHER_VERSION
-RUN test -n "$KOSHER_VERSION" \
-    && printf '%s\n' "$KOSHER_VERSION" > /usr/share/kosher/VERSION
-RUN . /usr/lib/os-release \
-    && kosher_version="$(tr -d '[:space:]' < /usr/share/kosher/VERSION)" \
-    && sed -i \
-        -e 's/^NAME=.*/NAME="KosherOS"/' \
-        -e "s/^PRETTY_NAME=.*/PRETTY_NAME=\"KosherOS ${kosher_version} (powered by Fedora ${VERSION_ID})\"/" \
-        -e '/^VARIANT=/d' -e '/^VARIANT_ID=/d' \
-        /usr/lib/os-release \
-    && printf 'VARIANT="KosherOS"\nVARIANT_ID=kosheros\n' >> /usr/lib/os-release \
-    # DEFAULT_HOSTNAME is the fallback systemd uses when /etc/hostname is
-    # absent or empty, and Fedora sets it to "fedora". The hostname file
-    # itself is shipped by COPY, not written here: podman bind-mounts
-    # /etc/hostname over the build container, so `echo > /etc/hostname` in
-    # a RUN writes to a temporary file and the image keeps an empty one.
-    # That is exactly what happened, and the machine introduced itself as
-    # "fedora login:" at every prompt.
-    && sed -i '/^DEFAULT_HOSTNAME=/d' /usr/lib/os-release \
-    && echo 'DEFAULT_HOSTNAME=kosheros' >> /usr/lib/os-release
+COPY os-image/files/ /
+
+# Umbriel ships its own starter config at /usr/share/umbriel/config.toml,
+# headed "Copy this file to ~/.config/umbriel/config.toml": no shell at
+# startup, no help or settings keys, bare Super for the launcher. Copied
+# by hand, it replaced the KosherOS one whole and the desktop came up
+# black. The KosherOS config takes its place, so either copy is ours.
+RUN install -m 0644 /etc/xdg/umbriel/config.toml /usr/share/umbriel/config.toml \
+    && cmp /etc/xdg/umbriel/config.toml /usr/share/umbriel/config.toml
+
+# Nix's own profile script exports NIX_SSL_CERT_FILE for the tools a Nix
+# shell brings (their curl, git, python carry nixpkgs' own cacert), and it
+# looks for the bundle at paths Fedora 44 no longer has — so it would fall
+# back to the shell's OWN cacert, which does not hold the filter's
+# certificate, and every download in a devenv shell on a filtered account
+# would fail with a certificate error. The system bundle goes first in its
+# list. (profile.d/kosher-ca.sh sets the same variable; this keeps nix.sh,
+# which runs after it, from overriding it.)
+RUN sed -i 's|^    if \[ -e /etc/ssl/certs/ca-certificates.crt \]; then|    if [ -e /etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem ]; then # KosherOS: the system bundle, with the filter CA\n        export NIX_SSL_CERT_FILE=/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem\n    elif [ -e /etc/ssl/certs/ca-certificates.crt ]; then|' \
+        /etc/profile.d/nix.sh \
+    && grep -q 'NIX_SSL_CERT_FILE=/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem' /etc/profile.d/nix.sh \
+    && sh -n /etc/profile.d/nix.sh \
+    && chmod 755 /usr/bin/devenv \
+    && grep -q '^!include /etc/nix/kosheros-users.conf' /etc/nix/nix.conf \
+    # Only root and the accounts with developer tools may run Nix (#214).
+    # The daemon's allowed-users is not enough: with a store of its own
+    # under ~ (`nix --store ~/x`), nix needs no daemon, and any account
+    # could build anything from nixpkgs. So the program, the namespace
+    # helper and the libraries (Nix has a C API Python could load) are
+    # root's and kosher-nix's alone; kosherd keeps that group to the
+    # developer accounts (nixdaemon.py). The gid is fixed in sysusers.d so
+    # an updated machine's group owns these files too. The other nix-*
+    # commands are links to /usr/bin/nix.
+    && systemd-sysusers /usr/lib/sysusers.d/kosher-nix.conf \
+    && test "$(getent group kosher-nix | cut -d: -f3)" = 850 \
+    # 1Password's groups (#234): kosherd makes /run/wrappers/bin/op setgid
+    # to onepassword-cli, the group the desktop app trusts. Fixed gids, and
+    # nobody in them.
+    && systemd-sysusers /usr/lib/sysusers.d/kosher-1password.conf \
+    && test "$(getent group onepassword-cli | cut -d: -f3)" = 851 \
+    && test "$(getent group onepassword | cut -d: -f3)" = 852 \
+    && test -z "$(getent group onepassword-cli | cut -d: -f4)" \
+    && chown root:850 /usr/bin/nix /usr/libexec/nix-nswrapper /usr/lib64/libnix*.so.* \
+    && chmod 0750 /usr/bin/nix /usr/libexec/nix-nswrapper /usr/lib64/libnix*.so.* \
+    && test -z "$(find /usr/bin /usr/libexec /usr/lib64 -maxdepth 1 -type f \( -name 'nix*' -o -name 'libnix*' \) -perm /o=rwx)"
+
 
 # --- Branding: boot splash, login screen, wallpaper, GRUB --------------------
-COPY branding/ /usr/share/kosher/branding/
-# Every raster from the real artwork (branding/logo.png, wallpaper.png):
-# the boot-splash logo, the start button, the login-screen lockup with the
-# name beside the logo, the wallpaper and its per-screen-shape crops plus
-# the background XML that lets GNOME pick the right one. See the script.
-RUN python3 /usr/share/kosher/branding/rasters.py \
-    # The admin app's icon went into hicolor; refresh the cache GTK reads.
-    && gtk-update-icon-cache -f -t /usr/share/icons/hicolor \
-    # The GRUB theme rasters.py wrote under /usr/lib/efi is a bootupd
-    # component: regenerate bootupd's EFI manifest so it is carried onto
-    # the EFI system partition at install, and assert it was picked up —
-    # a theme that quietly never reaches the disk is a plain menu with no
-    # error anywhere.
-    && bootupctl backend generate-update-metadata \
-    && grep -q kosheros-grub-theme /usr/lib/bootupd/updates/EFI.json \
-    && test -f /usr/share/grub/themes/starfield/theme.txt
 RUN true \
-    # The SVG is the older placeholder gradient, kept for anything still
-    # pointing at it. The GIMP sources travel in the repo, not in the image.
-    && install -D -m644 /usr/share/kosher/branding/wallpaper.svg \
-         /usr/share/backgrounds/kosheros/kosheros.svg \
-    && rm -f /usr/share/kosher/branding/*.xcf \
-    # Boot progress bar: Plymouth's script language cannot draw solid
-    # colours, so the bar is two images the theme scales.
-    && rsvg-convert -w 200 -h 8 /usr/share/kosher/branding/bar-track.svg \
-         -o /usr/share/plymouth/themes/kosheros/bar-track.png \
-    && rsvg-convert -w 200 -h 8 /usr/share/kosher/branding/bar-fill.svg \
-         -o /usr/share/plymouth/themes/kosheros/bar-fill.png \
-    && plymouth-set-default-theme kosheros \
-    # The splash in the initramfs too (#316). Fedora's bootc base leaves
-    # Plymouth out of it, so on an encrypted disk the password was asked
-    # for on a bare text console, before the splash existed. With the
-    # module added (dracut.conf.d/60-kosheros-plymouth.conf) and rhgb on
-    # the command line, the theme draws the prompt from the first second.
-    && kver="$(ls /usr/lib/modules)" \
-    && dracut --force --kver "$kver" "/usr/lib/modules/$kver/initramfs.img" \
-    && lsinitrd "/usr/lib/modules/$kver/initramfs.img" | grep -q 'plymouth/themes/kosheros/kosheros.script' \
-    # ...without every graphics driver's firmware (the boot loader reads
-    # all of it at every start): no amdgpu, and under 140 MB in all.
-    && ! lsinitrd "/usr/lib/modules/$kver/initramfs.img" | grep -q 'lib/firmware/amdgpu' \
-    && test "$(stat -c %s "/usr/lib/modules/$kver/initramfs.img")" -lt 146800640 \
     # bootc images have no /etc/default/grub; create it for the menu title.
     # (The timeout GRUB actually uses is set in the static config,
     # configs.d/09_kosheros_quiet.cfg; this file is documentation.)
@@ -651,6 +640,7 @@ RUN true \
     && dconf update
 
 
+# --- Lockdown ----------------------------------------------------------------
 RUN passwd -l root \
     && groupadd -r kosher-admin \
     # Every new account gets a block of subordinate ids: an image carries
@@ -711,12 +701,55 @@ RUN python3 -c 'import json; p = json.load(open("/etc/containers/policy.json"));
     && test -s /etc/pki/containers/kosheros-images.pub \
     && grep -q 'ghcr.io/aareman/kosher-linux' /etc/containers/registries.d/kosheros.yaml
 
-# certutil, so mkcert (which devenv runs for its proxy's https://*.localhost
-# names) can add its local CA to the account's own browser certificate
-# stores, Firefox's profiles and ~/.pki/nssdb, without root. Never the
-# system-wide store: one account's CA is trusted by that account alone.
-RUN dnf -y install nss-tools && dnf clean all && command -v certutil
 
+
+# The version, last before the apps: every step after an ARG whose value
+# changes is rebuilt, and the version changes with every merge.
+# --- Version and identity ----------------------------------------------------
+# Identity: KosherOS, powered by Fedora (Fedora Remix terms). ID stays
+# "fedora" — tooling keys off it; only the human-facing names change.
+# One version number for the whole product, passed in by the build
+# (KOSHER_VERSION, from scripts/version.py: the tag is the version). It names
+# the release in os-release, in the installer's welcome screen, in the ISO's
+# file name and in the image label at the end of this file; the daemon reads
+# it from /usr/share/kosher/VERSION. An empty one is a broken build, not a
+# build called "".
+ARG KOSHER_VERSION
+RUN test -n "$KOSHER_VERSION" \
+    && printf '%s\n' "$KOSHER_VERSION" > /usr/share/kosher/VERSION
+RUN . /usr/lib/os-release \
+    && kosher_version="$(tr -d '[:space:]' < /usr/share/kosher/VERSION)" \
+    && sed -i \
+        -e 's/^NAME=.*/NAME="KosherOS"/' \
+        -e "s/^PRETTY_NAME=.*/PRETTY_NAME=\"KosherOS ${kosher_version} (powered by Fedora ${VERSION_ID})\"/" \
+        -e '/^VARIANT=/d' -e '/^VARIANT_ID=/d' \
+        /usr/lib/os-release \
+    && printf 'VARIANT="KosherOS"\nVARIANT_ID=kosheros\n' >> /usr/lib/os-release \
+    # DEFAULT_HOSTNAME is the fallback systemd uses when /etc/hostname is
+    # absent or empty, and Fedora sets it to "fedora". The hostname file
+    # itself is shipped by COPY, not written here: podman bind-mounts
+    # /etc/hostname over the build container, so `echo > /etc/hostname` in
+    # a RUN writes to a temporary file and the image keeps an empty one.
+    # That is exactly what happened, and the machine introduced itself as
+    # "fedora login:" at every prompt.
+    && sed -i '/^DEFAULT_HOSTNAME=/d' /usr/lib/os-release \
+    && echo 'DEFAULT_HOSTNAME=kosheros' >> /usr/lib/os-release
+
+# Every raster from the real artwork (branding/logo.png, wallpaper.png):
+# the boot-splash logo, the start button, the login-screen lockup with the
+# name beside the logo, the wallpaper and its per-screen-shape crops plus
+# the background XML that lets GNOME pick the right one. See the script.
+RUN python3 /usr/share/kosher/branding/rasters.py \
+    # The admin app's icon went into hicolor; refresh the cache GTK reads.
+    && gtk-update-icon-cache -f -t /usr/share/icons/hicolor \
+    # The GRUB theme rasters.py wrote under /usr/lib/efi is a bootupd
+    # component: regenerate bootupd's EFI manifest so it is carried onto
+    # the EFI system partition at install, and assert it was picked up —
+    # a theme that quietly never reaches the disk is a plain menu with no
+    # error anywhere.
+    && bootupctl backend generate-update-metadata \
+    && grep -q kosheros-grub-theme /usr/lib/bootupd/updates/EFI.json \
+    && test -f /usr/share/grub/themes/starfield/theme.txt
 
 # --- kosherd + apps (last layers: change most often) --------------------------
 COPY kosherd/ /tmp/kosherd/

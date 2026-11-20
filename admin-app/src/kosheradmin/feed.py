@@ -20,7 +20,7 @@ from gi.repository import Adw, Gtk  # noqa: E402
 
 from kosherd import activity as activity_mod  # noqa: E402
 
-from . import labels  # noqa: E402
+from . import labels, seen  # noqa: E402
 from .common import avatar, clear, error_text, pointer_cursors, run_async, tag  # noqa: E402
 from .dialogs import allow_menu, pictures_menu  # noqa: E402
 
@@ -43,6 +43,10 @@ class ActivityPage(Gtk.Box):
         self.since_days = 1
         self.events: list[dict] = []
         self.requests: list[dict] = []
+        # When this administrator had last looked, as this visit began:
+        # what is newer is marked New for the whole visit. None until the
+        # page has been opened.
+        self.visit_since: int | None = None
 
         # -- the filters, which the window hands to the header bar --
         self.people = Gtk.ListBox(selection_mode=Gtk.SelectionMode.SINGLE,
@@ -80,6 +84,25 @@ class ActivityPage(Gtk.Box):
         self._rebuild_rail()
 
     # -- state ------------------------------------------------------------------
+
+    def begin_visit(self) -> None:
+        """The administrator opened Activity: what came since their last
+        look is marked New while they are here, and the count beside
+        Activity clears."""
+        self.visit_since = seen.load()
+        self._looked()
+
+    def _looked(self) -> None:
+        seen.save()
+        self.win.activity_unseen = 0
+        sidebar = getattr(self.win, "sidebar", None)
+        if sidebar is not None:
+            sidebar.say_activity()
+
+    def _on_screen(self) -> bool:
+        win = self.win
+        return (getattr(win, "destination", None) == "activity"
+                and bool(win.get_property("is-active")))
 
     def show_user(self, uid: int) -> None:
         """Narrow the feed to one person (from a card's "See all")."""
@@ -121,6 +144,9 @@ class ActivityPage(Gtk.Box):
         def on_done(result):
             self.events, self.requests = result
             self._render()
+            if self.visit_since is not None and self._on_screen():
+                # Whatever arrived while the page is open has been seen.
+                self._looked()
 
         run_async(load, on_done, lambda e: self.win.toast(error_text(e)))
 
@@ -191,14 +217,27 @@ class ActivityPage(Gtk.Box):
 
         current_day = None
         group = None
+        fresh: dict[Adw.PreferencesGroup, int] = {}
         for event in folded:
             day = labels.day_label(event["t"])
             if day != current_day:
                 current_day = day
                 group = Adw.PreferencesGroup(title=day)
                 self.feed.append(group)
-            group.add(self._event_row(event))
+            row = self._event_row(event)
+            row.is_new = self._is_new(event)
+            if row.is_new:
+                # Beside the title, before the actions: read first.
+                row.add_prefix(new_tag())
+                fresh[group] = fresh.get(group, 0) + 1
+            group.add(row)
+        for day_group, count in fresh.items():
+            day_group.set_description(new_since_sentence(count, self.visit_since))
         pointer_cursors(self)
+
+    def _is_new(self, event: dict) -> bool:
+        return (self.visit_since is not None and seen.is_news(event)
+                and event["t"] > self.visit_since)
 
     def _event_row(self, event: dict) -> Adw.ActionRow:
         kind = event["kind"]
@@ -274,6 +313,28 @@ class ActivityPage(Gtk.Box):
         if event.get("username", "?") == "?":
             return False
         return not (event.get("why") or "").startswith("rule:")
+
+
+def new_tag() -> Gtk.Label:
+    """The word New on a line that came since the last look. A word, so
+    colour is never the only way to tell."""
+    label = tag("New", "acc")
+    label.update_property([Gtk.AccessibleProperty.LABEL], ["New since you last looked"])
+    return label
+
+
+def new_since_sentence(count: int, last: int | None, now: float | None = None) -> str:
+    """Under a day's heading: how many of its lines are new, and since when."""
+    what = f"{count} new"
+    if not last:
+        return what
+    clock = time.strftime("%H:%M", time.localtime(last))
+    day = labels.day_label(last, now)
+    if day == "Today":
+        return f"{what} since you last looked, at {clock}"
+    if day == "Yesterday":
+        return f"{what} since you last looked, yesterday at {clock}"
+    return f"{what} since you last looked, on {day} at {clock}"
 
 
 def fold(events: list[dict]) -> list[dict]:

@@ -259,15 +259,24 @@ class Sidebar(Adw.NavigationPage):
         self.rows[row.key] = row
         self.list.append(row)
 
+    def say_activity(self) -> None:
+        """Today's lines this administrator has not looked at (seen.py).
+        It clears when Activity is opened."""
+        row = getattr(self, "rows", {}).get("activity")
+        if row is None:
+            return
+        unseen = getattr(self.win, "activity_unseen", 0) or 0
+        row.say(badge=str(unseen) if unseen else "")
+        row.badge.set_tooltip_text(
+            f"{unseen} new today since you last looked" if unseen else None)
+
     def _say_computer(self) -> None:
         win = self.win
-        blocked = sum(counts.get("blocked", 0)
-                      for counts in (getattr(win, "summary", None) or {}).values()
-                      if isinstance(counts, dict))
-        # Administration rows carry at most a number: how many were blocked
-        # today, how many things are wrong with the filter (amber), how
-        # many apps are approved. The words are on the pages.
-        self.rows["activity"].say(badge=str(blocked) if blocked else "")
+        # Administration rows carry at most a number: how much of today's
+        # activity this administrator has not looked at yet, how many
+        # things are wrong with the filter (amber), how many apps are
+        # approved. The words are on the pages.
+        self.say_activity()
 
         problems = health_problems(getattr(win, "status", None))
         self.rows["protection"].say(badge=str(problems) if problems else "",

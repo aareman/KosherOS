@@ -75,7 +75,11 @@ def test_the_first_boot_copies_the_skeleton_without_clobbering():
     assert starts[1].endswith("/nix/. /var/lib/nix/")
     # ...and the copy is relabelled: cp kept the skeleton's default_t on
     # the booted image, and the daemon's socket could not be created.
-    assert starts[2] == "/usr/sbin/restorecon -R /var/lib/nix"
+    assert starts[2] == "/usr/sbin/restorecon /var/lib/nix /var/lib/nix/store"
+    assert starts[3] == "/usr/sbin/restorecon -R /var/lib/nix/var"
+    # Never the store's contents: on a used store that walk held every
+    # boot back by two minutes, before local-fs.target.
+    assert not any(re.search(r"-R\S* /var/lib/nix(/store)?/?$", s) for s in starts)
 
 
 def test_the_store_and_the_daemons_socket_carry_labels_init_may_use():

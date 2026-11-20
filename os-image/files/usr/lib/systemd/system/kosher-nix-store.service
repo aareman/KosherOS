@@ -7,6 +7,11 @@ Description=KosherOS: put the Nix store on /var
 # The copy is relabelled afterwards: cp kept the skeleton's default_t,
 # and the daemon's socket may only be created in a var_run_t directory
 # (the file contexts the image sets for /var/lib/nix and /nix).
+# Only what the copy makes is relabelled: the two directories, and var/
+# with the socket's directory under it. Not the store's contents: what
+# Nix adds there inherits the store's var_lib_t, and walking every file
+# of a used store held the whole boot back by two minutes on a laptop
+# with a few hundred thousand of them.
 DefaultDependencies=no
 RequiresMountsFor=/var/lib
 Before=nix.mount
@@ -39,4 +44,5 @@ LockPersonality=yes
 SystemCallArchitectures=native
 ExecStart=/usr/bin/mkdir -p /var/lib/nix
 ExecStart=/usr/bin/cp -a --no-clobber --no-preserve=context /nix/. /var/lib/nix/
-ExecStart=/usr/sbin/restorecon -R /var/lib/nix
+ExecStart=/usr/sbin/restorecon /var/lib/nix /var/lib/nix/store
+ExecStart=/usr/sbin/restorecon -R /var/lib/nix/var

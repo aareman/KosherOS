@@ -52,6 +52,14 @@ ExecStart=/usr/bin/env mitmdump \
     --scripts /run/kosher-mitm/kosher_filter.py
 Restart=on-failure
 RestartSec=2
+# The filter pings systemd from its event loop (kosher_filter.py). A loop
+# stuck for 90 seconds means every filtered page fails with no message:
+# systemd kills it, with a core dump, and the restart above brings the web
+# back. Long enough for the slowest legitimate start, the image model's.
+WatchdogSec=90
+# A filter that ignores SIGTERM held a restart for 45 seconds; it holds
+# nothing worth waiting for (usage is flushed every minute).
+TimeoutStopSec=10
 StateDirectory=kosher-mitm
 RuntimeDirectory=kosher-mitm
 StateDirectoryMode=0750

@@ -25,6 +25,7 @@ import hmac
 import ipaddress
 import json
 import logging
+import os
 import re
 import secrets
 from collections import OrderedDict
@@ -222,6 +223,38 @@ def _fail_closed_entry() -> dict:
             "media_level": "immodest", "cover_style": "frost",
             "language_filter": "substitute",
             "youtube": {"restrict": "strict"}, "calm": {}}
+
+
+
+def _sd_notify(message: str) -> bool:
+    """Send one sd_notify message, if systemd gave us a socket."""
+    import socket
+
+    address = os.environ.get("NOTIFY_SOCKET", "")
+    if not address:
+        return False
+    if address.startswith("@"):
+        address = "\0" + address[1:]
+    try:
+        with socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM | socket.SOCK_CLOEXEC) as sock:
+            sock.connect(address)
+            sock.sendall(message.encode())
+        return True
+    except OSError:
+        return False
+
+
+def _watchdog_interval() -> float:
+    """Seconds between watchdog pings: a third of WatchdogSec=, or 0 when
+    systemd is not watching this process."""
+    try:
+        usec = int(os.environ.get("WATCHDOG_USEC", "0"))
+        pid = int(os.environ.get("WATCHDOG_PID", str(os.getpid())))
+    except ValueError:
+        return 0.0
+    if usec <= 0 or pid != os.getpid():
+        return 0.0
+    return usec / 3 / 1_000_000
 
 
 class PolicyCache:
@@ -1235,7 +1268,8 @@ class KosherFilter:
     # ---- usage: how much went through and how long the filter took --------
 
     def running(self) -> None:
-        """Start writing the usage totals out once a minute."""
+        """Start writing the usage totals out once a minute, and telling
+        systemd the event loop is alive."""
         import asyncio
 
         try:
@@ -1243,6 +1277,21 @@ class KosherFilter:
         except RuntimeError:
             return
         self._flusher = loop.create_task(self._flush_usage())
+        interval = _watchdog_interval()
+        if interval:
+            self._watchdog = loop.create_task(self._feed_watchdog(interval))
+
+    @staticmethod
+    async def _feed_watchdog(interval: float) -> None:
+        """Ping systemd's watchdog from the event loop itself. A filter
+        whose loop is stuck stops every page of every filtered account
+        with no message; with the pings gone, systemd kills it (leaving a
+        core dump that says where it was stuck) and starts it again."""
+        import asyncio
+
+        while True:
+            _sd_notify("WATCHDOG=1")
+            await asyncio.sleep(interval)
 
     async def _flush_usage(self) -> None:
         import asyncio

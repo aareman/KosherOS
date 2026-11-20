@@ -2594,3 +2594,42 @@ def test_hidden_pictures_from_another_site_name_the_page_not_the_site(addon):
     other = _hflow("image/jpeg", uid=1002, url="https://cdn.example.net/ring.jpg")
     other.request.headers["referer"] = "https://shop.example/"
     assert filt._page_of(other) == "https://shop.example/"
+
+
+# ---- the watchdog --------------------------------------------------------------
+
+def test_the_filter_pings_systemds_watchdog(addon, tmp_path, monkeypatch):
+    """A filter whose event loop was stuck failed every filtered page with
+    no message until a restart. It now pings systemd from that loop, and
+    systemd restarts it when the pings stop (kosher-mitm.service)."""
+    import os
+    import socket
+
+    path = tmp_path / "notify"
+    receiver = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
+    receiver.bind(str(path))
+    receiver.settimeout(2)
+    monkeypatch.setenv("NOTIFY_SOCKET", str(path))
+    monkeypatch.setenv("WATCHDOG_USEC", "90000000")
+    monkeypatch.setenv("WATCHDOG_PID", str(os.getpid()))
+    assert addon._watchdog_interval() == 30.0
+
+    async def first_ping():
+        task = asyncio.get_running_loop().create_task(addon.KosherFilter._feed_watchdog(30.0))
+        await asyncio.sleep(0)
+        task.cancel()
+
+    asyncio.run(first_ping())
+    assert receiver.recv(64) == b"WATCHDOG=1"
+    receiver.close()
+
+
+def test_no_watchdog_when_systemd_is_not_watching(addon, monkeypatch):
+    monkeypatch.delenv("WATCHDOG_USEC", raising=False)
+    monkeypatch.delenv("NOTIFY_SOCKET", raising=False)
+    assert addon._watchdog_interval() == 0.0
+    assert addon._sd_notify("WATCHDOG=1") is False
+    # Another process's watchdog (a child that inherited the variables).
+    monkeypatch.setenv("WATCHDOG_USEC", "90000000")
+    monkeypatch.setenv("WATCHDOG_PID", "1")
+    assert addon._watchdog_interval() == 0.0

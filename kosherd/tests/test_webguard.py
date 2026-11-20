@@ -66,6 +66,42 @@ def connect(filt, f, addresses=("93.184.216.34",)):
     return asyncio.run(run())
 
 
+def test_a_connected_upstream_is_named_after_its_site_again_so_it_is_reused(addon, tmp_path):
+    """The connect goes to the checked address, then the connection carries
+    the site's name again. mitmproxy reuses a connection only for the same
+    address and allows five per site for each browser connection; with the
+    IP left in place nothing was reused, and the sixth request to a busy
+    site waited until a connection closed (a spinner on Next.js sites)."""
+    filt = filtering(addon, tmp_path, "filtered")
+    f = flow("https://approved.example/")
+    f.server_conn.address = ("approved.example", 443)
+    connect(filt, f, ["93.184.216.34"])
+    assert f.server_conn.address == ("93.184.216.34", 443)   # where the socket goes
+    # Like mitmproxy's Server: no changing the address of an open connection.
+    class OpenServer:
+        def __init__(self, conn):
+            self.__dict__.update(id=conn.id, address=conn.address, state="open")
+
+        def __setattr__(self, name, value):
+            if name == "address":
+                raise RuntimeError("Cannot change server.address on open connection.")
+            super().__setattr__(name, value)
+
+    server = OpenServer(f.server_conn)
+    filt.server_connected(NS(server=server, client=f.client_conn))
+    assert server.address == ("approved.example", 443)  # what reuse matches on
+    assert not filt._pinned_names
+
+
+def test_a_numeric_upstream_keeps_its_address(addon, tmp_path):
+    filt = filtering(addon, tmp_path, "filtered")
+    f = flow("https://93.184.216.34/")
+    f.server_conn.address = ("93.184.216.34", 443)
+    connect(filt, f, ["93.184.216.34"])
+    filt.server_connected(NS(server=f.server_conn, client=f.client_conn))
+    assert f.server_conn.address == ("93.184.216.34", 443)
+
+
 def test_same_address_different_http_host_is_held_to_the_accounts_list(addon, tmp_path):
     filt = filtering(addon, tmp_path)
     allowed = flow("http://approved.example/page")

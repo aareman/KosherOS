@@ -451,7 +451,10 @@ def test_apply_starts_the_allowed_and_stops_the_rest(machine, monkeypatch):
     active = {"kid": False}
     monkeypatch.setattr(st, "is_active", lambda name: active[name])
     st.apply(Policy(syncthing=True, revision=2, users=[user(approved_apps=[REF])]))
-    assert ["systemctl", "start", "syncthing@kid.service"] in machine.calls
+    # Queued, never waited for: apply runs while kosherd starts, and the
+    # unit is ordered after kosherd (a 45-second deadlock at every boot).
+    assert ["systemctl", "start", "--no-block", "syncthing@kid.service"] in machine.calls
+    assert ["systemctl", "start", "syncthing@kid.service"] not in machine.calls
     assert json.loads(st.RUN_STATE.read_text()) == {"out": ["kid"], "lan": []}
     machine.calls.clear()
     active["kid"] = True
@@ -554,3 +557,22 @@ def test_the_ruleset_is_refreshed_before_the_service_starts(machine, monkeypatch
     monkeypatch.setattr(st, "_run", run)
     st.install(REF, 1001, progress)
     assert order == ["refresh", "start"]
+
+
+def test_nothing_kosherd_starts_while_applying_waits_for_kosherd():
+    """A unit ordered after kosherd.service that kosherd starts and waits
+    for during apply_policy deadlocks kosherd's own start. Every unit with
+    that ordering must either not be started by apply or be started with
+    --no-block (syncthing@, above)."""
+    import re
+    from pathlib import Path
+    root = Path(__file__).resolve().parents[2]
+    units = root / "os-image/files/usr/lib/systemd/system"
+    after_kosherd = sorted(
+        p.name for p in units.glob("*.service")
+        if re.search(r"^After=.*\bkosherd\.service\b", p.read_text(), re.M))
+    apply_src = (root / "kosherd/src/kosherd/apply.py").read_text()
+    for name in after_kosherd:
+        stem = name.replace("@.service", "@").replace(".service", "")
+        assert stem not in apply_src, f"apply.py names {name}, which waits for kosherd"
+    assert "syncthing@.service" in after_kosherd

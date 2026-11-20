@@ -354,10 +354,21 @@ def _icon(store: str) -> str:
     return ""
 
 
-def start(username: str) -> None:
+def start(username: str, *, wait: bool = True) -> None:
     """Start the account's service. Its ExecStartPost puts it in the
-    firewall's sets; kosherd's next apply does too, whichever is later."""
+    firewall's sets; kosherd's next apply does too, whichever is later.
+
+    wait=False only queues the start. apply() runs while kosherd itself
+    is starting, and the unit is ordered after kosherd.service: a start
+    that waited would wait for kosherd, which waits for it, until systemd
+    gives up on kosherd (45 seconds, twice, on a family's laptop)."""
     _systemctl("reset-failed", unit(username))
+    if not wait:
+        res = _systemctl("start", "--no-block", unit(username))
+        if res.returncode != 0:
+            raise SyncthingError(f"{unit(username)} could not be started: "
+                                 f"{(res.stderr or '').strip()}")
+        return
     res = _systemctl("start", unit(username))
     if res.returncode != 0:
         raise SyncthingError(f"{unit(username)} did not start: "
@@ -431,7 +442,7 @@ def apply(policy) -> None:
                 and username in state["out"] and dropin_path(username).exists())
         try:
             if want and not is_active(username):
-                start(username)
+                start(username, wait=False)
             elif not want and is_active(username):
                 stop(username)
         except SyncthingError as e:

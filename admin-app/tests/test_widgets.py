@@ -767,6 +767,13 @@ def a_feed(events, users=None, requests=()):
     return win, page
 
 
+def _feed_rows(page):
+    """The feed's own rows, not the detail rows inside an opened one."""
+    return [r for r in _rows(page.feed)
+            if not isinstance(r.get_ancestor(Adw.ExpanderRow), Adw.ExpanderRow)
+            or r.get_ancestor(Adw.ExpanderRow) is r]
+
+
 def test_the_feed_lists_people_as_filters_with_everyone_first():
     win, page = a_feed([], users=[a_user(), a_user(uid=1002, username="rivky")])
     rows = _children(page.people)
@@ -781,7 +788,7 @@ def test_a_quiet_day_says_so_rather_than_showing_nothing():
 
 def test_a_block_reads_in_the_familys_words_and_can_be_allowed():
     win, page = a_feed([an_event()])
-    rows = _rows(page.feed)
+    rows = _feed_rows(page)
     assert rows[0].get_title() == "Blocked roblox.com/games"
     assert "Games" in rows[0].get_subtitle()
     assert any(isinstance(b, Gtk.MenuButton) for b in _menu_buttons(rows[0]))
@@ -800,8 +807,8 @@ def _menu_buttons(widget, found=None):
 
 def test_a_block_by_an_admins_own_rule_is_not_offered_an_allow():
     win, page = a_feed([an_event(why="rule:youtube.com/shorts*")])
-    assert not _menu_buttons(_rows(page.feed)[0])
-    assert "a page rule" in _rows(page.feed)[0].get_subtitle()
+    assert not _menu_buttons(_feed_rows(page)[0])
+    assert "a page rule" in _feed_rows(page)[0].get_subtitle()
 
 
 def test_repeats_fold_into_one_line():
@@ -810,7 +817,7 @@ def test_repeats_fold_into_one_line():
     folded = feed.fold(events)
     assert len(folded) == 1 and folded[0]["times"] == 5
     win, page = a_feed(events)
-    assert "5 times" in _rows(page.feed)[0].get_subtitle()
+    assert "5 times" in _feed_rows(page)[0].get_subtitle()
 
 
 def test_every_kind_of_event_renders():
@@ -823,13 +830,13 @@ def test_every_kind_of_event_renders():
                        by_username="avi", method="SetFilterMode",
                        args=[1001, "dnsfilter"], guardian=True)]
     win, page = a_feed(events)
-    titles = [r.get_title() for r in _rows(page.feed)]
+    titles = [r.get_title() for r in _feed_rows(page)]
     assert titles == ["Blocked roblox.com/games",
                       "Hid pictures on shop.example/dress",
                       "Blocked video on tube.example/v",
                       "Blocked search: “bad words”",
                       "yosef: filter mode → DNS filter"]
-    change = _rows(page.feed)[-1]
+    change = _feed_rows(page)[-1]
     assert change.get_subtitle().startswith("avi, ")
     assert "guardian password given" in change.get_subtitle()
 
@@ -850,6 +857,97 @@ def test_narrowing_to_one_person_asks_the_daemon_for_them():
     drain()
     assert asked[-1] == 1001
     assert page.people.get_selected_row().uid == 1001
+
+
+def _badges(widget, found=None):
+    found = [] if found is None else found
+    child = widget.get_first_child()
+    while child is not None:
+        if child.has_css_class("kind-badge"):
+            found.append(child)
+        _badges(child, found)
+        child = child.get_next_sibling()
+    return found
+
+
+@pytest.mark.parametrize("event,kind", [
+    ({"dest": "document"}, "page"),
+    ({"dest": "iframe"}, "page"),
+    ({"dest": "image", "url": "https://cdn.example.com/a"}, "picture"),
+    ({"dest": "video"}, "video"),
+    ({"dest": "script"}, "part"),
+    ({"dest": "empty"}, "part"),
+    # Written before the filter noted what the browser fetched.
+    ({"url": "https://cdn.example.com/photo.JPG?w=200"}, "picture"),
+    ({"url": "https://media.example.com/clip.mp4"}, "video"),
+    ({"url": "https://example.com/games"}, "page"),
+    ({"why": "youtube:channel", "url": "https://video.example.com/watch?v=1"}, "video"),
+    ({"kind": "pictures", "why": ""}, "picture"),
+    ({"kind": "video", "why": ""}, "video"),
+    ({"kind": "search", "url": "", "text": "words"}, "search"),
+])
+def test_each_block_says_what_kind_of_thing_it_was(event, kind):
+    assert feed.blocked_kind(an_event(**event)) == kind
+
+
+def test_a_blocked_row_shows_its_kind_in_colour_icon_and_words():
+    now = int(time.time())
+    events = [an_event(t=now - 1, url="https://example.com/games", dest="document"),
+              an_event(t=now - 2, url="https://cdn.example.org/p.png", dest="image",
+                       page="https://example.org/gallery"),
+              an_event(t=now - 3, kind="video", url="https://video.example.net/v", why="")]
+    win, page = a_feed(events)
+    rows = _feed_rows(page)
+    badges = [_badges(r)[0] for r in rows]
+    assert [b.kind for b in badges] == ["page", "picture", "video"]
+    assert [b.has_css_class(c) for b, c in zip(badges, ("err", "warn", "acc"))] == [True] * 3
+    # Colour is never the only cue: the subtitle names the kind.
+    assert [r.get_subtitle().split(" · ")[0] for r in rows] == ["Page", "Picture", "Video"]
+    assert all(b.get_tooltip_text().startswith("Blocked: ") for b in badges)
+
+
+def _details(row):
+    return {r.get_title(): r.get_subtitle() for r in _rows(row) if r is not row}
+
+
+def test_opening_a_row_shows_the_whole_address_and_why():
+    long_url = "https://example.com/" + "/".join(f"part{i}" for i in range(30)) + "?q=1"
+    win, page = a_feed([an_event(url=long_url, why="category:games", dest="image",
+                                 page="https://example.org/article")])
+    row = _feed_rows(page)[0]
+    assert isinstance(row, Adw.ExpanderRow)
+    assert row.get_title_lines() == 1, "a long address is cut short until opened"
+    assert len(row.get_title()) < len(long_url)
+    row.set_expanded(True)
+    shown = _details(row)
+    assert shown["Address"] == long_url
+    assert shown["On the page"] == "https://example.org/article"
+    assert shown["What it was"] == "A picture"
+    assert shown["Why"] == "Games"
+    assert shown["Account"] == "yosef"
+    detail = next(r for r in _rows(row) if r is not row and r.get_title() == "Address")
+    assert detail.get_subtitle_selectable() and detail.get_subtitle_lines() == 0
+    # Allow is still on the row itself, not hidden inside it.
+    assert _menu_buttons(row)
+
+
+def test_repeats_say_since_when_and_old_records_still_open():
+    now = int(time.time())
+    events = [an_event(t=now - i * 60, url="https://example.com/x", why="")
+              for i in range(3)]
+    for event in events:
+        event.pop("why")
+    win, page = a_feed(events)
+    shown = _details(_feed_rows(page)[0])
+    assert "3 times since" in shown["When"]
+    assert shown["What it was"] == "A page"
+    assert "Why" not in shown and "On the page" not in shown
+
+
+def test_a_part_of_a_page_says_which_part():
+    shown = dict(feed.details(an_event(dest="script", url="https://example.com/a.js"),
+                              "part", ""))
+    assert shown["What it was"] == "Part of a page: a script"
 
 
 def test_yesterday_and_today_get_their_own_headings():
@@ -2854,7 +2952,7 @@ def test_a_time_event_reads_in_the_feed_and_on_the_overview():
     events = [an_event(t=now - 4, kind="time", url="", why="time:login"),
               an_event(t=now - 5, kind="time", url="", why="time:limit")]
     win, page = a_feed(events)
-    titles = [r.get_title() for r in _rows(page.feed)]
+    titles = [r.get_title() for r in _feed_rows(page)]
     assert titles == ["Refused a sign-in outside the allowed time",
                       "Signed out: today's time was used up"]
     page, _w, _u = _detail(activity=events)

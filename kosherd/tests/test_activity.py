@@ -112,6 +112,19 @@ def test_an_enormous_change_record_still_fits_on_a_line(tmp_path):
     assert json.loads(line)["method"] == "SetWhitelist"
 
 
+def test_a_long_page_address_on_a_block_still_comes_back(tmp_path):
+    """A block names the page it was for as well as its own address; two
+    long ones must not push the line past MAX_LINE and spoil it."""
+    long = "https://example.com/" + "a" * 5000
+    activity.record("proxy", activity.BLOCK, 1001, url=long, page=long,
+                    dest="image", spool=tmp_path)
+    found = activity.events(spool=tmp_path)
+    assert len(found) == 1
+    assert found[0]["url"] == long[:activity.MAX_URL]
+    assert long.startswith(found[0]["page"]) and len(found[0]["page"]) > 1000
+    assert found[0]["dest"] == "image"
+
+
 def test_day_start_is_local_midnight():
     now = time.time()
     start = activity.day_start(now)

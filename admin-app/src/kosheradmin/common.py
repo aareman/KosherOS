@@ -82,6 +82,11 @@ CSS = b"""
 .time-label { font-variant-numeric: tabular-nums; min-width: 44px; }
 .added-here { background-color: alpha(@accent_bg_color, 0.12); border-radius: 8px; }
 .url { font-family: monospace; font-size: 0.85em; }
+.kind-badge { border-radius: 9999px; min-width: 32px; min-height: 32px; }
+.kind-badge.err { background-color: alpha(@error_bg_color, 0.16); color: @error_color; }
+.kind-badge.warn { background-color: alpha(@warning_bg_color, 0.22); color: @warning_color; }
+.kind-badge.acc { background-color: alpha(@accent_bg_color, 0.18); color: @accent_color; }
+.kind-badge.plain { background-color: alpha(currentColor, 0.08); }
 """
 
 _css_loaded = False

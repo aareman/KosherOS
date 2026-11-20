@@ -53,6 +53,11 @@ WHY_SHOP = "shop"           # shop:<department>
 WHY_YOUTUBE = "youtube"     # youtube:channel | youtube:category
 WHY_TIME = "time"           # time:limit | time:schedule | time:login (timelimits.py)
 
+# A block may also carry `dest`, what the browser was fetching (its
+# Sec-Fetch-Dest: document, image, video, script…), and `page`, the page
+# it was for when that is not the address itself. Older lines have
+# neither; the admin app then goes by the address.
+
 KEEP_SECONDS = 7 * 24 * 3600
 MAX_LINE = 4000
 MAX_URL = 2000
@@ -78,11 +83,23 @@ def record(writer: str, kind: str, uid: int | None, *, url: str = "",
         document["why"] = str(why)[:300]
     for key, value in extra.items():
         if value is not None and value != "" and value != []:
-            document[key] = value
+            # A long page address must not push the line over MAX_LINE,
+            # where the cut below would leave it unreadable JSON.
+            document[key] = value[:MAX_URL] if isinstance(value, str) else value
     line = json.dumps(document, separators=(",", ":"))
     if len(line) > MAX_LINE:
         document.pop("args", None)
-        line = json.dumps(document, separators=(",", ":"))[:MAX_LINE]
+        line = json.dumps(document, separators=(",", ":"))
+    if len(line) > MAX_LINE and isinstance(document.get("page"), str):
+        # The page is the less important of two long addresses: shorten
+        # it so the line stays whole JSON rather than cut mid-string.
+        keep = len(document["page"]) - (len(line) - MAX_LINE) - 1
+        if keep > 0:
+            document["page"] = document["page"][:keep]
+        else:
+            document.pop("page")
+        line = json.dumps(document, separators=(",", ":"))
+    line = line[:MAX_LINE]
     path = _spool(spool) / f"{_safe_name(writer)}.jsonl"
     try:
         fd = os.open(path, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o644)

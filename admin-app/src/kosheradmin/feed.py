@@ -203,48 +203,70 @@ class ActivityPage(Gtk.Box):
     def _event_row(self, event: dict) -> Adw.ActionRow:
         kind = event["kind"]
         name = event.get("username", "?")
-        url = event.get("url", "")
-        why = labels.why_text(event.get("why", ""), event.get("source", ""))
         times = event.get("times", 1)
-        again = f" · {times} times" if times > 1 else ""
-        row = Adw.ActionRow(subtitle_lines=2, use_markup=False)
+        again = f"{times} times" if times > 1 else ""
+
+        if kind in (activity_mod.CHANGE, activity_mod.TIME):
+            row = Adw.ActionRow(subtitle_lines=2, use_markup=False)
+            row.add_prefix(self._clock(event))
+            if kind == activity_mod.CHANGE:
+                what, detail = labels.change_sentence(event, self.win.policy)
+                row.set_title(what)
+                row.set_subtitle(detail)
+                row.add_prefix(avatar(event.get("by_username") or "?", 24))
+            else:
+                row.add_prefix(avatar(name, 24))
+                row.set_title(labels.time_event_title(event))
+                row.set_subtitle(" · ".join(p for p in (name, again) if p))
+            return row
+
+        # What was blocked and what kind of thing it was, with the details
+        # an admin needs to decide behind the row's arrow.
+        what = blocked_kind(event)
+        word = KIND_INFO[what][0]
+        url = event.get("url", "")
+        row = Adw.ExpanderRow(title_lines=1, subtitle_lines=1, use_markup=False)
+        row.add_prefix(self._clock(event))
+        row.add_prefix(kind_badge(what))
+        if kind == activity_mod.SEARCH:
+            row.set_title(f"Blocked search: “{event.get('text', '')}”")
+            why = event.get("why", "")
+        elif kind == activity_mod.PICTURES:
+            row.set_title(f"Hid pictures on {labels.short_url(url)}")
+            why = "Page shown with pictures covered"
+        elif kind == activity_mod.VIDEO:
+            row.set_title(f"Blocked video on {labels.short_url(url) or 'a page'}")
+            why = "Blocked by video filtering"
+        else:
+            row.set_title(f"Blocked {labels.short_url(url)}")
+            why = labels.why_text(event.get("why", ""), event.get("source", ""))
+        row.set_subtitle(" · ".join(p for p in (word, name, why, again) if p))
+
+        if kind == activity_mod.BLOCK and self._allowable(event):
+            row.add_suffix(allow_menu(self.win, event["uid"], name, url,
+                                      on_done=self.refresh))
+        elif kind == activity_mod.PICTURES and name != "?" and url:
+            row.add_suffix(pictures_menu(self.win, event["uid"], name, url,
+                                         on_done=self.refresh))
+        for title, value in details(event, what, why):
+            # Markup off before the text goes in: an address with "&" in
+            # it is not markup, and would otherwise show as nothing.
+            detail = Adw.ActionRow(use_markup=False, subtitle_lines=0,
+                                   subtitle_selectable=True)
+            detail.set_title(title)
+            detail.set_subtitle(value)
+            detail.add_css_class("property")
+            row.add_row(detail)
+        return row
+
+    @staticmethod
+    def _clock(event: dict) -> Gtk.Label:
         clock = Gtk.Label(label=time.strftime("%H:%M", time.localtime(event["t"])),
                           valign=Gtk.Align.CENTER)
         clock.add_css_class("dim-label")
         clock.add_css_class("caption")
         clock.add_css_class("time-label")
-        row.add_prefix(clock)
-
-        if kind == activity_mod.CHANGE:
-            what, detail = labels.change_sentence(event, self.win.policy)
-            row.set_title(what)
-            row.set_subtitle(detail)
-            row.add_prefix(avatar(event.get("by_username") or "?", 24))
-            return row
-
-        row.add_prefix(avatar(name, 24))
-        if kind == activity_mod.BLOCK:
-            row.set_title(f"Blocked {labels.short_url(url)}")
-            row.set_subtitle(" · ".join(p for p in (name, why, again.strip(" ·")) if p))
-            if self._allowable(event):
-                row.add_suffix(allow_menu(self.win, event["uid"], name, url,
-                                          on_done=self.refresh))
-        elif kind == activity_mod.PICTURES:
-            row.set_title(f"Hid pictures on {labels.short_url(url)}")
-            row.set_subtitle(f"{name} · Page shown with pictures covered{again}")
-            if event.get("username", "?") != "?" and url:
-                row.add_suffix(pictures_menu(self.win, event["uid"], name, url,
-                                             on_done=self.refresh))
-        elif kind == activity_mod.VIDEO:
-            row.set_title(f"Blocked video on {labels.short_url(url) or 'a page'}")
-            row.set_subtitle(f"{name} · Blocked by video filtering{again}")
-        elif kind == activity_mod.SEARCH:
-            row.set_title(f"Blocked search: “{event.get('text', '')}”")
-            row.set_subtitle(" · ".join(p for p in (name, event.get("why", ""), again.strip(" ·")) if p))
-        elif kind == activity_mod.TIME:
-            row.set_title(labels.time_event_title(event))
-            row.set_subtitle(" · ".join(p for p in (name, again.strip(" ·")) if p))
-        return row
+        return clock
 
     def _allowable(self, event: dict) -> bool:
         """Allow makes sense for a block the filter decided; not for one an
@@ -267,8 +289,116 @@ def fold(events: list[dict]) -> list[dict]:
                event.get("text", ""), why, labels.day_label(event["t"]))
         if event["kind"] != activity_mod.CHANGE and key in seen:
             seen[key]["times"] = seen[key].get("times", 1) + 1
+            # Newest first, so each repeat is earlier than the last.
+            seen[key]["first"] = event["t"]
             continue
         entry = dict(event)
         seen[key] = entry
         out.append(entry)
+    return out
+
+
+# -- what was blocked -----------------------------------------------------------
+
+# kind: (the word in the row, icon, colour class, what it was in a sentence)
+KIND_INFO = {
+    "page": ("Page", "web-browser-symbolic", "err", "A page"),
+    "picture": ("Picture", "image-x-generic-symbolic", "warn", "A picture"),
+    "video": ("Video", "video-x-generic-symbolic", "acc", "A video"),
+    "search": ("Search", "system-search-symbolic", "plain", "A search"),
+    "part": ("Part of a page", "text-x-generic-symbolic", "plain", "Part of a page"),
+}
+
+# The browser's Sec-Fetch-Dest for the things a page loads besides itself.
+PART_WORDS = {"script": "a script", "style": "a style sheet", "font": "a font",
+              "manifest": "app information", "worker": "a background script",
+              "sharedworker": "a background script",
+              "serviceworker": "a background script",
+              "empty": "data the page asked for"}
+
+PICTURE_ENDINGS = (".jpg", ".jpeg", ".png", ".gif", ".webp", ".avif", ".svg",
+                   ".bmp", ".ico")
+VIDEO_ENDINGS = (".mp4", ".webm", ".m3u8", ".mpd", ".mov", ".m4v")
+
+
+def blocked_kind(event: dict) -> str:
+    """page, picture, video, search or part, from what the record says.
+
+    A block written before the filter noted what the browser was fetching
+    goes by the end of its address, and is a page otherwise."""
+    kind = event.get("kind")
+    if kind == activity_mod.PICTURES:
+        return "picture"
+    if kind == activity_mod.VIDEO or (event.get("why") or "").startswith("youtube:"):
+        return "video"
+    if kind == activity_mod.SEARCH:
+        return "search"
+    dest = (event.get("dest") or "").lower()
+    if dest in ("document", "iframe", "frame", "embed", "object"):
+        return "page"
+    if dest == "image":
+        return "picture"
+    if dest in ("video", "audio", "track"):
+        return "video"
+    if dest:
+        return "part"
+    from urllib.parse import urlsplit
+
+    try:
+        path = urlsplit(event.get("url", "")).path.lower()
+    except ValueError:
+        path = ""
+    if path.endswith(PICTURE_ENDINGS):
+        return "picture"
+    if path.endswith(VIDEO_ENDINGS):
+        return "video"
+    return "page"
+
+
+def kind_badge(what: str) -> Gtk.Widget:
+    """A round, coloured icon for the kind. The row's subtitle names the
+    kind in words too, so colour is never the only way to tell."""
+    word, icon, colour, _sentence = KIND_INFO[what]
+    badge = Gtk.Image(icon_name=icon, pixel_size=16, valign=Gtk.Align.CENTER,
+                      halign=Gtk.Align.CENTER,
+                      tooltip_text=f"Blocked: {word.lower()}")
+    badge.set_size_request(32, 32)
+    badge.add_css_class("kind-badge")
+    badge.add_css_class(colour)
+    badge.update_property([Gtk.AccessibleProperty.LABEL], [f"Blocked {word.lower()}"])
+    badge.kind = what
+    return badge
+
+
+def details(event: dict, what: str, why: str) -> list[tuple[str, str]]:
+    """The lines under an opened row: what the record knows that helps
+    decide whether to allow it."""
+    out: list[tuple[str, str]] = []
+    kind = event["kind"]
+    url = event.get("url", "")
+    if kind == activity_mod.SEARCH:
+        if event.get("text"):
+            out.append(("Searched for", event["text"]))
+    elif kind in (activity_mod.PICTURES, activity_mod.VIDEO):
+        if url:
+            out.append(("On the page", url))
+    else:
+        if url:
+            out.append(("Address", url))
+        if event.get("page") and event["page"] != url:
+            out.append(("On the page", event["page"]))
+    sentence = KIND_INFO[what][3]
+    dest = (event.get("dest") or "").lower()
+    if what == "part" and dest in PART_WORDS:
+        sentence = f"Part of a page: {PART_WORDS[dest]}"
+    out.append(("What it was", sentence))
+    if why:
+        out.append(("Why", why[:1].upper() + why[1:]))
+    out.append(("Account", event.get("username", "?")))
+    when = time.strftime("%A %-d %B, %H:%M", time.localtime(event["t"]))
+    times = event.get("times", 1)
+    if times > 1 and event.get("first"):
+        first = time.strftime("%H:%M", time.localtime(event["first"]))
+        when += f" ({times} times since {first})"
+    out.append(("When", when))
     return out

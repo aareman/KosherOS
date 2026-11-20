@@ -254,6 +254,11 @@ def test_the_boot_splash_speaks_in_sentences_not_unit_names():
     assert "systemd.show_status" not in containerfile.split("kargs = [")[1].split("]")[0]
     script = (ROOT / "os-image/files/usr/share/plymouth/themes/kosheros/kosheros.script").read_text()
     assert 'show_status("Starting KosherOS...");' in script
+    # ...but only when starting: the splash also shows at shutdown/restart.
+    assert 'mode = Plymouth.GetMode();' in script
+    for mode, line in (("shutdown", "Shutting down..."), ("reboot", "Restarting...")):
+        branch = script.split(f'mode == "{mode}"')[1].split("}")[0]
+        assert f'show_status("{line}");' in branch
     units = ROOT / "os-image/files/usr/lib/systemd/system"
     said = {}
     for conf in units.glob("*.service.d/10-kosheros-splash.conf"):

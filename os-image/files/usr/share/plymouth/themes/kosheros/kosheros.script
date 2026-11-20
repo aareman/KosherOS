@@ -57,7 +57,17 @@ fun show_status(text) {
 # Plain ASCII: this line and the password prompt are drawn in the
 # initramfs, whose text plugin (FreeType, no Pango) shows "…" and "•" as
 # empty boxes. Later messages are drawn after the switch to the real root.
-show_status("Starting KosherOS...");
+# The same splash shows at shutdown and restart, where "Starting" was wrong.
+mode = Plymouth.GetMode();
+if (mode == "shutdown") {
+    show_status("Shutting down...");
+} else if (mode == "reboot") {
+    show_status("Restarting...");
+} else if (mode == "updates" || mode == "system-upgrade" || mode == "firmware-upgrade") {
+    show_status("Installing updates...");
+} else {
+    show_status("Starting KosherOS...");
+}
 
 # --- progress ----------------------------------------------------------------
 ticks = 0;

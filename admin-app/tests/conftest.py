@@ -13,6 +13,13 @@ from kosherd import virtualdisplay
 DISPLAY = virtualdisplay.ensure()
 
 
+@pytest.fixture(autouse=True)
+def _own_state_dir(tmp_path, monkeypatch):
+    """When Activity was last looked at lives in the account's state
+    folder (seen.py); a test must never write the developer's."""
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
+
+
 def pytest_report_header(config):
     return f"display: {DISPLAY or 'none'}"
 

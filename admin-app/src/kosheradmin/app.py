@@ -16,11 +16,11 @@ import gi
 
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
-from gi.repository import Adw, Gio, Gtk  # noqa: E402
+from gi.repository import Adw, Gio, GLib, Gtk  # noqa: E402
 
 from kosherd.client import DaemonClient  # noqa: E402
 
-from . import labels  # noqa: E402
+from . import labels, seen  # noqa: E402
 from .common import banner_slot, error_text, load_css, run_async, submit_on_enter  # noqa: E402
 from .computer import AdvancedPage, AppsPage, ProtectionPage, UpdatesPage, health_rows  # noqa: E402
 from .detail import UserDetailPage  # noqa: E402
@@ -45,6 +45,8 @@ class Window(Adw.ApplicationWindow):
         self.requests: list[dict] = []
         self.status: dict | None = None
         self.summary: dict = {}
+        # Today's Activity lines this administrator has not looked at.
+        self.activity_unseen = 0
         self.time_usage: dict = {}
         self.catalog_count: int | None = None
         self.update_state: str | None = None
@@ -63,6 +65,8 @@ class Window(Adw.ApplicationWindow):
         # Pages must not talk to the daemon before Unlock, or their calls
         # race the unlock prompt.
         self.activity_page = ActivityPage(self)
+        # Back to a window showing Activity: that is looking at it again.
+        self.connect("notify::is-active", self._on_active)
 
         # The one banner. The user asked for "a blue notification at the
         # top: X requests waiting for you, click to deal with". It follows
@@ -165,6 +169,9 @@ class Window(Adw.ApplicationWindow):
         self.place_banner(page)
         self.sidebar.select(key)
         if key == "activity":
+            if self._landed:
+                # The window's own placeholder, before Unlock, is not a look.
+                self.activity_page.begin_visit()
             self.activity_page.refresh()
         if self.split.get_collapsed():
             self.split.set_show_content(True)
@@ -320,17 +327,21 @@ class Window(Adw.ApplicationWindow):
             requests = _quiet(client.list_requests, [])
             status = _quiet(client.filter_status, None)
             summary = _quiet(client.activity_summary, {})
+            unseen = _quiet(lambda: unseen_today(client), 0)
             time_usage = _quiet(client.time_usage, {})
             catalog = _quiet(lambda: len(client.list_catalog().get("apps", [])), None)
             # Once only: bootc takes a moment to answer, and the version
             # this computer is running does not change while it runs.
             deployment = self.deployment if self.deployment is not None \
                 else _quiet(client.deployment_status, {})
-            return policy, requests, status, summary, time_usage, catalog, deployment
+            return (policy, requests, status, summary, time_usage, catalog, deployment,
+                    unseen)
 
         def on_done(result):
             (self.policy, self.requests, self.status, self.summary, self.time_usage,
-             self.catalog_count, self.deployment) = result
+             self.catalog_count, self.deployment, unseen) = result
+            if not self._showing_activity():
+                self.activity_unseen = unseen
             self.refresh_banners()
             self.sidebar.refresh()
             if not self._landed:
@@ -338,6 +349,9 @@ class Window(Adw.ApplicationWindow):
                 # placeholder the window started on.
                 self._landed = True
                 self.go_home()
+                # New blocks arrive without the app doing anything; the
+                # count beside Activity follows them once a minute.
+                GLib.timeout_add_seconds(ACTIVITY_POLL_SECONDS, self._poll_activity)
             elif self.destination == "activity":
                 self.activity_page.refresh()
             self.refresh_open_detail()
@@ -345,6 +359,32 @@ class Window(Adw.ApplicationWindow):
                 then()
 
         run_async(load, on_done, lambda e: self.toast(error_text(e)))
+
+    # -- what is new on Activity ------------------------------------------------
+
+    def _showing_activity(self) -> bool:
+        # Not before the first load has landed: "activity" is only the
+        # placeholder destination the window starts on.
+        return (self._landed and self.destination == "activity"
+                and bool(self.get_property("is-active")))
+
+    def _poll_activity(self) -> bool:
+        def on_done(unseen):
+            if self._showing_activity():
+                # On screen: the page reads the new lines and marks them
+                # seen, which clears the count.
+                self.activity_page.refresh()
+            else:
+                self.activity_unseen = unseen
+                self.sidebar.say_activity()
+
+        run_async(lambda: unseen_today(self.client), on_done, lambda _e: None)
+        return True
+
+    def _on_active(self, *_args) -> None:
+        if self._landed and self._showing_activity():
+            self.activity_page.begin_visit()
+            self.activity_page.refresh()
 
     def with_guardian(self, then, on_cancel=None) -> None:
         """Ask for the guardian password once per session, then call `then(pw)`.
@@ -386,6 +426,16 @@ class Window(Adw.ApplicationWindow):
         dialog.connect("response", on_response)
         dialog.present(self)
         entry.grab_focus()
+
+
+ACTIVITY_POLL_SECONDS = 60
+
+
+def unseen_today(client) -> int:
+    """Today's Activity lines newer than this administrator's last look.
+    Off the main loop: it reads the feed from kosherd."""
+    last = seen.load()
+    return seen.unseen_today(client.list_activity(seen.since(last), -1), last)
 
 
 def _quiet(work, default):

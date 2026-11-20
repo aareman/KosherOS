@@ -957,6 +957,113 @@ def test_yesterday_and_today_get_their_own_headings():
     assert headings == ["Today", "Yesterday"]
 
 
+# -- what is new since the last look ----------------------------------------------
+
+def test_lines_since_the_last_look_are_marked_new_and_counted_under_the_day():
+    from kosheradmin import seen
+
+    now = int(time.time())
+    seen.save(now - 600)
+    events = [an_event(t=now - 60, url="https://new.example/a"),
+              an_event(t=now - 120, kind="pictures", url="https://new.example/b", why=""),
+              an_event(t=now - 1200, url="https://old.example/c"),
+              an_event(t=now - 30, kind="change", url="", why="", by=1000,
+                       by_username="avi", method="SetFilterMode",
+                       args=[1001, "dnsfilter"])]
+    win, page = a_feed(events)
+    page.begin_visit()
+    page.refresh()
+    drain()
+    rows = {r.get_title(): r for r in _feed_rows(page)}
+    assert rows["Blocked new.example/a"].is_new
+    assert rows["Hid pictures on new.example/b"].is_new
+    assert not rows["Blocked old.example/c"].is_new
+    # An administrator's own change is not news to them.
+    assert sorted(t for t, r in rows.items() if r.is_new) == \
+        ["Blocked new.example/a", "Hid pictures on new.example/b"]
+    assert "New" in _texts(rows["Blocked new.example/a"])
+    assert "New" not in _texts(rows["Blocked old.example/c"])
+    clock = time.strftime("%H:%M", time.localtime(now - 600))
+    descriptions = []
+    child = page.feed.get_first_child()
+    while child is not None:
+        if isinstance(child, Adw.PreferencesGroup):
+            descriptions.append(child.get_description())
+        child = child.get_next_sibling()
+    assert f"2 new since you last looked, at {clock}" in descriptions
+
+
+def test_the_new_marks_stay_for_the_visit_and_are_gone_on_the_next():
+    from kosheradmin import seen
+
+    now = int(time.time())
+    seen.save(now - 600)
+    win, page = a_feed([an_event(t=now - 60)])
+    page.begin_visit()
+    page.refresh()
+    drain()
+    assert _feed_rows(page)[0].is_new
+    page.refresh()  # a reload while still here keeps the mark
+    drain()
+    assert _feed_rows(page)[0].is_new
+    page.begin_visit()  # the next visit: that line has been seen
+    page.refresh()
+    drain()
+    assert not _feed_rows(page)[0].is_new
+
+
+def test_the_count_beside_activity_is_todays_unseen_lines_only():
+    from kosheradmin import seen
+
+    now = int(time.time())
+    start = __import__("kosherd.activity", fromlist=["day_start"]).day_start()
+    events = [an_event(t=now - 60), an_event(t=now - 90, url="https://other.example/"),
+              an_event(t=now - 95),  # a repeat of the first: one line, as on the page
+              an_event(t=now - 4000, url="https://seen.example/"),
+              an_event(t=start - 60, url="https://yesterday.example/"),
+              an_event(t=now - 20, kind="change", url="", method="SetMediaLevel")]
+    # Today's lines: the blocked page (twice, one line), other.example and
+    # seen.example. Not yesterday's, and not the administrator's change.
+    assert seen.unseen_today(events, 0) == (3 if now - 4000 >= start else 2)
+    assert seen.unseen_today(events, now - 3000) == 2
+    assert seen.unseen_today(events, now) == 0
+    assert seen.since(now - 3000) == now - 2999
+    assert seen.since(0) == start
+
+
+def test_opening_activity_clears_the_count_and_it_survives_a_restart():
+    import os
+
+    from kosheradmin import seen
+
+    now = int(time.time())
+    win, rail = a_rail([a_user()])
+    win.activity_unseen = 3
+    rail.say_activity()
+    badge = rail.rows["activity"].badge
+    assert badge.get_visible() and badge.get_label() == "3"
+    win.sidebar = rail
+    win.client = FakeClient(activity=[an_event(t=now - 60)])
+    page = feed.ActivityPage(win)
+    page.begin_visit()
+    assert win.activity_unseen == 0
+    assert not badge.get_visible()
+    # Written to the account's own state folder, so a new window (a
+    # restart of the app) knows when this administrator last looked.
+    assert seen.load() >= now
+    assert (seen.state_dir() / seen.FILE_NAME).exists()
+    assert str(seen.state_dir()).startswith(os.environ["XDG_STATE_HOME"])
+
+
+def test_a_missing_or_broken_seen_file_means_never_looked():
+    from kosheradmin import seen
+
+    assert seen.load() == 0
+    seen.state_dir().mkdir(parents=True, exist_ok=True)
+    (seen.state_dir() / seen.FILE_NAME).write_text("not json")
+    assert seen.load() == 0
+
+
 # -- one person's page --------------------------------------------------------------
 
 def _detail(mode="filtered", users=None, **kw):
@@ -2450,6 +2557,10 @@ def test_the_real_window_walks_every_sidebar_destination():
         win = admin.Window()
         drain()
         assert win.policy["users"], "the demo family loaded"
+        # Before Activity is ever opened, the demo day's lines are all
+        # unseen, and the count beside Activity says how many.
+        unseen = win.sidebar.rows["activity"].badge
+        assert unseen.get_visible() and unseen.get_label().isdigit()
         for row in _rail_rows(win.sidebar):
             if row.key == sidebar.ADD_KEY:
                 continue
@@ -2473,7 +2584,8 @@ def test_the_real_window_walks_every_sidebar_destination():
         # The sidebar says how each destination is, without being opened —
         # in a number, never a sentence.
         assert win.sidebar.rows["apps"].status.get_label().isdigit()
-        assert win.sidebar.rows["activity"].badge.get_label().isdigit()
+        # Activity was opened above: nothing of today is unseen any more.
+        assert not win.sidebar.rows["activity"].badge.get_visible()
         assert not win.sidebar.rows["activity"].status.get_visible()
     finally:
         admin.DaemonClient = original

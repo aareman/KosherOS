@@ -10,6 +10,7 @@ which is what the initramfs does.
 import configparser
 import gzip
 import importlib.util
+import re
 import shutil
 import subprocess
 import sys
@@ -277,7 +278,12 @@ def test_the_disk_password_is_asked_on_the_splash():
     assert "plymouth/themes/kosheros/kosheros.script" in containerfile
     conf = ROOT / "os-image/files/usr/lib/dracut/dracut.conf.d/60-kosheros-plymouth.conf"
     assert 'add_dracutmodules+=" plymouth "' in conf.read_text()
-    script = (ROOT / "os-image/files/usr/share/plymouth/themes/kosheros/kosheros.script").read_text()
+    # ...but not every graphics driver and its firmware: 269 MB that the
+    # boot loader read at every start. The build asserts the result.
+    omitted = re.search(r'^omit_drivers\+="([^"]*)"', conf.read_text(), re.M)
+    assert omitted and {"amdgpu", "nouveau", "radeon", "i915", "xe"} <= set(omitted[1].split())
+    assert "! lsinitrd" in containerfile and "lib/firmware/amdgpu" in containerfile
+    script =(ROOT / "os-image/files/usr/share/plymouth/themes/kosheros/kosheros.script").read_text()
     prompt = script.split("fun display_password_callback")[1].split("Plymouth.Set")[0]
     assert "Image.Text(prompt_text" not in prompt
     assert "disk password" in prompt

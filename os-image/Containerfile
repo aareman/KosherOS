@@ -577,6 +577,10 @@ RUN true \
     && kver="$(ls /usr/lib/modules)" \
     && dracut --force --kver "$kver" "/usr/lib/modules/$kver/initramfs.img" \
     && lsinitrd "/usr/lib/modules/$kver/initramfs.img" | grep -q 'plymouth/themes/kosheros/kosheros.script' \
+    # ...without every graphics driver's firmware (the boot loader reads
+    # all of it at every start): no amdgpu, and under 140 MB in all.
+    && ! lsinitrd "/usr/lib/modules/$kver/initramfs.img" | grep -q 'lib/firmware/amdgpu' \
+    && test "$(stat -c %s "/usr/lib/modules/$kver/initramfs.img")" -lt 146800640 \
     # bootc images have no /etc/default/grub; create it for the menu title.
     # (The timeout GRUB actually uses is set in the static config,
     # configs.d/09_kosheros_quiet.cfg; this file is documentation.)

@@ -166,3 +166,19 @@ def test_the_decoded_picture_is_let_go_when_the_check_ends(tmp_path):
     checker = vision.ImageFilter(detector=Detector(), cache=vision.VerdictCache(tmp_path / "v.sqlite"))
     checker.judge_bytes(_photo())
     assert getattr(vision._decoded, "entry", None) is None
+
+
+def test_bookkeeping_every_picture_waits_on_keeps_the_proxys_priority(tmp_path):
+    import asyncio
+    import os
+
+    checker = vision.ImageFilter(detector=vision.NullDetector(),
+                                 cache=vision.VerdictCache(tmp_path / "v.sqlite"))
+    try:
+        mine = os.getpriority(os.PRIO_PROCESS, 0)
+        preparing = asyncio.run(checker.prepare_async(os.getpriority, os.PRIO_PROCESS, 0))
+        judging = asyncio.run(checker.run_async(os.getpriority, os.PRIO_PROCESS, 0))
+        assert preparing == mine
+        assert judging == max(mine, vision.WORKER_NICE)
+    finally:
+        checker.close() if hasattr(checker, "close") else None

@@ -1313,9 +1313,13 @@ class ImageFilter:
         if preparation:
             if self._prepare_slots is None:
                 self._prepare_slots = asyncio.Semaphore(1)
+                # At the proxy's own priority, unlike the model's workers:
+                # every picture waits on this short bookkeeping, a cache hit
+                # and a hidden picture's tile included. At nice 15 beside a
+                # busy browser it got a few percent of a core, and pictures
+                # waited 5-11 s in the VM for work measured in milliseconds.
                 self._prepare_pool = ThreadPoolExecutor(
-                    max_workers=1, thread_name_prefix="kosher-image-cache",
-                    initializer=_lower_priority)
+                    max_workers=1, thread_name_prefix="kosher-image-cache")
             slots = self._prepare_slots
             executor = self._prepare_pool
         else:

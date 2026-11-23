@@ -13,6 +13,8 @@ import pytest
 
 from kosherd import apply as apply_mod
 from kosherd.apply import ApplyError, apply_policy, write_mitm_rules
+# The real one: conftest stands in for apply_mod.ipv6_loopback in every test.
+from kosherd.apply import ipv6_loopback as real_ipv6_loopback
 from kosherd.policy import Policy, UserPolicy
 from kosherd import paymentsecurity
 
@@ -525,3 +527,26 @@ def test_youtube_settings_alone_reach_the_proxy(tmp_path, monkeypatch):
                                       youtube={"allowed_channels": ["@torah"]})])
     write_mitm_rules(policy)
     assert rules_written(tmp_path)["1001"]["youtube"] == {"allowed_channels": ["@torah"]}
+
+
+def test_without_ipv6_the_filter_listens_on_ipv4_only(tmp_path, monkeypatch):
+    # mitmproxy exits when one listener cannot bind; with IPv6 off, a ::1
+    # listener kept the filter from starting and no page loaded.
+    from kosherd.policy import UserPolicy
+
+    monkeypatch.setattr(apply_mod, "MITM_DIR", tmp_path / "mitm")
+    monkeypatch.setattr(apply_mod, "MITM_RULES_PATH", tmp_path / "mitm" / "rules.json")
+    monkeypatch.setattr(apply_mod, "ipv6_loopback", lambda: False)
+    write_mitm_rules(Policy(users=[UserPolicy(uid=1001, username="a", mode="filtered")]))
+    assert (tmp_path / "mitm" / "listen.env").read_text() == \
+        "MITM_MODES=--mode transparent@127.0.0.1:30000\n"
+
+
+def test_ipv6_loopback_reads_the_kernel_address_list(tmp_path, monkeypatch):
+    table = tmp_path / "if_inet6"
+    monkeypatch.setattr(apply_mod, "IF_INET6", table)
+    assert real_ipv6_loopback() is False          # ipv6.disable=1: no file
+    table.write_text("fe80000000000000505400fffe123456 02 40 20 80 enp1s0\n")
+    assert real_ipv6_loopback() is False          # lo switched off
+    table.write_text("00000000000000000000000000000001 01 80 10 80       lo\n")
+    assert real_ipv6_loopback() is True

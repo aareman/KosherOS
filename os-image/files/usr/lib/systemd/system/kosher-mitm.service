@@ -18,6 +18,10 @@ Group=kosher-mitm
 # list to listen.env on every policy apply and restarts this service. The
 # Environment= line is the fallback for a first start before any apply.
 Environment="MITM_MODES=--mode transparent@127.0.0.1:30000"
+# Two allocator pools, not one per thread: the picture checker's model
+# threads each kept their own, and together they held over 200 MB the
+# filter no longer used (#322).
+Environment=MALLOC_ARENA_MAX=2
 EnvironmentFile=-/var/lib/kosher-mitm/listen.env
 # The filter script is COPIED to /run before start and loaded from there,
 # never from /usr. This is load-bearing: mitmproxy's script loader only

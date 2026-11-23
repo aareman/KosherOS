@@ -713,6 +713,11 @@ def _unpack(text: str) -> tuple:
 # Codec support varies by build; other Pillow-readable formats are
 # normalized to JPEG before detection even if this OpenCV can read them.
 CV2_FORMATS = frozenset({"JPEG", "PNG", "WEBP", "BMP", "TIFF"})
+# Larger pictures are reduced to this long side before detection. The
+# detector looks at 320 pixels; a 48-megapixel photo handed over whole was
+# decoded at full size and padded to a square, near 350 MB for one picture,
+# and a page of them took the filter past 3 GB (#322).
+PREPARE_MAX_SIDE = 1600
 
 
 def prepare(image_bytes: bytes) -> tuple[bytes, float]:
@@ -722,7 +727,8 @@ def prepare(image_bytes: bytes) -> tuple[bytes, float]:
     Small pictures blind the model: on ~200px search thumbnails the
     detector missed a swimsuit photo entirely — not even the face.
     Upscaling to ~640 on the short side before detection restores most of
-    it, for a few milliseconds of Pillow. NudeNet reads the file with
+    it, for a few milliseconds of Pillow. Large pictures are reduced to
+    PREPARE_MAX_SIDE, so the scale is then below one. NudeNet reads the file with
     OpenCV, whose codecs vary by build. Formats outside the conservative
     pass-through set, including GIF and AVIF, become a JPEG of the first
     frame when Pillow can read them. Other pictures go through untouched
@@ -735,16 +741,23 @@ def prepare(image_bytes: bytes) -> tuple[bytes, float]:
         from PIL import Image
 
         with Image.open(io.BytesIO(image_bytes)) as im:
-            short = min(im.size)
+            width, height = im.size
+            short, long = min(width, height), max(width, height)
             foreign = (im.format or "").upper() not in CV2_FORMATS
             if 0 < short < 480:
                 scale = min(640 / short, 4.0)
+            elif long > PREPARE_MAX_SIDE:
+                scale = PREPARE_MAX_SIDE / long
             if scale == 1.0 and not foreign:
                 return image_bytes, 1.0
+            target = (max(1, int(width * scale)), max(1, int(height * scale)))
+            if scale < 1.0:
+                # A JPEG decodes straight at 1/2, 1/4 or 1/8 of its size,
+                # never at full size in memory; other formats ignore this.
+                im.draft("RGB", target)
             frame = im.convert("RGB")
-            if scale != 1.0:
-                frame = frame.resize((int(im.width * scale), int(im.height * scale)),
-                                     Image.Resampling.LANCZOS)
+            if frame.size != target:
+                frame = frame.resize(target, Image.Resampling.LANCZOS)
             out = io.BytesIO()
             frame.save(out, "JPEG", quality=90)
             return out.getvalue(), scale

@@ -1,8 +1,9 @@
-"""Large pictures are reduced before the models see them (#322).
+"""What one picture check costs in memory and time (#322).
 
-A photo tens of megapixels in size was decoded at full size for each model.
-A page of them took the filter past 3 GB. What reaches the models is now
-reduced first, and every box still lands on the original picture."""
+A photo tens of megapixels in size was decoded at full size for each model,
+and a page of them took the filter past 3 GB. What reaches the models is
+now reduced first, and every box still lands on the original picture. The
+nudity model runs on two threads per picture, as the person models do."""
 import io
 
 import pytest
@@ -73,3 +74,32 @@ def test_the_person_detector_reads_a_large_jpeg_reduced_but_answers_in_its_pixel
     # Whatever size the JPEG was decoded at, the ratio is the original's.
     assert ratio == pytest.approx(persons.INPUT / 4000, rel=0.01)
     assert detector._session.tensors[0].shape == (1, 3, persons.INPUT, persons.INPUT)
+
+
+def test_the_nudity_model_runs_on_two_threads_per_picture(monkeypatch):
+    ort = pytest.importorskip("onnxruntime")
+    made = {}
+
+    class Session:
+        _model_path = "/models/320n.onnx"
+
+    class Fake:
+        onnx_session = Session()
+
+    monkeypatch.setattr(ort, "InferenceSession",
+                        lambda path, sess_options, providers: made.update(
+                            path=path, threads=sess_options.intra_op_num_threads) or "rebuilt")
+    detector = Fake()
+    vision._limit_threads(detector)
+    assert made == {"path": "/models/320n.onnx", "threads": vision.MODEL_THREADS}
+    assert detector.onnx_session == "rebuilt"
+
+
+def test_a_session_that_cannot_be_rebuilt_is_kept():
+    class Fake:
+        onnx_session = object()   # no model path to rebuild from
+
+    detector = Fake()
+    kept = detector.onnx_session
+    vision._limit_threads(detector)
+    assert detector.onnx_session is kept

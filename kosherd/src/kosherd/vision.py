@@ -835,6 +835,30 @@ class NullDetector:
         return None
 
 
+# Threads per picture inside the nudity model, as for the person models.
+# NudeNet's own session takes one per core, so two workers on four cores
+# ran eight beside the browser; under a browsing load two each judged 51
+# pictures in 3.2-3.8 s against 6.4-8.2 s.
+MODEL_THREADS = 2
+
+
+def _limit_threads(detector) -> None:
+    """Rebuild NudeNet's session with MODEL_THREADS. Keeps its own session
+    when that cannot be done: slower is better than no detector."""
+    try:
+        import onnxruntime as ort
+
+        session = detector.onnx_session
+        options = ort.SessionOptions()
+        options.intra_op_num_threads = MODEL_THREADS
+        options.inter_op_num_threads = 1
+        detector.onnx_session = ort.InferenceSession(
+            session._model_path, sess_options=options,
+            providers=["CPUExecutionProvider"])
+    except Exception:  # noqa: BLE001
+        log.debug("kept NudeNet's own session", exc_info=True)
+
+
 class NudeNetDetector:
     """NudeNet's ONNX detector: about 5 MB, CPU, tens of milliseconds.
 
@@ -859,7 +883,9 @@ class NudeNetDetector:
                 try:
                     from nudenet import NudeDetector
 
-                    self._detector = NudeDetector()
+                    detector = NudeDetector()
+                    _limit_threads(detector)
+                    self._detector = detector
                 except Exception:  # noqa: BLE001 - absence is a supported state
                     log.warning("no image model installed; accounts with "
                                 "picture filtering will hide pictures instead",

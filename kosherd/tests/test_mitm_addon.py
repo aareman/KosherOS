@@ -2057,21 +2057,23 @@ def test_an_animation_that_hides_is_hidden_whole_not_covered(addon):
 
 # ---- what the filter did is written down ---------------------------------
 
-def _activity_to(addon, tmp_path):
+def _activity_to(addon, tmp_path, monkeypatch):
     import functools
 
     from kosherd import activity
 
-    addon.activity_mod.record = functools.partial(activity.record, spool=tmp_path)
+    # monkeypatch, so the real module is put back for the tests after this one
+    monkeypatch.setattr(addon.activity_mod, "record",
+                        functools.partial(activity.record, spool=tmp_path))
     return functools.partial(activity.events, spool=tmp_path)
 
 
-def test_a_department_block_is_written_to_the_activity_log(addon, tmp_path):
+def test_a_department_block_is_written_to_the_activity_log(addon, tmp_path, monkeypatch):
     from pathlib import Path
 
     from kosherd import siterules
 
-    events = _activity_to(addon, tmp_path)
+    events = _activity_to(addon, tmp_path, monkeypatch)
     filt = addon.KosherFilter.__new__(addon.KosherFilter)
     filt.uids = type("U", (), {"uid_for_connection": staticmethod(lambda *a, **k: 1001)})()
     filt.policy = _request_policy(blocked=["immodest"])
@@ -2090,10 +2092,10 @@ def test_a_department_block_is_written_to_the_activity_log(addon, tmp_path):
     assert found[0]["why"].startswith("shop:")
 
 
-def test_the_block_page_carries_the_reason_into_a_request(addon, tmp_path):
+def test_the_block_page_carries_the_reason_into_a_request(addon, tmp_path, monkeypatch):
     from kosherd import accessreq
 
-    _activity_to(addon, tmp_path)
+    _activity_to(addon, tmp_path, monkeypatch)
     filt = addon.KosherFilter.__new__(addon.KosherFilter)
     flow = _request_flow("https://example.com/x")
     filt._block(flow, "https://example.com/x", " because it is video",
@@ -2122,8 +2124,8 @@ def test_the_block_page_carries_the_reason_into_a_request(addon, tmp_path):
     assert waiting[0]["why"] == "category:video"
 
 
-def test_hidden_pictures_are_one_line_per_page_not_per_picture(addon, tmp_path):
-    events = _activity_to(addon, tmp_path)
+def test_hidden_pictures_are_one_line_per_page_not_per_picture(addon, tmp_path, monkeypatch):
+    events = _activity_to(addon, tmp_path, monkeypatch)
     filt = addon.KosherFilter.__new__(addon.KosherFilter)
     for _ in range(5):
         flow = _image_flow_sized(addon, 4000, referer="https://shop.example/dress")
@@ -2140,9 +2142,9 @@ def test_hidden_pictures_are_one_line_per_page_not_per_picture(addon, tmp_path):
     assert len(events()) == 2
 
 
-def test_a_block_notes_what_the_browser_fetched_and_for_which_page(addon, tmp_path):
+def test_a_block_notes_what_the_browser_fetched_and_for_which_page(addon, tmp_path, monkeypatch):
     """The admin app shows a blocked picture as a picture, on its page."""
-    events = _activity_to(addon, tmp_path)
+    events = _activity_to(addon, tmp_path, monkeypatch)
     filt = addon.KosherFilter.__new__(addon.KosherFilter)
     flow = _request_flow("https://cdn.example.org/p.png")
     flow.request.headers["sec-fetch-dest"] = "image"
@@ -2161,8 +2163,8 @@ def test_a_block_notes_what_the_browser_fetched_and_for_which_page(addon, tmp_pa
     assert "dest" not in found["https://example.net/"], "a browser that did not say"
 
 
-def test_a_failed_note_never_fails_the_block(addon, tmp_path):
-    addon.activity_mod.SPOOL_DIR = tmp_path / "nowhere"
+def test_a_failed_note_never_fails_the_block(addon, tmp_path, monkeypatch):
+    monkeypatch.setattr(addon.activity_mod, "SPOOL_DIR", tmp_path / "nowhere")
     filt = addon.KosherFilter.__new__(addon.KosherFilter)
     flow = _request_flow("https://example.com/x")
     filt._block(flow, "https://example.com/x", "", why="rule:example.com")

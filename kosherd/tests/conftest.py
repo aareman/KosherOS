@@ -14,6 +14,13 @@ from kosherd import policy as policy_mod
 
 
 @pytest.fixture(autouse=True)
+def _ipv6_loopback(monkeypatch):
+    # The listener list must not depend on whether the test host has IPv6.
+    from kosherd import apply as apply_mod
+    monkeypatch.setattr(apply_mod, "ipv6_loopback", lambda: True)
+
+
+@pytest.fixture(autouse=True)
 def _bundled_policy_schema(monkeypatch, tmp_path):
     monkeypatch.setattr(policy_mod, "SCHEMA_PATH", tmp_path / "no-installed-schema.json")
     monkeypatch.setattr(policy_mod, "_schema_cache", None)

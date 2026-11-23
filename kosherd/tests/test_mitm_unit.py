@@ -53,3 +53,8 @@ def test_a_stuck_filter_is_restarted_and_never_holds_a_restart():
     assert "WatchdogSec=90" in UNIT
     assert "Restart=on-failure" in UNIT
     assert "TimeoutStopSec=10" in UNIT
+
+
+def test_the_filter_keeps_two_allocator_pools_not_one_per_thread():
+    # #322: the picture checker's threads each kept a pool of their own.
+    assert "Environment=MALLOC_ARENA_MAX=2" in UNIT

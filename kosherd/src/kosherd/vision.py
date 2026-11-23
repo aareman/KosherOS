@@ -254,7 +254,7 @@ PHOTO_MAX_ONE_LEVEL = 0.5
 def _chroma(im) -> tuple[float, float]:
     """(spread, offset) of the picture's chroma: how much Cb and Cr vary,
     and how far their average sits from neutral grey."""
-    small = im.convert("RGB").convert("YCbCr")
+    small = (im if im.mode == "RGB" else im.convert("RGB")).convert("YCbCr")
     small.thumbnail((64, 64))
     data = list(small.getdata())
     n = max(1, len(data))
@@ -270,15 +270,41 @@ def _is_monochrome(im) -> bool:
     return spread < MONO_CHROMA_SPREAD and offset < MONO_CHROMA_OFFSET
 
 
+# One picture is measured several times in a check (the whole frame, each
+# face, each figure). Each measurement decoded it again and converted the
+# whole of it twice before cropping: a 24-megapixel photo cost over 200 MB
+# per measurement (#322). It is now decoded once per check, on the worker
+# that judges it, and dropped when the check ends (forget_decoded).
+_decoded = threading.local()
+
+
+def _rgb(image_bytes: bytes):
+    """(the picture as RGB, whether it is monochrome), decoded once per check."""
+    entry = getattr(_decoded, "entry", None)
+    if entry is not None and entry[0] is image_bytes:
+        return entry[1], entry[2]
+    import io
+
+    from PIL import Image
+
+    im = Image.open(io.BytesIO(image_bytes))
+    im.load()
+    # Already RGB (most photographs): used as it is, not copied.
+    rgb = im if im.mode == "RGB" else im.convert("RGB")
+    entry = (image_bytes, rgb, _is_monochrome(rgb))
+    _decoded.entry = entry
+    return entry[1], entry[2]
+
+
+def forget_decoded() -> None:
+    """Let go of the picture _rgb kept for this thread."""
+    _decoded.entry = None
+
+
 def is_monochrome(image_bytes: bytes) -> bool:
     """Black and white, or a single tint such as sepia."""
     try:
-        import io
-
-        from PIL import Image
-
-        with Image.open(io.BytesIO(image_bytes)) as im:
-            return _is_monochrome(im)
+        return _rgb(image_bytes)[1]
     except Exception:  # noqa: BLE001
         return False
 
@@ -300,19 +326,16 @@ def face_lightness(image_bytes: bytes, face) -> int | None:
     """The median lightness of the middle of a face box: what skin looks
     like in this picture, for a monochrome measurement."""
     try:
-        import io
-
-        from PIL import Image
-
-        with Image.open(io.BytesIO(image_bytes)) as im:
-            x, y, w, h = face
-            region = im.convert("RGB").convert("YCbCr").crop(
-                (int(x + w * 0.25), int(y + h * 0.25),
-                 int(x + w * 0.75), int(y + h * 0.75)))
-            if region.width < 2 or region.height < 2:
-                return None
-            values = sorted(Y for Y, _cb, _cr in region.getdata())
-            return values[len(values) // 2]
+        im, _mono = _rgb(image_bytes)
+        x, y, w, h = face
+        # Cropped, then converted: the same pixels, without a copy of the
+        # whole picture in each colour space.
+        region = im.crop((int(x + w * 0.25), int(y + h * 0.25),
+                          int(x + w * 0.75), int(y + h * 0.75))).convert("YCbCr")
+        if region.width < 2 or region.height < 2:
+            return None
+        values = sorted(Y for Y, _cb, _cr in region.getdata())
+        return values[len(values) // 2]
     except Exception:  # noqa: BLE001
         return None
 
@@ -473,60 +496,59 @@ def skin_fraction(image_bytes: bytes, box, reference: int | None = None,
     and in a monochrome picture — where the lightness band is all the
     colour gate has — what it marks as skin is what counts as skin."""
     try:
-        import io
-
         from PIL import Image
 
-        with Image.open(io.BytesIO(image_bytes)) as im:
-            mono = _is_monochrome(im)
-            x, y, w, h = box
-            right, bottom = min(x + w, im.width), min(y + h, im.height)
-            region = im.convert("RGB").convert("YCbCr").crop((x, y, right, bottom))
-            if region.width < 8 or region.height < 8:
-                return None
-            # Sample down: precision is not needed to measure a fraction.
-            # Nearest, not smoothed: smoothing invents grey levels between
-            # a drawing's few, and a terminal would pass for a photograph.
-            sample_w, sample_h = min(96, region.width), min(96, region.height)
-            region = region.resize((sample_w, sample_h), Image.Resampling.NEAREST)
-            data = list(region.getdata())
-            keep = [True] * len(data)
-            if exclude:
-                # Which samples fall inside an excluded box, in the
-                # sampled region's own coordinates.
-                sx, sy = sample_w / (right - x), sample_h / (bottom - y)
-                holes = [(int((ex - x) * sx), int((ey - y) * sy),
-                          int((ex + ew - x) * sx), int((ey + eh - y) * sy))
-                         for ex, ey, ew, eh in exclude]
-                keep = [not any(hx0 <= i % sample_w < hx1 and hy0 <= i // sample_w < hy1
-                                for hx0, hy0, hx1, hy1 in holes)
-                        for i in range(len(data))]
-            skin_marks = None
-            if within is not None:
-                def sampled(mask):
-                    return list(mask.crop((x, y, right, bottom)).resize(
-                        (sample_w, sample_h), Image.Resampling.NEAREST).getdata())
-                person = sampled(within.person)
-                keep = [k and p >= MASK_CUT for k, p in zip(keep, person)]
-                if mono and within.skin is not None:
-                    skin_marks = sampled(within.skin)
-            counted = [px for px, k in zip(data, keep) if k]
-            if not counted:
-                return None
-            if skin_marks is not None:
-                skin = sum(1 for mark, k in zip(skin_marks, keep) if k and mark >= MASK_CUT)
-            elif mono:
-                if not looks_photographic(Y for Y, _cb, _cr in counted):
-                    return 0.0
-                if reference is not None:
-                    low, high = reference - MONO_SKIN_TOLERANCE, reference + MONO_SKIN_TOLERANCE
-                else:
-                    low, high = MONO_SKIN_BAND
-                skin = sum(1 for (Y, _cb, _cr) in counted if Y > 60 and low <= Y <= high)
+        im, mono = _rgb(image_bytes)
+        x, y, w, h = box
+        right, bottom = min(x + w, im.width), min(y + h, im.height)
+        region = im.crop((x, y, right, bottom))
+        if region.width < 8 or region.height < 8:
+            return None
+        # Sample down: precision is not needed to measure a fraction.
+        # Nearest, not smoothed: smoothing invents grey levels between
+        # a drawing's few, and a terminal would pass for a photograph.
+        # Nearest picks pixels as they are, so sampling before converting
+        # gives the same values without converting the whole region.
+        sample_w, sample_h = min(96, region.width), min(96, region.height)
+        region = region.resize((sample_w, sample_h), Image.Resampling.NEAREST).convert("YCbCr")
+        data = list(region.getdata())
+        keep = [True] * len(data)
+        if exclude:
+            # Which samples fall inside an excluded box, in the
+            # sampled region's own coordinates.
+            sx, sy = sample_w / (right - x), sample_h / (bottom - y)
+            holes = [(int((ex - x) * sx), int((ey - y) * sy),
+                      int((ex + ew - x) * sx), int((ey + eh - y) * sy))
+                     for ex, ey, ew, eh in exclude]
+            keep = [not any(hx0 <= i % sample_w < hx1 and hy0 <= i // sample_w < hy1
+                            for hx0, hy0, hx1, hy1 in holes)
+                    for i in range(len(data))]
+        skin_marks = None
+        if within is not None:
+            def sampled(mask):
+                return list(mask.crop((x, y, right, bottom)).resize(
+                    (sample_w, sample_h), Image.Resampling.NEAREST).getdata())
+            person = sampled(within.person)
+            keep = [k and p >= MASK_CUT for k, p in zip(keep, person)]
+            if mono and within.skin is not None:
+                skin_marks = sampled(within.skin)
+        counted = [px for px, k in zip(data, keep) if k]
+        if not counted:
+            return None
+        if skin_marks is not None:
+            skin = sum(1 for mark, k in zip(skin_marks, keep) if k and mark >= MASK_CUT)
+        elif mono:
+            if not looks_photographic(Y for Y, _cb, _cr in counted):
+                return 0.0
+            if reference is not None:
+                low, high = reference - MONO_SKIN_TOLERANCE, reference + MONO_SKIN_TOLERANCE
             else:
-                skin = sum(1 for (Y, cb, cr) in counted
-                           if Y > 60 and 77 <= cb <= 127 and 133 <= cr <= 173)
-            return skin / max(1, len(counted))
+                low, high = MONO_SKIN_BAND
+            skin = sum(1 for (Y, _cb, _cr) in counted if Y > 60 and low <= Y <= high)
+        else:
+            skin = sum(1 for (Y, cb, cr) in counted
+                       if Y > 60 and 77 <= cb <= 127 and 133 <= cr <= 173)
+        return skin / max(1, len(counted))
     except Exception:  # noqa: BLE001 - a measurement, never a crash
         return None
 
@@ -713,6 +735,11 @@ def _unpack(text: str) -> tuple:
 # Codec support varies by build; other Pillow-readable formats are
 # normalized to JPEG before detection even if this OpenCV can read them.
 CV2_FORMATS = frozenset({"JPEG", "PNG", "WEBP", "BMP", "TIFF"})
+# Larger pictures are reduced to this long side before detection. The
+# detector looks at 320 pixels; a 48-megapixel photo handed over whole was
+# decoded at full size and padded to a square, near 350 MB for one picture,
+# and a page of them took the filter past 3 GB (#322).
+PREPARE_MAX_SIDE = 1600
 
 
 def prepare(image_bytes: bytes) -> tuple[bytes, float]:
@@ -722,7 +749,8 @@ def prepare(image_bytes: bytes) -> tuple[bytes, float]:
     Small pictures blind the model: on ~200px search thumbnails the
     detector missed a swimsuit photo entirely — not even the face.
     Upscaling to ~640 on the short side before detection restores most of
-    it, for a few milliseconds of Pillow. NudeNet reads the file with
+    it, for a few milliseconds of Pillow. Large pictures are reduced to
+    PREPARE_MAX_SIDE, so the scale is then below one. NudeNet reads the file with
     OpenCV, whose codecs vary by build. Formats outside the conservative
     pass-through set, including GIF and AVIF, become a JPEG of the first
     frame when Pillow can read them. Other pictures go through untouched
@@ -735,21 +763,84 @@ def prepare(image_bytes: bytes) -> tuple[bytes, float]:
         from PIL import Image
 
         with Image.open(io.BytesIO(image_bytes)) as im:
-            short = min(im.size)
+            width, height = im.size
+            short, long = min(width, height), max(width, height)
             foreign = (im.format or "").upper() not in CV2_FORMATS
             if 0 < short < 480:
                 scale = min(640 / short, 4.0)
+            elif long > PREPARE_MAX_SIDE:
+                scale = PREPARE_MAX_SIDE / long
             if scale == 1.0 and not foreign:
                 return image_bytes, 1.0
+            target = (max(1, int(width * scale)), max(1, int(height * scale)))
+            if scale < 1.0:
+                # A JPEG decodes straight at 1/2, 1/4 or 1/8 of its size,
+                # never at full size in memory; other formats ignore this.
+                im.draft("RGB", target)
             frame = im.convert("RGB")
-            if scale != 1.0:
-                frame = frame.resize((int(im.width * scale), int(im.height * scale)),
-                                     Image.Resampling.LANCZOS)
+            if frame.size != target:
+                frame = frame.resize(target, Image.Resampling.LANCZOS)
             out = io.BytesIO()
             frame.save(out, "JPEG", quality=90)
             return out.getvalue(), scale
     except Exception:  # noqa: BLE001 - detection on the original instead
         return image_bytes, 1.0
+# SVG pictures (#322). Neither the model nor Pillow reads vector drawings,
+# so every SVG came back "could not be judged" and was hidden: a site's
+# icons and logos went blank, and a page of them queued behind real
+# pictures for seconds. An SVG is drawn on white with librsvg and the
+# drawing is judged like any picture. librsvg fetches nothing from the
+# network, and a drawing read from memory has no folder to read files
+# from. One that cannot be drawn is still hidden, as before.
+SVG_MAX_BYTES = 2_000_000
+SVG_MIN_SIDE, SVG_MAX_SIDE = 256, 1024
+
+
+def looks_svg(image_bytes: bytes) -> bool:
+    head = image_bytes[:4096].lstrip()
+    return head[:1] == b"<" and b"<svg" in head.lower()
+
+
+def render_svg(image_bytes: bytes) -> bytes | None:
+    """The drawing as a PNG on white, its long side between SVG_MIN_SIDE
+    and SVG_MAX_SIDE; None when it cannot be drawn."""
+    if len(image_bytes) > SVG_MAX_BYTES:
+        return None
+    try:
+        import io
+
+        import gi
+
+        gi.require_version("Rsvg", "2.0")
+        gi.require_foreign("cairo")
+        import cairo
+        from gi.repository import Rsvg
+
+        handle = Rsvg.Handle.new_from_data(image_bytes)
+        known, width, height = handle.get_intrinsic_size_in_pixels()
+        if not known or width <= 0 or height <= 0:
+            # Sized by its viewBox alone (most icons): keep its shape.
+            *_sizes, has_box, box = handle.get_intrinsic_dimensions()
+            width, height = (box.width, box.height) if has_box and box.width > 0 \
+                and box.height > 0 else (SVG_MIN_SIDE, SVG_MIN_SIDE)
+        long = max(width, height)
+        scale = min(SVG_MAX_SIDE / long, max(1.0, SVG_MIN_SIDE / long))
+        size = (max(1, round(width * scale)), max(1, round(height * scale)))
+        surface = cairo.ImageSurface(cairo.FORMAT_RGB24, *size)
+        context = cairo.Context(surface)
+        context.set_source_rgb(1, 1, 1)
+        context.paint()
+        viewport = Rsvg.Rectangle()
+        viewport.x, viewport.y, viewport.width, viewport.height = 0, 0, *size
+        handle.render_document(context, viewport)
+        out = io.BytesIO()
+        surface.write_to_png(out)
+        return out.getvalue()
+    except Exception:  # noqa: BLE001 - not drawable means not judged
+        log.debug("could not draw an SVG", exc_info=True)
+        return None
+
+
 # Frames judged from an animated picture, spread through it. A GIF or an
 # animated PNG/WebP is a short clip: a clean first frame says nothing about
 # the rest, so it is sampled like one — and given as many deadlines as it
@@ -822,6 +913,30 @@ class NullDetector:
         return None
 
 
+# Threads per picture inside the nudity model, as for the person models.
+# NudeNet's own session takes one per core, so two workers on four cores
+# ran eight beside the browser; under a browsing load two each judged 51
+# pictures in 3.2-3.8 s against 6.4-8.2 s.
+MODEL_THREADS = 2
+
+
+def _limit_threads(detector) -> None:
+    """Rebuild NudeNet's session with MODEL_THREADS. Keeps its own session
+    when that cannot be done: slower is better than no detector."""
+    try:
+        import onnxruntime as ort
+
+        session = detector.onnx_session
+        options = ort.SessionOptions()
+        options.intra_op_num_threads = MODEL_THREADS
+        options.inter_op_num_threads = 1
+        detector.onnx_session = ort.InferenceSession(
+            session._model_path, sess_options=options,
+            providers=["CPUExecutionProvider"])
+    except Exception:  # noqa: BLE001
+        log.debug("kept NudeNet's own session", exc_info=True)
+
+
 class NudeNetDetector:
     """NudeNet's ONNX detector: about 5 MB, CPU, tens of milliseconds.
 
@@ -846,7 +961,9 @@ class NudeNetDetector:
                 try:
                     from nudenet import NudeDetector
 
-                    self._detector = NudeDetector()
+                    detector = NudeDetector()
+                    _limit_threads(detector)
+                    self._detector = detector
                 except Exception:  # noqa: BLE001 - absence is a supported state
                     log.warning("no image model installed; accounts with "
                                 "picture filtering will hide pictures instead",
@@ -1052,14 +1169,23 @@ class ImageFilter:
         picture comes past, which on a slow machine is exactly when it
         matters. An animated picture is judged on frames spread through it
         and gets one verdict for the lot."""
+        sha = sha or digest(image_bytes)
+        if looks_svg(image_bytes):
+            # Judged as drawn; cached under the SVG itself.
+            image_bytes = render_svg(image_bytes)
+            if image_bytes is None:
+                return None
         frames = animation_frames(image_bytes)
-        if frames:
-            verdict = combine(self._judge_one(frame) for frame in frames)
-        else:
-            verdict = self._judge_one(image_bytes)
+        try:
+            if frames:
+                verdict = combine(self._judge_one(frame) for frame in frames)
+            else:
+                verdict = self._judge_one(image_bytes)
+        finally:
+            forget_decoded()
         if verdict is None:
             return None
-        self.cache.put(sha or digest(image_bytes), verdict)
+        self.cache.put(sha, verdict)
         return verdict
 
     def _judge_one(self, image_bytes: bytes) -> ImageVerdict | None:
@@ -1187,9 +1313,13 @@ class ImageFilter:
         if preparation:
             if self._prepare_slots is None:
                 self._prepare_slots = asyncio.Semaphore(1)
+                # At the proxy's own priority, unlike the model's workers:
+                # every picture waits on this short bookkeeping, a cache hit
+                # and a hidden picture's tile included. At nice 15 beside a
+                # busy browser it got a few percent of a core, and pictures
+                # waited 5-11 s in the VM for work measured in milliseconds.
                 self._prepare_pool = ThreadPoolExecutor(
-                    max_workers=1, thread_name_prefix="kosher-image-cache",
-                    initializer=_lower_priority)
+                    max_workers=1, thread_name_prefix="kosher-image-cache")
             slots = self._prepare_slots
             executor = self._prepare_pool
         else:

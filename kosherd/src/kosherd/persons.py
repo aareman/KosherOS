@@ -183,7 +183,11 @@ class PersonDetector:
 
             with Image.open(io.BytesIO(image_bytes)) as im:
                 width, height = im.size
+                # A large JPEG decodes at a fraction of its size (#322); the
+                # ratio is then put back in the original's terms.
+                im.draft("RGB", (INPUT, INPUT))
                 tensor, ratio = letterbox(im)
+                ratio *= im.size[0] / width
             raw = session.run(None, {self._input: tensor})[0][0]
         except Exception:  # noqa: BLE001
             log.debug("person detection failed", exc_info=True)
@@ -303,6 +307,7 @@ class PersonMask:
 
             with Image.open(io.BytesIO(image_bytes)) as im:
                 size = im.size
+                im.draft("RGB", (MASK_INPUT, MASK_INPUT))  # see detect (#322)
                 small = im.convert("RGB").resize((MASK_INPUT, MASK_INPUT),
                                                  Image.Resampling.BILINEAR)
             tensor = (np.asarray(small, dtype=np.float32) / 255.0)[None]

@@ -162,13 +162,29 @@ def write_mitm_rules(policy: Policy, tailnet_allowed: tuple[str, ...] | None = N
     _write_atomic(MITM_RULES_PATH, json.dumps(per_user, indent=2) + "\n", mode=0o644)
     # The listener list, one transparent mode per port. systemd splits the
     # unquoted $MITM_MODES on whitespace into separate arguments.
+    # ::1 only where the machine has IPv6: mitmproxy exits when a listener
+    # cannot bind, and a filter that will not start loads no page at all.
+    hosts = ("127.0.0.1", "::1") if ipv6_loopback() else ("127.0.0.1",)
     modes = " ".join(f"--mode transparent@{host}:{port}"
-                     for port in sorted(listen_ports) for host in ("127.0.0.1", "::1"))
+                     for port in sorted(listen_ports) for host in hosts)
     # Beside the rules file (not a fixed path), so a relocated rules file in
     # a test or a future layout takes its listener list with it. Read by
     # kosher-mitm.service as EnvironmentFile.
     _write_atomic(MITM_RULES_PATH.with_name("listen.env"),
                   f"MITM_MODES={modes}\n", mode=0o644)
+
+
+IF_INET6 = Path("/proc/net/if_inet6")
+
+
+def ipv6_loopback() -> bool:
+    """Whether ::1 is up: not with ipv6.disable=1 (no file) or with
+    disable_ipv6 set on lo (no line for it)."""
+    try:
+        return any(line.split()[0] == "0" * 31 + "1"
+                   for line in IF_INET6.read_text().splitlines() if line.strip())
+    except OSError:
+        return False
 
 
 def search_uid() -> int | None:

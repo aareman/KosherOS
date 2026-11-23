@@ -785,6 +785,62 @@ def prepare(image_bytes: bytes) -> tuple[bytes, float]:
             return out.getvalue(), scale
     except Exception:  # noqa: BLE001 - detection on the original instead
         return image_bytes, 1.0
+# SVG pictures (#322). Neither the model nor Pillow reads vector drawings,
+# so every SVG came back "could not be judged" and was hidden: a site's
+# icons and logos went blank, and a page of them queued behind real
+# pictures for seconds. An SVG is drawn on white with librsvg and the
+# drawing is judged like any picture. librsvg fetches nothing from the
+# network, and a drawing read from memory has no folder to read files
+# from. One that cannot be drawn is still hidden, as before.
+SVG_MAX_BYTES = 2_000_000
+SVG_MIN_SIDE, SVG_MAX_SIDE = 256, 1024
+
+
+def looks_svg(image_bytes: bytes) -> bool:
+    head = image_bytes[:4096].lstrip()
+    return head[:1] == b"<" and b"<svg" in head.lower()
+
+
+def render_svg(image_bytes: bytes) -> bytes | None:
+    """The drawing as a PNG on white, its long side between SVG_MIN_SIDE
+    and SVG_MAX_SIDE; None when it cannot be drawn."""
+    if len(image_bytes) > SVG_MAX_BYTES:
+        return None
+    try:
+        import io
+
+        import gi
+
+        gi.require_version("Rsvg", "2.0")
+        gi.require_foreign("cairo")
+        import cairo
+        from gi.repository import Rsvg
+
+        handle = Rsvg.Handle.new_from_data(image_bytes)
+        known, width, height = handle.get_intrinsic_size_in_pixels()
+        if not known or width <= 0 or height <= 0:
+            # Sized by its viewBox alone (most icons): keep its shape.
+            *_sizes, has_box, box = handle.get_intrinsic_dimensions()
+            width, height = (box.width, box.height) if has_box and box.width > 0 \
+                and box.height > 0 else (SVG_MIN_SIDE, SVG_MIN_SIDE)
+        long = max(width, height)
+        scale = min(SVG_MAX_SIDE / long, max(1.0, SVG_MIN_SIDE / long))
+        size = (max(1, round(width * scale)), max(1, round(height * scale)))
+        surface = cairo.ImageSurface(cairo.FORMAT_RGB24, *size)
+        context = cairo.Context(surface)
+        context.set_source_rgb(1, 1, 1)
+        context.paint()
+        viewport = Rsvg.Rectangle()
+        viewport.x, viewport.y, viewport.width, viewport.height = 0, 0, *size
+        handle.render_document(context, viewport)
+        out = io.BytesIO()
+        surface.write_to_png(out)
+        return out.getvalue()
+    except Exception:  # noqa: BLE001 - not drawable means not judged
+        log.debug("could not draw an SVG", exc_info=True)
+        return None
+
+
 # Frames judged from an animated picture, spread through it. A GIF or an
 # animated PNG/WebP is a short clip: a clean first frame says nothing about
 # the rest, so it is sampled like one — and given as many deadlines as it
@@ -1113,6 +1169,12 @@ class ImageFilter:
         picture comes past, which on a slow machine is exactly when it
         matters. An animated picture is judged on frames spread through it
         and gets one verdict for the lot."""
+        sha = sha or digest(image_bytes)
+        if looks_svg(image_bytes):
+            # Judged as drawn; cached under the SVG itself.
+            image_bytes = render_svg(image_bytes)
+            if image_bytes is None:
+                return None
         frames = animation_frames(image_bytes)
         try:
             if frames:
@@ -1123,7 +1185,7 @@ class ImageFilter:
             forget_decoded()
         if verdict is None:
             return None
-        self.cache.put(sha or digest(image_bytes), verdict)
+        self.cache.put(sha, verdict)
         return verdict
 
     def _judge_one(self, image_bytes: bytes) -> ImageVerdict | None:

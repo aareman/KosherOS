@@ -63,6 +63,9 @@ def test_slow_cache_preparation_leaves_the_event_loop_responsive(monkeypatch):
 
 def test_timed_out_burst_never_runs_queued_images(monkeypatch):
     filt = image_filter(monkeypatch)
+    # Pictures that give up while still queued (their QUEUE_WAIT, set
+    # short here) must never become work.
+    filt.queue_wait = filt.timeout
     started, release = threading.Event(), threading.Event()
     calls = []
 

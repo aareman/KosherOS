@@ -117,6 +117,13 @@ MIN_CONFIDENCE = 0.18
 MIN_IMAGE_BYTES = 2500
 # Inference must not stall the page.
 DETECT_TIMEOUT = 2.0
+# How long a picture may wait for a free worker before it is judged. The
+# deadline above is for the judging itself: counted from arrival, a page
+# that asked for fifty pictures at once had all but the first few hidden
+# while still in the queue, though each needed a fraction of a second.
+# Nothing is shown while a picture waits, so waiting longer lets nothing
+# unchecked through; the browser shows the picture when it is judged.
+QUEUE_WAIT = 20.0
 
 # Measured: the detector takes tens of milliseconds on a developer's
 # machine and 200-600 ms per image on two cores, which is the machine this
@@ -1050,6 +1057,7 @@ class ImageFilter:
         self.detector = detector if detector is not None else NudeNetDetector()
         self.cache = cache if cache is not None else VerdictCache()
         self.timeout = timeout
+        self.queue_wait = QUEUE_WAIT
         self._pool = None
         self._workers = workers if workers is not None else default_workers()
         self._slow_ms = slow_ms
@@ -1239,16 +1247,22 @@ class ImageFilter:
             if known is not None or sha is None:
                 return known
             deadline = self.timeout * (ANIMATION_FRAMES if animated else 1)
-            remaining = deadline - (time.monotonic() - started)
-            if remaining <= 0:
-                return None
-            return await asyncio.wait_for(
-                self.run_async(self._judge_if_needed, image_bytes, sha,
-                               share_key=("image", sha)), remaining)
-        except asyncio.TimeoutError:
-            # Queue time is not detector time. A waiter that expires must
-            # never become CPU work later, or make the machine look slow
-            # simply because a page requested many pictures at once.
+            # Two budgets: QUEUE_WAIT for a worker to be free, then the
+            # deadline for the judging. A waiter that leaves the queue never
+            # becomes work, so a page's burst cannot make the machine look
+            # slow (see _run_async).
+            admitted = asyncio.get_running_loop().create_future()
+            judging = asyncio.ensure_future(self.run_async(
+                self._judge_if_needed, image_bytes, sha,
+                share_key=("image", sha), admitted=admitted))
+            try:
+                await asyncio.wait_for(asyncio.shield(admitted),
+                                       self.queue_wait - (time.monotonic() - started))
+                return await asyncio.wait_for(judging, deadline)
+            finally:
+                if not judging.done():
+                    judging.cancel()
+        except (asyncio.TimeoutError, ValueError):
             return None
         except Exception:  # noqa: BLE001 - a broken picture is not a verdict
             log.debug("judgement failed", exc_info=True)
@@ -1281,7 +1295,7 @@ class ImageFilter:
         """
         return await self._run_async(fn, *args, preparation=True)
 
-    async def run_async(self, fn, *args, share_key=None):
+    async def run_async(self, fn, *args, share_key=None, admitted=None):
         """Admit CPU work only when a worker is free.
 
         Waiting stays in asyncio, where a cancelled/timed-out request can
@@ -1292,9 +1306,13 @@ class ImageFilter:
         worker. Namespace keys by operation; the function and arguments
         must produce the same result for every caller of that key.
         """
-        return await self._run_async(fn, *args, share_key=share_key)
+        return await self._run_async(fn, *args, share_key=share_key, admitted=admitted)
 
-    async def _run_async(self, fn, *args, preparation=False, share_key=None):
+    async def _run_async(self, fn, *args, preparation=False, share_key=None,
+                         admitted=None):
+        """`admitted`, a future, is resolved when the job has a worker (or
+        joins one already running), so a caller can time the queue and the
+        work separately."""
         import asyncio
         from concurrent.futures import ThreadPoolExecutor
 
@@ -1308,7 +1326,12 @@ class ImageFilter:
         if self._closed:
             raise RuntimeError("image filter is closed")
         loop = asyncio.get_running_loop()
+        def admit():
+            if admitted is not None and not admitted.done():
+                admitted.set_result(True)
+
         if share_key is not None and share_key in self._inflight:
+            admit()
             return await wait_result(self._inflight[share_key])
         if preparation:
             if self._prepare_slots is None:
@@ -1332,12 +1355,14 @@ class ImageFilter:
         # its result in asyncio, never by parking a detector thread.
         if share_key is not None and share_key in self._inflight:
             slots.release()
+            admit()
             return await wait_result(self._inflight[share_key])
         try:
             future = executor.submit(fn, *args)
         except BaseException:
             slots.release()
             raise
+        admit()
 
         result = asyncio.wrap_future(future, loop=loop)
         if share_key is not None:

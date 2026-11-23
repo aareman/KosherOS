@@ -254,7 +254,7 @@ PHOTO_MAX_ONE_LEVEL = 0.5
 def _chroma(im) -> tuple[float, float]:
     """(spread, offset) of the picture's chroma: how much Cb and Cr vary,
     and how far their average sits from neutral grey."""
-    small = im.convert("RGB").convert("YCbCr")
+    small = (im if im.mode == "RGB" else im.convert("RGB")).convert("YCbCr")
     small.thumbnail((64, 64))
     data = list(small.getdata())
     n = max(1, len(data))
@@ -270,15 +270,41 @@ def _is_monochrome(im) -> bool:
     return spread < MONO_CHROMA_SPREAD and offset < MONO_CHROMA_OFFSET
 
 
+# One picture is measured several times in a check (the whole frame, each
+# face, each figure). Each measurement decoded it again and converted the
+# whole of it twice before cropping: a 24-megapixel photo cost over 200 MB
+# per measurement (#322). It is now decoded once per check, on the worker
+# that judges it, and dropped when the check ends (forget_decoded).
+_decoded = threading.local()
+
+
+def _rgb(image_bytes: bytes):
+    """(the picture as RGB, whether it is monochrome), decoded once per check."""
+    entry = getattr(_decoded, "entry", None)
+    if entry is not None and entry[0] is image_bytes:
+        return entry[1], entry[2]
+    import io
+
+    from PIL import Image
+
+    im = Image.open(io.BytesIO(image_bytes))
+    im.load()
+    # Already RGB (most photographs): used as it is, not copied.
+    rgb = im if im.mode == "RGB" else im.convert("RGB")
+    entry = (image_bytes, rgb, _is_monochrome(rgb))
+    _decoded.entry = entry
+    return entry[1], entry[2]
+
+
+def forget_decoded() -> None:
+    """Let go of the picture _rgb kept for this thread."""
+    _decoded.entry = None
+
+
 def is_monochrome(image_bytes: bytes) -> bool:
     """Black and white, or a single tint such as sepia."""
     try:
-        import io
-
-        from PIL import Image
-
-        with Image.open(io.BytesIO(image_bytes)) as im:
-            return _is_monochrome(im)
+        return _rgb(image_bytes)[1]
     except Exception:  # noqa: BLE001
         return False
 
@@ -300,19 +326,16 @@ def face_lightness(image_bytes: bytes, face) -> int | None:
     """The median lightness of the middle of a face box: what skin looks
     like in this picture, for a monochrome measurement."""
     try:
-        import io
-
-        from PIL import Image
-
-        with Image.open(io.BytesIO(image_bytes)) as im:
-            x, y, w, h = face
-            region = im.convert("RGB").convert("YCbCr").crop(
-                (int(x + w * 0.25), int(y + h * 0.25),
-                 int(x + w * 0.75), int(y + h * 0.75)))
-            if region.width < 2 or region.height < 2:
-                return None
-            values = sorted(Y for Y, _cb, _cr in region.getdata())
-            return values[len(values) // 2]
+        im, _mono = _rgb(image_bytes)
+        x, y, w, h = face
+        # Cropped, then converted: the same pixels, without a copy of the
+        # whole picture in each colour space.
+        region = im.crop((int(x + w * 0.25), int(y + h * 0.25),
+                          int(x + w * 0.75), int(y + h * 0.75))).convert("YCbCr")
+        if region.width < 2 or region.height < 2:
+            return None
+        values = sorted(Y for Y, _cb, _cr in region.getdata())
+        return values[len(values) // 2]
     except Exception:  # noqa: BLE001
         return None
 
@@ -473,60 +496,59 @@ def skin_fraction(image_bytes: bytes, box, reference: int | None = None,
     and in a monochrome picture — where the lightness band is all the
     colour gate has — what it marks as skin is what counts as skin."""
     try:
-        import io
-
         from PIL import Image
 
-        with Image.open(io.BytesIO(image_bytes)) as im:
-            mono = _is_monochrome(im)
-            x, y, w, h = box
-            right, bottom = min(x + w, im.width), min(y + h, im.height)
-            region = im.convert("RGB").convert("YCbCr").crop((x, y, right, bottom))
-            if region.width < 8 or region.height < 8:
-                return None
-            # Sample down: precision is not needed to measure a fraction.
-            # Nearest, not smoothed: smoothing invents grey levels between
-            # a drawing's few, and a terminal would pass for a photograph.
-            sample_w, sample_h = min(96, region.width), min(96, region.height)
-            region = region.resize((sample_w, sample_h), Image.Resampling.NEAREST)
-            data = list(region.getdata())
-            keep = [True] * len(data)
-            if exclude:
-                # Which samples fall inside an excluded box, in the
-                # sampled region's own coordinates.
-                sx, sy = sample_w / (right - x), sample_h / (bottom - y)
-                holes = [(int((ex - x) * sx), int((ey - y) * sy),
-                          int((ex + ew - x) * sx), int((ey + eh - y) * sy))
-                         for ex, ey, ew, eh in exclude]
-                keep = [not any(hx0 <= i % sample_w < hx1 and hy0 <= i // sample_w < hy1
-                                for hx0, hy0, hx1, hy1 in holes)
-                        for i in range(len(data))]
-            skin_marks = None
-            if within is not None:
-                def sampled(mask):
-                    return list(mask.crop((x, y, right, bottom)).resize(
-                        (sample_w, sample_h), Image.Resampling.NEAREST).getdata())
-                person = sampled(within.person)
-                keep = [k and p >= MASK_CUT for k, p in zip(keep, person)]
-                if mono and within.skin is not None:
-                    skin_marks = sampled(within.skin)
-            counted = [px for px, k in zip(data, keep) if k]
-            if not counted:
-                return None
-            if skin_marks is not None:
-                skin = sum(1 for mark, k in zip(skin_marks, keep) if k and mark >= MASK_CUT)
-            elif mono:
-                if not looks_photographic(Y for Y, _cb, _cr in counted):
-                    return 0.0
-                if reference is not None:
-                    low, high = reference - MONO_SKIN_TOLERANCE, reference + MONO_SKIN_TOLERANCE
-                else:
-                    low, high = MONO_SKIN_BAND
-                skin = sum(1 for (Y, _cb, _cr) in counted if Y > 60 and low <= Y <= high)
+        im, mono = _rgb(image_bytes)
+        x, y, w, h = box
+        right, bottom = min(x + w, im.width), min(y + h, im.height)
+        region = im.crop((x, y, right, bottom))
+        if region.width < 8 or region.height < 8:
+            return None
+        # Sample down: precision is not needed to measure a fraction.
+        # Nearest, not smoothed: smoothing invents grey levels between
+        # a drawing's few, and a terminal would pass for a photograph.
+        # Nearest picks pixels as they are, so sampling before converting
+        # gives the same values without converting the whole region.
+        sample_w, sample_h = min(96, region.width), min(96, region.height)
+        region = region.resize((sample_w, sample_h), Image.Resampling.NEAREST).convert("YCbCr")
+        data = list(region.getdata())
+        keep = [True] * len(data)
+        if exclude:
+            # Which samples fall inside an excluded box, in the
+            # sampled region's own coordinates.
+            sx, sy = sample_w / (right - x), sample_h / (bottom - y)
+            holes = [(int((ex - x) * sx), int((ey - y) * sy),
+                      int((ex + ew - x) * sx), int((ey + eh - y) * sy))
+                     for ex, ey, ew, eh in exclude]
+            keep = [not any(hx0 <= i % sample_w < hx1 and hy0 <= i // sample_w < hy1
+                            for hx0, hy0, hx1, hy1 in holes)
+                    for i in range(len(data))]
+        skin_marks = None
+        if within is not None:
+            def sampled(mask):
+                return list(mask.crop((x, y, right, bottom)).resize(
+                    (sample_w, sample_h), Image.Resampling.NEAREST).getdata())
+            person = sampled(within.person)
+            keep = [k and p >= MASK_CUT for k, p in zip(keep, person)]
+            if mono and within.skin is not None:
+                skin_marks = sampled(within.skin)
+        counted = [px for px, k in zip(data, keep) if k]
+        if not counted:
+            return None
+        if skin_marks is not None:
+            skin = sum(1 for mark, k in zip(skin_marks, keep) if k and mark >= MASK_CUT)
+        elif mono:
+            if not looks_photographic(Y for Y, _cb, _cr in counted):
+                return 0.0
+            if reference is not None:
+                low, high = reference - MONO_SKIN_TOLERANCE, reference + MONO_SKIN_TOLERANCE
             else:
-                skin = sum(1 for (Y, cb, cr) in counted
-                           if Y > 60 and 77 <= cb <= 127 and 133 <= cr <= 173)
-            return skin / max(1, len(counted))
+                low, high = MONO_SKIN_BAND
+            skin = sum(1 for (Y, _cb, _cr) in counted if Y > 60 and low <= Y <= high)
+        else:
+            skin = sum(1 for (Y, cb, cr) in counted
+                       if Y > 60 and 77 <= cb <= 127 and 133 <= cr <= 173)
+        return skin / max(1, len(counted))
     except Exception:  # noqa: BLE001 - a measurement, never a crash
         return None
 
@@ -1092,10 +1114,13 @@ class ImageFilter:
         matters. An animated picture is judged on frames spread through it
         and gets one verdict for the lot."""
         frames = animation_frames(image_bytes)
-        if frames:
-            verdict = combine(self._judge_one(frame) for frame in frames)
-        else:
-            verdict = self._judge_one(image_bytes)
+        try:
+            if frames:
+                verdict = combine(self._judge_one(frame) for frame in frames)
+            else:
+                verdict = self._judge_one(image_bytes)
+        finally:
+            forget_decoded()
         if verdict is None:
             return None
         self.cache.put(sha or digest(image_bytes), verdict)

@@ -526,6 +526,10 @@ class DaemonClient:
         """Which image is booted, and what a rollback would return to."""
         return json.loads(self._call("System", "DeploymentStatus")[0])
 
+    def system_health(self) -> dict:
+        """The failed system services and their last log lines."""
+        return json.loads(self._call("System", "SystemHealth")[0])
+
     def rollback(self, guardian_password: str = "") -> None:
         self._call("System", "Rollback", "(s)", guardian_password)
 

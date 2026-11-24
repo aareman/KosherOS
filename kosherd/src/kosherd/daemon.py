@@ -439,6 +439,9 @@ INTROSPECTION_XML = """
     <method name="DeploymentStatus">
       <arg direction="out" type="s" name="status_json"/>
     </method>
+    <method name="SystemHealth">
+      <arg direction="out" type="s" name="health_json"/>
+    </method>
     <method name="Rollback">
       <arg direction="in" type="s" name="guardian_password"/>
     </method>
@@ -617,7 +620,7 @@ KEYD_UNIT_PATH = "/org/freedesktop/systemd1/unit/keyd_2eservice"
 # A YouTube channel search waits on YouTube instead, which is as good a
 # reason: the main loop must not stop for the network.
 # Tailscale's calls wait on its control server the same way.
-IN_BACKGROUND = frozenset({"CheckUpdate", "DeploymentStatus", "ListChannels",
+IN_BACKGROUND = frozenset({"CheckUpdate", "DeploymentStatus", "SystemHealth", "ListChannels",
                            "SetChannel", "Rollback", "TryImage", "ReturnToKept",
                            "RunAutoUpdate", "RunAutoAppUpdate",
                            "SearchYouTubeChannels",
@@ -3549,6 +3552,13 @@ class Daemon:
         if res.returncode != 0:
             raise PolicyError(f"could not restart: {res.stderr.strip()}")
         return None
+
+    def impl_SystemHealth(self):
+        """The failed system services, how they stopped and what they last
+        logged, for an administrator, who cannot read the journal (#337)."""
+        from . import health
+
+        return GLib.Variant("(s)", (json.dumps(health.report()),))
 
     def impl_DeploymentStatus(self):
         """Which image is booted, and which one "go back" would return to."""

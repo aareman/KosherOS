@@ -244,11 +244,12 @@ decision is the only way to understand it, give it one sentence.
 Say which build it happened on. The version is on the Updates page of
 KosherOS Admin, and in Settings under About.
 
-Two commands on the machine help, and neither needs root:
+Three commands on the machine help, and none needs root:
 
 ```sh
 kosherctl status           # whether the filter is enforcing, and what is not loaded
 kosherctl log -g youtube   # the filter services' recent journal, filtered by a pattern
+kosherctl system health    # each failed system service, and the last lines it logged
 ```
 
 There is no `sudo` and no root shell on an installed KosherOS, so a report

@@ -904,6 +904,33 @@ def _deployment_line(label: str, entry) -> str:
     return f"  {label:<10} {version}\n             {image}"
 
 
+def format_health(report: dict) -> str:
+    """`kosherctl system health`: each failed system service, how and when it
+    stopped, and the last lines it logged."""
+    failed = report.get("failed") or []
+    if not failed:
+        return "no system service has failed\n"
+    out = []
+    for unit in failed:
+        name = unit.get("unit", "?")
+        what = unit.get("description") or ""
+        out.append(f"{name}" + (f" ({what})" if what else "") + "\n")
+        how = unit.get("result") or "failed"
+        if unit.get("status") not in (None, "", "0"):
+            how += f", exit status {unit['status']}"
+        if unit.get("failed_at"):
+            how += f", at {unit['failed_at']}"
+        out.append(f"  {how}\n")
+        log = unit.get("log") or []
+        if log:
+            out.append("  last lines it logged:\n")
+            out.extend(f"    {line}\n" for line in log)
+        else:
+            out.append("  it logged nothing\n")
+        out.append("\n")
+    return "".join(out)
+
+
 def cmd_system(args) -> int:
     c = _client()
     if args.action == "status":
@@ -924,6 +951,9 @@ def cmd_system(args) -> int:
             print(_deployment_line("kept", st["kept"]))
             print("             while builds are tried; "
                   "'kosherctl system try done' returns to it")
+        return 0
+    if args.action == "health":
+        print(format_health(c.system_health()), end="")
         return 0
     if args.action == "try":
         what = (args.value or "").strip()
@@ -1812,9 +1842,10 @@ def main(argv: list[str] | None = None) -> int:
 
     s = sub.add_parser("system",
                        help="which system version is running, which channel "
-                            "it follows, going back, and trying a build")
+                            "it follows, going back, trying a build, and "
+                            "which system services have failed (health)")
     s.add_argument("action",
-                   choices=["status", "check", "update", "rollback", "channel", "try"])
+                   choices=["status", "health", "check", "update", "rollback", "channel", "try"])
     s.add_argument("value", nargs="?", default="",
                    help="with 'channel': the channel to switch to (omit to "
                         "list them); with 'try': a pull request number or a "

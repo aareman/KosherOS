@@ -241,6 +241,9 @@ ACTIONS = {
     "FilterLog": ACTION_READ_CONFIG,
     "ApplyUpdate": ACTION_APPLY_UPDATES,
     "DeploymentStatus": ACTION_READ_CONFIG,
+    # Failed system services and their last log lines (#337): there is no
+    # sudo, so an administrator could see that one failed but never why.
+    "SystemHealth": ACTION_READ_CONFIG,
     "ListChannels": ACTION_READ_CONFIG,
     # Which stream of builds this computer follows. Guardian-gated: moving
     # the family computer onto edge puts it on builds nobody has tried
